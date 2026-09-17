@@ -1,0 +1,24 @@
+views:
+  - type: table
+    name: Active
+    filters:
+      and:
+        - file.tags.contains("project")
+        - '!status.containsAny("Abandoned", "done", "Done", "Intern")'
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - file.name
+      - status
+      - start
+      - due
+    sort:
+      - property: end
+        direction: ASC
+  - type: kanban
+    name: View
+    groupBy:
+      property: status
+      direction: ASC
+    hideEmptyGroups: false

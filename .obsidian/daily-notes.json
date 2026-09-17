@@ -1,0 +1,6 @@
+{
+  "autorun": false,
+  "format": "YYYY-MM-DD",
+  "folder": "30 Reference/36 Planner/days",
+  "template": "00 Meta/01 Templates/Daily Note.md"
+}

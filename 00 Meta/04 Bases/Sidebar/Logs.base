@@ -1,0 +1,72 @@
+formulas:
+  Event: link(file.name,file.name.slice(11).trim())
+  Untitled: link(file.name,if(aliases,list(aliases)[0],file.name))
+views:
+  - type: table
+    name: Logs
+    filters:
+      and:
+        - and:
+            - file.tags.contains("log")
+            - or:
+                - date == this.file.name
+                - file.links.contains(this.file)
+    order:
+      - date
+      - formula.Event
+    sort:
+      - property: date
+        direction: DESC
+      - property: file.name
+        direction: DESC
+    columnSize:
+      note.date: 121
+      formula.Event: 250
+    rowHeight: medium
+  - type: table
+    name: Daily Log
+    filters:
+      and:
+        - and:
+            - file.tags.contains("log")
+            - or:
+                - file.links.contains(this.file)
+                - date == this.file.name
+    order:
+      - Time
+      - formula.Event
+    sort:
+      - property: Time
+        direction: ASC
+      - property: date
+        direction: DESC
+      - property: file.name
+        direction: ASC
+    columnSize:
+      note.Time: 82
+      formula.Event: 279
+  - type: list
+    name: Daily Log 2
+    filters:
+      and:
+        - and:
+            - file.tags.contains("log")
+            - or:
+                - file.links.contains(this.file)
+                - date == this.file.name
+    order:
+      - Time
+      - formula.Event
+    sort:
+      - property: Time
+        direction: ASC
+      - property: date
+        direction: DESC
+      - property: file.name
+        direction: ASC
+    columnSize:
+      note.Time: 82
+      formula.Event: 279
+    markers: none
+    indentProperties: false
+    separator: " | "

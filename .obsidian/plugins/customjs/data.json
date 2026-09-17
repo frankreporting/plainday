@@ -1,0 +1,23 @@
+{
+  "jsFiles": "",
+  "jsFolder": "00 Meta/02 Scripts/CustomJS/",
+  "startupScriptNames": [
+    "SyncArea",
+    "RefoldOnOpen",
+    "TimeReportOnStartup"
+  ],
+  "registeredInvocableScriptNames": [
+    "DueDate",
+    "AddTaskNote",
+    "Schedule",
+    "Plan",
+    "ConvertToProject",
+    "RefoldDailyNotes",
+    "SnapshotDailyNotes",
+    "CalendarSync",
+    "CalendarSyncRange",
+    "TimeReport",
+    "ToggleTimeEntry"
+  ],
+  "rerunStartupScriptsOnFileChange": true
+}

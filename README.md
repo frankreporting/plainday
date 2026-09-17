@@ -1,0 +1,191 @@
+# Obsidian PM
+
+An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, meeting logs, calendar events and time tracking with billing reports, built from Templater templates and CustomJS scripts.
+
+This repository **is** a vault: the system in `00 Meta/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference, not a plugin: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
+
+## Try it
+
+1. Clone or download this repository, and in Obsidian choose **Open folder as vault**.
+2. **Settings → Community plugins:** turn on community plugins, then install and enable:
+   - [Templater](https://github.com/SilentVoid13/Templater)
+   - [CustomJS](https://github.com/saml-dev/obsidian-custom-js)
+   - [Natural Language Dates](https://github.com/argenos/nldates-obsidian)
+   Their settings for this vault are already in the repository.
+3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
+4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
+5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `10 Inbox`.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddTaskNote* ``⌥⌘` ``, and *Daily notes: Open today's daily note*.
+7. Open `Welcome.md`.
+
+Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
+
+The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
+
+Nothing here backs your vault up. Use Obsidian Sync's version history, Time Machine, or a backup tool of your choice.
+
+## Folder structure
+
+The sample notes use this layout. Area and project names are yours to choose; only the top-level folders and `36 Planner` are fixed.
+
+```
+00 Meta/                           the system
+  01 Templates/                    Templater templates
+  02 Scripts/                      CustomJS, Templater user scripts, Calendar, tests
+  04 Bases/                        Bases views
+10 Inbox/                          new notes that haven't been filed
+Projects/
+  Projects.md                      list of active projects (Bases)
+  Freelance/                       an area: folder + folder note tagged #area
+    Freelance.md
+    Kestrel Outfitters 2026/       a project: folder + folder note tagged #project
+      Kestrel Outfitters 2026.md
+      Draft homepage wireframes.md a task note (#task)
+      logs/                        meeting logs for the project
+        2026-09-14 Homepage review with Imogen.md
+      Kestrel Fall Catalog/        a sub-project: a project folder inside a project
+    Pinecrest Library Brochure/
+  Household/                       an area with only task notes
+  Personal/
+    Garden Club Newsletter/
+30 Reference/
+  31 Notes/                        general notes
+  33 Subjects/                     maps of content (§)
+  34 Entities/                     organizations (@)
+  35 People/                       people (@)
+  36 Planner/
+    days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
+  37 Journal/
+  Sources/                         source notes (¶)
+90 Archive/                        finished projects, moved here whole; excluded from search and reports
+Welcome.md                         start here
+```
+
+- Every note inside an area or project carries an `area` property linking to the nearest folder note above it. It's kept current automatically when notes or folders move.
+- Aliases mark note types in the Quick Switcher: `⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`.
+- Most notes have `id` (a `YYYYMMDDHHmmssSS` timestamp) and `tags` in their frontmatter; daily and monthly notes only have an alias.
+
+## Creating notes: the title picks the template
+
+New notes run `Get Template.md`, which picks a template from the title you type:
+
+| Title | Template | Result |
+| --- | --- | --- |
+| `2026-09-15` | Daily Note | Moved to `36 Planner/days`, alias `9/15/26 Tuesday` |
+| `2026w38` | Weekly Note | Moved to `36 Planner/weeks`, alias `Week of 9/13/26` |
+| `2026-09` | Monthly Note | Moved to `36 Planner/months`, alias `September 2026` |
+| `2026` | Yearly Note | Moved to `36 Planner/years` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: asks for the project or area and files it in that folder's `logs/` (Esc: Inbox); fills `area`, `date`, `time`, `endTime` (from the calendar event line that links to it), `who` |
+| `!task Draft the proposal` | Task | Task note filed in the chosen project or area (dates are dropped from the title) |
+| `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
+| `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
+| `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `35 People` / `34 Entities` |
+| anything else | Empty Note | `id` and `tags` frontmatter |
+
+Other templates, inserted with Templater:
+
+| Template | Purpose |
+| --- | --- |
+| Subject | Prompts for a subject and creates its note in `33 Subjects` |
+| Writing Mode | Toggles a `writing` CSS class on the note (hotkey) |
+| Metadata Callout | Inserts a `[!metadata]` callout |
+| Formula | Inserts a table formula comment |
+| Custom PDF | Frontmatter for PDF export (Enhancing Export) |
+| Autonote - Empty Note | Empty note for notes created by other tools; moved to the Inbox |
+
+Templater user scripts (`00 Meta/02 Scripts/Templater/`): `pickParent` (area/project picker), `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line).
+
+## Daily notes
+
+A daily note is one checklist, events first, then tasks; anything else goes under `## Notes`.
+
+```markdown
+- [<] 9:00am	Team standup
+	- 9:30am
+- [<] 1:30pm	[[2026-09-15 Kickoff call|Kickoff call]] [[Kestrel Outfitters 2026|⭕]]
+	- 1:30pm - 2:15pm
+- [ ] Draft the proposal [[Draft the proposal|🔗]] [[2026-09-18|🚩 9/18]]
+	- 9:40am - 11:05am: outline
+	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
+- [>] Send the invoice [[Send the invoice|🔗]]
+```
+
+- **Markers:** `[<]` event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled.
+- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times.
+- **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
+- **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🚩 M/D` its due date.
+- **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned.
+
+## Commands (CustomJS)
+
+Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command id=customjs:invoke-<Name>`.
+
+| Command | Suggested hotkey | What it does |
+| --- | --- | --- |
+| Schedule | `⌘S` | Moves the task (and its sub-bullets) to another day's checklist; a task already worked on stays behind as `[>]`, linked on both days to its task note, which is created first (asking for its project or area) if it doesn't exist |
+| DueDate | `⇧⌘D` | Appends a `🚩 M/D` due-date link |
+| AddTaskNote | ``⌥⌘` `` | Links the selected task name to its task note, creating the note through the Task template (asking for its project or area) if it doesn't exist, then puts the cursor after the checkbox. The name is the selection or, with nothing selected and text after the cursor, the task's text up to its first link (the 🔗 link then ends the line). A date in the name becomes the note's `due` and is removed from the line. The line's ⭕ project links decide where the note goes: one project files a new note, or moves an existing note that has no project, there without asking; several bring up the menu with the line's projects first. An existing note's `area` is set from its folder, and the Task template writes `area` on new notes. Once the note sits in one of the line's projects, or you picked from several, the ⭕ links are removed. An existing note in a different project keeps the ⭕ link, and TimeReport lists that conflict on both projects. With only whitespace after the cursor, inserts an empty link to type into. On an event line, links a meeting log for the selection or the title after the event's time |
+| Plan | | Opens the next 2–5 daily notes side by side |
+| ConvertToProject | | Turns the selection into a new project folder and note |
+| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, log links and time entries added to them); marks canceled events `[-]`; maps recurring series to projects from the Calendar Sync note |
+| CalendarSyncRange | | Picks how far ahead to sync, then syncs |
+| TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes; lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
+| ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
+| RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
+
+Startup scripts (run when Obsidian starts):
+
+| Script | What it does |
+| --- | --- |
+| SyncArea | Updates `area` when notes or folders move |
+| RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
+| TimeReportOnStartup | Refreshes the time reports (desktop only) |
+
+## Scripts outside Obsidian
+
+| Script | What it does |
+| --- | --- |
+| `02 Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`; *CalendarSync* runs it |
+| `02 Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
+
+## Tests
+
+From the vault root, with Node 20 or later:
+
+```
+node --test "00 Meta/02 Scripts/tests/*.test.mjs"
+```
+
+Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `area` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "00 Meta/02 Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
+
+## Working on it
+
+Changes go through pull requests from a git worktree outside the vault, tested by opening the worktree as its own vault. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
+
+### Using it for your own notes
+
+To run the system in your own vault and still take updates, make the vault a git copy of this repository limited to the system files, so the sample notes never land in it. Back the vault up first. From the vault folder:
+
+```
+git init -b main
+git remote add origin https://github.com/<owner>/obsidian-pm.git
+git remote set-url --push origin DISABLED
+git sparse-checkout set --no-cone '/00 Meta/' /CLAUDE.md /README.md /.gitignore \
+  /.obsidian/daily-notes.json /.obsidian/plugins/templater-obsidian/data.json /.obsidian/plugins/customjs/data.json
+git fetch origin
+git reset origin/main
+git status
+```
+
+`git reset` without `--hard` changes no files: it only tells git which version your files are compared with. `git status` then lists system files you don't have yet as deleted, and files where your copy differs as modified. `git restore -- <path>` takes the repository's version (`git restore -- .` takes all of them, overwriting your own edits to system files, so restore those one by one if you want to keep them). Keep your notes out of `git status` with `.git/info/exclude`, adding a line for anything of your own inside `00 Meta/`:
+
+```
+/*
+!/00 Meta/
+!/CLAUDE.md
+!/README.md
+!/.gitignore
+!/.obsidian/
+```
+
+(`.gitignore` already leaves out the rest of `.obsidian`.) From then on, `git pull --ff-only` brings in changes.
