@@ -729,6 +729,18 @@ class TimeReport {
         return (minutes / 60).toFixed(2);
     }
 
+    // A table cell: hours with two decimals so columns line up, blank for zero so the cells where
+    // work happened stand out (Brian, 2026-09-17)
+    hoursCell(minutes) {
+        const h = this.hours(minutes);
+        return h === "0.00" ? "" : h;
+    }
+
+    // A money cell, blank for nothing earned
+    moneyCell(cents) {
+        return cents ? this.money(cents) : "";
+    }
+
     shortDate(date) {
         const [y, m, d] = date.split("-");
         return `${+m}/${+d}/${y.slice(2)}`;
@@ -788,12 +800,12 @@ class TimeReport {
     // Summary table lines for `entries`: a row per project (its own entries only), Unassigned, and All
     summaryTable(model, entries, link, { total = false } = {}) {
         if (!entries.length) return ["No time entries."];
-        const b = (bold) => (s) => (bold ? `**${s}**` : s);
+        const b = (bold) => (s) => (bold && s !== "" ? `**${s}**` : s);
         const row = (name, t, project, bold = false) => {
             const m = project ? model.money.get(project) ?? {} : {};
             const f = b(bold);
-            return `| ${f(this.cell(name))} | ${f(t.count)} | ${f(this.hours(t.billable))} | ${f(this.hours(t.free))} | ${f(this.hours(t.billable + t.free))} | ${f(this.hours(t.exact))} | `
-                + `${m.capMinutes ? this.hours(m.capMinutes) : ""} | ${m.label ?? ""} | ${t.rated && !(m.type && m.type !== "hourly") ? f(this.money(t.cents)) : ""} |`;
+            return `| ${f(this.cell(name))} | ${f(t.count)} | ${f(this.hoursCell(t.billable))} | ${f(this.hoursCell(t.free))} | ${f(this.hoursCell(t.billable + t.free))} | ${f(this.hoursCell(t.exact))} | `
+                + `${m.capMinutes ? this.hours(m.capMinutes) : ""} | ${m.label ?? ""} | ${t.rated && !(m.type && m.type !== "hourly") ? f(this.moneyCell(t.cents)) : ""} |`;
         };
         const projects = this.ownProjects(entries);
         const rows = projects.map((p) => row(link(p), this.totals(entries.filter((e) => e.project === p), model.money), p));
@@ -818,8 +830,8 @@ class TimeReport {
         const subs = this.ownProjects(entries).filter((p) => p !== scope.path);
         const m = model.money.get(scope.path) ?? {};
         const cap = (x) => (x.capMinutes ? this.hours(x.capMinutes) : "");
-        const earned = (x, project) => { const c = this.earnedFor(x, project, model); return c === null ? "" : this.money(c); };
-        const nums = (x) => [x.count, this.hours(x.billable), this.hours(x.free), this.hours(x.billable + x.free), this.hours(x.exact)];
+        const earned = (x, project) => { const c = this.earnedFor(x, project, model); return c === null ? "" : this.moneyCell(c); };
+        const nums = (x) => [x.count, this.hoursCell(x.billable), this.hoursCell(x.free), this.hoursCell(x.billable + x.free), this.hoursCell(x.exact)];
         const out = [];
 
         if (!subs.length) {
@@ -873,7 +885,7 @@ class TimeReport {
         const value = (list, project) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
-            if (measure === "hours") return this.hours(t.billable + t.free).replace(/\.00$/, "");
+            if (measure === "hours") return this.hoursCell(t.billable + t.free);
             const c = this.earnedFor(t, project, model);
             return c ? this.money(c).replace(/\.00$/, "") : "";
         };
@@ -899,7 +911,7 @@ class TimeReport {
         const hours = (list) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
-            return this.hours(t.billable + t.free).replace(/\.00$/, "");
+            return this.hoursCell(t.billable + t.free);
         };
         const row = (name, list, bold = false) => {
             const b = (v) => (bold && v ? `**${v}**` : v);
