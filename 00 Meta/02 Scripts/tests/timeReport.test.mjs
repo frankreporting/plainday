@@ -228,6 +228,14 @@ test("parentProject: sub-projects by folder, archived projects too", () => {
     assert.equal(tr.parentProject(KESTREL, INDEX), null);
 });
 
+test("table cells: hours always with two decimals, and blank for zero hours or zero Earned", () => {
+    assert.equal(tr.hoursCell(60), "1.00");
+    assert.equal(tr.hoursCell(45), "0.75");
+    assert.equal(tr.hoursCell(0), "");
+    assert.equal(tr.moneyCell(0), "");
+    assert.equal(tr.moneyCell(8000), "$80.00");
+});
+
 test("rounded: each entry up to the next 15 minutes, as invoices are billed", () => {
     const cases = [[0, 0], [1, 15], [3, 15], [15, 15], [16, 30], [20, 30], [45, 45], [50, 60],
         [120, 120], [121, 135], [126, 135], [441, 450]];
@@ -290,12 +298,12 @@ test("render month: summary by project with Max Hrs, Rate, Earned and a total; t
     assert.ok(lines.includes("| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |"));
     // Each row is that project's own entries, so the rows add up to All: Orchard Lane's own 60 min
     // (cap 9600 ÷ 80 = 120 h), and Orchard Lane Web's two entries on their own row, not indented under it
-    assert.ok(lines.includes("| [[Orchard Lane 2026\\|⭕ Orchard Lane 2026]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 | 120.00 | $80/hr | $80.00 |"), block);
+    assert.ok(lines.includes("| [[Orchard Lane 2026\\|⭕ Orchard Lane 2026]] | 1 | 1.00 |  | 1.00 | 1.00 | 120.00 | $80/hr | $80.00 |"), block);
     // Orchard Lane Web has no rate of its own: it uses its parent's
     assert.ok(lines.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 2 | 1.00 | 0.25 | 1.25 | 1.00 |  | $80/hr | $80.00 |"));
     assert.ok(!block.includes("↳"));
     // Time with no project is nobody's to bill, so it lands in 🆓
-    assert.ok(lines.includes("| Unassigned | 1 | 0.00 | 0.50 | 0.50 | 0.33 |  |  |  |"), block);
+    assert.ok(lines.includes("| Unassigned | 1 |  | 0.50 | 0.50 | 0.33 |  |  |  |"), block);
     assert.ok(lines.includes("| **All** | **4** | **2.00** | **0.75** | **2.75** | **2.33** |  |  | **$160.00** |"), block);
     assert.ok(!block.includes("Pinecone Studio") && !block.includes("Kestrel"), "October and archived projects stay out");
     assert.ok(!block.includes("| Date |") && !block.includes("9:50am"), "no per-entry detail");
@@ -316,15 +324,15 @@ test("render year: Earned and Hours tables, a column per month linking the month
     // Sep and Oct columns (the 9th and 10th months)
     const cells = (table, name) => table.find((l) => l.startsWith(`| ${name} |`)).split(/(?<!\\)\|/).slice(2, -1).map((c) => c.trim());
     assert.deepEqual(cells(earned, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", ""], "flat-rate projects earn nothing here");
-    assert.deepEqual(cells(hours, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", "1 h"], "but their hours show");
+    assert.deepEqual(cells(hours, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", "1.00"], "but their hours show");
     assert.deepEqual(cells(earned, "[[Pinecone Studio\\|⭕ Pinecone Studio]]").slice(8, 13), ["", "$270", "", "", "$270"]);
     // Orchard Lane's row is its own September hour only; the sub-project's rows are its own
     assert.deepEqual(cells(earned, "[[Orchard Lane 2026\\|⭕ Orchard Lane 2026]]").slice(8, 13), ["$80", "", "", "", "$80"]);
     assert.deepEqual(cells(earned, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["$80", "$80", "", "", "$160"]);
-    assert.deepEqual(cells(hours, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["1.25 h", "1 h", "", "", "2.25 h"]);
-    assert.deepEqual(cells(hours, "Unassigned").slice(8, 13), ["0.50 h", "", "", "", "0.50 h"]);
+    assert.deepEqual(cells(hours, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["1.25", "1.00", "", "", "2.25"]);
+    assert.deepEqual(cells(hours, "Unassigned").slice(8, 13), ["0.50", "", "", "", "0.50"]);
     assert.deepEqual(cells(earned, "**All**").slice(8, 13), ["**$160**", "**$350**", "", "", "**$510**"]);
-    assert.deepEqual(cells(hours, "**All**").slice(8, 13), ["**2.75 h**", "**4.25 h**", "", "", "**7 h**"]);
+    assert.deepEqual(cells(hours, "**All**").slice(8, 13), ["**2.75**", "**4.25**", "", "", "**7.00**"]);
     assert.ok(!block.includes("Kestrel"));
 });
 
@@ -338,7 +346,7 @@ test("render project: summary without a Project column, then weeks (total first,
     const weeks = lines.indexOf("| Week | Entries | Billable | 🆓 | Total | Exact | Earned |");
     assert.deepEqual(plain(lines.slice(weeks + 2, weeks + 5)), [
         "| **Total** | **3** | **2.00** | **0.25** | **2.25** | **2.00** | **$160.00** |",
-        "| [[2026w40\\|9/27-10/3]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 | $80.00 |",
+        "| [[2026w40\\|9/27-10/3]] | 1 | 1.00 |  | 1.00 | 1.00 | $80.00 |",
         "| [[2026w36\\|8/30-9/5]] | 2 | 1.00 | 0.25 | 1.25 | 1.00 | $80.00 |",
     ]);
     assert.ok(!project.includes("Orchard Lane 2026"), "a sub-project's block doesn't show its parent");
@@ -351,14 +359,14 @@ test("render project: summary without a Project column, then weeks (total first,
     assert.deepEqual(plain(parent.slice(3, 8)), [
         "| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |",
         "| ------- | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |",
-        "| [[Orchard Lane 2026\\|⭕ Orchard Lane 2026]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 |  | $80/hr | $80.00 |",
+        "| [[Orchard Lane 2026\\|⭕ Orchard Lane 2026]] | 1 | 1.00 |  | 1.00 | 1.00 |  | $80/hr | $80.00 |",
         "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 3 | 2.00 | 0.25 | 2.25 | 2.00 |  | $80/hr | $160.00 |",
         "| **Total** | **4** | **3.00** | **0.25** | **3.25** | **3.00** | **120.00** |  | **$240.00** |",
     ]);
     const parentWeeks = parent.indexOf("| Week | Entries | Billable | 🆓 | Total | Exact | Earned |");
     assert.deepEqual(plain(parent.slice(parentWeeks + 2, parentWeeks + 4)), [
-        "| **Total** | **1** | **1.00** | **0.00** | **1.00** | **1.00** | **$80.00** |",
-        "| [[2026w36\\|8/30-9/5]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 | $80.00 |",
+        "| **Total** | **1** | **1.00** |  | **1.00** | **1.00** | **$80.00** |",
+        "| [[2026w36\\|8/30-9/5]] | 1 | 1.00 |  | 1.00 | 1.00 | $80.00 |",
     ]);
     assert.ok(!parent.some((l) => l.startsWith("| [[2026w40")), "October was the sub-project's time, not the parent's");
     // A flat-rate project shows no Earned anywhere
@@ -366,8 +374,8 @@ test("render project: summary without a Project column, then weeks (total first,
     // A name shared with another note links by full path instead
     const shared = tr.render(SMALL, { kind: "project", path: ORCHARD_WEB, linkTarget: (unit, key) => (key === "2026w36" ? `30 Reference/36 Planner/weeks/${key}` : key) }, "s");
     assert.ok(shared.includes("| [[30 Reference/36 Planner/weeks/2026w36\\|8/30-9/5]] |") && shared.includes("| [[2026w40\\|9/27-10/3]] |"));
-    assert.equal(flat[5], "| 1 | 1.00 | 0.00 | 1.00 | 1.00 | 36.00 | $640 flat |  |");
-    assert.ok(flat.includes("| **Total** | **1** | **1.00** | **0.00** | **1.00** | **1.00** |  |"));
+    assert.equal(flat[5], "| 1 | 1.00 |  | 1.00 | 1.00 | 36.00 | $640 flat |  |");
+    assert.ok(flat.includes("| **Total** | **1** | **1.00** |  | **1.00** | **1.00** |  |"));
 });
 
 test("money: rate types, inheritance, caps, cents", () => {
@@ -1087,7 +1095,7 @@ test("overview review: Earned is billed per rate like an invoice, and blank on n
     assert.equal(tr.totals([{ project: "x", minutes: 30, free: false, billable: true }], new Map([["x", { rate: 0.29 }]])).cents, 15);
     const block = tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s");
     assert.ok(!block.includes("[[Flat"), "a parent with nothing logged to it directly has no row");
-    assert.ok(block.includes("| [[Hour\\|⭕ Hour]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 |  | $100/hr | $100.00 |"));
+    assert.ok(block.includes("| [[Hour\\|⭕ Hour]] | 1 | 1.00 |  | 1.00 | 1.00 |  | $100/hr | $100.00 |"));
 });
 
 test("overview review: quotes cut on whole characters; a differently-cased heading is reused", () => {
@@ -1125,15 +1133,15 @@ test("periodic reports: the periods with entries, and a week's report with its o
 
     const week = tr.render(model, { kind: "period", unit: "week", key: "2026w38" }, "s");
     assert.ok(!week.includes("Week of"), "no title line");
-    assert.ok(week.includes("| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 1 | 2.25 | 0.00 | 2.25 | 2.12 | 42.00 | $120/hr | $270.00 |"), week);
-    assert.ok(week.includes("| [[Bramble\\|⭕ Bramble]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 | 36.00 | $640 flat |  |"));
-    assert.ok(week.includes("| **All** | **2** | **3.25** | **0.00** | **3.25** | **3.12** |  |  | **$270.00** |"));
+    assert.ok(week.includes("| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 1 | 2.25 |  | 2.25 | 2.12 | 42.00 | $120/hr | $270.00 |"), week);
+    assert.ok(week.includes("| [[Bramble\\|⭕ Bramble]] | 1 | 1.00 |  | 1.00 | 1.00 | 36.00 | $640 flat |  |"));
+    assert.ok(week.includes("| **All** | **2** | **3.25** |  | **3.25** | **3.12** |  |  | **$270.00** |"));
     assert.ok(!week.includes("Orchard"), "entries from other weeks stay out");
     assert.ok(week.includes("line 4: `- 4:00pm -` clock still running"), "the week's own problems are listed");
 
     // A single project still gets its total row at the bottom
     const oct = tr.render(model, { kind: "period", unit: "month", key: "2026-10" }, "s");
-    assert.ok(oct.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 1 | 1.00 | 0.00 | 1.00 | 0.83 |  | $80/hr | $80.00 |"), oct);
+    assert.ok(oct.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 1 | 1.00 |  | 1.00 | 0.83 |  | $80/hr | $80.00 |"), oct);
     assert.ok(oct.includes("| **All** | **1** | **1.00** |"));
     assert.match(oct, /### Problems\n\nNone\.\n%% time:end %%$/);
     // A period with no entries gets Totals (saying so) but no By Day / By Week table
@@ -1198,7 +1206,7 @@ test("only entries that have already ended count, for hours and Earned; the bloc
     // Hours leave it out too: it isn't work yet
     assert.equal(tr.totals(noon.entries, noon.money).billable, 60);
     const block = tr.render(noon, { kind: "period", unit: "week", key: "2026w38" }, "2026-09-14 12:00pm");
-    assert.ok(block.includes("| **All** | **1** | **1.00** | **0.00** | **1.00** | **1.00** |  |  | **$80.00** |"), block);
+    assert.ok(block.includes("| **All** | **1** | **1.00** |  | **1.00** | **1.00** |  |  | **$80.00** |"), block);
     const lines = block.split("\n");
     assert.deepEqual(plain(lines.slice(0, 6)), ["%% time:start %%", "*Updated 2026-09-14 12:00pm*", "", "### Totals", "", "| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |"]);
     assert.ok(!/round each entry|Earned is|Max Hrs is/.test(block));
@@ -1208,20 +1216,20 @@ test("tables listing projects: a parent with nothing logged to it directly has n
     const model = tr.build([note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am\n\t- 11:00am - 11:30am")], MONEY_INDEX);
     const month = tr.render(model, { kind: "period", unit: "month", key: "2026-09" }, "s");
     assert.ok(!month.includes("Orchard Lane 2026"), month);
-    assert.ok(month.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 2 | 1.50 | 0.00 | 1.50 | 1.50 |  | $80/hr | $120.00 |"));
+    assert.ok(month.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 2 | 1.50 |  | 1.50 | 1.50 |  | $80/hr | $120.00 |"));
     assert.ok(month.includes("| **All** | **2** | **1.50** |"));
     const year = tr.render(model, { kind: "period", unit: "year", key: "2026" }, "s");
     assert.ok(!year.includes("Orchard Lane 2026"));
     // The parent's own note still totals its sub-projects
-    assert.ok(tr.render(model, { kind: "project", path: ORCHARD }, "s").includes("| **Total** | **2** | **1.50** | **0.00** | **1.50** | **1.50** | **120.00** |  | **$120.00** |"));
+    assert.ok(tr.render(model, { kind: "project", path: ORCHARD }, "s").includes("| **Total** | **2** | **1.50** |  | **1.50** | **1.50** | **120.00** |  | **$120.00** |"));
 });
 
 test("project note for a parent with no time of its own: sub-project rows and Total, no weekly table", () => {
     const model = tr.build([note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am")], MONEY_INDEX);
     const lines = tr.render(model, { kind: "project", path: ORCHARD }, "s").split("\n");
     assert.ok(!lines.some((l) => l.startsWith("| [[Orchard Lane 2026\\|")), "no row for the parent's own (empty) time");
-    assert.ok(lines.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 1 | 1.00 | 0.00 | 1.00 | 1.00 |  | $80/hr | $80.00 |"));
-    assert.ok(lines.includes("| **Total** | **1** | **1.00** | **0.00** | **1.00** | **1.00** | **120.00** |  | **$80.00** |"));
+    assert.ok(lines.includes("| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 1 | 1.00 |  | 1.00 | 1.00 |  | $80/hr | $80.00 |"));
+    assert.ok(lines.includes("| **Total** | **1** | **1.00** |  | **1.00** | **1.00** | **120.00** |  | **$80.00** |"));
     assert.ok(lines.includes("No time logged to this project directly; see its sub-projects' notes for their weeks."));
     assert.ok(!lines.some((l) => l.startsWith("| Week |")));
 });
@@ -1242,11 +1250,11 @@ test("weekly notes: one table of hours per project per day, day headers linking 
     assert.deepEqual(plain(lines.slice(head, head + 7)), [
         "| Project | [[2026-09-13\\|Sun 9/13]] | [[2026-09-14\\|Mon 9/14]] | [[2026-09-15\\|Tue 9/15]] | [[2026-09-16\\|Wed 9/16]] | [[2026-09-17\\|Thu 9/17]] | [[2026-09-18\\|Fri 9/18]] | [[2026-09-19\\|Sat 9/19]] | Week |",
         "| ------- | --: | --: | --: | --: | --: | --: | --: | --: |",
-        "| [[Bramble\\|⭕ Bramble]] |  |  | 1 h |  |  |  |  | 1 h |",
-        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 0.50 h |  |  |  |  |  |  | 0.50 h |",
-        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.75 h |  |  |  |  |  |  | 2.75 h |",
-        "| Unassigned |  |  | 0.50 h |  |  |  |  | 0.50 h |",
-        "| **All** | **3.25 h** |  | **1.50 h** |  |  |  |  | **4.75 h** |",
+        "| [[Bramble\\|⭕ Bramble]] |  |  | 1.00 |  |  |  |  | 1.00 |",
+        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 0.50 |  |  |  |  |  |  | 0.50 |",
+        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.75 |  |  |  |  |  |  | 2.75 |",
+        "| Unassigned |  |  | 0.50 |  |  |  |  | 0.50 |",
+        "| **All** | **3.25** |  | **1.50** |  |  |  |  | **4.75** |",
     ]);
     assert.ok(!block.includes("### [["), "no per-day sections");
     assert.ok(!block.includes("2026-09-21"), "other weeks stay out");
@@ -1271,10 +1279,10 @@ test("monthly notes: hours per project per week, week headers linking to weekly 
         "| Project | [[2026w36\\|8/30-9/5]] | [[2026w37\\|9/6-9/12]] | [[2026w38\\|9/13-9/19]] | [[2026w39\\|9/20-9/26]] | [[2026w40\\|9/27-10/3]] | Month |",
         "| ------- | --: | --: | --: | --: | --: | --: |",
         // August 31 is in week 36 but not in September, so it stays out
-        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] |  |  | 0.50 h |  |  | 0.50 h |",
-        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.25 h |  |  |  |  | 2.25 h |",
-        "| Unassigned |  |  | 0.50 h |  |  | 0.50 h |",
-        "| **All** | **2.25 h** |  | **1 h** |  |  | **3.25 h** |",
+        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] |  |  | 0.50 |  |  | 0.50 |",
+        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.25 |  |  |  |  | 2.25 |",
+        "| Unassigned |  |  | 0.50 |  |  | 0.50 |",
+        "| **All** | **2.25** |  | **1.00** |  |  | **3.25** |",
     ]);
     // Weekly and yearly notes don't get a weeks table
     assert.ok(!tr.render(model, { kind: "period", unit: "week", key: "2026w38" }, "s").includes("| Project | [[2026w"));
