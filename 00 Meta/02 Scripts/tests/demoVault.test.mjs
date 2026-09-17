@@ -5,14 +5,21 @@
 // note, run that script and commit what it writes. These checks keep the demo opening cleanly: the
 // startup report run finds nothing to rewrite, the only Problem is the deliberate one, and every
 // `area` and link is right.
-import { test } from "node:test";
+import { test as baseTest } from "node:test";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
 
-const tr = loadTimeReport();
-const vault = readVault();
-const plan = planReports(tr, vault);
+// Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
+// failure text says to run renderReports.mjs, which writes report blocks into notes: so skip them,
+// and don't even read the vault (a real one holds thousands of notes).
+const isDemoVault = fs.existsSync(new URL("../../../Welcome.md", import.meta.url));
+const test = isDemoVault ? baseTest : (name, fn) => baseTest.skip(name, fn);
+
+const tr = isDemoVault ? loadTimeReport() : null;
+const vault = isDemoVault ? readVault() : { root: "", files: [], notes: new Map() };
+const plan = isDemoVault ? planReports(tr, vault) : { targets: { project: [], week: [], month: [], year: [] }, blocks: new Map(), changes: [], errors: [], model: { entries: [], problems: [], projectProblems: [], money: new Map(), parent: new Map() }, index: null };
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const basename = (p) => p.split("/").pop().replace(/\.md$/, "");
 const dirname = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");

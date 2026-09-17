@@ -23,6 +23,11 @@
 /00 Meta/02 Scripts/Calendar/calendar-events.json
 /00 Meta/02 Scripts/Calendar/calendar-sync.json
 
+# Written by the Update Obsidian PM command in a vault that installed the system: where the
+# clone is, and what it installed
+/00 Meta/02 Scripts/update-source
+/00 Meta/02 Scripts/update-manifest.json
+
 # Obsidian's local trash
 /.trash/
 
