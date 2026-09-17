@@ -316,15 +316,15 @@ test("render year: Earned and Hours tables, a column per month linking the month
     // Sep and Oct columns (the 9th and 10th months)
     const cells = (table, name) => table.find((l) => l.startsWith(`| ${name} |`)).split(/(?<!\\)\|/).slice(2, -1).map((c) => c.trim());
     assert.deepEqual(cells(earned, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", ""], "flat-rate projects earn nothing here");
-    assert.deepEqual(cells(hours, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", "1 h"], "but their hours show");
+    assert.deepEqual(cells(hours, "[[Bramble\\|⭕ Bramble]]").slice(8, 10), ["", "1"], "but their hours show");
     assert.deepEqual(cells(earned, "[[Pinecone Studio\\|⭕ Pinecone Studio]]").slice(8, 13), ["", "$270", "", "", "$270"]);
     // Orchard Lane's row is its own September hour only; the sub-project's rows are its own
     assert.deepEqual(cells(earned, "[[Orchard Lane 2026\\|⭕ Orchard Lane 2026]]").slice(8, 13), ["$80", "", "", "", "$80"]);
     assert.deepEqual(cells(earned, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["$80", "$80", "", "", "$160"]);
-    assert.deepEqual(cells(hours, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["1.25 h", "1 h", "", "", "2.25 h"]);
-    assert.deepEqual(cells(hours, "Unassigned").slice(8, 13), ["0.50 h", "", "", "", "0.50 h"]);
+    assert.deepEqual(cells(hours, "[[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]]").slice(8, 13), ["1.25", "1", "", "", "2.25"]);
+    assert.deepEqual(cells(hours, "Unassigned").slice(8, 13), ["0.50", "", "", "", "0.50"]);
     assert.deepEqual(cells(earned, "**All**").slice(8, 13), ["**$160**", "**$350**", "", "", "**$510**"]);
-    assert.deepEqual(cells(hours, "**All**").slice(8, 13), ["**2.75 h**", "**4.25 h**", "", "", "**7 h**"]);
+    assert.deepEqual(cells(hours, "**All**").slice(8, 13), ["**2.75**", "**4.25**", "", "", "**7**"]);
     assert.ok(!block.includes("Kestrel"));
 });
 
@@ -1242,11 +1242,11 @@ test("weekly notes: one table of hours per project per day, day headers linking 
     assert.deepEqual(plain(lines.slice(head, head + 7)), [
         "| Project | [[2026-09-13\\|Sun 9/13]] | [[2026-09-14\\|Mon 9/14]] | [[2026-09-15\\|Tue 9/15]] | [[2026-09-16\\|Wed 9/16]] | [[2026-09-17\\|Thu 9/17]] | [[2026-09-18\\|Fri 9/18]] | [[2026-09-19\\|Sat 9/19]] | Week |",
         "| ------- | --: | --: | --: | --: | --: | --: | --: | --: |",
-        "| [[Bramble\\|⭕ Bramble]] |  |  | 1 h |  |  |  |  | 1 h |",
-        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 0.50 h |  |  |  |  |  |  | 0.50 h |",
-        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.75 h |  |  |  |  |  |  | 2.75 h |",
-        "| Unassigned |  |  | 0.50 h |  |  |  |  | 0.50 h |",
-        "| **All** | **3.25 h** |  | **1.50 h** |  |  |  |  | **4.75 h** |",
+        "| [[Bramble\\|⭕ Bramble]] |  |  | 1 |  |  |  |  | 1 |",
+        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 0.50 |  |  |  |  |  |  | 0.50 |",
+        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.75 |  |  |  |  |  |  | 2.75 |",
+        "| Unassigned |  |  | 0.50 |  |  |  |  | 0.50 |",
+        "| **All** | **3.25** |  | **1.50** |  |  |  |  | **4.75** |",
     ]);
     assert.ok(!block.includes("### [["), "no per-day sections");
     assert.ok(!block.includes("2026-09-21"), "other weeks stay out");
@@ -1271,10 +1271,10 @@ test("monthly notes: hours per project per week, week headers linking to weekly 
         "| Project | [[2026w36\\|8/30-9/5]] | [[2026w37\\|9/6-9/12]] | [[2026w38\\|9/13-9/19]] | [[2026w39\\|9/20-9/26]] | [[2026w40\\|9/27-10/3]] | Month |",
         "| ------- | --: | --: | --: | --: | --: | --: |",
         // August 31 is in week 36 but not in September, so it stays out
-        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] |  |  | 0.50 h |  |  | 0.50 h |",
-        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.25 h |  |  |  |  | 2.25 h |",
-        "| Unassigned |  |  | 0.50 h |  |  | 0.50 h |",
-        "| **All** | **2.25 h** |  | **1 h** |  |  | **3.25 h** |",
+        "| [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] |  |  | 0.50 |  |  | 0.50 |",
+        "| [[Pinecone Studio\\|⭕ Pinecone Studio]] | 2.25 |  |  |  |  | 2.25 |",
+        "| Unassigned |  |  | 0.50 |  |  | 0.50 |",
+        "| **All** | **2.25** |  | **1** |  |  | **3.25** |",
     ]);
     // Weekly and yearly notes don't get a weeks table
     assert.ok(!tr.render(model, { kind: "period", unit: "week", key: "2026w38" }, "s").includes("| Project | [[2026w"));

@@ -873,7 +873,7 @@ class TimeReport {
         const value = (list, project) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
-            if (measure === "hours") return `${this.hours(t.billable + t.free).replace(/\.00$/, "")} h`;
+            if (measure === "hours") return this.hours(t.billable + t.free).replace(/\.00$/, "");
             const c = this.earnedFor(t, project, model);
             return c ? this.money(c).replace(/\.00$/, "") : "";
         };
@@ -899,7 +899,7 @@ class TimeReport {
         const hours = (list) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
-            return `${this.hours(t.billable + t.free).replace(/\.00$/, "")} h`;
+            return this.hours(t.billable + t.free).replace(/\.00$/, "");
         };
         const row = (name, list, bold = false) => {
             const b = (v) => (bold && v ? `**${v}**` : v);
