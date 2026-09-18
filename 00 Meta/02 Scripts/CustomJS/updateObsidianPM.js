@@ -72,12 +72,16 @@ class UpdateObsidianPM {
         return out;
     }
 
-    // The confirmation, as lines. `local` needs a decision, so it comes first.
-    summary(plan, { source, commit, firstRun = false } = {}) {
+    // The confirmation, as lines. `local` needs a decision, so it comes first. Long lists are cut
+    // to `max` paths and counted, so the dialog stays readable.
+    summary(plan, { source, commit, firstRun = false, max = 8 } = {}) {
         const lines = [];
         const list = (label, paths, note = "") => {
             if (!paths.length) return;
-            lines.push(`**${label}: ${paths.length}**${note}`, ...paths.map((p) => `- ${p}`), "");
+            const shown = paths.slice(0, max);
+            lines.push(`**${label}: ${paths.length}**${note}`, ...shown.map((p) => `- ${p}`));
+            if (paths.length > shown.length) lines.push(`- …and ${paths.length - shown.length} more`);
+            lines.push("");
         };
         if (source) lines.push(`From \`${source}\`${commit ? ` at ${commit}` : ""}`, "");
         if (firstRun && plan.local.length) {

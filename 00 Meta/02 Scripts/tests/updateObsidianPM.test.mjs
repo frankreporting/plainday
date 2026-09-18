@@ -116,6 +116,17 @@ test("summary: a first install says why everything looks changed", () => {
     assert.ok(!up.summary(plan).includes("No record of an earlier install"));
 });
 
+test("summary: a long list is cut and counted", () => {
+    const many = Array.from({ length: 20 }, (_, i) => `00 Meta/f${String(i).padStart(2, "0")}.md`);
+    const text = up.summary({ add: many, update: [], local: [], remove: [], keep: [], same: [] });
+    assert.ok(text.includes("**New: 20**"));
+    assert.equal(text.split("\n").filter((l) => l.startsWith("- 00 Meta/")).length, 8);
+    assert.ok(text.includes("- …and 12 more"));
+    // every path shows when it fits
+    assert.equal(up.summary({ add: many.slice(0, 8), update: [], local: [], remove: [], keep: [], same: [] })
+        .split("\n").filter((l) => l.startsWith("- ")).length, 8);
+});
+
 test("done: what to say afterwards", () => {
     assert.equal(up.done({ copy: ["a", "b"], delete: ["c"] }, "abc1234"), "2 files copied, 1 removed (abc1234)");
     assert.equal(up.done({ copy: ["a"], delete: [] }), "1 file copied");
