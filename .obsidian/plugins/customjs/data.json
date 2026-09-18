@@ -17,7 +17,8 @@
     "CalendarSync",
     "CalendarSyncRange",
     "TimeReport",
-    "ToggleTimeEntry"
+    "ToggleTimeEntry",
+    "UpdateObsidianPM"
   ],
   "rerunStartupScriptsOnFileChange": true
 }

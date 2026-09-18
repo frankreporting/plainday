@@ -27,7 +27,7 @@ For reading notes, `grep` on the markdown files is often faster.
   - A branch named `<user>/obs-N-<slug>` and a `Closes OBS-N` line in the PR description link the PR and close the issue when it merges.
   - `Part of OBS-N` links without closing. Put a PR like that on a branch without `obs-N` in its name, since the branch name alone would close the issue.
   - Don't set Linear statuses by hand.
-- **After a merge:** run the close-out steps in `CLAUDE.local.md` if there are any (for example, pulling the change into a personal vault).
+- **After a merge:** pull the change into this folder, then install it in any vault that uses the system with the **UpdateObsidianPM** command (see README). A personal vault is never a git copy of this repository, because the sample notes' paths would collide with real notes. `CLAUDE.local.md` has the rest of the close-out, if there is any.
 
 ## Sample notes
 

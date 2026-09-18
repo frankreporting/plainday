@@ -131,6 +131,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
 | TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes; lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
+| UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
 
 Startup scripts (run when Obsidian starts):
@@ -164,28 +165,16 @@ Changes go through pull requests from a git worktree outside the vault, tested b
 
 ### Using it for your own notes
 
-To run the system in your own vault and still take updates, make the vault a git copy of this repository limited to the system files, so the sample notes never land in it. Back the vault up first. From the vault folder:
+Don't make your own vault a copy of this repository: it carries the sample notes, and their paths (daily notes, weekly notes, `Projects/`) would collide with yours.
 
-```
-git init -b main
-git remote add origin https://github.com/<owner>/obsidian-pm.git
-git remote set-url --push origin DISABLED
-git sparse-checkout set --no-cone '/00 Meta/' /CLAUDE.md /README.md /.gitignore \
-  /.obsidian/daily-notes.json /.obsidian/plugins/templater-obsidian/data.json /.obsidian/plugins/customjs/data.json
-git fetch origin
-git reset origin/main
-git status
-```
+Instead, clone this repository somewhere outside your vault, and install the system with the **Update Obsidian PM** command:
 
-`git reset` without `--hard` changes no files: it only tells git which version your files are compared with. `git status` then lists system files you don't have yet as deleted, and files where your copy differs as modified. `git restore -- <path>` takes the repository's version (`git restore -- .` takes all of them, overwriting your own edits to system files, so restore those one by one if you want to keep them). Keep your notes out of `git status` with `.git/info/exclude`, adding a line for anything of your own inside `00 Meta/`:
+1. Copy `00 Meta/02 Scripts/CustomJS/updateObsidianPM.js` from the clone into your vault's `00 Meta/02 Scripts/CustomJS/` (once, by hand), and add `UpdateObsidianPM` to the CustomJS plugin's invocable scripts.
+2. Run **CustomJS: UpdateObsidianPM** from the command palette. It asks where your clone is the first time.
+3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm.
 
-```
-/*
-!/00 Meta/
-!/CLAUDE.md
-!/README.md
-!/.gitignore
-!/.obsidian/
-```
+What it installs: everything the repository has under `00 Meta/`, plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, and the demo's own test files.
 
-(`.gitignore` already leaves out the rest of `.obsidian`.) From then on, `git pull --ff-only` brings in changes.
+A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `00 Meta/02 Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version).
+
+Run it again whenever you want the latest.
