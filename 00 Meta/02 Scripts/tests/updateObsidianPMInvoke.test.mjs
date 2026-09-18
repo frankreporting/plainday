@@ -192,6 +192,18 @@ test("invoke: it refuses a folder that isn't a clone, and the vault itself", asy
     assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false);
 });
 
+test("invoke: an uncommitted edit in the clone is shown before anything is written", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    // the clone has a local edit that isn't committed, as a worktree under test would
+    write(f.source, "00 Meta/02 Scripts/CustomJS/timeReport.js", "locally edited\n");
+    await f.up.invoke();
+    assert.match(f.answers.sawSummary, /\*\*Uncommitted in the clone: 1\*\*/);
+    assert.match(f.answers.sawSummary, /- 00 Meta\/02 Scripts\/CustomJS\/timeReport\.js/);
+    // it still copies what's on disk, which is what makes testing a branch possible
+    assert.equal(read(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), "locally edited\n");
+});
+
 test("invoke: nothing to do says so", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));

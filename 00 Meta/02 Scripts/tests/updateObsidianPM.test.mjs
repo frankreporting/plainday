@@ -127,6 +127,15 @@ test("summary: a long list is cut and counted", () => {
         .split("\n").filter((l) => l.startsWith("- ")).length, 8);
 });
 
+test("summary: uncommitted files in the clone are called out, and only the ones it would copy", () => {
+    const plan = { add: ["00 Meta/a.md"], update: [], local: [], remove: [], keep: [], same: [] };
+    const text = up.summary(plan, { dirty: ["00 Meta/a.md", "Welcome.md", "30 Reference/note.md"] });
+    assert.ok(text.includes("**Uncommitted in the clone: 1** (copied as they are on disk, not as the repository has them)"));
+    assert.ok(text.includes("- 00 Meta/a.md"));
+    assert.ok(!up.summary(plan).includes("Uncommitted in the clone"), "a clean clone says nothing");
+    assert.ok(!up.summary(plan, { dirty: ["Welcome.md"] }).includes("Uncommitted in the clone"), "notes don't count");
+});
+
 test("done: what to say afterwards", () => {
     assert.equal(up.done({ copy: ["a", "b"], delete: ["c"] }, "abc1234"), "2 files copied, 1 removed (abc1234)");
     assert.equal(up.done({ copy: ["a"], delete: [] }), "1 file copied");

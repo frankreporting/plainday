@@ -74,7 +74,7 @@ class UpdateObsidianPM {
 
     // The confirmation, as lines. `local` needs a decision, so it comes first. Long lists are cut
     // to `max` paths and counted, so the dialog stays readable.
-    summary(plan, { source, commit, firstRun = false, max = 8 } = {}) {
+    summary(plan, { source, commit, firstRun = false, max = 8, dirty = [] } = {}) {
         const lines = [];
         const list = (label, paths, note = "") => {
             if (!paths.length) return;
@@ -93,6 +93,10 @@ class UpdateObsidianPM {
         list("Updated", plan.update);
         list("Removed", plan.remove, " (the repository no longer has these)");
         list("Kept, changed here since it was installed", plan.keep, " (nothing will happen to these)");
+        // The clone's files are copied as they are on disk, which is what lets a branch's worktree be
+        // installed for testing. Anything uncommitted there is worth seeing before it lands in a vault.
+        list("Uncommitted in the clone", dirty.filter((p) => this.installs(p)),
+            " (copied as they are on disk, not as the repository has them)");
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
             lines.push(`Already up to date (${plan.same.length} files).`);
         }
@@ -166,7 +170,11 @@ class UpdateObsidianPM {
         }
 
         const plan = this.plan(sourceFiles, vaultFiles, manifest);
-        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0 });
+        const dirty = [...new Set([
+            ...(this.git(source, ["diff", "--name-only", "HEAD"]).out ?? "").split("\n"),
+            ...(this.git(source, ["ls-files", "--others", "--exclude-standard"]).out ?? "").split("\n"),
+        ])].filter(Boolean).sort();
+        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0, dirty });
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
             new Notice(`Obsidian PM is up to date (${commit ?? "no commit"})`, 6000); return;
         }
