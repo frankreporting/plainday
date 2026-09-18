@@ -35,6 +35,18 @@ For reading notes, `grep` on the markdown files is often faster.
 - The notes are there to show every feature. When a feature changes, update the notes that show it.
 - Opening the vault runs `TimeReportOnStartup`. If the committed report blocks match what the scripts render, it changes nothing, and `demoVault.test.mjs` checks exactly that. Otherwise opening the vault rewrites tracked notes.
 
+## Tables in notes: keep them out of lists (RULE)
+
+Obsidian doesn't render a table inside a list item: indented under a bullet, it shows as plain pipes. When a note needs a table:
+
+- Start every row at the left edge, with no indent, and leave a blank line before and after the table.
+- Put the table after the list, not under a bullet. A bullet can introduce it (`- **Settings:**`), then the table follows at the left edge. Bullets after it start a new list, which renders the same.
+- Include the separator row (`|---|---|`) with one cell per column, and give every row the same number of cells.
+- Escape a `|` inside a cell as `\|`, including in wikilink aliases (`[[Note\|alias]]`).
+- Copy pasted from terminal output often comes indented by two spaces; remove that indent before writing it into a note.
+
+The time reports follow this already: TimeReport writes its tables at the left edge and escapes the `|` in every link.
+
 ## Privacy: nothing personal reaches GitHub (RULE)
 
 This repository is public. That covers:
