@@ -40,10 +40,18 @@ function setUp({ running = false, opens = true, fetches = true, scheduled = fals
 
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
-    // The CLI answers "vault info=path" only while Obsidian is running
+    // The CLI answers "vault info=path" only while Obsidian is running, and answers for the vault
+    // named in `vault=<name>`: without a matching name it reaches a different vault (or none)
     stub(dir, "bin/obsidian", `echo "obsidian $*" >> ${calls}
 [ "$(cat ${dir}/state)" = running ] || exit 1
-echo ok`);
+case "$1" in
+  vault=vault) ;;
+  *) echo "/some/other/vault"; exit 0 ;;
+esac
+case "$2" in
+  vault) echo "${path.join(dir, "vault")}" ;;
+  *) echo ok ;;
+esac`);
     stub(dir, "bin/open", `echo "open $*" >> ${calls}
 ${opens ? `echo running > ${dir}/state` : "true"}`);
     stub(dir, "bin/swift", `echo "swift $*" >> ${calls}
@@ -77,18 +85,38 @@ test("Obsidian running: its own Calendar sync does the work, and nothing else is
     const { run } = setUp({ running: true });
     const { out, calls } = run();
     assert.match(out, /Obsidian synced the calendar/);
-    assert.match(calls, /obsidian command id=customjs:invoke-CalendarSync/);
+    assert.match(calls, /obsidian vault=vault command id=customjs:invoke-CalendarSync/);
     assert.doesNotMatch(calls, /swift|open /);
 });
 
 test("Obsidian closed: it's opened in the background, then asked to sync", () => {
     const { run } = setUp({ running: false });
     const { out, calls } = run();
-    assert.match(out, /opening it in the background/);
-    assert.match(calls, /open -g -a Obsidian/);
-    assert.match(calls, /obsidian command id=customjs:invoke-CalendarSync/);
+    assert.match(out, /opening this vault in the background/);
+    assert.match(calls, /open -g obsidian:\/\/open\?vault=vault/, "opens this vault by name, not just the app");
+    assert.match(calls, /obsidian vault=vault command id=customjs:invoke-CalendarSync/);
     assert.match(out, /Obsidian synced the calendar/);
     assert.doesNotMatch(calls, /swift/);
+});
+
+test("every CLI call names this script's own vault, before the command", () => {
+    const { run } = setUp({ running: true });
+    const { calls } = run();
+    const cli = calls.split("\n").filter((l) => l.startsWith("obsidian "));
+    assert.ok(cli.length >= 2, calls);
+    for (const line of cli) assert.match(line, /^obsidian vault=vault /, line);
+    // after the command, `vault=` is ignored by the CLI, so it has to come first
+    for (const line of cli) assert.ok(line.indexOf("vault=vault") < line.indexOf("command id=") || !line.includes("command id="), line);
+});
+
+test("a sync that would reach another vault is treated as Obsidian not answering", () => {
+    // the stub answers with a different path unless the name matches, as the CLI does for a vault
+    // that isn't open; the script must not sync that vault
+    const { dir, run } = setUp({ running: true });
+    fs.writeFileSync(path.join(dir, "state"), "running");
+    const { out, calls } = run("--no-launch");
+    assert.match(calls, /obsidian vault=vault vault info=path/);
+    assert.doesNotMatch(out, /couldn't reach Obsidian/);
 });
 
 test("--no-launch: nothing is opened, and the fetch keeps the events file current", () => {

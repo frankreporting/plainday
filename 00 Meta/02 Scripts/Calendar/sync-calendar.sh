@@ -8,12 +8,19 @@
 # phone. When Obsidian isn't running, this opens it in the background (--no-launch to skip that).
 #
 #   sync-calendar.sh [--no-launch] [months]   sync now (months only matters for the fallback fetch)
+#
+# It syncs the vault it lives in, named in every CLI call, so a copy in a worktree can't reach
+# another vault and a scheduled run always means the vault it was installed in.
 #   sync-calendar.sh on | off | status        the launchd schedule (7:15am, 12:15pm, 5:15pm, 9:15pm)
 #
 # Log: ~/Library/Logs/calendar-sync.log (where launchd sends this script's output).
 set -uo pipefail
 
 VAULT="$(cd "$(dirname "$0")/../../.." && pwd)"
+# Every CLI call names this vault, the one this copy of the script lives in. Without a name, the
+# command goes to whichever vault Obsidian picks, so with a second vault open a scheduled run could
+# write real events into it. `vault=` only counts before the command; after it, it's ignored.
+VAULT_NAME="$(basename "$VAULT")"
 FETCH="$VAULT/00 Meta/02 Scripts/Calendar/fetchCalendar.swift"
 EVENTS="$VAULT/00 Meta/02 Scripts/Calendar/calendar-events.json"
 # The launchd job: the first *calendar-sync.plist in LaunchAgents, and the label inside it
@@ -30,8 +37,8 @@ WAIT="${OBSIDIAN_WAIT:-60}"   # seconds to wait for Obsidian to answer after ope
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # The CLI only answers while the app is running
-running() { "$OBSIDIAN" vault info=path >/dev/null 2>&1; }
-sync_now() { "$OBSIDIAN" command id=customjs:invoke-CalendarSync >/dev/null 2>&1; }
+running() { [ "$("$OBSIDIAN" vault="$VAULT_NAME" vault info=path 2>/dev/null)" = "$VAULT" ]; }
+sync_now() { "$OBSIDIAN" vault="$VAULT_NAME" command id=customjs:invoke-CalendarSync >/dev/null 2>&1; }
 
 schedule() {
     case "$1" in
@@ -69,8 +76,10 @@ if running; then
     sync_now && { log "Obsidian synced the calendar"; exit 0; }
     log "Obsidian is running but the sync command failed; falling back to a fetch"
 elif [ "$LAUNCH" -eq 1 ]; then
-    log "Obsidian isn't running — opening it in the background"
-    "$OPEN" -g -a Obsidian
+    log "Obsidian isn't running (or this vault isn't open) — opening this vault in the background"
+    # By name, so the right vault opens: naming a vault that isn't open is an error from the CLI,
+    # and launching the app alone would only reopen whatever was open last.
+    "$OPEN" -g "obsidian://open?vault=${VAULT_NAME// /%20}" 2>/dev/null || "$OPEN" -g -a Obsidian
     for _ in $(seq 1 "$WAIT"); do
         running && break
         sleep 1
