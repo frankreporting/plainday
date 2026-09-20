@@ -74,7 +74,7 @@ class UpdateObsidianPM {
 
     // The confirmation, as lines. `local` needs a decision, so it comes first. Long lists are cut
     // to `max` paths and counted, so the dialog stays readable.
-    summary(plan, { source, commit, firstRun = false, max = 8, dirty = [] } = {}) {
+    summary(plan, { source, commit, firstRun = false, max = 8, dirty = [], hidden = [] } = {}) {
         const lines = [];
         const list = (label, paths, note = "") => {
             if (!paths.length) return;
@@ -97,6 +97,10 @@ class UpdateObsidianPM {
         // installed for testing. Anything uncommitted there is worth seeing before it lands in a vault.
         list("Uncommitted in the clone", dirty.filter((p) => this.installs(p)),
             " (copied as they are on disk, not as the repository has them)");
+        // Files git has been told to ignore changes to (`update-index --skip-worktree`) never show
+        // in a diff, so they'd travel silently: they're the likeliest edits to be wrong for a vault.
+        list("Hidden from git in the clone", hidden.filter((p) => this.installs(p)),
+            " (skip-worktree: git shows no change, but this copies what's on disk)");
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
             lines.push(`Already up to date (${plan.same.length} files).`);
         }
@@ -174,7 +178,11 @@ class UpdateObsidianPM {
             ...(this.git(source, ["diff", "--name-only", "HEAD"]).out ?? "").split("\n"),
             ...(this.git(source, ["ls-files", "--others", "--exclude-standard"]).out ?? "").split("\n"),
         ])].filter(Boolean).sort();
-        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0, dirty });
+        // `ls-files -v` tags each entry: "S" for skip-worktree, a lowercase letter for
+        // assume-unchanged. Both tell git to ignore changes, so neither shows in a diff.
+        const hidden = (this.git(source, ["ls-files", "-v"]).out ?? "").split("\n")
+            .filter((line) => /^(S|[a-z]) /.test(line)).map((line) => line.slice(2)).filter(Boolean).sort();
+        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0, dirty, hidden });
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
             new Notice(`Obsidian PM is up to date (${commit ?? "no commit"})`, 6000); return;
         }

@@ -204,6 +204,21 @@ test("invoke: an uncommitted edit in the clone is shown before anything is writt
     assert.equal(read(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), "locally edited\n");
 });
 
+test("invoke: an edit hidden with skip-worktree in the clone is still shown", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    // the clone's settings are edited and hidden from git, as a demo vault's were
+    const settings = ".obsidian/plugins/customjs/data.json";
+    write(f.source, settings, '{"jsFolder":"edited locally"}\n');
+    execFileSync("git", ["-C", f.source, "update-index", "--skip-worktree", settings], { stdio: "pipe" });
+    // git itself reports nothing
+    assert.equal(execFileSync("git", ["-C", f.source, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).trim(), "");
+
+    await f.up.invoke();
+    assert.match(f.answers.sawSummary, /\*\*Hidden from git in the clone: 1\*\*/);
+    assert.match(f.answers.sawSummary, /- \.obsidian\/plugins\/customjs\/data\.json/);
+});
+
 test("invoke: nothing to do says so", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
