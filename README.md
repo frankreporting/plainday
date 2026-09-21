@@ -163,6 +163,8 @@ Scripts are loaded the way CustomJS and Templater load them, and the parts that 
 
 Changes go through pull requests from a git worktree outside the vault, tested by opening the worktree as its own vault. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
 
+GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top.
+
 ### Using it for your own notes
 
 Don't make your own vault a copy of this repository: it carries the sample notes, and their paths (daily notes, weekly notes, `Projects/`) would collide with yours.

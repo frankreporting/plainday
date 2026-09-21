@@ -57,6 +57,9 @@ ${opens ? `echo running > ${dir}/state` : "true"}`);
     stub(dir, "bin/swift", `echo "swift $*" >> ${calls}
 ${fetches ? `echo '{"events":[]}' > "$5"` : "echo denied >&2; exit 1"}`);
     stub(dir, "bin/jq", "echo 2");
+    // plutil is macOS-only; the stub reads the label so the test runs on Linux too
+    stub(dir, "bin/plutil", `for f; do :; done
+sed -n 's:.*<key>Label</key><string>\\(.*\\)</string>.*:\\1:p' "$f"`);
     stub(dir, "bin/launchctl", `echo "launchctl $*" >> ${calls}
 case "$1" in
   list) [ -f ${dir}/loaded ] || exit 1; echo '{ "LastExitStatus" = 256; };' ;;
@@ -71,6 +74,7 @@ esac`);
             env: {
                 ...process.env, HOME: dir, OBSIDIAN_CLI: path.join(bin, "obsidian"), OPEN_CMD: path.join(bin, "open"),
                 LAUNCHCTL_CMD: path.join(bin, "launchctl"), SWIFT_CMD: path.join(bin, "swift"), JQ_CMD: path.join(bin, "jq"),
+                PLUTIL_CMD: path.join(bin, "plutil"),
                 OBSIDIAN_WAIT: "3",
             },
         });

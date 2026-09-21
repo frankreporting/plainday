@@ -25,15 +25,16 @@ FETCH="$VAULT/00 Meta/02 Scripts/Calendar/fetchCalendar.swift"
 EVENTS="$VAULT/00 Meta/02 Scripts/Calendar/calendar-events.json"
 # The launchd job: the first *calendar-sync.plist in LaunchAgents, and the label inside it
 PLIST="${CALENDAR_SYNC_PLIST:-$(print -r -- "$HOME"/Library/LaunchAgents/*calendar-sync.plist(N[1]))}"
-LABEL="$([ -n "$PLIST" ] && [ -f "$PLIST" ] && /usr/bin/plutil -extract Label raw -o - "$PLIST" 2>/dev/null)"
 LOG="$HOME/Library/Logs/calendar-sync.log"
 # The tests point these at stubs
+PLUTIL="${PLUTIL_CMD:-/usr/bin/plutil}"
 OBSIDIAN="${OBSIDIAN_CLI:-$(command -v obsidian || echo /usr/local/bin/obsidian)}"
 OPEN="${OPEN_CMD:-/usr/bin/open}"
 LAUNCHCTL="${LAUNCHCTL_CMD:-/bin/launchctl}"
 SWIFT="${SWIFT_CMD:-/usr/bin/swift}"
 JQ="${JQ_CMD:-/opt/homebrew/bin/jq}"
 WAIT="${OBSIDIAN_WAIT:-60}"   # seconds to wait for Obsidian to answer after opening it
+LABEL="$([ -n "$PLIST" ] && [ -f "$PLIST" ] && "$PLUTIL" -extract Label raw -o - "$PLIST" 2>/dev/null)"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # The CLI only answers while the app is running

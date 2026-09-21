@@ -23,6 +23,10 @@ For reading notes, `grep` on the markdown files is often faster.
   - `demoVault.test.mjs` checks the sample notes against the scripts: the committed time reports must equal what the scripts render, and every link and `area` must be right. If a change alters what the report writes, re-render the sample notes with `node "00 Meta/02 Scripts/tests/demo/renderReports.mjs"` and commit the result.
   - Checks against a real vault's data go in `*.private.test.mjs` files with `*.private.json` fixtures, which git ignores.
 - **Docs:** a change a user would notice updates `README.md` in the same PR, and the sample notes too if they should show it.
+- **CI (`.github/workflows/ci.yml`)** runs on every PR and must be green before a merge. It runs the tests, loads every CustomJS class and Templater script the way the plugins do, checks the tracked JSON, scans the diff, commits, title, body and branch name for the patterns the "Privacy" rule names, and checks the PR body:
+  - it links its Linear issue (`Closes OBS-N`, or `Part of OBS-N`; see below), and
+  - when files under `CustomJS/`, `Templater/`, `Calendar/` or `01 Templates/` change, it has a `## Docs` section with a `My Obsidian Setup:` line (the sections changed in that untracked note, or `none`) and, unless `README.md` changes too, a sentence on why the README needs nothing.
+  - The checks are plain Node scripts in `.github/ci/`; run one locally with the environment variables its header names, and `node --test .github/ci/*.test.mjs` tests them.
 - **Issues:** issues are tracked in Linear, not GitHub.
   - A branch named `<user>/obs-N-<slug>` and a `Closes OBS-N` line in the PR description link the PR and close the issue when it merges.
   - `Part of OBS-N` links without closing. Put a PR like that on a branch without `obs-N` in its name, since the branch name alone would close the issue.
@@ -57,5 +61,5 @@ This repository is public. That covers:
 Never include anything from a real vault: note names, people's names, clients or projects, dollar amounts or rates, calendar events, journal or health details, emails, usernames, paths under a home folder, or tokens.
 
 - Refer to real things generically: "a meeting log", "a client project", "a synced event".
-- Use only invented data in tests and sample notes, and don't make it up by lightly disguising real data, such as keeping a real project's initials or a real rate.
-- Before pushing, search the diff for real names and amounts.
+- Write sample notes, test fixtures, comments and PR text from how the system behaves, never from a real note, and don't disguise real data either, such as keeping a real project's initials or a real rate. A bug seen in a real vault is reproduced with an invented note of the same shape; if only the real line will do, it goes in a `*.private.*` test, which git ignores.
+- CI scans the diff, commits and PR text for what a pattern can catch: home-folder paths, emails, tokens and claude.ai links. Names, clients and amounts it can't know, so before pushing, read the diff for those yourself.

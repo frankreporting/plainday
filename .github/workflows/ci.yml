@@ -1,0 +1,77 @@
+# Runs on every pull request, and on main after a merge. What each job checks is documented in
+# CLAUDE.md ("Working on the system") and at the top of the scripts in .github/ci/.
+name: CI
+
+on:
+  pull_request:
+    # `edited` re-runs the PR checks when the title or body is fixed
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install zsh (the calendar sync script runs under it)
+        run: command -v zsh >/dev/null || (sudo apt-get update -q && sudo apt-get install -y -q zsh)
+      - name: Vault tests and CI-check tests
+        run: node --test "00 Meta/02 Scripts/tests/*.test.mjs" .github/ci/*.test.mjs
+
+  scripts:
+    name: Scripts load, settings parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node .github/ci/checkScripts.mjs
+
+  privacy:
+    name: Privacy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Scan the diff, commits, title, body and branch name
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: node .github/ci/privacy.mjs
+
+  pr:
+    name: Linear link and docs
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the PR body and branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: node .github/ci/checkPR.mjs
