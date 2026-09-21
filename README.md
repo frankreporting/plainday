@@ -140,7 +140,7 @@ Startup scripts (run when Obsidian starts):
 | --- | --- |
 | SyncArea | Updates `area` when notes or folders move |
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
-| TimeReportOnStartup | Refreshes the time reports (desktop only) |
+| TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian
 

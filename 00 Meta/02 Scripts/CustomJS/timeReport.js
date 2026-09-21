@@ -1366,6 +1366,10 @@ class TimeReport {
     async refresh({ quiet }) {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
+        // A script saved while this runs makes CustomJS start `customJS` over and register the classes
+        // again one file at a time, so keep the Schedule this run began with instead of looking it up
+        // on the global part-way through (OBS-41)
+        this.schedule = customJS.Schedule;
         const working = quiet ? null : new Notice("Building the time report…", 0);
 
         try {
@@ -1420,7 +1424,7 @@ class TimeReport {
     periodFolders() {
         const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
         const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
-        const daily = customJS.Schedule.dailyOpts().folder;
+        const daily = this.schedule.dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
         const folderOf = (pattern, fallback) => {
             const p = String(pattern ?? "");
@@ -1561,10 +1565,10 @@ class TimeReport {
     }
 
     async readDailyNotes() {
-        const { format } = customJS.Schedule.dailyOpts();
+        const { format } = this.schedule.dailyOpts();
         const notes = [];
         for (const f of app.vault.getMarkdownFiles()) {
-            if (!customJS.Schedule.isDailyNote(f)) continue;
+            if (!this.schedule.isDailyNote(f)) continue;
             const text = await this.textOf(f);
             if (!/\d[:.]\d\d|\d\s*[ap]\.?m/i.test(text)) continue;
             notes.push({ date: window.moment(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });

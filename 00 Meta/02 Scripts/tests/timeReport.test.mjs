@@ -1352,3 +1352,30 @@ test("OBS-34: no conflict without a 🔗 note, with an archived note project, or
     const m = tr.build([note("2026-09-01", text)], idx);
     assert.deepEqual(plain(m.projectProblems.filter((p) => p.conflict)), []);
 });
+
+test("OBS-41: refresh keeps the Schedule it started with while CustomJS rebuilds customJS", async () => {
+    const schedule = {
+        dailyOpts: () => ({ folder: "Planner/days", format: "YYYY-MM-DD" }),
+        isDailyNote: (f) => f.path.startsWith("Planner/days/"),
+    };
+    const day = { path: "Planner/days/2026-09-01.md", basename: "2026-09-01" };
+    const context = {
+        customJS: { obsidian: {}, Schedule: schedule },
+        app: {
+            vault: { getMarkdownFiles: () => [day], getFileByPath: () => null, cachedRead: async () => "- 9:00am - 9:30am" },
+            metadataCache: {},
+            workspace: { getLeavesOfType: () => [] },
+            plugins: { plugins: {} },
+        },
+        window: { moment: (text) => ({ format: () => text }) },
+        console: { ...console, warn: () => {} },
+    };
+    const Loaded = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const report = new Loaded();
+    // With no project note in sight, refresh stops before it writes anything; it has started, though
+    await report.refresh({ quiet: true });
+    // A script is saved: CustomJS starts `customJS` over, and Schedule isn't back yet
+    context.customJS = { obsidian: {} };
+    assert.deepEqual(plain(report.periodFolders()), { week: "Planner/weeks", month: "Planner/months", year: "Planner/years" });
+    assert.deepEqual(plain(await report.readDailyNotes()), [{ date: "2026-09-01", path: day.path, text: "- 9:00am - 9:30am" }]);
+});
