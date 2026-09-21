@@ -2,9 +2,10 @@ class CalendarSync {
     // Writes calendar events into daily notes and keeps them current: an event that moves, is
     // renamed or is canceled updates the line the sync wrote (a canceled one is marked [-], kept as
     // a record of what was planned, and back to [<] if the event returns). A line you've touched is yours,
-    // except for what you add on top of an event: ⭕ project links after the title, a log link
-    // around it, and time entries under it. Those are kept through every update, and a moved
-    // event takes its links (not its time entries) to the new day. A ⭕ put after a recurring
+    // except for what you add on top of an event: ⭕ project links and a 🆓 after the title, a log
+    // link around it, a note after the end time's colon, and time entries under it. Those are kept
+    // through every update, and a moved event takes its links and 🆓 (not its time entries or the
+    // end line's note) to the new day. A ⭕ put after a recurring
     // series in the Calendar Sync note reaches every upcoming line of that series. An event the
     // calendar shows as free gets ℹ️ after its title (see FREE_MARK), kept current the same way.
     //
@@ -45,6 +46,13 @@ class CalendarSync {
     // simply ends in the character isn't one.
     static FREE_MARK = "ℹ️";
     static FREE = /\s+ℹ️?$/u;
+    // 🆓 after the title is yours: TimeReport reads it as "don't bill this event's time" (OBS-24).
+    // Kept through updates like a ⭕ link, and carried when the event moves. A phone may add U+FE0F.
+    static NONBILLABLE_MARK = "🆓";
+    static NONBILLABLE = /\s+🆓\uFE0F?$/u;
+    // The sync's end-time line under an event, and any note you've put after it with a colon
+    // (`\t- 4:30pm: 🆓 not billing this`), which is kept when the end time changes
+    static END_LINE = /^(\s*[-*+]\s+\d{1,2}:\d{2}\s?[ap]m)(\s*:.*)?$/i;
 
     async invoke() {
         try {
@@ -563,19 +571,20 @@ class CalendarSync {
         let text;
         try {
             const file = app.vault.getFileByPath(this.dailyPath(entry.date));
-            if (!file) return { projects: [], log: null, series: entry.series };
+            if (!file) return { projects: [], log: null, nonbillable: false, series: entry.series };
             text = await app.vault.read(file);
         } catch (e) {
-            return { projects: entry.projects ?? [], log: entry.log ?? null, series: entry.series };
+            return { projects: entry.projects ?? [], log: entry.log ?? null, nonbillable: entry.nonbillable ?? false, series: entry.series };
         }
         const lines = text.split("\n");
         const block = this.findBlock(lines, entry);
-        if (!block) return { projects: [], log: null, series: entry.series };
+        if (!block) return { projects: [], log: null, nonbillable: false, series: entry.series };
         const own = lines.slice(block.from, block.to + 1);
         const ann = this.detached(lines, block) ? null : this.annotations(own, entry.lines);
-        if (ann) return { projects: ann.projects, log: ann.entries ? null : ann.log, series: entry.series };
-        // A line that's yours stays behind, but its ⭕ links still say what the event is for
-        return { projects: this.eventHead(own[0])?.projects ?? [], log: null, series: entry.series };
+        if (ann) return { projects: ann.projects, log: ann.entries ? null : ann.log, nonbillable: ann.nonbillable, series: entry.series };
+        // A line that's yours stays behind, but its ⭕ links and 🆓 still say what the event is for
+        const head = this.eventHead(own[0]);
+        return { projects: head?.projects ?? [], log: null, nonbillable: head?.nonbillable ?? false, series: entry.series };
     }
 
     async applyToNote(date, operations, ledger, report, landed, taken = new Map()) {
@@ -643,12 +652,12 @@ class CalendarSync {
         }
         if (op.kind === "insert") {
             // A moved event brings the old line's links; a series may add its ⭕
-            const carry = op.carry ?? { projects: [], log: null, series: undefined };
+            const carry = op.carry ?? { projects: [], log: null, nonbillable: false, series: undefined };
             const links = carry.log ? null : this.seriesLinks(carry.projects, carry.series, op.series);
-            const withLog = this.decorate(op.lines, { projects: links ?? carry.projects, log: carry.log });
+            const withLog = this.decorate(op.lines, { projects: links ?? carry.projects, log: carry.log, nonbillable: carry.nonbillable });
             // A new title that can't sit inside a link loses the log link here, so the old line stays
             const droppedLog = !withLog;
-            const written = withLog ?? this.decorate(op.lines, { projects: links ?? carry.projects, log: null });
+            const written = withLog ?? this.decorate(op.lines, { projects: links ?? carry.projects, log: null, nonbillable: carry.nonbillable });
             const series = this.seriesApplied(carry.projects, carry.series, links, op.series);
             const existing = this.findBlock(lines, { lines: op.lines }, claimed);
             if (!existing) {
@@ -670,15 +679,18 @@ class CalendarSync {
             // more than your additions stays as it is.
             const changed = [];
             const own = adopted.slice(existing.from, existing.to + 1);
-            const end = own.findIndex((l, i) => i > 0 && /^\t[-*+]\s+\d{1,2}:\d{2}\s?[ap]m\s*$/i.test(l));
+            // The end line as the sync wrote it, whatever note you've put after it
+            const end = own.findIndex((l, i) => i > 0 && this.indentWidth(l) === 4 && CalendarSync.END_LINE.test(l));
+            const bareEnd = end > 0 ? own[end].match(CalendarSync.END_LINE)[1] : null;
             const free = this.eventHead(own[0])?.free ?? false;
-            if (op.lines.length > 1 && end > 0 && own[end] !== op.lines[1]) changed.push("end time updated");
+            if (op.lines.length > 1 && end > 0 && bareEnd !== op.lines[1]) changed.push("end time updated");
+            if (op.lines.length === 1 && end > 0) changed.push("end time removed");
             if (op.lines.length > 1 && free !== this.isFree(op.lines[0])) changed.push(`now ${free ? "busy" : "free"}`);
             if (changed.length && !this.detached(adopted, existing)) {
                 // The head as the sync would have written it with the line's own mark, so only the
                 // end time and the mark are what's updated. With no end line in the block (a time
                 // entry replaced it), the new one is still expected, so it isn't written back.
-                const ann = this.annotations(own, [this.markLine(op.lines[0], free), end > 0 ? own[end] : op.lines[1]]);
+                const ann = this.annotations(own, [this.markLine(op.lines[0], free), end > 0 ? bareEnd : op.lines[1]]);
                 const updated = ann && this.decorate(op.lines, ann);
                 if (updated) adopted = [...adopted.slice(0, existing.from), ...updated, ...adopted.slice(existing.to + 1)];
                 else changed.length = 0;
@@ -700,7 +712,7 @@ class CalendarSync {
             if (any && seed.get(lines[any.from])) return { text, outcome: "taken" };
             if (op.entry.confirmed || op.kind === "cancel" || op.kind === "restore") return { text, outcome: "missing" };
             const fresh = op.lines ?? op.entry.lines;
-            const written = this.decorate(fresh, { projects: op.entry.projects ?? [], log: op.entry.log ?? null }) ?? fresh;
+            const written = this.decorate(fresh, { projects: op.entry.projects ?? [], log: op.entry.log ?? null, nonbillable: op.entry.nonbillable ?? false }) ?? fresh;
             this.claim(claimed, written[0]);
             return { text: this.insert(lines, written), outcome: "reinserted", lines: fresh, written };
         }
@@ -747,10 +759,12 @@ class CalendarSync {
         if (op.kind === "moveOut") {
             keep();
             if (untouched) return { text: without.join("\n"), outcome: "removed" };
-            // A line with only links goes, once the new day's line has those same links. Anything
-            // more (time entries, notes), or links that didn't make it across, and it's forwarded.
-            const carried = op.carry && op.landed?.asIntended && ann && !ann.entries
-                && this.same(ann.projects, op.carry.projects) && (ann.log ?? null) === (op.carry.log ?? null);
+            // A line with only links and a 🆓 goes, once the new day's line has those same ones.
+            // Anything more (time entries, a note on the end line), or links that didn't make it
+            // across, and it's forwarded.
+            const carried = op.carry && op.landed?.asIntended && ann && !ann.entries && !ann.endNote
+                && this.same(ann.projects, op.carry.projects) && (ann.log ?? null) === (op.carry.log ?? null)
+                && !!ann.nonbillable === !!op.carry.nonbillable;
             return carried
                 ? { text: without.join("\n"), outcome: "removed" }
                 : { text: this.forward(lines, block, op.event.date), outcome: "forwarded" };
@@ -798,7 +812,8 @@ class CalendarSync {
                 if (wrote) {
                     const intended = this.eventHead((result.written ?? lines)[0]);
                     const asIntended = !result.droppedLog && !!found && !!intended
-                        && this.same(found.projects, intended.projects) && found.log === intended.log;
+                        && this.same(found.projects, intended.projects) && found.log === intended.log
+                        && !!found.nonbillable === !!intended.nonbillable;
                     landed?.set(op.key, { asIntended });
                 }
                 // Carry forward what the ledger knew (a series ⭕ you took off stays off), then
@@ -811,7 +826,7 @@ class CalendarSync {
                 };
                 const series = result.series ?? prev.series ?? op.carry?.series;
                 if (series !== undefined) next.series = series;
-                this.remember(next, found ?? { projects: prev.projects ?? [], log: prev.log ?? null });
+                this.remember(next, found ?? { projects: prev.projects ?? [], log: prev.log ?? null, nonbillable: prev.nonbillable ?? false });
                 ledger.events[op.key] = next;
                 if (op.handover) delete ledger.events[op.handover];
                 if (wrote && result.revived) delete ledger.canceled[result.revived];
@@ -1030,20 +1045,23 @@ class CalendarSync {
         return { rest: rest.trim(), projects };
     }
 
-    // "Title ℹ️ [[A|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]"], free: true }: the ⭕ links and
-    // the free mark come off the end, in either order. A title that is only the mark keeps it.
+    // "Title ℹ️ 🆓 [[A|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]"], free: true, nonbillable: true }:
+    // the ⭕ links, the free mark and your 🆓 come off the end, in any order. A title that is only
+    // a mark keeps it.
     splitTail(text) {
         let rest = text.trimEnd();
         const projects = [];
-        let free = false;
+        let free = false, nonbillable = false;
         for (;;) {
             const link = rest.match(CalendarSync.PROJECT_LINK);
             if (link) { projects.unshift(link[0].trim()); rest = rest.slice(0, link.index); continue; }
             const mark = !free && rest.match(CalendarSync.FREE);
             if (mark) { free = true; rest = rest.slice(0, mark.index); continue; }
+            const yours = !nonbillable && rest.match(CalendarSync.NONBILLABLE);
+            if (yours) { nonbillable = true; rest = rest.slice(0, yours.index); continue; }
             break;
         }
-        return { rest: rest.trim(), projects, free };
+        return { rest: rest.trim(), projects, free, nonbillable };
     }
 
     // Whether one of the sync's own lines carries the free mark
@@ -1057,50 +1075,57 @@ class CalendarSync {
         return free ? `${bare} ${CalendarSync.FREE_MARK}` : bare;
     }
 
-    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <⭕ links>`,
+    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <⭕ links>`,
     // where the title may be wrapped in a log link. `shown` is the title as it reads, `log` the
-    // link around it as written, `free` whether it carries the mark, `trail` any whitespace at the
-    // end of the line. Null otherwise.
+    // link around it as written, `free` whether it carries the mark, `nonbillable` whether you've
+    // put 🆓 on it, `trail` any whitespace at the end of the line. Null otherwise.
     eventHead(line) {
         const match = line.match(/^- \[<\] ([^\t]+)\t(.*?)(\s*)$/);
         if (!match) return null;
-        const { rest, projects, free } = this.splitTail(match[2]);
+        const { rest, projects, free, nonbillable } = this.splitTail(match[2]);
         const wrapped = rest.match(CalendarSync.LOG_LINK);
         return {
             start: match[1], shown: wrapped ? (wrapped[2] ?? wrapped[1]).trim() : rest,
-            log: wrapped ? rest : null, projects, free, trail: match[3],
+            log: wrapped ? rest : null, projects, free, nonbillable, trail: match[3],
         };
     }
 
     // What you've added to a block the sync wrote as `synced`, if that's all you've changed: ⭕
-    // links, a log link around the title, time entries (and the lines under them) beside or in
-    // place of the end time. `children` keeps the order under the event line. Null if the block
-    // has any other change, which makes it yours (the free mark is the sync's: taking it off, or
-    // adding it, counts as a change).
+    // links, a 🆓, a log link around the title, a note after the end time's colon, time entries
+    // (and the lines under them) beside or in place of the end time. `children` keeps the order
+    // under the event line. Null if the block has any other change, which makes it yours (the free
+    // mark is the sync's: taking it off, or adding it, counts as a change).
     annotations(block, synced) {
         const head = this.eventHead(block[0]);
         if (!head || this.markLine(`- [<] ${head.start}\t${head.shown}`, head.free) !== synced[0]) return null;
         const children = [];
-        let hasEnd = false;
+        let hasEnd = false, endNote = false;
         let entryWidth = null;   // the indent of the time entry the next lines may sit under
         for (const line of block.slice(1)) {
             const width = this.indentWidth(line);
             if (entryWidth !== null && width > entryWidth) { children[children.length - 1].lines.push(line); continue; }
             entryWidth = null;
-            if (synced.length > 1 && !hasEnd && line === synced[1]) { hasEnd = true; children.push({ kind: "end" }); continue; }
+            const end = synced.length > 1 && !hasEnd && line.match(CalendarSync.END_LINE);
+            if (end && end[1] === synced[1]) {
+                hasEnd = true;
+                endNote = !!end[2];
+                children.push({ kind: "end", suffix: end[2] ?? "" });
+                continue;
+            }
             const bullet = line.match(/^\s+[-*+]\s+(.*)$/);
             if (!bullet || !CalendarSync.ENTRY.test(bullet[1].trim())) return null;
             entryWidth = width;
             children.push({ kind: "entry", lines: [line] });
         }
-        return { ...head, children, hasEnd, endExpected: synced.length > 1, entries: children.some((c) => c.kind === "entry") };
+        return { ...head, children, hasEnd, endNote, endExpected: synced.length > 1, entries: children.some((c) => c.kind === "entry") };
     }
 
     // The sync's lines for an event with your additions put back: the new start and title, the
     // log link keeping its target (only its text follows a rename), the free mark as the sync's
-    // lines have it, the ⭕ links, and the children in their order with the end time updated.
-    // Given only { projects, log } (a moved event, or a series), the links go on the sync's lines
-    // as they are. Null if the new title can't sit inside a link.
+    // lines have it, your 🆓, the ⭕ links, and the children in their order with the end time
+    // updated and its note kept. Given only { projects, log, nonbillable } (a moved event, or a
+    // series), the links go on the sync's lines as they are. Null if the new title can't sit inside
+    // a link, or the event has no end line any more (all day now) for a noted one to move to.
     decorate(lines, ann) {
         const lead = lines[0].slice(0, lines[0].indexOf("\t"));
         const { rest: title, free } = this.splitTail(lines[0].slice(lines[0].indexOf("\t") + 1));
@@ -1111,12 +1136,17 @@ class CalendarSync {
             else if (/[[\]|]/.test(title)) return null;
             else shown = `[[${target}|${title}]]`;
         }
-        const first = `${lead}\t${[shown, ...(free ? [CalendarSync.FREE_MARK] : []), ...ann.projects].join(" ")}${ann.trail ?? ""}`;
+        const marks = [...(free ? [CalendarSync.FREE_MARK] : []), ...(ann.nonbillable ? [CalendarSync.NONBILLABLE_MARK] : [])];
+        const first = `${lead}\t${[shown, ...marks, ...ann.projects].join(" ")}${ann.trail ?? ""}`;
         const end = lines.slice(1);
         if (!ann.children) return [first, ...end];
         const out = [first];
         if (!ann.endExpected) out.push(...end);   // it was an all-day event, with no end time to replace
-        for (const child of ann.children) out.push(...(child.kind === "end" ? end : child.lines));
+        for (const child of ann.children) {
+            if (child.kind !== "end") { out.push(...child.lines); continue; }
+            if (child.suffix && !end.length) return null;
+            out.push(...end.map((l, i) => (i === 0 ? l + child.suffix : l)));
+        }
         return out;
     }
 
@@ -1142,6 +1172,7 @@ class CalendarSync {
     remember(entry, found) {
         if (found.projects?.length) entry.projects = found.projects; else delete entry.projects;
         if (found.log) entry.log = found.log; else delete entry.log;
+        if (found.nonbillable) entry.nonbillable = true; else delete entry.nonbillable;
     }
 
     // Tabs count as four spaces
@@ -1157,17 +1188,24 @@ class CalendarSync {
     }
 
     // A newline or tab in a title would break the line format, and nothing would match it again
+    // A title ending in ℹ️ or 🆓 would read as the marks, and the line would never match again
     title(event) {
-        return (event.title || "").replace(/\s+/g, " ").trim() || "(untitled)";
+        return (event.title || "").replace(/\s+/g, " ").replace(/(?:\s+(?:🆓|ℹ)\uFE0F?)+$/u, "").trim() || "(untitled)";
     }
 
     // A timed event the calendar shows as free gets the mark; an events file from before the
-    // fetcher wrote `availability` marks nothing, as before
+    // fetcher wrote `availability` marks nothing, as before. A timed event that ends on another day
+    // gets no end line, unless it only runs past midnight (pm to am, under a day), which TimeReport
+    // reads as one span: otherwise its end's clock time would read as a span on the first day
+    // (OBS-24), so it's listed as an event with no end time instead.
     lines(event) {
         const title = this.title(event);
         if (event.allDay) return [`- [<] All day\t${title}`];
         const mark = event.availability === "free" ? ` ${CalendarSync.FREE_MARK}` : "";
-        return [`- [<] ${this.time(event.start)}\t${title}${mark}`, `\t- ${this.time(event.end)}`];
+        const head = `- [<] ${this.time(event.start)}\t${title}${mark}`;
+        const start = this.time(event.start), end = this.time(event.end);
+        const overnight = start.endsWith("pm") && end.endsWith("am") && Date.parse(event.end) - Date.parse(event.start) < 24 * 3600 * 1000;
+        return event.endsSameDay === false && !overnight ? [head] : [head, `\t- ${end}`];
     }
 
     time(iso) {

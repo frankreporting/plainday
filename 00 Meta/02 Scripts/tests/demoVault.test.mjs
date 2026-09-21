@@ -62,13 +62,21 @@ test("demo vault: the only Problem is the deliberate mistyped entry on 9/16", ()
     assert.match(lines[line], /Deliberate mistake for the demo/, "the example is labeled in the note");
     assert.deepEqual(plain(model.problems).map((p) => [p.path, p.line, p.kind]), [[PROBLEM_NOTE, line, "format"]]);
     assert.deepEqual(plain(model.projectProblems), []);
-    assert.ok(model.entries.every((e) => e.project), "no Unassigned time");
-    // Rendered: under the brochure project and the week, month and year of 9/16; None. everywhere else
+    // The only Unassigned time is the busy events with no project: they count from their end lines (OBS-24)
+    assert.deepEqual(plain(model.entries.filter((e) => !e.project).map((e) => [e.date, e.task, e.minutes])), [
+        ["2026-08-27", "Weekly planning", 15], ["2026-09-11", "Coffee with Esme", 60], ["2026-09-14", "Weekly planning", 30], ["2026-09-15", "Run with the club", 60],
+    ]);
+    // Rendered: under the brochure project and the week, month and year of 9/16, plus the count of
+    // Unassigned entries in every period with a busy event that has no project; None. everywhere else
     const flagged = [...plan.blocks].filter(([, b]) => !/### Problems\n\nNone\.\n/.test(b)).map(([p]) => p).sort();
     assert.deepEqual(flagged, [
-        `${FOLDERS.month}/2026-09.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
+        `${FOLDERS.month}/2026-08.md`, `${FOLDERS.month}/2026-09.md`,
+        `${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
         "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md",
     ].sort());
+    for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.month}/2026-08.md`]) {
+        assert.match(plan.blocks.get(p), /### Problems\n\n- 1 entry has no project \(see Unassigned\)\n/, p);
+    }
 });
 
 test("demo vault: no running clocks, and nothing that hasn't ended by the last demo day", () => {
@@ -76,7 +84,9 @@ test("demo vault: no running clocks, and nothing that hasn't ended by the last d
         const { problems } = tr.parseNote(n.text, n.date);
         assert.ok(!problems.some((p) => p.kind === "open"), `${n.path} has a running clock`);
     }
-    assert.ok(plan.model.entries.every((e) => e.date <= "2026-09-16"), "entries after 9/16 would drop out of a report run before they end");
+    // The committed reports are built without a clock, so the demo has to be opened after its last
+    // entry has ended, or the startup run would leave that entry out and rewrite the notes
+    assert.ok(plan.model.entries.every((e) => e.date <= "2026-09-18"), "entries after 9/18 would drop out of a report run before they end");
 });
 
 test("demo vault: the archived project's entries are in the daily notes but left out of every report", () => {

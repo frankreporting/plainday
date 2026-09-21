@@ -16,7 +16,9 @@ class TimeReport {
     // entry-by-entry detail belongs on invoices (OBS-5). Projects in 90 Archive are left out.
     //
     // A time entry is a bullet one level under a task or event: `- 9:01am - 9:40am`, optionally
-    // `: note`. 🆓 at the start of the note doesn't bill it (`- 5:00pm - 5:30pm: 🆓 not billing`).
+    // `: note`. 🆓 at the start of the note doesn't bill it (`- 5:00pm - 5:30pm: 🆓 not billing`);
+    // 🆓 as a word of its own on the task or event line, or a line it's nested under, doesn't bill
+    // any entry under it, and an entry marked both ways is 🆓 and listed under Problems (OBS-24).
     // `- 3:00pm - ` is a running clock. An end earlier than a pm start past midnight
     // (`10:30pm - 5:51am`) runs into the next day. Lines nested under an entry are notes about
     // it, not entries. Old daily notes (to August 2025) list meetings as `3:15pm⇥[[log|title]]`
@@ -25,12 +27,15 @@ class TimeReport {
     // code blocks and %% / <!-- --> comments are skipped.
     //
     // An event line (`- [<] 4:00pm⇥Title`) with the calendar sync's end time under it (`⇥- 4:30pm`)
-    // isn't counted as time, but a busy one that has ended is checked for overlaps against every
-    // entry and every other busy event (OBS-47). ℹ️ after the title, before its ⭕ links, marks
-    // an event the calendar says you're free during: not your time, so it's never counted and never
-    // overlaps anything. Time entries under an event replace its own span, so an event with entries
-    // can't overlap itself; typed under a free event, they count as always. All-day, canceled ([-])
-    // and forwarded ([>]) events have no span.
+    // counts from its start to that end once it has ended, as an entry on the project the line
+    // resolves to, else Unassigned (OBS-24); it's checked for overlaps like any entry (OBS-47).
+    // The end line takes a note after a colon like an entry does (`⇥- 4:30pm: 🆓 not billing`).
+    // ℹ️ after the title, before its ⭕ links, marks an event the calendar says you're free during:
+    // not your time, so it's never counted and never overlaps anything. Time entries directly under
+    // an event are its time instead: its end line is then ignored, and a 🆓 left there is a Problem.
+    // A busy event with a start and no usable end line is a Problem, like a running clock, except
+    // that one ending when it starts is quietly nothing. All-day, canceled ([-]) and forwarded ([>])
+    // events, and any marker but [<], are never counted.
     //
     // The project an entry belongs to, first match wins, looking at the task line and then the
     // lines it's nested under:
@@ -85,8 +90,14 @@ class TimeReport {
     static OLD_EVENT = /^\d{1,2}:\d{2}\s?[ap]m\b/i;
     // A timed event line's body, up to the tab before its title: `[<] 4:00pm⇥`
     static EVENT_HEAD = new RegExp(String.raw`^\[<\]\s+(${TimeReport.TIME})\t`, "i");
-    // The calendar sync's end-time line under an event: `4:30pm` on its own
-    static END_LINE = new RegExp(String.raw`^(${TimeReport.TIME})$`, "i");
+    // The calendar sync's end-time line under an event: `4:30pm` on its own, or with a note after a
+    // colon like an entry's (`4:30pm: 🆓 not billing this`)
+    static END_LINE = new RegExp(String.raw`^(${TimeReport.TIME})(?:\s*:\s*(.*?))?\s*$`, "i");
+    // 🆓 as a word of its own on a task or event line (a phone may add U+FE0F); links come out first
+    static FREE_WORD = /(?<=^|[\s(\[])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/u;
+    static FREE_WORDS = /(?<=^|[\s(\[])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/gu;
+    static EMPTY_BRACKETS = /\s*[(\[]\s*[)\]]/g;
+    static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
     // 🔗, ⭕, 🗃️ and 🚩 links, which say nothing about what a line is
@@ -221,15 +232,25 @@ class TimeReport {
         return { kind: "text", body: t };
     }
 
-    // Whether an event line's body carries the free mark after its title (its ⭕ links aside)
+    // Whether an event line's body carries the free mark after its title (its ⭕ links and a 🆓 aside)
     freeEvent(body) {
-        return TimeReport.FREE_MARK.test(body.replace(TimeReport.SYMBOL_LINK, "").trimEnd());
+        return TimeReport.FREE_MARK.test(body.replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
+    }
+
+    // Whether a task or event line carries 🆓 as a word of its own (links aside), which frees every
+    // entry under it, and whether it holds a 🆓 that isn't one (`Stray🆓`), which counts for nothing
+    freeLine(body) {
+        const text = body.replace(TimeReport.LINK, "");
+        const free = TimeReport.FREE_WORD.test(text);
+        return { free, stray: !free && text.includes("🆓") };
     }
 
     // Reads one daily note. Returns { entries, problems, events }; each carries `context`, the task
     // line and the lines it's nested under (nearest first), for working out its project later.
     // `events` are the timed event lines: { line, start, end (from the end-time line under it, or
-    // null), free, ranges (time entries under it), text }.
+    // null), endText, endNote, endFree (🆓 after the end line's colon), lineFree (🆓 on the event
+    // line), free (ℹ️), ranges (time entries under it), minutes, text }. Once an event has ended,
+    // build() counts a busy one with an end line as an entry (OBS-24).
     parseNote(text, date) {
         const lines = this.lines(text);
         const entries = [];
@@ -246,6 +267,12 @@ class TimeReport {
         for (const u of unclosed) problem(u.line, "unclosed", `opens a ${u.what} that never closes, so nothing after it is read`);
 
         const stack = [];        // open ancestors: { width, kind, body, line }
+        const strayFlagged = new Set();   // lines with a 🆓 that isn't a word, said once each
+        const stray = (c) => {
+            if (strayFlagged.has(c.line)) return;
+            strayFlagged.add(c.line);
+            problem(c.line, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it", [{ body: c.body, line: c.line + 1 }]);
+        };
         let oldEvent = null;     // an old-style meeting line still collecting bullets at its own level
         const timedKinds = ["entry", "open", "rangeish"];
 
@@ -265,18 +292,39 @@ class TimeReport {
             // An event line, and what sits under it: its end-time line, or time entries in its place
             const head = node.kind === "item" && node.box && node.body.match(TimeReport.EVENT_HEAD);
             if (head) {
+                const mark = this.freeLine(node.body);
                 node.event = {
-                    date, line: i + 1, start: this.minutes(head[1]), startText: head[1], end: null, endText: null,
-                    free: this.freeEvent(node.body), ranges: false, text: raw.trim().replace(/\t+/g, " "),
+                    date, line: i + 1, start: this.minutes(head[1]), startText: head[1], end: null, endText: null, endBare: false,
+                    endNote: "", endFree: false, endStray: false, lineFree: mark.free, lineStray: mark.stray,
+                    free: this.freeEvent(node.body), ranges: false, minutes: 0, text: raw.trim().replace(/\t+/g, " "),
                     context: [node, ...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))].map((c) => ({ body: c.body, line: c.line + 1 })),
                 };
                 if (node.event.start !== null) events.push(node.event);
             }
+            // Entries directly under the event are its time; a sub-task's entries are the sub-task's
             const under = ancestors.find((a) => a.event)?.event;
-            if (under && timed) under.ranges = true;
-            else if (under && ancestors[0].event && under.end === null && node.kind === "item" && !node.box && TimeReport.END_LINE.test(node.body)) {
-                under.end = this.minutes(node.body);
-                under.endText = node.body;
+            if (under && timed) {
+                if (ancestors[0].event) under.ranges = true;
+            } else if (under && ancestors[0].event && node.kind === "item" && !node.box) {
+                const end = node.body.match(TimeReport.END_LINE);
+                if (end && this.minutes(end[1]) === null) {
+                    problem(i, "format", "isn't a real time, so it isn't the event's end", [...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))].map((c) => ({ body: c.body, line: c.line + 1 })));
+                    continue;
+                }
+                if (end) {
+                    // The sync's bare end line wins; a noted one (`4:30pm: 🆓`) stands until a bare one comes
+                    const bare = !node.body.slice(end.index + end[1].length).includes(":");
+                    if (under.endText === null || (bare && !under.endBare)) {
+                        const note = (end[2] ?? "").trim();
+                        under.end = this.minutes(end[1]);
+                        under.endText = end[1];
+                        under.endBare = bare;
+                        under.endFree = /^🆓/u.test(note);
+                        under.endNote = under.endFree ? note.replace(/^🆓\uFE0F?\s*/u, "") : note;
+                        under.endStray = !under.endFree && note.includes("🆓");
+                    }
+                    continue;
+                }
             }
             if (width === 0) {
                 if (node.kind === "event") oldEvent = node;
@@ -350,7 +398,11 @@ class TimeReport {
             }
 
             const note = (noteRaw ?? "").trim();
-            const free = /^🆓/u.test(note);
+            const own = /^🆓/u.test(note);
+            // 🆓 on the task or event line, or a line above it, frees every entry under it
+            const marks = context.map((c) => (c.freeLine ??= this.freeLine(c.body)));
+            const above = marks.some((m) => m.free);
+            const free = own || above;
             const entry = {
                 date, line: i + 1, start, end, minutes: end - start, crossesMidnight, free,
                 note: free ? note.replace(/^🆓\uFE0F?\s*/u, "") : note,
@@ -360,18 +412,56 @@ class TimeReport {
             entries.push(entry);
 
             if (!anchored) problem(i, "anchor", "isn't under a task or event", ctx);
-            if (!free && note.includes("🆓")) problem(i, "free", "has 🆓 after other text, so it doesn't count; put 🆓 right after the colon", ctx);
-            if (anchored && context[0].body.includes("🆓")) problem(i, "free", "🆓 on the task line doesn't count; put it after the entry's colon", ctx);
+            if (!own && note.includes("🆓")) problem(i, "free", "has 🆓 after other text, so it doesn't count; put 🆓 right after the colon", ctx);
+            if (own && above) problem(i, "free", "has 🆓 here and on the line above; one is enough", ctx);
+            if (!above) context.filter((c, k) => marks[k].stray).forEach(stray);
             if (entry.minutes >= TimeReport.LONG_MINUTES) problem(i, "long", `is ${this.hours(entry.minutes)} hours long`, ctx);
         }
-        // An event's end before its start runs past midnight when it reads pm → am; otherwise the
-        // end line isn't one, and the event has no span
+        // What each timed event is worth. A free one (ℹ️) is never counted and never a Problem.
+        // Entries under a busy one are its time, so its end line is ignored, and a 🆓 left there is
+        // said so. Otherwise its span runs from its start to its end line, past midnight when it
+        // reads pm → am; a busy event with no usable end is a Problem like a running clock, except
+        // that a zero-length one (a reminder) is quietly nothing.
+        // Each carries the event's start, so build() can hold it back until the event has begun
+        const eventProblem = (ev, kind, message) => problems.push({ date, line: ev.line, kind, message, text: ev.text, context: ev.context, start: ev.start });
         for (const ev of events) {
-            if (ev.end === null || ev.end > ev.start) continue;
-            if (ev.end < ev.start && /pm$/i.test(ev.startText) && /am$/i.test(ev.endText)) ev.end += 1440;
-            else ev.end = null;
+            if (ev.free) continue;
+            if (ev.lineStray) stray({ line: ev.line - 1, body: ev.context[0].body });
+            if (ev.ranges) {
+                if (ev.endFree) eventProblem(ev, "free", "has 🆓 on its end line, but the entries under it are its time, so it doesn't apply; put 🆓 on the entries or the event line");
+                ev.end = null;
+                continue;
+            }
+            if (ev.end === null) { eventProblem(ev, "open", "has no end time under it, so it isn't counted"); continue; }
+            if (ev.end < ev.start) {
+                if (/pm$/i.test(ev.startText) && /am$/i.test(ev.endText)) {
+                    ev.end += 1440;
+                    ev.crossesMidnight = true;
+                } else {
+                    eventProblem(ev, "order", "ends before it starts, so it isn't counted");
+                    ev.end = null;
+                    continue;
+                }
+            } else if (ev.end === ev.start) {
+                ev.end = null;
+                continue;
+            }
+            ev.minutes = ev.end - ev.start;
+            if (ev.lineFree && ev.endFree) eventProblem(ev, "free", "has 🆓 on the event line and on its end line; one is enough");
+            if (ev.endStray) eventProblem(ev, "free", "has 🆓 after other text on its end line, so it doesn't count; put 🆓 right after the colon");
+            if (ev.minutes >= TimeReport.LONG_MINUTES) eventProblem(ev, "long", `is ${this.hours(ev.minutes)} hours long`);
         }
         return { entries, problems, events };
+    }
+
+    // An ended busy event with its end line, as the entry the report counts: its span, the end
+    // line's note, 🆓 from the end line or the event line, and the title as its task
+    eventEntry(ev) {
+        return {
+            date: ev.date, line: ev.line, path: ev.path, project: ev.project, start: ev.start, end: ev.end, minutes: ev.minutes,
+            crossesMidnight: !!ev.crossesMidnight, free: ev.endFree || ev.lineFree, note: ev.endNote,
+            task: this.taskText(ev.context[0].body), context: ev.context, startText: ev.startText, endText: ev.endText, text: ev.text,
+        };
     }
 
     // A task or event line as plain text for a table: no checkbox, event time, symbol links or
@@ -385,6 +475,8 @@ class TimeReport {
             .replace(TimeReport.SYMBOL_LINK, "")
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
             .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1")
+            .replace(TimeReport.FREE_WORDS, "")
+            .replace(TimeReport.EMPTY_BRACKETS, "")
             .replace(/\s+/g, " ")
             .trim()
             .replace(TimeReport.FREE_MARK, "")
@@ -529,14 +621,15 @@ class TimeReport {
         return key ? props[key] : undefined;
     }
 
-    // notes: [{ date: "YYYY-MM-DD", path, text }]. With `now` ({ date, minutes }), entries that haven't
-    // ended yet are left out, and events that haven't ended yet don't overlap anything; without it
-    // every entry counts.
+    // notes: [{ date: "YYYY-MM-DD", path, text }]. With `now` ({ date, minutes }), entries and events
+    // that haven't ended yet are left out, and don't overlap anything; without it everything counts.
     build(notes, index, { now = null } = {}) {
         const entries = [];
         const archived = [];     // entries whose only project is archived: out of the report, but still checked for overlaps
-        const events = [];       // every timed event line; busy ones that have ended join the overlap check
+        const events = [];       // every timed event line
         const problems = [];
+        const day = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
+        const ended = (e) => !now || day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
         // The first live project wins; an entry that only resolves to archived projects is archived work
         const place = (context, path) => {
             const live = context.length ? this.resolve(context, path, index, true) : null;
@@ -552,28 +645,28 @@ class TimeReport {
                 (where.archived ? archived : entries).push(e);
             }
             for (const p of parsed.problems) {
+                // The sync writes events months ahead: what's wrong with one waits until it has started
+                if (p.start !== undefined && now && day(p.date) * 1440 + p.start > day(now.date) * 1440 + now.minutes) continue;
                 p.path = n.path;
                 const where = place(p.context, n.path);
                 p.projects = [where.project];
                 if (!where.archived) problems.push(p);
             }
+            // A busy event with an end line and no entries of its own counts once it has ended: its
+            // span is an entry like any other, on the project its line resolves to, else Unassigned
             for (const ev of parsed.events) {
                 ev.path = n.path;
                 const where = place(ev.context, n.path);
                 ev.project = where.project;
                 ev.archived = where.archived;
                 events.push(ev);
+                if (ev.end !== null && !ev.free && !ev.ranges && ended(ev)) (ev.archived ? archived : entries).push(this.eventEntry(ev));
             }
         }
 
-        // Overlaps, across every project and across midnight. A busy event that has ended, with the
-        // sync's end time under it and no time entries of its own, has a span like an entry's; a free
-        // one (ℹ️) never does.
-        const day = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
-        const ended = (e) => !now || day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
-        const spans = events.filter((ev) => ev.end !== null && !ev.free && !ev.ranges && ended(ev));
-        const liveSet = new Set([...entries, ...spans.filter((ev) => !ev.archived)]);
-        const timeline = [...entries, ...archived, ...spans].map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
+        // Overlaps, across every project and across midnight; an event's span overlaps like an entry's
+        const liveSet = new Set(entries);
+        const timeline = [...entries, ...archived].map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
             .sort((a, b) => a.from - b.from || a.to - b.to);
         let latest = null;
         for (const t of timeline) {

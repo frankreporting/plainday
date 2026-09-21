@@ -117,10 +117,13 @@ test("parseNote: en and em dashes and capital AM/PM are accepted", () => {
     assert.deepEqual(entries.map((e) => [e.minutes, e.free]), [[30, false], [45, true]]);
 });
 
-test("parseNote: 🆓 anywhere but right after the colon is flagged and billed", () => {
-    const { entries, problems } = entriesOf("- [x] Mixed 🆓\n\t- 1:00pm - 2:00pm: call 🆓");
+test("parseNote: 🆓 after other text on an entry is flagged and billed; 🆓 on the task line frees its entries (OBS-24)", () => {
+    const { entries, problems } = entriesOf("- [x] Mixed\n\t- 1:00pm - 2:00pm: call 🆓");
     assert.equal(entries[0].free, false);
-    assert.deepEqual(problems.map((p) => p.kind), ["free", "free"]);
+    assert.deepEqual(problems.map((p) => p.kind), ["free"]);
+    const whole = entriesOf("- [x] Mixed 🆓\n\t- 1:00pm - 2:00pm: call 🆓");
+    assert.equal(whole.entries[0].free, true);
+    assert.deepEqual(whole.problems.map((p) => p.kind), ["free"]);
 });
 
 test("parseNote: entries not under a task or event count, and are flagged", () => {
@@ -297,7 +300,7 @@ test("parseNote: a timed event line is read with its end line, its free mark and
     ].join("\n"), D);
     assert.deepEqual(events.map((e) => [e.line, e.start, e.end, e.free, e.ranges, e.text]), [
         [2, 840, 960, true, false, "- [<] 2:00pm Delivery window ℹ️ [[Household|⭕]]"],
-        [4, 540, 570, false, true, "- [<] 9:00am Standup [[Orchard Lane Web 2026|⭕]]"],
+        [4, 540, null, false, true, "- [<] 9:00am Standup [[Orchard Lane Web 2026|⭕]]"],   // entries under it: the end line is ignored
         [7, 1380, 1440 + 60, false, false, "- [<] 11:00pm Red-eye check-in"],
         [9, 1020, null, false, false, "- [<] 5:00pm No end line"],
     ]);
@@ -314,7 +317,7 @@ test("freeEvent and taskText: ℹ️ after the title, with or without U+FE0F, be
     assert.equal(tr.taskText("[<] 2:00pm\t[[2026-09-15 Flight|Flight]] ℹ️"), "Flight");
 });
 
-test("a busy event that has ended overlaps a typed entry, and another busy event; the totals don't change", () => {
+test("a busy event that has ended overlaps a typed entry, and another busy event; both events count (OBS-24)", () => {
     const model = tr.build([note(D, [
         "- [<] 2:00pm\tClient call [[Orchard Lane Web 2026|⭕]]",
         "\t- 3:00pm",
@@ -329,7 +332,9 @@ test("a busy event that has ended overlaps a typed entry, and another busy event
     ]);
     // The event's project is where its overlap is listed; the entry's overlap names both
     assert.deepEqual(plain(model.problems.map((p) => p.projects)), [[null, ORCHARD_WEB], [ORCHARD_WEB, null]]);
-    assert.deepEqual(plain(model.entries.map((e) => e.minutes)), [75]);
+    // The client call is an hour on its project; the dentist is 45 minutes Unassigned
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.project, e.task, e.free])),
+        [[6, 75, ORCHARD_WEB, "Charts", false], [1, 60, ORCHARD_WEB, "Client call", false], [3, 45, null, "Dentist", false]]);
 });
 
 test("a free event never overlaps: free × busy, free × free, free × a typed entry, and an entry typed under it still counts", () => {
@@ -346,7 +351,8 @@ test("a free event never overlaps: free × busy, free × free, free × a typed e
         "\t- 3:00pm - 4:00pm",
     ].join("\n"))], INDEX);
     assert.deepEqual(overlaps(model), [[D, 8, "- 3:15pm - 3:45pm", "overlaps 3:00pm - 4:00pm (line 10)"]]);
-    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[8, 30, "Open house"], [10, 60, "Charts"]]);
+    // The free events never count; the busy client call does
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[8, 30, "Open house"], [10, 60, "Charts"], [3, 60, "Client call"]]);
 });
 
 test("an event with time entries under it has no span of its own; without an end line, all day, canceled or forwarded, none either", () => {
@@ -363,8 +369,12 @@ test("an event with time entries under it has no span of its own; without an end
         "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
         "\t- 9:05am - 10:00am",
     ].join("\n"))], INDEX);
-    // Only the typed entries overlap each other
+    // Only the typed entries overlap each other, and only they count
     assert.deepEqual(overlaps(model), [[D, 11, "- 9:05am - 10:00am", "overlaps 9:00am - 9:20am (line 3)"]]);
+    assert.deepEqual(plain(model.entries.map((e) => e.line)), [3, 11]);
+    // The busy event with no end line is a Problem, like a running clock
+    assert.deepEqual(plain(model.problems.filter((p) => p.kind !== "overlap").map((p) => [p.line, p.kind, p.message])),
+        [[5, "open", "has no end time under it, so it isn't counted"]]);
 });
 
 test("events overlap across midnight, unless free", () => {
@@ -378,16 +388,26 @@ test("events overlap across midnight, unless free", () => {
         note("2024-12-10", "- [x] Early [[Orchard Lane Web 2026|⭕]]\n\t- 12:30am - 1:30am"),
     ], INDEX);
     assert.deepEqual(overlaps(free), []);
-    // An end before the start that isn't pm → am is no end at all
+    // An end before the start that isn't pm → am is no end at all, and a Problem
     const odd = tr.build([note(D, "- [<] 9:00am\tOdd\n\t- 8:00am\n- [x] Charts\n\t- 8:30am - 9:30am")], INDEX);
     assert.deepEqual(overlaps(odd), []);
+    assert.deepEqual(plain(odd.problems.map((p) => [p.line, p.kind])), [[1, "order"]]);
+    assert.deepEqual(plain(odd.entries.map((e) => e.line)), [4]);
 });
 
-test("an event that hasn't ended yet doesn't overlap anything (the sync writes days ahead)", () => {
+test("an event that hasn't ended yet doesn't overlap anything and isn't counted (the sync writes days ahead)", () => {
     const notes = [note(D, "- [<] 2:00pm\tClient call\n\t- 3:00pm\n- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 2:30pm - 3:30pm")];
-    assert.equal(overlaps(tr.build(notes, INDEX, { now: { date: D, minutes: 14 * 60 + 45 } })).length, 0);
-    assert.equal(overlaps(tr.build(notes, INDEX, { now: { date: D, minutes: 15 * 60 } })).length, 1);
+    const early = tr.build(notes, INDEX, { now: { date: D, minutes: 14 * 60 + 45 } });
+    assert.equal(overlaps(early).length, 0);
+    assert.deepEqual(plain(early.entries.map((e) => e.line)), [], "the entry hasn't ended either");
+    const later = tr.build(notes, INDEX, { now: { date: D, minutes: 15 * 60 + 30 } });
+    assert.equal(overlaps(later).length, 1);
+    assert.deepEqual(plain(later.entries.map((e) => e.line)), [4, 1]);
     assert.equal(overlaps(tr.build(notes, INDEX)).length, 1);
+    // Days ahead: two synced events that overlap each other on a future day aren't a Problem yet
+    const ahead = tr.build([note("2026-09-20", "- [<] 2:00pm\tA\n\t- 3:00pm\n- [<] 2:30pm\tB\n\t- 3:30pm")], INDEX, { now: { date: D, minutes: 600 } });
+    assert.deepEqual(overlaps(ahead), []);
+    assert.deepEqual(plain(ahead.entries), []);
 });
 
 test("an event of an archived project overlaps live work but isn't reported on its own", () => {
@@ -400,6 +420,188 @@ test("an event of an archived project overlaps live work but isn't reported on i
         "\t- 2:45pm - 4:00pm",
     ].join("\n"))], INDEX);
     assert.deepEqual(overlaps(model).map((p) => p[1]), [6]);
+    assert.deepEqual(plain(model.entries.map((e) => e.line)), [6], "archived events are overlap-only");
+});
+
+// ------------------------------------------------------------------ events count (OBS-24)
+
+test("parseNote: the end line's note, its 🆓, and 🆓 on the event line are read; the time comes off the line first", () => {
+    const { events, problems } = entriesOf([
+        "- [<] 11:00pm\tRed-eye check-in",
+        "\t- 1:00am: 🆓 not my time",
+        "- [<] 9:00am\tStandup 🆓 [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:20am",
+        "- [<] 10:00am\tReview [[Orchard Lane Web 2026|⭕]]",
+        "\t- 10:30am : went long",
+    ].join("\n"), D);
+    assert.deepEqual(events.map((e) => [e.line, e.start, e.end, e.endText, e.endNote, e.endFree, e.lineFree]), [
+        [1, 1380, 1440 + 60, "1:00am", "not my time", true, false],
+        [3, 540, 560, "9:20am", "", false, true],
+        [5, 600, 630, "10:30am", "went long", false, false],
+    ]);
+    assert.deepEqual(problems, []);
+});
+
+test("parseNote: a bare end line wins over a noted bullet; a note with a time in it isn't a Problem", () => {
+    const { events, problems } = entriesOf([
+        "- [<] 3:00pm\tPitch",
+        "\t- 3:00pm: they were late",
+        "\t- 4:30pm",
+        "- [<] 5:00pm\tCall",
+        "\t- 5:30pm: 🆓 ran on to 6:00pm",
+    ].join("\n"), D);
+    assert.deepEqual(events.map((e) => [e.line, e.end, e.endNote]), [[1, 990, ""], [4, 1050, "ran on to 6:00pm"]]);
+    assert.deepEqual(problems, []);
+});
+
+test("build: a busy event with an end line counts from start to end, on its project or Unassigned, once it has ended", () => {
+    const model = tr.build([note(D, [
+        "- [<] 8:00am\tCoffee with Esme",
+        "\t- 9:00am",
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:20am",
+        "- [<] 10:00am\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]",
+        "\t- 10:45am",
+        "- [<] 2:00pm\tDelivery window ℹ️ [[Household|⭕]]",
+        "\t- 4:00pm",
+        "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
+        "\t- 11:00am - 11:30am",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.start, e.end, e.minutes, e.project, e.task, e.note, e.free, e.billable])), [
+        [10, 660, 690, 30, ORCHARD_WEB, "Charts", "", false, true],
+        [1, 480, 540, 60, null, "Coffee with Esme", "", false, false],
+        [3, 540, 560, 20, ORCHARD_WEB, "Standup", "", false, true],
+        [5, 600, 645, 45, ORCHARD_WEB, "Content Calendar Sync", "", false, true],
+    ]);
+    assert.deepEqual(plain(model.problems), []);
+    // The summary counts them like typed entries: rounded up to 15 minutes each
+    const t = plain(tr.totals(model.entries.filter((e) => e.project === ORCHARD_WEB)));
+    assert.deepEqual([t.count, t.billable, t.exact], [3, 30 + 30 + 45, 30 + 20 + 45]);
+});
+
+test("build: 🆓 on the end line, or on the event line, makes the event's time 🆓; both at once is a Problem", () => {
+    const model = tr.build([note(D, [
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:20am: 🆓 not billing this one",
+        "- [<] 10:00am\tReview 🆓 [[Orchard Lane Web 2026|⭕]]",
+        "\t- 10:30am",
+        "- [<] 11:00am\tSync 🆓 [[Orchard Lane Web 2026|⭕]]",
+        "\t- 11:30am: 🆓",
+        "- [<] 1:00pm\tCall [[Orchard Lane Web 2026|⭕]]",
+        "\t- 1:30pm: not billing 🆓",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.free, e.note, e.task])), [
+        [1, true, "not billing this one", "Standup"], [3, true, "", "Review"], [5, true, "", "Sync"], [7, false, "not billing 🆓", "Call"],
+    ]);
+    assert.deepEqual(plain(model.problems.map((p) => [p.line, p.kind, p.message])), [
+        [5, "free", "has 🆓 on the event line and on its end line; one is enough"],
+        [7, "free", "has 🆓 after other text on its end line, so it doesn't count; put 🆓 right after the colon"],
+    ]);
+});
+
+test("build: ranges under an event still win; a 🆓 left on the end line then doesn't apply, and says so", () => {
+    const model = tr.build([note(D, [
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:30am: 🆓",
+        "\t- 9:00am - 9:10am",
+        "\t- 9:20am - 9:30am",
+        "- [<] 10:00am\tReview [[Orchard Lane Web 2026|⭕]]",
+        "\t- 11:00am",
+        "\t- 10:00am - 10:40am",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.free])), [[3, 10, false], [4, 10, false], [7, 40, false]]);
+    assert.deepEqual(plain(model.problems.map((p) => [p.line, p.kind, p.message])),
+        [[1, "free", "has 🆓 on its end line, but the entries under it are its time, so it doesn't apply; put 🆓 on the entries or the event line"]]);
+});
+
+test("build: a sub-task's entries under an event are its own; the event still counts", () => {
+    const model = tr.build([note(D, [
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:30am",
+        "\t- [ ] Send notes",
+        "\t\t- 9:30am - 9:45am",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[4, 15, "Send notes"], [1, 30, "Standup"]]);
+    assert.deepEqual(overlaps(model), []);
+});
+
+test("build: zero-length events are silently nothing; long events are flagged but counted; free events with no end are silent", () => {
+    const model = tr.build([note(D, [
+        "- [<] 9:00am\tCheck in",
+        "\t- 9:00am",
+        "- [<] 6:00am\tTravel day",
+        "\t- 7:00pm",
+        "- [<] 8:00pm\tFlight ℹ️",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes])), [[3, 13 * 60]]);
+    assert.deepEqual(plain(model.problems.map((p) => [p.line, p.kind])), [[3, "long"]]);
+});
+
+test("🆓 on a task line frees every entry under it and under its sub-tasks; on an entry only that one; both is a Problem", () => {
+    const { entries, problems } = entriesOf([
+        "- [x] Rework 🆓 [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:00am - 9:30am",
+        "\t- 10:00am - 10:30am: 🆓 also here",
+        "\t- [x] Sub-task",
+        "\t\t- 11:00am - 11:15am",
+        "- [x] Fix [[Notes 🆓 Sweep|🔗]]",
+        "\t- 1:00pm - 1:30pm",
+        "- [x] Mixed (🆓)",
+        "\t- 2:00pm - 2:30pm",
+        "- [x] Stray🆓",
+        "\t- 3:00pm - 3:30pm",
+    ].join("\n"), D);
+    assert.deepEqual(entries.map((e) => [e.line, e.free, e.note]), [
+        [2, true, ""], [3, true, "also here"], [5, true, ""], [7, false, ""], [9, true, ""], [11, false, ""],
+    ]);
+    assert.deepEqual(problems.map((p) => [p.line, p.kind, p.message]), [
+        [3, "free", "has 🆓 here and on the line above; one is enough"],
+        [10, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it"],
+    ]);
+    // Said once, on the line that has it, however many entries sit under it
+    const many = entriesOf("- [ ] Task🆓\n\t- 1:00pm - 1:30pm\n\t- 2:00pm - 2:30pm\n\t- 3:00pm - 3:30pm", D);
+    assert.deepEqual(many.problems.map((p) => [p.line, p.kind]), [[1, "free"]]);
+    assert.equal(tr.taskText("[ ] Call (🆓) client"), "Call client");
+});
+
+test("build: what's wrong with an event waits until the event has started (the sync writes months ahead)", () => {
+    const notes = [note("2026-10-20", [
+        "- [<] 4:00pm\tNo end yet",
+        "- [<] 8:00am\tConference",
+        "\t- 9:00pm",
+        "- [<] 1:00pm\tOdd",
+        "\t- 12:00pm",
+    ].join("\n"))];
+    const before = tr.build(notes, INDEX, { now: { date: D, minutes: 600 } });
+    assert.deepEqual(plain(before.problems), []);
+    assert.deepEqual(plain(before.entries), []);
+    const started = tr.build(notes, INDEX, { now: { date: "2026-10-20", minutes: 16 * 60 + 5 } });
+    assert.deepEqual(plain(started.problems.map((p) => [p.line, p.kind])), [[1, "open"], [2, "long"], [4, "order"]]);
+    assert.deepEqual(plain(started.entries), [], "the conference hasn't ended, so it isn't counted yet");
+    const over = tr.build(notes, INDEX, { now: { date: "2026-10-21", minutes: 0 } });
+    assert.deepEqual(plain(over.problems.map((p) => [p.line, p.kind])), [[1, "open"], [2, "long"], [4, "order"]]);
+    assert.deepEqual(plain(over.entries.map((e) => e.line)), [2]);
+    // Without a clock everything is said, as in the other tests
+    assert.deepEqual(plain(tr.build(notes, INDEX).problems.map((p) => p.kind)), ["open", "long", "order"]);
+});
+
+test("parseNote: an end line that isn't a real time is a format Problem, and a real one after it still counts", () => {
+    const { events, problems } = entriesOf("- [<] 4:00pm\tPlanning\n\t- 13:00pm\n\t- 5:00pm", D);
+    assert.deepEqual(events.map((e) => [e.end, e.endText]), [[1020, "5:00pm"]]);
+    assert.deepEqual(problems.map((p) => [p.line, p.kind]), [[2, "format"]]);
+});
+
+test("freeEvent and taskText: a 🆓 word beside ℹ️, in either order, doesn't hide the free mark", () => {
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window ℹ️ 🆓 [[Household|⭕]]"), true);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window 🆓 ℹ️"), true);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window 🆓"), false);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window ℹ️ (🆓)"), true);
+    assert.equal(tr.taskText("[<] 2:00pm\tDelivery window ℹ️ 🆓 [[Household|⭕]]"), "Delivery window");
+    assert.equal(tr.taskText("[x] Rework 🆓 [[Orchard Lane Web 2026|⭕]]"), "Rework");
+    // A free event marked 🆓 is still just free: never counted
+    const model = tr.build([note(D, "- [<] 2:00pm\tDelivery window ℹ️ 🆓\n\t- 4:00pm")], INDEX);
+    assert.deepEqual(plain(model.entries), []);
+    assert.deepEqual(plain(model.problems), []);
 });
 
 // ------------------------------------------------------------------ the report

@@ -772,11 +772,142 @@ test("lines: a timed free event gets ℹ️ after its title; all-day, busy, tent
     }
 });
 
+// ------------------------------------------------------------------ 🆓 on the line, a note on the end line (OBS-24)
+
+test("splitTail: a 🆓 you put on the line comes off the end with the mark and the ⭕ links, in any order", () => {
+    const P = "[[Pinecone Studio|⭕]]";
+    assert.deepEqual(plain(cs.splitTail("Planning 🆓")), { rest: "Planning", projects: [], free: false, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail("Planning ℹ️ 🆓")), { rest: "Planning", projects: [], free: true, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail("Planning 🆓 ℹ️")), { rest: "Planning", projects: [], free: true, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail(`Planning ${P} 🆓`)), { rest: "Planning", projects: [P], free: false, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail(`Planning 🆓 ${P}`)), { rest: "Planning", projects: [P], free: false, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail("Planning 🆓\uFE0F")), { rest: "Planning", projects: [], free: false, nonbillable: true });
+    assert.deepEqual(plain(cs.splitTail("🆓")), { rest: "🆓", projects: [], free: false, nonbillable: false }, "a title that is only the mark keeps it");
+    assert.deepEqual(plain(cs.splitTail("Planning🆓")), { rest: "Planning🆓", projects: [], free: false, nonbillable: false }, "no whitespace before it: part of the title");
+    assert.equal(cs.isFree("- [<] 4:00pm\tPlanning ℹ️ 🆓"), true);
+    assert.equal(cs.eventHead("- [<] 4:00pm\tPlanning ℹ️ 🆓 [[Pinecone Studio|⭕]]").nonbillable, true);
+    assert.equal(cs.head("- [<] 4:00pm\tPlanning 🆓").title, "Planning");
+});
+
+test("a 🆓 on the line survives a time change and a free flip, written after the mark and before the ⭕ links", () => {
+    const before = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] 🆓", "\t- 4:30pm");
+    const { text: after, outcome } = run(before, replace(["- [<] 5:00pm\tPlanning", "\t- 5:30pm"]));
+    assert.equal(outcome, "replaced");
+    assert.equal(after, note("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm"));
+    const flipped = run(before, replace(["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"]));
+    assert.equal(flipped.text, note("- [<] 4:00pm\tPlanning ℹ️ 🆓 [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+});
+
+test("a note on the end line is kept when the end time changes, and a run with nothing new writes nothing", () => {
+    const before = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: 🆓 not billing this", "\t\t- a note under it");
+    assert.equal(cs.annotations(before.split("\n").slice(3, 6), ENTRY.lines), null, "a line under the end line is still yours");
+    const simple = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: 🆓 not billing this");
+    const { text: after, outcome } = run(simple, replace(["- [<] 4:00pm\tPlanning", "\t- 5:00pm"]));
+    assert.equal(outcome, "replaced");
+    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 5:00pm: 🆓 not billing this"));
+    // A space before the colon is the same note
+    assert.equal(run(note("- [<] 4:00pm\tPlanning", "\t- 4:30pm : left early"), replace(["- [<] 4:00pm\tPlanning", "\t- 5:00pm"])).text,
+        note("- [<] 4:00pm\tPlanning", "\t- 5:00pm : left early"));
+    // An entry that starts at the end time isn't the end line
+    assert.equal(run(note("- [<] 4:00pm\tPlanning", "\t- 4:30pm - 5:00pm"), replace(["- [<] 4:00pm\tPlanning", "\t- 5:00pm"])).text,
+        note("- [<] 4:00pm\tPlanning", "\t- 4:30pm - 5:00pm"));
+});
+
+test("adopting a line with a noted end line: the end time is updated once, the note kept, the free mark follows", () => {
+    const insert = (lines) => ({ kind: "insert", key: "E1", event: event(), lines });
+    const noted = note("- [<] 4:00pm\tPlanning", "\t- 4:30pm: 🆓 not billing this");
+    const same = run(noted, insert(["- [<] 4:00pm\tPlanning", "\t- 4:30pm"]));
+    assert.equal(same.outcome, "adopted");
+    assert.deepEqual(plain(same.result.changed), []);
+    assert.equal(same.text, noted);
+    const later = run(noted, insert(["- [<] 4:00pm\tPlanning", "\t- 5:00pm"]));
+    assert.deepEqual(plain(later.result.changed), ["end time updated"]);
+    assert.equal(later.text, note("- [<] 4:00pm\tPlanning", "\t- 5:00pm: 🆓 not billing this"));
+    const free = run(noted, insert(["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"]));
+    assert.deepEqual(plain(free.result.changed), ["now free"]);
+    assert.equal(free.text, note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm: 🆓 not billing this"));
+});
+
+test("timed → all day with a noted end line: the line is left alone as yours", () => {
+    const before = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: 🆓 skipped it");
+    const { text: after, outcome } = run(before, replace(["- [<] All day\tPlanning"]));
+    assert.equal(outcome, "yours");
+    assert.equal(after, before);
+});
+
+test("moved: a noted end line is forwarded with the old line, and a 🆓 travels like a ⭕", () => {
+    const noted = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: 🆓 skipped it", "- [ ] A task");
+    const carry = { projects: ["[[Pinecone Studio|⭕]]"], log: null, nonbillable: false };
+    const forwarded = run(noted, { ...moveOut, carry, landed: { asIntended: true } });
+    assert.equal(forwarded.outcome, "forwarded");
+    assert.equal(forwarded.text, note("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: 🆓 skipped it", "- [ ] A task"));
+
+    const marked = note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 4:30pm", "- [ ] A task");
+    const gone = run(marked, { ...moveOut, carry: { ...carry, nonbillable: true }, landed: { asIntended: true } });
+    assert.equal(gone.outcome, "removed");
+    assert.equal(gone.text, note("- [ ] A task"));
+    // The 🆓 didn't make it across (or was added since): forward instead
+    assert.equal(run(marked, { ...moveOut, carry, landed: { asIntended: true } }).outcome, "forwarded");
+
+    const op = { kind: "insert", key: "E1", event: event({ date: "2026-09-18" }), move: true, lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], carry: { ...carry, nonbillable: true } };
+    const { text: after, result } = run(note("- [ ] A task"), op);
+    assert.equal(after, note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.deepEqual(plain(result.lines), ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], "the ledger keeps the sync's own lines");
+});
+
+test("a calendar title ending in 🆓 or ℹ️ loses it, so the line can be found again; a timed event ending on another day gets no end line", () => {
+    assert.deepEqual(plain(cs.lines(event({ title: "Gym 🆓" }))), ["- [<] 4:00pm\tGym", "\t- 4:30pm"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Gym ℹ️ 🆓" }))), ["- [<] 4:00pm\tGym", "\t- 4:30pm"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Camping", end: "2026-09-18T11:00:00-04:00", endsSameDay: false }))), ["- [<] 4:00pm\tCamping"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Planning", endsSameDay: true }))), ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"]);
+    // Past midnight (pm to am, under a day) still gets its end line: the report reads that as one span
+    assert.deepEqual(plain(cs.lines(event({ title: "Late show", start: "2026-09-16T22:30:00-04:00", end: "2026-09-17T01:00:00-04:00", endsSameDay: false }))), ["- [<] 10:30pm\tLate show", "\t- 1:00am"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Party", start: "2026-09-16T20:00:00-04:00", end: "2026-09-17T00:00:00-04:00", endsSameDay: false }))), ["- [<] 8:00pm\tParty", "\t- 12:00am"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Two nights", start: "2026-09-16T22:30:00-04:00", end: "2026-09-18T01:00:00-04:00", endsSameDay: false }))), ["- [<] 10:30pm\tTwo nights"]);
+    assert.deepEqual(plain(cs.lines(event({ title: "Overnight from the morning", start: "2026-09-16T09:00:00-04:00", end: "2026-09-17T02:00:00-04:00", endsSameDay: false }))), ["- [<] 9:00am\tOvernight from the morning"]);
+});
+
+test("adopting a line: a time-looking note nested deeper isn't the end line; an event that lost its end line loses the stale one", () => {
+    const insert = (lines) => ({ kind: "insert", key: "E1", event: event(), lines });
+    const nested = note("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:20pm", "\t\t- 4:30pm");
+    const same = run(nested, insert(["- [<] 4:00pm\tPlanning", "\t- 4:30pm"]));
+    assert.equal(same.outcome, "adopted");
+    assert.deepEqual(plain(same.result.changed), []);
+    const oneLine = run(note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm", "- [ ] A task"), insert(["- [<] 4:00pm\tPlanning"]));
+    assert.deepEqual(plain(oneLine.result.changed), ["end time removed"]);
+    assert.equal(oneLine.text, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "- [ ] A task"));
+    // With a note on it, the end line is yours to remove
+    const noted = note("- [<] 4:00pm\tPlanning", "\t- 4:30pm: 🆓 skipped");
+    const kept = run(noted, insert(["- [<] 4:00pm\tPlanning"]));
+    assert.deepEqual(plain(kept.result.changed), []);
+    assert.equal(kept.text, noted);
+});
+
+test("run: a 🆓 on the line is remembered, survives a time change, and follows the event to another day", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning 🆓 [[Pinecone Studio|⭕]]\n\t- 4:30pm: not my meeting"));
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal(ledger(map).events.E1.nonbillable, true);
+    assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
+    // Moved: the note on the end line keeps the old line (forwarded); the 🆓 and the ⭕ go with the event
+    await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T17:00:00-04:00", end: "2026-09-18T17:30:00-04:00" })]);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm"));
+    assert.equal(ledger(map).events.E1.nonbillable, true);
+    // Take the 🆓 off, and it stays off through the next change
+    edit(map, day("2026-09-18"), (t) => t.replace(" 🆓", ""));
+    await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T17:00:00-04:00", end: "2026-09-18T18:00:00-04:00" })]);
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 6:00pm"));
+    assert.equal(ledger(map).events.E1.nonbillable, undefined);
+});
+
 test("splitTail and head: the mark and ⭕ links come off the end in either order, and don't change which line is meant", () => {
-    assert.deepEqual(plain(cs.splitTail("Planning ℹ️ [[Pinecone Studio|⭕]]")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true });
-    assert.deepEqual(plain(cs.splitTail("Planning [[Pinecone Studio|⭕]] ℹ")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true });
-    assert.deepEqual(plain(cs.splitTail("ℹ️")), { rest: "ℹ️", projects: [], free: false });
-    assert.deepEqual(plain(cs.splitTail("Planningℹ️")), { rest: "Planningℹ️", projects: [], free: false }, "no whitespace before it: part of the title");
+    assert.deepEqual(plain(cs.splitTail("Planning ℹ️ [[Pinecone Studio|⭕]]")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true, nonbillable: false });
+    assert.deepEqual(plain(cs.splitTail("Planning [[Pinecone Studio|⭕]] ℹ")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true, nonbillable: false });
+    assert.deepEqual(plain(cs.splitTail("ℹ️")), { rest: "ℹ️", projects: [], free: false, nonbillable: false });
+    assert.deepEqual(plain(cs.splitTail("Planningℹ️")), { rest: "Planningℹ️", projects: [], free: false, nonbillable: false }, "no whitespace before it: part of the title");
     assert.deepEqual(plain(cs.head("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]")), { start: "4:00pm", title: "Planning" });
     const lines = note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm").split("\n");
     assert.deepEqual(plain(cs.findBlock(lines, { lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] })), { from: 3, to: 4 });

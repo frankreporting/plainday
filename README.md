@@ -106,16 +106,21 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 	- 1:30pm - 2:15pm
 - [<] 3:00pm	Delivery window ℹ️
 	- 5:00pm
+- [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
+	- 4:30pm: 🆓 not billing this one
 - [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🔗]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
+- [x] Redo the nav I broke 🆓 [[Kestrel Outfitters 2026|⭕]]
+	- 5:00pm - 5:20pm
 - [>] Send the invoice [[Send the invoice|🔗]]
 ```
 
 - **Markers:** `[<]` event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled.
-- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times.
-- **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended, with its end time still under it, is checked: work logged during it is an overlap under Problems. Time entries typed under an event replace its span, and count as always.
+- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times. **An event that has ended counts** from its start to that end line, like a time entry, on the project its line points to or else as Unassigned (the standup above is 30 minutes Unassigned). Time entries typed under an event are its time instead, and its end line is then ignored (the kickoff call counts 45 minutes). A busy event with no end line under it is listed under Problems; one you skipped, mark `[-]` by hand. The end line takes a note after a colon like an entry: `- 4:30pm: 🆓 not billing this one`.
+- **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended is checked: work logged during it is an overlap under Problems.
 - **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
+- **🆓 on the line:** 🆓 as a word of its own on a task or event line makes every entry under it 🆓 (a task worked on all day that you won't bill); on an entry, or after the end line's colon, it applies to that one. Both at once is still 🆓, and listed under Problems so a stray mark is never decided silently.
 - **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🗃️` its area (*AddProjectLink* puts either there), `🚩 M/D` its due date. The note link comes last, after the due date, so End reaches the note. One of `🔗`, `⭕` and `🗃️` per line says where its time counts: a task note is filed in its project, so a line that links one needs no `⭕`, and the commands keep it that way.
 - **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else any other link to a project note there, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned. Time linked to an area counts as Unassigned for now.
 
@@ -131,9 +136,9 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | AddProjectLink | `⌥⌘P` | On a task or event line, picks a project or area from the same menu and links it at the end of the line as `[[Project\|⭕]]` or `[[Area\|🗃️]]`, for tying the line's time to a project when the task needs no note of its own; then puts the cursor after the checkbox. A ⭕ or 🗃️ the line already has is replaced: one per line. With a 🔗 task note on the line, or a meeting log linked from an event's title, the note is moved into the picked project instead (a log into its `logs/`) and no ⭕ is added: without asking when the note has no project or area yet, after a confirm when it's leaving one (its project is shared by every line that links it); a note already there needs nothing, and if the picked project already has a note of the same name the line is pointed at that one instead. Esc cancels |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
-| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, log links and time entries added to them); marks canceled events `[-]` and free events ℹ️; maps recurring series to projects from the Calendar Sync note |
+| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, a 🆓, log links, a note after the end time and time entries added to them); marks canceled events `[-]` and free events ℹ️; writes no end line for a timed event that ends on another day, unless it only runs past midnight; maps recurring series to projects from the Calendar Sync note |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
-| TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes; lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
+| TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes, counting time entries and ended busy events alike (each rounded up to 15 minutes); lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
 | UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes, and refuses unless the clone is on `main` with nothing uncommitted |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
