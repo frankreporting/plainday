@@ -29,7 +29,8 @@ test("installs: the system, never notes, never the demo's own test files", () =>
     for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "30 Reference/36 Planner/days/2026-09-16.md",
         "90 Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "10 Inbox/Desk lamp for the studio.md",
         ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json",
-        "00 Meta/02 Scripts/tests/demoVault.test.mjs", "00 Meta/02 Scripts/tests/demo/renderReports.mjs"]) {
+        "00 Meta/02 Scripts/tests/demoVault.test.mjs", "00 Meta/02 Scripts/tests/demo/renderReports.mjs",
+        "00 Meta/02 Scripts/dev-vault.sh", "00 Meta/02 Scripts/tests/devVault.test.mjs"]) {
         assert.equal(up.installs(path), false, path);
     }
 });
@@ -127,13 +128,18 @@ test("summary: a long list is cut and counted", () => {
         .split("\n").filter((l) => l.startsWith("- ")).length, 8);
 });
 
-test("summary: uncommitted files in the clone are called out, and only the ones it would copy", () => {
-    const plan = { add: ["00 Meta/a.md"], update: [], local: [], remove: [], keep: [], same: [] };
-    const text = up.summary(plan, { dirty: ["00 Meta/a.md", "Welcome.md", "30 Reference/note.md"] });
-    assert.ok(text.includes("**Uncommitted in the clone: 1** (copied as they are on disk, not as the repository has them)"));
-    assert.ok(text.includes("- 00 Meta/a.md"));
-    assert.ok(!up.summary(plan).includes("Uncommitted in the clone"), "a clean clone says nothing");
-    assert.ok(!up.summary(plan, { dirty: ["Welcome.md"] }).includes("Uncommitted in the clone"), "notes don't count");
+test("refusal: only main with a clean tree installs", () => {
+    assert.equal(up.refusal({ branch: "main", commit: "abc1234", dirty: [] }), null);
+    const branch = up.refusal({ branch: "me/obs-7-thing", commit: "abc1234", dirty: [] });
+    assert.match(branch, /on branch `me\/obs-7-thing`, not `main`/);
+    assert.match(branch, /dev-vault\.sh done/);
+    const detached = up.refusal({ branch: "", commit: "abc1234", dirty: [] });
+    assert.match(detached, /detached at abc1234/);
+    const dirty = up.refusal({ branch: "main", commit: "abc1234", dirty: ["Welcome.md", "30 Reference/note.md"] });
+    assert.match(dirty, /2 uncommitted changes \(Welcome\.md, …\)/);
+    assert.match(up.refusal({ branch: "main", commit: "abc1234", dirty: ["Welcome.md"] }), /1 uncommitted change \(Welcome\.md\)/);
+    // a note counts too: the whole tree is restored by `done`, and a rewritten note means it hasn't run
+    assert.notEqual(up.refusal({ branch: "main", commit: "abc1234", dirty: ["Welcome.md"] }), null);
 });
 
 test("summary: files hidden from git in the clone are called out too", () => {

@@ -131,7 +131,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
 | TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes; lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
-| UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes |
+| UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes, and refuses unless the clone is on `main` with nothing uncommitted |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
 
 Startup scripts (run when Obsidian starts):
@@ -148,6 +148,7 @@ Startup scripts (run when Obsidian starts):
 | --- | --- |
 | `02 Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`; *CalendarSync* runs it |
 | `02 Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
+| `02 Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
 
 ## Tests
 
@@ -161,7 +162,7 @@ Scripts are loaded the way CustomJS and Templater load them, and the parts that 
 
 ## Working on it
 
-Changes go through pull requests from a git worktree outside the vault, tested by opening the worktree as its own vault. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
+Changes go through pull requests from a git worktree outside the vault, and are tested one at a time in the clone itself, opened in Obsidian as a vault of its own and driven by `dev-vault.sh`. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
 
 GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top.
 
@@ -173,9 +174,9 @@ Instead, clone this repository somewhere outside your vault, and install the sys
 
 1. Copy `00 Meta/02 Scripts/CustomJS/updateObsidianPM.js` from the clone into your vault's `00 Meta/02 Scripts/CustomJS/` (once, by hand), and add `UpdateObsidianPM` to the CustomJS plugin's invocable scripts.
 2. Run **CustomJS: UpdateObsidianPM** from the command palette. It asks where your clone is the first time.
-3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm.
+3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs.
 
-What it installs: everything the repository has under `00 Meta/`, plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, and the demo's own test files.
+What it installs: everything the repository has under `00 Meta/`, plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `00 Meta/02 Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version).
 

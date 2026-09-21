@@ -192,16 +192,37 @@ test("invoke: it refuses a folder that isn't a clone, and the vault itself", asy
     assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false);
 });
 
-test("invoke: an uncommitted edit in the clone is shown before anything is written", async (t) => {
+test("invoke: a clone with an uncommitted edit is refused before anything is written", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
-    // the clone has a local edit that isn't committed, as a worktree under test would
-    write(f.source, "00 Meta/02 Scripts/CustomJS/timeReport.js", "locally edited\n");
+    // the clone is the dev vault, and the app rewrote a note there while a branch was under test
+    write(f.source, "30 Reference/36 Planner/days/2026-09-16.md", "rewritten by the startup report\n");
     await f.up.invoke();
-    assert.match(f.answers.sawSummary, /\*\*Uncommitted in the clone: 1\*\*/);
-    assert.match(f.answers.sawSummary, /- 00 Meta\/02 Scripts\/CustomJS\/timeReport\.js/);
-    // it still copies what's on disk, which is what makes testing a branch possible
-    assert.equal(read(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), "locally edited\n");
+    assert.match(f.notices.at(-1), /1 uncommitted change \(30 Reference\/36 Planner\/days\/2026-09-16\.md\)/);
+    assert.match(f.notices.at(-1), /dev-vault\.sh done/);
+    assert.equal(f.answers.sawSummary, undefined, "no dialog");
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), false, "nothing installed");
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false);
+});
+
+test("invoke: a clone on a branch, or detached at a commit under test, is refused", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    const git = (...args) => execFileSync("git", ["-C", f.source, ...args], { stdio: "pipe" });
+    git("checkout", "-qb", "me/obs-7-thing");
+    await f.up.invoke();
+    assert.match(f.notices.at(-1), /on branch `me\/obs-7-thing`, not `main`/);
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false);
+
+    git("checkout", "-q", "--detach", "main");
+    await f.up.invoke();
+    assert.match(f.notices.at(-1), /detached at [0-9a-f]{7}/);
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false);
+
+    // back on main and clean: it installs
+    git("checkout", "-q", "main");
+    await f.up.invoke();
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), true);
 });
 
 test("invoke: an edit hidden with skip-worktree in the clone is still shown", async (t) => {

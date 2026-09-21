@@ -12,6 +12,11 @@ class UpdateObsidianPM {
     // listed on their own, and a file you've changed yourself is never removed and only overwritten
     // if you say so.
     //
+    // It installs only what a pull request merged: the clone must be on main with a clean tree.
+    // The clone doubles as the dev vault where a branch is tested (dev-vault.sh), so a half-tested
+    // branch, or a note the app rewrote, would otherwise land here. It shows where the clone is
+    // and stops.
+    //
     // Where the clone is: `00 Meta/02 Scripts/update-source`, a one-line file holding its path. It
     // isn't in the repository, since it's yours. The command asks for the path on the first run.
     // What it installed last time: `00 Meta/02 Scripts/update-manifest.json` (also yours), which is
@@ -20,6 +25,8 @@ class UpdateObsidianPM {
     // Desktop only: it reads another folder and runs git.
     static SOURCE_FILE = "00 Meta/02 Scripts/update-source";
     static MANIFEST_FILE = "00 Meta/02 Scripts/update-manifest.json";
+    // The only branch that installs
+    static BRANCH = "main";
     // What the repository installs into a vault
     static INCLUDE = [
         "00 Meta/",
@@ -31,10 +38,13 @@ class UpdateObsidianPM {
     ];
     // Parts of the repository that belong to the demo vault only. demoVault.test.mjs asserts the
     // demo's own notes, and its render script writes report blocks into notes, so neither belongs
-    // in a vault of real notes.
+    // in a vault of real notes. dev-vault.sh drives the clone as a test vault, and its test builds
+    // throwaway clones: both are for working on the system, not for using it.
     static EXCLUDE = [
         "00 Meta/02 Scripts/tests/demoVault.test.mjs",
         "00 Meta/02 Scripts/tests/demo/",
+        "00 Meta/02 Scripts/dev-vault.sh",
+        "00 Meta/02 Scripts/tests/devVault.test.mjs",
     ];
 
     // ---------------------------------------------------------------- planning (no app, no fs)
@@ -72,9 +82,27 @@ class UpdateObsidianPM {
         return out;
     }
 
+    // Why the clone can't install right now, or null when it's on main with nothing changed.
+    //   branch  the checked-out branch, or "" when HEAD is detached
+    //   commit  the short commit, for the message
+    //   dirty   what `git status --porcelain` lists: changed, and untracked but not ignored
+    refusal({ branch, commit, dirty = [] }) {
+        const where = branch ? `on branch \`${branch}\`` : `detached at ${commit}`;
+        if (branch !== UpdateObsidianPM.BRANCH) {
+            return `The clone is ${where}, not \`${UpdateObsidianPM.BRANCH}\`: a branch under test doesn't install.`
+                + ` Finish the test (dev-vault.sh done), then run this again.`;
+        }
+        if (dirty.length) {
+            const n = dirty.length;
+            return `The clone has ${n} uncommitted change${n === 1 ? "" : "s"} (${dirty[0]}${n > 1 ? ", …" : ""}):`
+                + ` only what a pull request merged installs. Restore it (dev-vault.sh done), then run this again.`;
+        }
+        return null;
+    }
+
     // The confirmation, as lines. `local` needs a decision, so it comes first. Long lists are cut
     // to `max` paths and counted, so the dialog stays readable.
-    summary(plan, { source, commit, firstRun = false, max = 8, dirty = [], hidden = [] } = {}) {
+    summary(plan, { source, commit, firstRun = false, max = 8, hidden = [] } = {}) {
         const lines = [];
         const list = (label, paths, note = "") => {
             if (!paths.length) return;
@@ -93,12 +121,9 @@ class UpdateObsidianPM {
         list("Updated", plan.update);
         list("Removed", plan.remove, " (the repository no longer has these)");
         list("Kept, changed here since it was installed", plan.keep, " (nothing will happen to these)");
-        // The clone's files are copied as they are on disk, which is what lets a branch's worktree be
-        // installed for testing. Anything uncommitted there is worth seeing before it lands in a vault.
-        list("Uncommitted in the clone", dirty.filter((p) => this.installs(p)),
-            " (copied as they are on disk, not as the repository has them)");
         // Files git has been told to ignore changes to (`update-index --skip-worktree`) never show
-        // in a diff, so they'd travel silently: they're the likeliest edits to be wrong for a vault.
+        // in a diff or in `git status`, so the branch-and-clean check above can't see them: they'd
+        // travel silently, and they're the likeliest edits to be wrong for a vault.
         list("Hidden from git in the clone", hidden.filter((p) => this.installs(p)),
             " (skip-worktree: git shows no change, but this copies what's on disk)");
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
@@ -152,6 +177,16 @@ class UpdateObsidianPM {
         }
         if (path.resolve(vaultPath) === source) { new Notice("That's this vault, not a clone of the repository", 0); return; }
 
+        // Before the pull: a detached HEAD has nothing to pull into, and a dirty tree shouldn't move
+        const refusal = this.refusal({
+            branch: (this.git(source, ["symbolic-ref", "-q", "--short", "HEAD"]).out ?? "").trim(),
+            commit: (this.git(source, ["rev-parse", "--short", "HEAD"]).out ?? "").trim(),
+            // -z: paths come unquoted, so one with a space reads as it is
+            dirty: (this.git(source, ["status", "--porcelain", "-z", "--untracked-files=all"]).out ?? "")
+                .split("\0").filter(Boolean).map((line) => line.slice(3)),
+        });
+        if (refusal) { new Notice(`Update Obsidian PM: ${refusal}`, 0); return; }
+
         const pull = this.git(source, ["pull", "--ff-only"]);
         if (!pull.ok) new Notice(`Couldn't update the clone (${pull.message}); using it as it is`, 8000);
         const commit = this.git(source, ["rev-parse", "--short", "HEAD"]).out?.trim();
@@ -174,15 +209,11 @@ class UpdateObsidianPM {
         }
 
         const plan = this.plan(sourceFiles, vaultFiles, manifest);
-        const dirty = [...new Set([
-            ...(this.git(source, ["diff", "--name-only", "HEAD"]).out ?? "").split("\n"),
-            ...(this.git(source, ["ls-files", "--others", "--exclude-standard"]).out ?? "").split("\n"),
-        ])].filter(Boolean).sort();
         // `ls-files -v` tags each entry: "S" for skip-worktree, a lowercase letter for
         // assume-unchanged. Both tell git to ignore changes, so neither shows in a diff.
         const hidden = (this.git(source, ["ls-files", "-v"]).out ?? "").split("\n")
             .filter((line) => /^(S|[a-z]) /.test(line)).map((line) => line.slice(2)).filter(Boolean).sort();
-        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0, dirty, hidden });
+        const summary = this.summary(plan, { source, commit, firstRun: manifest.size === 0, hidden });
         if (!plan.add.length && !plan.update.length && !plan.local.length && !plan.remove.length) {
             new Notice(`Obsidian PM is up to date (${commit ?? "no commit"})`, 6000); return;
         }
