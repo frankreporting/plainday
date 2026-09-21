@@ -108,6 +108,13 @@ test("⭕ added, then the event's time changes: time updated, ⭕ kept", () => {
     assert.equal(after, note("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 5:30pm", "- [ ] A task"));
 });
 
+test("🗃️ area link added, then the event's time changes: time updated, 🗃️ kept (OBS-36)", () => {
+    const before = note("- [<] 4:00pm\tPlanning [[Household|🗃️]]", "\t- 4:30pm", "- [ ] A task");
+    const { text: after, outcome } = run(before, replace(["- [<] 5:00pm\tPlanning", "\t- 5:30pm"]));
+    assert.equal(outcome, "replaced");
+    assert.equal(after, note("- [<] 5:00pm\tPlanning [[Household|🗃️]]", "\t- 5:30pm", "- [ ] A task"));
+});
+
 test("⭕ and a time range added, then the title changes: title updated, both kept", () => {
     const before = note(
         "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]",

@@ -8,8 +8,12 @@ class AddTaskNote {
     static DATE = /\d{4}-\d{2}-\d{2}/g;
     // An event line's time, which comes before its title: "1:00pm\t", "all day\t"
     static EVENT_TIME = /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+/i;
-    // A project link on a task line: [[Project|⭕]]
-    static PROJECT_LINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?\|⭕\]\]/g;
+    // A project link on a task line, [[Project|⭕]], or an area link, [[Area|🗃️]] (a phone may add
+    // or drop the U+FE0F, and the calendar sync allows spaces around the emoji)
+    static PROJECT_LINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]/gu;
+    // The suffix a home gets on a line: ⭕ for a project, 🗃️ for an area (its Quick Switcher alias)
+    static AREA_MARK = "🗃️";
+    static PROJECT_MARK = "⭕";
     // The parent picked in advance for the one note being created ({ path, parent }), read by pickParent
     static preset = null;
 
@@ -90,15 +94,18 @@ class AddTaskNote {
     // date, not part of its name: the note is looked up by the name without it, and a new one is made
     // through the Task template from the full text, so the template can set `due`.
     //
-    // `lineText` is the whole task line, and its ⭕ project links decide where the note goes:
-    //   - one project linked: a new note is filed there, and an existing note with no project (by the
-    //     time report's rule: its folder, else its `area`) is moved there, without asking;
-    //   - several projects linked: you pick, with the line's projects listed first, and the new note
-    //     is filed there or the existing projectless note moved there;
-    //   - an existing note already in a project stays where it is.
-    // Esc on the menu cancels and nothing changes. An existing note's `area` is then set from its
-    // folder (SyncArea's rule), so its properties show where it lives even when that disagrees with
-    // the line. `reconcile` decides which ⭕ links go.
+    // `lineText` is the whole task line. One link per line says where its time counts: the 🔗 note
+    // filed in its project or area, or a ⭕ (OBS-36), so once the note is linked every ⭕ comes off
+    // the line, and the line's ⭕ links decide where the note goes first:
+    //   - one project or area linked: a new note is filed there, and an existing note with no
+    //     project or area (its nearest folder note) is moved there, without asking;
+    //   - several linked: you pick, with the line's projects listed first, and the note is filed or
+    //     moved there;
+    //   - an existing note already in a different project or area: you're asked to move it there or
+    //     leave it (its project is shared by every line that links it); left, the line's time then
+    //     counts toward where the note is.
+    // A project or area note is never moved. Esc on a menu cancels and nothing changes. An existing
+    // note's `area` is then set from its folder (SyncArea's rule).
     //
     // Resolves to { note, linktext, name, created, projectLinks }, where `name` is the text to leave on
     // the line (without its dates) and `projectLinks` the ⭕ link texts to take off it, or null when no
@@ -108,20 +115,33 @@ class AddTaskNote {
         const name = this.withoutDates(text);
         const line = this.lineProjects(lineText, sourcePath);
         const existing = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
-        let note = existing, picked = false;
+        let note = existing;
         if (existing) {
-            if (line.projects.length && !this.projectOfNote(existing)) {
+            const noteHome = this.homeOf(existing);
+            if (line.projects.length && !this.isHome(existing) && !line.projects.includes(noteHome)) {
                 let home = null;
                 if (line.allLive && line.projects.length === 1) {
                     home = line.projects[0];
                 } else {
                     home = await this.pickHome(existing.basename, line.projects);
                     if (!home) return this.cancelled();
-                    picked = true;
                 }
-                if (!(await this.moveInto(existing, home))) return null;
+                const twin = this.sameNameIn(existing, home);
+                if (twin) {
+                    // The picked home already has a note of that name: link that one, leave this one
+                    note = twin;
+                    new Notice(`Linked the ${twin.basename} already in ${home.basename}; the one in ${existing.parent?.path || "the vault root"} was left alone`);
+                } else if (home !== noteHome) {
+                    let choice = "move";
+                    if (noteHome) {
+                        choice = await this.confirmMove(existing, noteHome, home);
+                        if (!choice) return this.cancelled();
+                    }
+                    if (choice === "move" && !(await this.moveInto(existing, home))) return null;
+                    if (choice === "leave") new Notice(`${existing.basename} stays in ${noteHome.basename}, which this line's time counts toward`);
+                }
             }
-            await customJS.SyncArea?.sync?.(existing, false);
+            await customJS.SyncArea?.sync?.(note, false);
         } else {
             let home = null;
             if (line.allLive && line.projects.length === 1) {
@@ -129,7 +149,6 @@ class AddTaskNote {
             } else if (line.allLive && line.projects.length > 1) {
                 home = await this.pickHome(name, line.projects);
                 if (!home) return this.cancelled();
-                picked = true;
             }
             note = await this.createTaskNote(text, home);
             if (!note) return null;
@@ -138,12 +157,7 @@ class AddTaskNote {
         return {
             note, name, created: !existing,
             linktext: this.linktextFor(note, app.vault.getMarkdownFiles().map((f) => f.path)),
-            projectLinks: this.reconcile({
-                links: line.links,
-                lineProjects: line.projects.map((f) => f.path),
-                noteProject: this.projectOfNote(note),
-                picked,
-            }),
+            projectLinks: line.links,
         };
     }
 
@@ -162,52 +176,91 @@ class AddTaskNote {
         return null;
     }
 
-    // Which ⭕ links come off the task line once its note is settled, so the line and note agree:
-    //   - all of them, when the note sits in one of the projects the line links;
-    //   - all of them, when the line linked several and you picked (the pick settles it);
-    //   - none, when the note has no project (the links are all that tie its time to one), or when it
-    //     sits in a different project than the line's single ⭕: a conflict to settle by hand, which the
-    //     time report lists on both projects.
-    // { links: link texts, lineProjects: paths, noteProject: path | null, picked } → link texts
-    reconcile({ links, lineProjects, noteProject, picked }) {
-        if (!links.length || !noteProject) return [];
-        if (lineProjects.includes(noteProject)) return links;
-        if (picked && lineProjects.length > 1) return links;
-        return [];
+    // Asks whether to move `note` from the project or area `from` into `to`. Resolves to "move",
+    // "leave", or null when dismissed (Esc). Enter moves. Laid out as facts, not a sentence: the
+    // note, the move as `🗃️ from → ⭕ to`, and one line on its time entries. The buttons follow
+    // the arrow's order: Leave it, then Move.
+    confirmMove(note, from, to) {
+        const { Modal, ButtonComponent } = customJS.obsidian;
+        return new Promise((resolve) => {
+            let choice = null;
+            const modal = new (class extends Modal {
+                onClose() { setTimeout(() => resolve(choice), 0); }
+            })(app);
+            const pick = (c) => { choice = c; modal.close(); };
+            const log = note.parent?.name === "logs";
+            const mark = (f) => `${this.isArea(f) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${f.basename}`;
+            modal.titleEl.setText(log ? "Move log?" : "Move task note?");
+            const rows = modal.contentEl.createEl("table", { attr: { style: "border-collapse: collapse; margin-bottom: 0.75em;" } });
+            for (const [k, v] of [[log ? "Log" : "Task", note.basename], ["Move", `${mark(from)}  \u2192  ${mark(to)}`]]) {
+                const tr = rows.createEl("tr");
+                tr.createEl("td", { text: k, attr: { style: "padding: 0.15em 1em 0.15em 0; color: var(--text-muted); white-space: nowrap;" } });
+                tr.createEl("td", { text: v, attr: { style: "padding: 0.15em 0; font-weight: var(--font-semibold);" } });
+            }
+            modal.contentEl.createEl("p", { text: "Time entries will be reallocated accordingly." });
+            const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
+            new ButtonComponent(row).setButtonText("Leave it").onClick(() => pick("leave"));
+            const move = new ButtonComponent(row).setButtonText("Move").setCta().onClick(() => pick("move"));
+            modal.scope.register([], "Enter", () => { pick("move"); return false; });
+            modal.open();
+            // Move is the default: focused, so Enter or Space takes it; Tab reaches Leave it
+            move.buttonEl.focus();
+        });
     }
 
-    // A task line's ⭕ links: { links: link texts, projects: the distinct live projects they point at,
-    // in line order, allLive: every link is one }. Live means tagged #project, under Projects/, and
-    // not `completed`.
+    // The project or area a note sits in: its nearest folder note (Folder/Folder.md) tagged #project
+    // or #area, as SyncArea writes `area`; a project or area note is its own home. Null outside any.
+    homeOf(file) {
+        if (this.isHome(file)) return file;
+        for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
+            const folderNote = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
+            if (folderNote && this.isHome(folderNote)) return folderNote;
+        }
+        return null;
+    }
+
+    // A task line's ⭕ links: { links: link texts, projects: the distinct live projects or areas they
+    // point at, in line order, allLive: every link is one }. Live means tagged #project or #area,
+    // under Projects/, and not `completed`.
     lineProjects(lineText, sourcePath) {
         const links = this.projectLinks(lineText);
         const projects = [];
         let allLive = links.length > 0;
         for (const { linkpath } of links) {
             const file = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-            if (!file || !this.isLiveProject(file)) { allLive = false; continue; }
+            if (!file || !this.isLiveHome(file)) { allLive = false; continue; }
             if (!projects.includes(file)) projects.push(file);
         }
         return { links: links.map((l) => l.raw), projects, allLive };
     }
 
-    isLiveProject(file) {
-        const cache = app.metadataCache.getFileCache(file);
-        const raw = cache?.frontmatter?.tags ?? [];
-        const tags = (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/)).map((t) => String(t).replace(/^#/, "").toLowerCase());
-        return tags.includes("project") && file.path.startsWith("Projects/") && !cache.frontmatter?.completed;
+    isLiveHome(file) {
+        return file.path.startsWith("Projects/") && this.isHome(file);
     }
 
-    // The path of the project a note belongs to, by the time report's own rule (its nearest project
-    // folder, else its `area`), so the two never disagree; null when it has none
-    projectOfNote(file) {
-        const report = customJS.TimeReport;
-        return report.projectOfNote(file.path, report.appIndex());
+    // Whether a home note is an area (tagged #area) rather than a project
+    isArea(file) {
+        const cache = app.metadataCache.getFileCache(file);
+        return !!cache && this.tagsOf(cache).includes("area");
+    }
+
+    // The suffix link for a home: [[Project|⭕]] or [[Area|🗃️]], with `linktext` as linktextFor gives it
+    homeLink(home, linktext) {
+        return `[[${linktext}|${this.isArea(home) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK}]]`;
+    }
+
+    // A note's tags as pickParent reads them: frontmatter `tags` or `tag` (list or string) and
+    // inline #tags, lowercased, without the #
+    tagsOf(cache) {
+        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
+        return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
+            .concat((cache.tags ?? []).map((t) => t.tag))
+            .map((t) => String(t).replace(/^#/, "").toLowerCase());
     }
 
     // Asks which area or project the note `name` belongs to, with `preferred` (the task line's
     // projects) first, then every other area and project the Task template's picker offers. Resolves
-    // to the picked area or project note, or null when dismissed.
+    // to the picked area or project note, or null when dismissed. AddProjectLink uses the same menu.
     pickHome(name, preferred) {
         const { FuzzySuggestModal } = customJS.obsidian;
         const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
@@ -233,17 +286,28 @@ class AddTaskNote {
     isHome(file) {
         const cache = app.metadataCache.getFileCache(file);
         if (!cache || cache.frontmatter?.completed) return false;
-        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
-        return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
-            .concat((cache.tags ?? []).map((t) => t.tag))
-            .map((t) => String(t).replace(/^#/, "").toLowerCase())
-            .some((t) => t === "area" || t === "project");
+        return this.tagsOf(cache).some((t) => t === "area" || t === "project");
     }
 
-    // Moves `note` into the folder of `home` (an area or project note), updating links to it.
-    // False, with a notice, when that folder already has a note of the same name.
+    // The note already in `home`'s folder (or its `logs/`, for a log) with the same name as `note`,
+    // other than `note` itself; null when there's none. A line whose note has that twin in the picked
+    // project is pointed at the twin rather than the move being refused (OBS-36).
+    sameNameIn(note, home) {
+        const folder = note.parent?.name === "logs" ? `${home.parent.path}/logs` : home.parent.path;
+        const target = `${folder}/${note.name}`;
+        const twin = app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target);
+        return twin && twin !== note && twin.extension === "md" ? twin : null;
+    }
+
+    // Moves `note` into the folder of `home` (an area or project note), updating links to it; a
+    // meeting log (one sitting in a `logs` folder) goes into that folder's `logs/`, where the Log
+    // template files them. False, with a notice, when the target already has a note of the same name.
     async moveInto(note, home) {
-        const folder = home.parent.path;
+        let folder = home.parent.path;
+        if (note.parent?.name === "logs") {
+            folder = `${folder}/logs`;
+            if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+        }
         const target = `${folder}/${note.name}`;
         if (app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target)) {
             new Notice(`${folder} already has a note named ${note.basename}, so nothing changed`);
@@ -254,19 +318,20 @@ class AddTaskNote {
         return true;
     }
 
-    // The ⭕ project links on a line: [{ raw, linkpath }]
+    // The ⭕ project and 🗃️ area links on a line: [{ raw, linkpath }]
     projectLinks(lineText) {
         return [...lineText.matchAll(AddTaskNote.PROJECT_LINK)].map((m) => ({ raw: m[0], linkpath: m[1].trim() }));
     }
 
-    // `lineText` with each of `links` taken out, and the spaces they leave behind closed up.
-    // The line's indent and checkbox are kept as they are.
+    // `lineText` with each of `links` taken out, along with one space beside each, so the text
+    // around them closes up while spacing elsewhere on the line stays as it is (an event's title
+    // must still read as the sync wrote it). The line's indent and checkbox are kept as they are.
     withoutLinks(lineText, links) {
         if (!links?.length) return lineText;
         const head = this.afterCheckbox(lineText);
         let body = lineText.slice(head);
-        for (const link of links) body = body.split(link).join("");
-        return lineText.slice(0, head) + body.replace(/ {2,}/g, " ").trim();
+        for (const link of links) body = body.split(` ${link}`).join("").split(`${link} `).join("").split(link).join("");
+        return lineText.slice(0, head) + body.trim();
     }
 
     // For pickParent: the parent picked in advance for the note at `path`, once. Any other note, or a

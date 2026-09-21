@@ -33,8 +33,9 @@ class CalendarSync {
     // A time entry under an event, the way TimeReport reads one: `4:00pm - 4:30pm: note`, or a
     // running `4:00pm - `
     static ENTRY = /^\d{1,2}:\d{2}\s?[ap]m\s*[-–—]\s*(?:\d{1,2}:\d{2}\s?[ap]m)?\s*(?::.*)?$/i;
-    // A ⭕ project link at the end of a title (a phone may add U+FE0F to the emoji)
-    static PROJECT_LINK = /\s*\[\[[^[\]|]+\|\s*⭕️?\s*\]\]$/u;
+    // A ⭕ project link, or a 🗃️ area link (OBS-36), at the end of a title (a phone may add or
+    // drop the U+FE0F)
+    static PROJECT_LINK = /\s*\[\[[^[\]|]+\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u;
     static LOG_LINK = /^\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]$/;
     // ℹ️ after the title marks an event the calendar says you're free during (Show As: Free): not
     // your time, so TimeReport never counts it or checks it for overlaps (OBS-47). The sync writes

@@ -1,7 +1,7 @@
 <%*
 // New notes are created in the current folder (Obsidian's "Default location for new notes"),
 // so always ask where a new task belongs rather than only for notes made in 10 Inbox
-const pickedFile = await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select parent project or area...");
+const pickedFile = await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select parent project or area (Esc: Inbox)...");
 
 const thisID = tp.date.now("YYYYMMDDHHmmssSS");
 const rxDates = /[0-9]{4}-[0-9]{2}-[0-9]{2}/g;
@@ -25,9 +25,20 @@ tp.file.cursor();
 const cleanTitle = tp.file.title.replaceAll(rxDates, "").replace("!task", "").trim();
 if (pickedFile) {
 	await tp.file.move(pickedFile.parent.path + "/" + cleanTitle);
-} else if (cleanTitle && cleanTitle != tp.file.title) {
-	// Picker dismissed: leave the note where it is, but drop "!task" and the dates from its name
-	await tp.file.rename(cleanTitle);
+} else {
+	// Picker dismissed: the note goes to 10 Inbox, as a log does, with "!task" and the dates dropped
+	// from its name; a note already there is only renamed (OBS-36)
+	const inbox = "10 Inbox";
+	const target = inbox + "/" + (cleanTitle || tp.file.title);
+	if (tp.file.path(true) != target + ".md") {
+		if (!app.vault.getAbstractFileByPath(inbox)) await app.vault.createFolder(inbox);
+		if (app.vault.getAbstractFileByPath(target + ".md")) {
+			new Notice("A note named \"" + (cleanTitle || tp.file.title) + "\" is already in " + inbox + ", so this one stays where it is.");
+			if (cleanTitle && cleanTitle != tp.file.title) await tp.file.rename(cleanTitle);
+		} else {
+			await tp.file.move(target);
+		}
+	}
 }
 tp.user.showNewNote(tp);
 %>

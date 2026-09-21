@@ -68,6 +68,11 @@ test("the Task template keeps the name's last date as due, and still drops dates
     assert.ok(template.includes('tR += "area: " + area + "\\n";'), "template writes area");
     assert.ok(template.indexOf('tR += "area: "') < template.indexOf("await tp.file.move("), "area is written before the move");
     assert.ok(template.includes('"\\"[[" + pickedFile.basename + "|" + parentAlias + "]]\\""'), "same [[Project|alias]] form as the Log template");
+    // Esc files the note in 10 Inbox, as the Log template does (OBS-36), never at the vault root
+    assert.match(template, /Esc: Inbox/, "the prompt says where Esc puts it");
+    assert.match(template, /const inbox = "10 Inbox";/);
+    assert.ok(template.indexOf("const inbox") > template.indexOf("} else {"), "only when nothing was picked");
+    assert.ok(template.includes('tp.file.path(true) != target + ".md"'), "a note already in the Inbox isn't moved onto itself");
 });
 
 test("target: with nothing selected, text after the cursor means use the line's text; only whitespace means a blank link", () => {
@@ -144,6 +149,10 @@ test("projectLinks: the ⭕ links on a line, with their link paths", () => {
     assert.deepEqual(links("- [ ] A [[Hawk Ledger#Notes|⭕]]").map((l) => l.linkpath), ["Hawk Ledger"], "a heading link still names the project");
     assert.equal(links("- [ ] A [[One|⭕]] [[Two|⭕]]").length, 2);
     assert.deepEqual(links("- [ ] A [[Note|🔗]] [[2026-10-25|🚩 10/25]]"), [], "other suffixes aren't project links");
+    assert.deepEqual(links("- [ ] A [[Hawk Ledger|⭕️]] [[Tin| ⭕ ]]").map((l) => l.linkpath), ["Hawk Ledger", "Tin"], "U+FE0F and spaces, as the sync allows");
+    assert.deepEqual(links("- [ ] A [[Household|🗃️]] [[Garden|🗃]]").map((l) => l.linkpath), ["Household", "Garden"], "an area's 🗃️ link counts too (OBS-36)");
+    assert.equal(AddTaskNote.AREA_MARK, "🗃️");
+    assert.equal(AddTaskNote.PROJECT_MARK, "⭕");
     // Repeated calls don't carry regex state (the pattern is global)
     assert.equal(links("- [ ] A [[P|⭕]]").length, 1);
     assert.equal(links("- [ ] A [[P|⭕]]").length, 1);
@@ -156,6 +165,7 @@ test("withoutLinks: takes the project link out and closes the gap, keeping inden
     assert.equal(add.withoutLinks("- [ ] [[P|⭕]] Plan it [[Plan it|🔗]]", ["[[P|⭕]]"]), "- [ ] Plan it [[Plan it|🔗]]", "right after the checkbox");
     assert.equal(add.withoutLinks("- [ ] A [[P|⭕]] [[P|⭕]] [[A|🔗]]", ["[[P|⭕]]", "[[P|⭕]]"]), "- [ ] A [[A|🔗]]", "the same link twice");
     assert.equal(add.withoutLinks("- [ ] A [[Due|🚩 9/30]] [[P|⭕]] [[A|🔗]]", ["[[P|⭕]]"]), "- [ ] A [[Due|🚩 9/30]] [[A|🔗]]");
+    assert.equal(add.withoutLinks("- [<] 9:00am\tQ3  review [[P|⭕]]", ["[[P|⭕]]"]), "- [<] 9:00am\tQ3  review", "spacing elsewhere on the line is kept");
     const untouched = "- [ ] A  [[P|⭕]] [[A|🔗]]";
     assert.equal(add.withoutLinks(untouched, []), untouched, "nothing to remove: the line isn't touched at all");
 });
@@ -190,26 +200,12 @@ test("pickParent: skips the menu for the preset note only, and shows it for ever
     assert.equal(await load({})(tp("10 Inbox/X.md"), () => true, "?"), "FROM MENU");
 });
 
-test("reconcile: which ⭕ links come off the line once the task note is settled", () => {
-    const r = (o) => JSON.parse(JSON.stringify(add.reconcile(o)));
-    const one = ["[[Hawk|⭕]]"], two = ["[[Hawk|⭕]]", "[[Tin|⭕]]"];
-    const HAWK = "P/Hawk/Hawk.md", TIN = "P/Tin/Tin.md", OTHER = "P/Other/Other.md";
-    // The note sits in the line's project: reconciled
-    assert.deepEqual(r({ links: one, lineProjects: [HAWK], noteProject: HAWK, picked: false }), one, "new note auto-filed, or existing note already there");
-    assert.deepEqual(r({ links: one, lineProjects: [HAWK], noteProject: HAWK, picked: true }), one, "projectless note moved to the line's project");
-    // Several projects: the note in any of them, or any pick, settles it and they all go
-    assert.deepEqual(r({ links: two, lineProjects: [HAWK, TIN], noteProject: TIN, picked: true }), two);
-    assert.deepEqual(r({ links: two, lineProjects: [HAWK, TIN], noteProject: OTHER, picked: true }), two, "picked a project the line didn't name");
-    assert.deepEqual(r({ links: two, lineProjects: [HAWK, TIN], noteProject: HAWK, picked: false }), two, "existing note already in one of them");
-    // Conflicts stay for you to settle (and the time report lists them on both projects)
-    assert.deepEqual(r({ links: one, lineProjects: [HAWK], noteProject: OTHER, picked: false }), [], "existing note in another project");
-    assert.deepEqual(r({ links: one, lineProjects: [HAWK], noteProject: OTHER, picked: true }), [], "one ⭕, and you picked a different project");
-    assert.deepEqual(r({ links: two, lineProjects: [HAWK, TIN], noteProject: OTHER, picked: false }), [], "existing note elsewhere, nothing picked");
-    // A note with no project (picked an area): the links are all that ties the time to a project
-    assert.deepEqual(r({ links: two, lineProjects: [HAWK, TIN], noteProject: null, picked: true }), []);
-    assert.deepEqual(r({ links: one, lineProjects: [HAWK], noteProject: null, picked: false }), []);
-    // Nothing on the line
-    assert.deepEqual(r({ links: [], lineProjects: [], noteProject: HAWK, picked: false }), []);
+test("noteFor: one link per line: every ⭕ comes off once the note is linked, and a project or area note is never moved", () => {
+    const source = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
+    assert.match(source, /projectLinks: line\.links,/, "all of the line's ⭕ links are handed back to be removed");
+    assert.ok(!/reconcile\(/.test(source), "no partial rule remains");
+    assert.match(source, /!this\.isHome\(existing\) && !line\.projects\.includes\(noteHome\)/, "a folder note stays put; a note already in the line's project stays put");
+    assert.match(source, /choice = await this\.confirmMove\(existing, noteHome, home\)/, "leaving a project or area asks first");
 });
 
 test("linktextFor: the note's name, or its path only when another note really shares the name", () => {

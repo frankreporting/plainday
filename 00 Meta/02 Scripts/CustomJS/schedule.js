@@ -81,7 +81,7 @@ class Schedule {
                 // Task/project/other note: forward with a link to the daily note, and link back from there
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
                 editor.replaceRange(`[[${dailyName}|${m.format("M/D")}]] `, { line: lineNum, ch: bodyCh });
-                const alias = this.isProjectNote(srcFile) ? "⭕" : "🔗";
+                const alias = this.isProjectNote(srcFile) ? "⭕" : this.isAreaNote(srcFile) ? "🗃️" : "🔗";
                 outgoing = [`${bullet}[${destStatus}] ${body.trimEnd()} [[${srcFile.basename}|${alias}]] `];
             } else if (wasWorkedOn && !sourceIsMonthly) {
                 // Daily note, already worked on: forward in place, fresh copy goes forward
@@ -192,6 +192,13 @@ class Schedule {
         const cache = app.metadataCache.getFileCache(file);
         const tags = cache ? (customJS.obsidian.getAllTags(cache) ?? []) : [];
         return tags.some(t => t === "#project" || t.startsWith("#project/"));
+    }
+
+    // A line forwarded out of an area note links the area with its own suffix, 🗃️ (OBS-36)
+    isAreaNote(file) {
+        const cache = app.metadataCache.getFileCache(file);
+        const tags = cache ? (customJS.obsidian.getAllTags(cache) ?? []) : [];
+        return tags.some(t => t === "#area" || t.startsWith("#area/"));
     }
 
     async ensureDailyNote(path) {

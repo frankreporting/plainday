@@ -9,6 +9,7 @@
   "registeredInvocableScriptNames": [
     "DueDate",
     "AddTaskNote",
+    "AddProjectLink",
     "Schedule",
     "Plan",
     "ConvertToProject",

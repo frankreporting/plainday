@@ -34,7 +34,7 @@ class TimeReport {
     //
     // The project an entry belongs to, first match wins, looking at the task line and then the
     // lines it's nested under:
-    //   1. a link to a project note (`[[Orchard Lane Web 2026|⭕]]`, or any alias);
+    //   1. a link to a project note: one aliased ⭕ (`[[Orchard Lane Web 2026|⭕]]`) first, then any alias;
     //   2. the 🔗 note's nearest project folder note (Folder/Folder.md tagged #project), or its `area`;
     //   3. the same for any other linked note (a meeting log, say).
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
@@ -89,8 +89,8 @@ class TimeReport {
     static END_LINE = new RegExp(String.raw`^(${TimeReport.TIME})$`, "i");
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
-    // 🔗, ⭕ and 🚩 links, which say nothing about what a line is
-    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🔗|⭕|🚩)[^\]]*\]\]/gu;
+    // 🔗, ⭕, 🗃️ and 🚩 links, which say nothing about what a line is
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🔗|⭕|🗃|🚩)[^\]]*\]\]/gu;
     static DATE_LINK = /^\d{4}-\d{2}(-\d{2})?$/;
     static SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -445,9 +445,13 @@ class TimeReport {
     resolve(context, fromPath, index, live = false) {
         const lines = context.map((c) => this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) })));
         const isChain = (alias) => alias.replace(/\uFE0F/g, "") === "🔗";
+        const isMark = (alias) => /^(?:⭕|🗃)$/u.test(alias.replace(/[\uFE0F\s]/g, ""));
         const ok = (p) => p && !(live && this.isArchived(p));
-        for (const links of lines) {
-            for (const l of links) if (l.dest && index.isProject(l.dest) && ok(l.dest)) return l.dest;
+        // A ⭕ (or 🗃️) says where the line's time goes, ahead of a project merely mentioned in its text
+        for (const mark of [true, false]) {
+            for (const links of lines) {
+                for (const l of links) if (l.dest && isMark(l.alias) === mark && index.isProject(l.dest) && ok(l.dest)) return l.dest;
+            }
         }
         for (const chain of [true, false]) {
             for (const links of lines) {

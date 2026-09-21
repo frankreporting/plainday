@@ -15,7 +15,7 @@ This repository **is** a vault: the system in `00 Meta/`, plus made-up sample no
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `10 Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddTaskNote* ``⌥⌘` ``, and *Daily notes: Open today's daily note*.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddTaskNote* ``⌥⌘` ``, *AddProjectLink* `⌥⌘P`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
 Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
@@ -76,7 +76,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026-09` | Monthly Note | Moved to `36 Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `36 Planner/years` |
 | `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: asks for the project or area and files it in that folder's `logs/` (Esc: Inbox); fills `area`, `date`, `time`, `endTime` (from the calendar event line that links to it), `who` |
-| `!task Draft the proposal` | Task | Task note filed in the chosen project or area (dates are dropped from the title) |
+| `!task Draft the proposal` | Task | Task note filed in the chosen project or area (Esc: Inbox); dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
 | `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `35 People` / `34 Entities` |
@@ -106,7 +106,7 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 	- 1:30pm - 2:15pm
 - [<] 3:00pm	Delivery window ℹ️
 	- 5:00pm
-- [ ] Draft the proposal [[Draft the proposal|🔗]] [[2026-09-18|🚩 9/18]]
+- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🔗]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
 - [>] Send the invoice [[Send the invoice|🔗]]
@@ -116,8 +116,8 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 - **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times.
 - **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended, with its end time still under it, is checked: work logged during it is an overlap under Problems. Time entries typed under an event replace its span, and count as always.
 - **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
-- **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🚩 M/D` its due date.
-- **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned.
+- **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🗃️` its area (*AddProjectLink* puts either there), `🚩 M/D` its due date. The note link comes last, after the due date, so End reaches the note. One of `🔗`, `⭕` and `🗃️` per line says where its time counts: a task note is filed in its project, so a line that links one needs no `⭕`, and the commands keep it that way.
+- **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else any other link to a project note there, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned. Time linked to an area counts as Unassigned for now.
 
 ## Commands (CustomJS)
 
@@ -125,9 +125,10 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
-| Schedule | `⌘S` | Moves the task (and its sub-bullets) to another day's checklist; a task already worked on stays behind as `[>]`, linked on both days to its task note, which is created first (asking for its project or area) if it doesn't exist |
-| DueDate | `⇧⌘D` | Appends a `🚩 M/D` due-date link |
-| AddTaskNote | ``⌥⌘` `` | Links the selected task name to its task note, creating the note through the Task template (asking for its project or area) if it doesn't exist, then puts the cursor after the checkbox. The name is the selection or, with nothing selected and text after the cursor, the task's text up to its first link (the 🔗 link then ends the line). A date in the name becomes the note's `due` and is removed from the line. The line's ⭕ project links decide where the note goes: one project files a new note, or moves an existing note that has no project, there without asking; several bring up the menu with the line's projects first. An existing note's `area` is set from its folder, and the Task template writes `area` on new notes. Once the note sits in one of the line's projects, or you picked from several, the ⭕ links are removed. An existing note in a different project keeps the ⭕ link, and TimeReport lists that conflict on both projects. With only whitespace after the cursor, inserts an empty link to type into. On an event line, links a meeting log for the selection or the title after the event's time |
+| Schedule | `⌘S` | Moves the task (and its sub-bullets) to another day's checklist; a task already worked on stays behind as `[>]`, linked on both days to its task note, which is created first (asking for its project or area) if it doesn't exist. A line forwarded out of a project or area note links it back with `⭕` or `🗃️`. |
+| DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link: before the note link that ends the line (🔗, ⭕ or 🗃️), else at the end. |
+| AddTaskNote | ``⌥⌘` `` | Links the selected task name to its task note, creating the note through the Task template (asking for its project or area) if it doesn't exist, then puts the cursor after the checkbox. The name is the selection or, with nothing selected and text after the cursor, the task's text up to its first link (the 🔗 link then ends the line). A date in the name becomes the note's `due` and is removed from the line. The line's ⭕ links decide where the note goes: one project or area files a new note there, or moves an existing note that has no project or area yet, without asking; several bring up the menu with the line's projects first; an existing note already in a different project or area asks whether to move it or leave it, and a same-named note already in the picked project is linked instead of moving. Once the note is linked, the ⭕ links come off: the note says where the line's time counts. An existing note's `area` is set from its folder, and the Task template writes `area` on new notes. With only whitespace after the cursor, inserts an empty link to type into. On an event line, links a meeting log for the selection or the title after the event's time |
+| AddProjectLink | `⌥⌘P` | On a task or event line, picks a project or area from the same menu and links it at the end of the line as `[[Project\|⭕]]` or `[[Area\|🗃️]]`, for tying the line's time to a project when the task needs no note of its own; then puts the cursor after the checkbox. A ⭕ or 🗃️ the line already has is replaced: one per line. With a 🔗 task note on the line, or a meeting log linked from an event's title, the note is moved into the picked project instead (a log into its `logs/`) and no ⭕ is added: without asking when the note has no project or area yet, after a confirm when it's leaving one (its project is shared by every line that links it); a note already there needs nothing, and if the picked project already has a note of the same name the line is pointed at that one instead. Esc cancels |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
 | CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, log links and time entries added to them); marks canceled events `[-]` and free events ℹ️; maps recurring series to projects from the Calendar Sync note |

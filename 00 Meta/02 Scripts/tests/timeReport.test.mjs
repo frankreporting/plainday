@@ -200,6 +200,13 @@ test("resolve: a project link wins over everything, whatever its alias", () => {
     assert.equal(projectFor("[>] [[2024-12-10|12/10]] [[Kestrel Newsletter]]"), KESTREL);
     // on a line the task is nested under, it still beats the task's own 🔗
     assert.equal(projectFor("[x] Subtask [[2026-09-02 Launch wrapup|🔗]]", ["[ ] Parent [[Orchard Lane Web 2026|⭕]]"]), ORCHARD_WEB);
+    // a ⭕ says where the time goes, ahead of a project mentioned earlier in the text (OBS-36)
+    assert.equal(projectFor("[x] Send the [[Kestrel Newsletter]] invoice [[Orchard Lane Web 2026|⭕]]"), ORCHARD_WEB);
+    assert.equal(projectFor("[x] Send the [[Kestrel Newsletter]] invoice [[Orchard Lane Web 2026|⭕️]]"), ORCHARD_WEB, "with U+FE0F");
+    assert.equal(projectFor("[x] Subtask", ["[ ] Parent [[Kestrel Newsletter]] work [[Orchard Lane Web 2026|⭕]]"]), ORCHARD_WEB, "on a parent line too");
+    assert.equal(projectFor("[x] Send the [[Kestrel Newsletter]] invoice [[Orchard Lane Web 2026|⭕ Orchard]]"), KESTREL, "⭕ with a name after it is an ordinary alias, as the report itself writes them");
+    // An area's 🗃️ link is stripped from task text like the other suffixes, and (once areas count, OBS-51) outranks a prose link the same way
+    assert.equal(tr.taskText("[x] Water the beds [[Household|🗃️]] [[Water the beds|🔗]]"), "Water the beds");
 });
 
 test("resolve: the 🔗 note's project folder, then its area", () => {
