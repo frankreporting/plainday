@@ -105,7 +105,7 @@ test("summary: the decisions come first, and an up-to-date vault says so", () =>
         { source: "/Users/x/src/obsidian-pm", commit: "abc1234" });
     assert.match(busy, /^From `\/Users\/x\/src\/obsidian-pm` at abc1234\n\n\*\*Changed in this vault, would be overwritten: 1\*\*\n- c\n/);
     assert.ok(busy.includes("**New: 1**") && busy.includes("**Updated: 1**"));
-    assert.ok(busy.includes("**Removed: 1** (the repository no longer has these)"));
+    assert.ok(busy.includes("**Removed: 1** (the repository doesn't install these any more)"));
     assert.ok(busy.includes("**Kept, changed here since it was installed: 1**"));
 });
 

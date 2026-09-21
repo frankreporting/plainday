@@ -15,7 +15,15 @@ class UpdateObsidianPM {
     // It installs only what a pull request merged: the clone must be on main with a clean tree.
     // The clone doubles as the dev vault where a branch is tested (dev-vault.sh), so a half-tested
     // branch, or a note the app rewrote, would otherwise land here. It shows where the clone is
-    // and stops.
+    // and stops. The dialog can stay open for as long as it likes, and the clone can move
+    // underneath it (a test starts, a pull runs in a terminal, a worktree is deleted), so the same
+    // check runs again when Update is clicked, and a clone that moved installs nothing.
+    //
+    // Git state isn't the whole story: an edit hidden with skip-worktree shows in none of it. So
+    // each file is hashed again as it's copied, and one that isn't what the dialog was built from
+    // stops the copy. Should the copy stop partway, for that or for a file that can't be written or
+    // a removal the trash refuses, the manifest still records what did land, and the notice names
+    // where it stopped, so the next run sees an install to finish, not a vault full of local edits.
     //
     // Where the clone is: `00 Meta/02 Scripts/update-source`, a one-line file holding its path. It
     // isn't in the repository, since it's yours. The command asks for the path on the first run.
@@ -100,6 +108,16 @@ class UpdateObsidianPM {
         return null;
     }
 
+    // Why the clone can't be copied from now, when it passed when the dialog opened, or null when
+    // it hasn't moved. `before` and `now` are what state() returned then and now; `now` is null
+    // when the clone's folder is gone.
+    moved(before, now) {
+        const why = !now ? "The clone is no longer there. Run this again."
+            : this.refusal(now)
+            ?? (now.head !== before.head ? `It moved from ${before.commit} to ${now.commit}. Run this again.` : null);
+        return why && `The clone changed while the dialog was open, so nothing was written. ${why}`;
+    }
+
     // The confirmation, as lines. `local` needs a decision, so it comes first. Long lists are cut
     // to `max` paths and counted, so the dialog stays readable.
     summary(plan, { source, commit, firstRun = false, max = 8, hidden = [] } = {}) {
@@ -119,7 +137,7 @@ class UpdateObsidianPM {
         list(firstRun ? "Differs from the repository" : "Changed in this vault, would be overwritten", plan.local);
         list("New", plan.add);
         list("Updated", plan.update);
-        list("Removed", plan.remove, " (the repository no longer has these)");
+        list("Removed", plan.remove, " (the repository doesn't install these any more)");
         list("Kept, changed here since it was installed", plan.keep, " (nothing will happen to these)");
         // Files git has been told to ignore changes to (`update-index --skip-worktree`) never show
         // in a diff or in `git status`, so the branch-and-clean check above can't see them: they'd
@@ -178,18 +196,14 @@ class UpdateObsidianPM {
         if (path.resolve(vaultPath) === source) { new Notice("That's this vault, not a clone of the repository", 0); return; }
 
         // Before the pull: a detached HEAD has nothing to pull into, and a dirty tree shouldn't move
-        const refusal = this.refusal({
-            branch: (this.git(source, ["symbolic-ref", "-q", "--short", "HEAD"]).out ?? "").trim(),
-            commit: (this.git(source, ["rev-parse", "--short", "HEAD"]).out ?? "").trim(),
-            // -z: paths come unquoted, so one with a space reads as it is
-            dirty: (this.git(source, ["status", "--porcelain", "-z", "--untracked-files=all"]).out ?? "")
-                .split("\0").filter(Boolean).map((line) => line.slice(3)),
-        });
+        const refusal = this.refusal(this.state(source));
         if (refusal) { new Notice(`Update Obsidian PM: ${refusal}`, 0); return; }
 
         const pull = this.git(source, ["pull", "--ff-only"]);
         if (!pull.ok) new Notice(`Couldn't update the clone (${pull.message}); using it as it is`, 8000);
-        const commit = this.git(source, ["rev-parse", "--short", "HEAD"]).out?.trim();
+        // What the plan is built from; checked again when Update is clicked
+        const before = this.state(source);
+        const commit = before.commit || undefined;
 
         const listed = this.git(source, ["ls-files", "-z"]);
         if (!listed.ok) { new Notice(`Couldn't read the clone: ${listed.message}`, 0); return; }
@@ -220,31 +234,56 @@ class UpdateObsidianPM {
         const choice = await this.confirm(summary, plan);
         if (!choice) return;
 
-        const steps = this.steps(plan, choice);
-        for (const rel of steps.copy) {
-            const to = path.join(vaultPath, rel);
-            fs.mkdirSync(path.dirname(to), { recursive: true });
-            fs.copyFileSync(path.join(source, rel), to);
-        }
-        for (const rel of steps.delete) {
-            const file = app.vault.getAbstractFileByPath(rel);
-            if (file) await app.fileManager.trashFile(file);
-            else fs.rmSync(path.join(vaultPath, rel), { force: true });
-        }
-        const after = this.manifestAfter(sourceFiles, manifest, steps);
-        await this.write(UpdateObsidianPM.MANIFEST_FILE, JSON.stringify({
-            source, commit: commit ?? null, updated: window.moment().format("YYYY-MM-DD HH:mm"),
-            files: Object.fromEntries([...after].sort(([a], [b]) => a.localeCompare(b))),
-        }, null, 2) + "\n");
+        // The dialog may have been open for a while: the clone has to be where the plan left it
+        const isClone = fs.existsSync(path.join(source, "00 Meta/02 Scripts/CustomJS"));
+        const moved = this.moved(before, isClone ? this.state(source) : null);
+        if (moved) { new Notice(`Update Obsidian PM: ${moved}`, 0); return; }
+
         if (!(await this.read(UpdateObsidianPM.SOURCE_FILE))) await this.write(UpdateObsidianPM.SOURCE_FILE, source + "\n");
 
-        new Notice(`Update Obsidian PM: ${this.done(steps, commit)}`, 8000);
-        if (steps.copy.some((p) => p.startsWith("00 Meta/02 Scripts/CustomJS/") || p.endsWith("customjs/data.json"))) {
-            if (await this.confirmReload()) {
-                await app.plugins.disablePlugin("customjs");
-                await app.plugins.enablePlugin("customjs");
-                new Notice("CustomJS reloaded");
+        // `landed` follows every write, so a stop partway can still record what's installed
+        const steps = this.steps(plan, choice);
+        const landed = new Map(manifest);
+        const copied = [];
+        let rel;
+        try {
+            for (rel of steps.copy) {
+                // Byte for byte what the dialog was built from: git state can't see an edit hidden
+                // with skip-worktree, and the folder can move between the check and the copy
+                const buffer = fs.readFileSync(path.join(source, rel));
+                if (this.hash(buffer) !== sourceFiles.get(rel)) throw new Error("changed while the dialog was open");
+                const to = path.join(vaultPath, rel);
+                fs.mkdirSync(path.dirname(to), { recursive: true });
+                fs.writeFileSync(to, buffer);
+                landed.set(rel, sourceFiles.get(rel));
+                copied.push(rel);
             }
+            for (rel of steps.delete) {
+                const file = app.vault.getAbstractFileByPath(rel);
+                if (file) await app.fileManager.trashFile(file);
+                else fs.rmSync(path.join(vaultPath, rel), { force: true });
+                landed.delete(rel);
+            }
+        } catch (e) {
+            await this.record(landed, { source, commit, failed: rel });
+            new Notice(`Update Obsidian PM: ${copied.length} of ${steps.copy.length} file${steps.copy.length === 1 ? "" : "s"} copied,`
+                + ` then ${rel} failed (${String(e?.message ?? e).split("\n")[0]}). The manifest records what landed; run this again.`, 0);
+            await this.offerReload(copied);
+            return;
+        }
+        await this.record(this.manifestAfter(sourceFiles, manifest, steps), { source, commit });
+
+        new Notice(`Update Obsidian PM: ${this.done(steps, commit)}`, 8000);
+        await this.offerReload(steps.copy);
+    }
+
+    // When a script or the CustomJS settings landed, the new versions only run after a reload
+    async offerReload(copied) {
+        if (!copied.some((p) => p.startsWith("00 Meta/02 Scripts/CustomJS/") || p.endsWith("customjs/data.json"))) return;
+        if (await this.confirmReload()) {
+            await app.plugins.disablePlugin("customjs");
+            await app.plugins.enablePlugin("customjs");
+            new Notice("CustomJS reloaded");
         }
     }
 
@@ -260,6 +299,28 @@ class UpdateObsidianPM {
 
     hash(buffer) {
         return require("crypto").createHash("sha1").update(buffer).digest("hex");
+    }
+
+    // The clone as it is right now, for refusal() and moved(): the checked-out branch ("" when
+    // HEAD is detached), the commit, short and full, and what `git status --porcelain` lists
+    state(source) {
+        return {
+            branch: (this.git(source, ["symbolic-ref", "-q", "--short", "HEAD"]).out ?? "").trim(),
+            commit: (this.git(source, ["rev-parse", "--short", "HEAD"]).out ?? "").trim(),
+            head: (this.git(source, ["rev-parse", "HEAD"]).out ?? "").trim(),
+            // -z: paths come unquoted, so one with a space reads as it is
+            dirty: (this.git(source, ["status", "--porcelain", "-z", "--untracked-files=all"]).out ?? "")
+                .split("\0").filter(Boolean).map((line) => line.slice(3)),
+        };
+    }
+
+    // Writes the manifest: what's installed now, from where, and `failed` when a copy stopped there
+    async record(files, { source, commit, failed } = {}) {
+        await this.write(UpdateObsidianPM.MANIFEST_FILE, JSON.stringify({
+            source, commit: commit ?? null, updated: window.moment().format("YYYY-MM-DD HH:mm"),
+            ...(failed ? { failed } : {}),
+            files: Object.fromEntries([...files].sort(([a], [b]) => a.localeCompare(b))),
+        }, null, 2) + "\n");
     }
 
     // git in the clone, never in the vault

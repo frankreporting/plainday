@@ -77,8 +77,11 @@ function load(context, answers) {
     const UpdateObsidianPM = vm.runInContext(code + "\n;UpdateObsidianPM", vm.createContext(context));
     const up = new UpdateObsidianPM();
     up.ask = async () => answers.source ?? "";
-    up.confirm = async (summary) => { answers.sawSummary = summary; return answers.confirm ?? null; };
-    up.confirmReload = async () => Boolean(answers.reload);
+    up.confirm = async (summary) => {
+        answers.sawSummary = summary;
+        return (typeof answers.confirm === "function" ? answers.confirm() : answers.confirm) ?? null;
+    };
+    up.confirmReload = async () => { answers.askedReload = true; return Boolean(answers.reload); };
     return up;
 }
 
@@ -246,4 +249,161 @@ test("invoke: nothing to do says so", async (t) => {
     await f.up.invoke();
     await f.up.invoke();
     assert.match(f.notices.at(-1), /up to date/);
+});
+
+// The dialog can sit open for as long as it likes, and the clone can move underneath it. What the
+// guard checked is checked again when Update is clicked; `answers.confirm` as a function stands in
+// for whatever happened while the dialog was open.
+const nothingWritten = (f, why) => {
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), false, `${why}: nothing installed`);
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/update-manifest.json"), false, `${why}: no manifest`);
+    assert.match(f.notices.at(-1), /clone changed while the dialog was open/i, why);
+    assert.match(f.notices.at(-1), /run this again/i, why);
+};
+
+test("invoke: a clone that moved to a branch while the dialog was open installs nothing", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    f.answers.confirm = () => {
+        execFileSync("git", ["-C", f.source, "checkout", "-qb", "me/obs-9-under-test"], { stdio: "pipe" });
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    nothingWritten(f, "branch");
+    assert.match(f.notices.at(-1), /on branch `me\/obs-9-under-test`, not `main`/);
+});
+
+test("invoke: a clone dirtied while the dialog was open installs nothing", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    f.answers.confirm = () => {
+        write(f.source, "30 Reference/36 Planner/days/2026-09-16.md", "rewritten by the startup report\n");
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    nothingWritten(f, "dirty");
+    assert.match(f.notices.at(-1), /1 uncommitted change/);
+});
+
+test("invoke: a clone that moved to another commit while the dialog was open installs nothing", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    f.answers.confirm = () => {
+        // pulled in another terminal: still main, still clean, different files
+        write(f.source, "00 Meta/02 Scripts/CustomJS/timeReport.js", "newer report\n");
+        execFileSync("git", ["-C", f.source, "commit", "-qam", "pulled"], { stdio: "pipe" });
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    nothingWritten(f, "commit");
+    assert.match(f.notices.at(-1), /moved from [0-9a-f]{7} to [0-9a-f]{7}/);
+});
+
+test("invoke: a clone deleted while the dialog was open installs nothing", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    f.answers.confirm = () => {
+        fs.rmSync(f.source, { recursive: true, force: true });
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    nothingWritten(f, "deleted");
+    assert.match(f.notices.at(-1), /no longer there/);
+});
+
+test("invoke: a copy that fails partway still records what landed, and names what didn't", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    // A source file made unreadable shows in `git status` (git can't hash it), so the re-check
+    // refuses it as a dirty tree. What the re-check can't see is the vault's side: a folder sitting
+    // where the third file, in copy order, is meant to land.
+    const blocked = "00 Meta/02 Scripts/CustomJS/timeReport.js";
+    f.answers.confirm = () => {
+        fs.mkdirSync(path.join(f.vault, blocked), { recursive: true });
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    // copy order: .obsidian/…/data.json, 00 Meta/01 Templates/Task.md, 00 Meta/02 Scripts/…/timeReport.js, README.md
+    assert.equal(exists(f.vault, ".obsidian/plugins/customjs/data.json"), true);
+    assert.equal(exists(f.vault, "00 Meta/01 Templates/Task.md"), true);
+    assert.equal(fs.statSync(path.join(f.vault, blocked)).isDirectory(), true, "the failed file");
+    assert.equal(exists(f.vault, "README.md"), false, "stopped at the failure");
+    const manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.deepEqual(Object.keys(manifest.files).sort(), [".obsidian/plugins/customjs/data.json", "00 Meta/01 Templates/Task.md"],
+        "the manifest matches what's on disk");
+    assert.equal(manifest.failed, blocked);
+    assert.match(f.notices.at(-1), /2 of 4 files copied/);
+    assert.match(f.notices.at(-1), /timeReport\.js failed/);
+    assert.match(f.notices.at(-1), /EISDIR/);
+    assert.equal(read(f.vault, "00 Meta/02 Scripts/update-source").trim(), f.source, "the clone's path is kept too");
+    assert.equal(f.answers.askedReload, true, "a script landed, so the reload is offered");
+
+    // once the folder is out of the way, the next run finishes the install: the two that landed
+    // are up to date, the other two are new, and nothing is called a local edit
+    fs.rmSync(path.join(f.vault, blocked), { recursive: true });
+    f.answers.confirm = { overwriteLocal: false, remove: true };
+    await f.up.invoke();
+    assert.doesNotMatch(f.answers.sawSummary, /Changed in this vault/);
+    assert.match(f.answers.sawSummary, /\*\*New: 2\*\*/);
+    assert.equal(read(f.vault, blocked), "new report\n");
+    assert.equal(read(f.vault, "README.md"), "readme\n");
+    const finished = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.equal("failed" in finished, false, "a finished install carries no failure");
+    assert.equal(Object.keys(finished.files).length, 4);
+});
+
+test("invoke: a file edited under skip-worktree while the dialog was open is not what the dialog showed, so it isn't copied", async (t) => {
+    const f = fixture();
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    // git status, the branch and HEAD all read the same as when the plan was built
+    const settings = ".obsidian/plugins/customjs/data.json";
+    f.answers.confirm = () => {
+        execFileSync("git", ["-C", f.source, "update-index", "--skip-worktree", settings], { stdio: "pipe" });
+        write(f.source, settings, '{"jsFolder":"edited while the dialog was open"}\n');
+        return { overwriteLocal: true, remove: true };
+    };
+    await f.up.invoke();
+    // it's the first file in copy order, so nothing lands at all
+    assert.equal(exists(f.vault, settings), false, "the edited file");
+    assert.equal(exists(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), false, "nothing after it either");
+    assert.match(f.notices.at(-1), /0 of 4 files copied/);
+    assert.match(f.notices.at(-1), /data\.json/);
+    assert.match(f.notices.at(-1), /changed while the dialog was open/i);
+    const manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.deepEqual(manifest.files, {}, "the manifest matches what's on disk");
+    assert.equal(manifest.failed, settings);
+});
+
+test("invoke: a removal that fails still records the copies that landed", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    await f.up.invoke();
+
+    // the repository updates one file and drops two; the vault's trash refuses the second removal
+    write(f.source, "00 Meta/02 Scripts/CustomJS/timeReport.js", "newer report\n");
+    execFileSync("git", ["-C", f.source, "rm", "-q", "00 Meta/01 Templates/Task.md", "README.md"], { stdio: "pipe" });
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "update and drop"], { stdio: "pipe" });
+    const trashFile = f.context.app.fileManager.trashFile;
+    f.context.app.fileManager.trashFile = async (file) => {
+        if (file.path === "README.md") throw new Error("Trash isn't available");
+        return trashFile(file);
+    };
+    await f.up.invoke();
+    assert.equal(read(f.vault, "00 Meta/02 Scripts/CustomJS/timeReport.js"), "newer report\n");
+    assert.equal(exists(f.vault, "00 Meta/01 Templates/Task.md"), false, "the first removal went through");
+    assert.equal(exists(f.vault, "README.md"), true, "the second didn't");
+    assert.match(f.notices.at(-1), /1 of 1 files? copied/);
+    assert.match(f.notices.at(-1), /README\.md failed/);
+    assert.match(f.notices.at(-1), /Trash isn't available/);
+    const manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.equal("00 Meta/01 Templates/Task.md" in manifest.files, false, "removed, so forgotten");
+    assert.equal("README.md" in manifest.files, true, "still there, so still recorded");
+    assert.equal(manifest.failed, "README.md");
+
+    // the next run sees the update as done and offers the removal again
+    f.context.app.fileManager.trashFile = trashFile;
+    await f.up.invoke();
+    assert.doesNotMatch(f.answers.sawSummary, /Changed in this vault/);
+    assert.match(f.answers.sawSummary, /\*\*Removed: 1\*\*/);
+    assert.equal(exists(f.vault, "README.md"), false);
 });
