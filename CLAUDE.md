@@ -22,7 +22,7 @@ For reading notes, `grep` on the markdown files is often faster.
 - **Tests:** run `node --test "00 Meta/02 Scripts/tests/*.test.mjs"` from the repo root.
   - `demoVault.test.mjs` checks the sample notes against the scripts: the committed time reports must equal what the scripts render, and every link and `area` must be right. If a change alters what the report writes, re-render the sample notes with `node "00 Meta/02 Scripts/tests/demo/renderReports.mjs"` and commit the result.
   - Checks against a real vault's data go in `*.private.test.mjs` files with `*.private.json` fixtures, which git ignores.
-- **Docs:** a change a user would notice updates `README.md` in the same PR, and the sample notes too if they should show it.
+- **Docs:** a change a user would notice updates `README.md` in the same PR, and the sample notes too if they should show it. Before opening the PR, read each README section that names a changed script against the diff and fix what no longer matches: CI checks that the docs were touched, not that they are right.
 - **CI (`.github/workflows/ci.yml`)** runs on every PR and must be green before a merge. It runs the tests, loads every CustomJS class and Templater script the way the plugins do, checks the tracked JSON, scans the diff, commits, title, body and branch name for the patterns the "Privacy" rule names, and checks the PR body:
   - it links its Linear issue (`Closes OBS-N`, or `Part of OBS-N`; see below), and
   - when files under `CustomJS/`, `Templater/`, `Calendar/` or `01 Templates/` change, it has a `## Docs` section with a `My Obsidian Setup:` line (the sections changed in that untracked note, or `none`) and, unless `README.md` changes too, a sentence on why the README needs nothing.
