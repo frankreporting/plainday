@@ -63,8 +63,30 @@ function makeApp(files) {
         },
         foldManager: { load: () => null },
         workspace: { getLeavesOfType: () => [] },
+        // Enough of the metadata cache and the frontmatter editor for a log's `time` and `endTime`
+        metadataCache: {
+            getFirstLinkpathDest: (name) => {
+                const p = [...map.keys()].find((k) => k === `${name}.md` || k.endsWith(`/${name}.md`));
+                return p ? { path: p } : null;
+            },
+            getFileCache: (f) => ({ frontmatter: frontmatterOf(map.get(f.path)) }),
+        },
+        fileManager: {
+            processFrontMatter: async (f, fn) => {
+                const fm = frontmatterOf(map.get(f.path));
+                fn(fm);
+                const body = map.get(f.path).replace(/^---\n[\s\S]*?\n---\n?/, "");
+                map.set(f.path, `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join("\n")}\n---\n${body}`);
+            },
+        },
     };
     return { app, map };
+}
+
+// `key: value` lines between the --- markers, as strings
+function frontmatterOf(text) {
+    const block = String(text ?? "").match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+    return Object.fromEntries(block.split("\n").filter((l) => l.includes(":")).map((l) => [l.slice(0, l.indexOf(":")).trim(), l.slice(l.indexOf(":") + 1).trim()]));
 }
 
 function load(app = {}) {
@@ -990,4 +1012,88 @@ test("run: adopting a line whose end line a time entry replaced changes only the
     assert.equal(body(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ key: "E2", id: "E2" })]), "Calendar sync: 1 adopted");
     assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+});
+
+// ------------------------------------------------------------------ a log's line with no time (OBS-10)
+
+test("insert adopts a log's timeless line: the sync's shape around the log link, ⭕ and what's under it kept", () => {
+    const before = note("- [<] 9:00am\tStandup", "\t- 9:15am", "- [<] [[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm", "- [ ] A task");
+    const insert = (lines) => ({ kind: "insert", key: "E1", event: event(), lines });
+    const { text: after, outcome, result } = run(before, insert(["- [<] 4:00pm\tPlanning", "\t- 4:30pm"]));
+    assert.equal(outcome, "adopted");
+    assert.deepEqual(plain(result.changed), ["time added"]);
+    assert.equal(after, note("- [<] 9:00am\tStandup", "\t- 9:15am", "- [<] 4:00pm\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
+    // A free event brings its mark, before the ⭕
+    const free = run(before, insert(["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"])).text;
+    assert.equal(free.split("\n")[5], "- [<] 4:00pm\t[[2026-09-16 Planning|Planning]] ℹ️ [[Pinecone Studio|⭕]]");
+    // Another title isn't it: the timed line goes above the timeless one, which stays
+    const other = run(before, insert(["- [<] 4:00pm\tRetro", "\t- 4:30pm"]));
+    assert.equal(other.outcome, "inserted");
+    assert.equal(other.text, note("- [<] 9:00am\tStandup", "\t- 9:15am", "- [<] 4:00pm\tRetro", "\t- 4:30pm", "- [<] [[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
+});
+
+test("only an insert adopts a timeless line: a cancel or a check for a line that's gone leaves it alone", () => {
+    const before = note("- [<] [[2026-09-16 Planning|Planning]]");
+    const cancel = run(before, { kind: "cancel", key: "E1", entry: ENTRY });
+    assert.equal(cancel.outcome, "missing");
+    assert.equal(cancel.text, before);
+    const verify = run(before, { kind: "verify", key: "E1", entry: ENTRY, event: event(), lines: ENTRY.lines });
+    assert.equal(verify.outcome, "missing");
+    assert.equal(verify.text, before);
+});
+
+test("run: a log's timeless line is adopted when its event arrives, remembered, and kept current after", async () => {
+    const map = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Planning|Planning]]", "- [ ] A task") });
+    assert.equal(await sync(map, [event()]), "Calendar sync: 1 adopted");
+    assert.match(map.get(NOTE), /Planning \(time added\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\t[[2026-09-16 Planning|Planning]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.equal(ledger(map).events.E1.log, "[[2026-09-16 Planning|Planning]]");
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\t[[2026-09-16 Planning|Planning]]", "\t- 5:30pm", "- [ ] A task"));
+});
+
+test("adopting a timeless line for a moved event: its ⭕ comes along, the old day's log link can't, so the old line stays", () => {
+    const before = note("- [<] [[2026-09-17 Planning|Planning]]", "- [ ] A task");
+    const carry = { projects: ["[[Pinecone Studio|⭕]]"], log: "[[2026-09-16 Planning|Planning]]", series: undefined };
+    const { text: after, outcome, result } = run(before, { kind: "insert", key: "E1", event: event({ date: "2026-09-17" }), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], move: true, carry });
+    assert.equal(outcome, "adopted");
+    assert.equal(result.droppedLog, true);
+    assert.equal(after, note("- [<] 4:00pm\t[[2026-09-17 Planning|Planning]] [[Pinecone Studio|⭕]]", "\t- 4:30pm", "- [ ] A task"));
+    // A series mapping's ⭕ too, and the mapping is remembered
+    const series = run(before, { kind: "insert", key: "E1", event: event({ recurring: true }), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], series: { links: ["[[Studio|⭕]]"], key: "[[Studio|⭕]]" } });
+    assert.equal(series.text.split("\n")[3], "- [<] 4:00pm\t[[2026-09-17 Planning|Planning]] [[Studio|⭕]]");
+    assert.equal(series.result.series, "[[Studio|⭕]]");
+});
+
+test("a timeless line nested under a task belongs to the task: not adopted; hand-typed [<] lines still sort below timed events", () => {
+    const nested = note("- [ ] Big task", "\t- [<] [[2026-09-16 Planning|Planning]]", "\t\t- 4:00pm - 4:20pm");
+    const { text: after, outcome } = run(nested, { kind: "insert", key: "E1", event: event(), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] });
+    assert.equal(outcome, "inserted");
+    assert.equal(after, note("- [<] 4:00pm\tPlanning", "\t- 4:30pm", "- [ ] Big task", "\t- [<] [[2026-09-16 Planning|Planning]]", "\t\t- 4:00pm - 4:20pm"));
+    const typed = note("- [<] 4:00pm Dentist", "- [<] Lunch", "- [ ] A task").split("\n");
+    assert.equal(cs.insert(typed, ["- [<] 5:00pm\tDrinks", "\t- 6:00pm"]), note("- [<] 5:00pm\tDrinks", "\t- 6:00pm", "- [<] 4:00pm Dentist", "- [<] Lunch", "- [ ] A task"));
+});
+
+test("run: a log a line links takes the line's times: on adoption, on a retime, and not when nothing changed", async () => {
+    const LOG = "Projects/Studio/logs/2026-09-16 Planning.md";
+    const map = vault({
+        [day("2026-09-16")]: note("- [<] [[2026-09-16 Planning|Planning]]", "- [ ] A task"),
+        [LOG]: "---\ntags: log\ndate: 2026-09-16\ntime: \nendTime: \n---\n## Notes\n",
+    });
+    assert.equal(await sync(map, [event()]), "Calendar sync: 1 adopted");
+    assert.match(map.get(NOTE), /Planning \(time added; log times updated\)/);
+    assert.equal(map.get(LOG), "---\ntags: log\ndate: 2026-09-16\ntime: 4:00pm\nendTime: 4:30pm\n---\n## Notes\n");
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
+    assert.match(map.get(NOTE), /Planning \(log times updated\)/);
+    assert.equal(map.get(LOG), "---\ntags: log\ndate: 2026-09-16\ntime: 5:00pm\nendTime: 5:30pm\n---\n## Notes\n");
+    // Moved to another day: the new line carries the link, and the log's times follow
+    assert.equal(await sync(map, [event({ date: "2026-09-17", start: "2026-09-17T09:00:00-04:00", end: "2026-09-17T09:45:00-04:00" })]), "Calendar sync: 1 added, 1 removed");
+    assert.equal(map.get(LOG), "---\ntags: log\ndate: 2026-09-16\ntime: 9:00am\nendTime: 9:45am\n---\n## Notes\n");
+    // An all-day event adopts a timeless line too, and says nothing about time; a log that isn't there is no error
+    const map2 = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Offsite|Offsite]]") });
+    assert.equal(await sync(map2, [event({ key: "E2", id: "E2", title: "Offsite", allDay: true })]), "Calendar sync: 1 adopted");
+    assert.equal(body(map2.get(day("2026-09-16"))), "- [<] All day\t[[2026-09-16 Offsite|Offsite]]");
+    assert.match(map2.get(NOTE), /Offsite \(time added\)/);
 });

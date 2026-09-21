@@ -1,7 +1,6 @@
 ---
 id: 2026091409562204
 aliases: 
-- Homepage review with Imogen
 - 9/14/26 Homepage review with Imogen
 tags: log
 area: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"

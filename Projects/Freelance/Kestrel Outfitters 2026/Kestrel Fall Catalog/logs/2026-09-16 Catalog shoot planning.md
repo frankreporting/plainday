@@ -1,7 +1,6 @@
 ---
 id: 2026091609581137
 aliases: 
-- Catalog shoot planning
 - 9/16/26 Catalog shoot planning
 tags: log
 area: "[[Kestrel Fall Catalog|⭕.Freelance.Kestrel Outfitters 2026.Kestrel Fall Catalog]]"

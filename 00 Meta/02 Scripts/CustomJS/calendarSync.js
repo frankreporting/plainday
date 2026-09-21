@@ -8,6 +8,9 @@ class CalendarSync {
     // end line's note) to the new day. A ⭕ put after a recurring
     // series in the Calendar Sync note reaches every upcoming line of that series. An event the
     // calendar shows as free gets ℹ️ after its title (see FREE_MARK), kept current the same way.
+    // A log's line with no time, `- [<] [[log|Title]]` (the Log template writes one when the
+    // calendar has no event for a meeting, OBS-10), is adopted when the event arrives and given
+    // its time, and a log a line links takes the line's times whenever the sync writes the line.
     //
     // Three files, all in 00 Meta:
     // - `calendar-events.json`   every calendar and event, written by the fetcher
@@ -593,7 +596,7 @@ class CalendarSync {
         const file = app.vault.getFileByPath(path) ?? (wantsInsert ? await this.createDaily(date, path) : null);
         if (!file) {
             // The whole note is gone, so every line the sync wrote in it went with it
-            for (const op of operations) if (op.kind !== "reserve") this.record({ op, outcome: "missing" }, [], ledger, report, landed);
+            for (const op of operations) if (op.kind !== "reserve") await this.record({ op, outcome: "missing" }, [], ledger, report, landed);
             return;
         }
 
@@ -621,7 +624,7 @@ class CalendarSync {
                 if (!taken.has(date)) taken.set(date, new Map());
                 this.claim(taken.get(date), result.took);
             }
-            this.record(result, afterLines, ledger, report, landed);
+            await this.record(result, afterLines, ledger, report, landed);
         }
     }
 
@@ -659,7 +662,26 @@ class CalendarSync {
             const droppedLog = !withLog;
             const written = withLog ?? this.decorate(op.lines, { projects: links ?? carry.projects, log: null, nonbillable: carry.nonbillable });
             const series = this.seriesApplied(carry.projects, carry.series, links, op.series);
-            const existing = this.findBlock(lines, { lines: op.lines }, claimed);
+            let existing = this.findBlock(lines, { lines: op.lines }, claimed, true);
+            // A log's line with no time (the Log template wrote it before the sync had the event):
+            // written in the sync's shape around the log link, with its ⭕ links and any a moved
+            // event or a series brings, and whatever sits under it kept below the end time. A moved
+            // event's old log link can't come along, so its old line stays, as with any dropped link.
+            const timeless = existing && this.logLine(lines[existing.from]);
+            if (timeless) {
+                const projects = [...new Set([...timeless.projects, ...(links ?? carry.projects)])];
+                const head = this.decorate(op.lines, { projects, log: timeless.log });
+                if (head) {
+                    const block = [...head, ...lines.slice(existing.from + 1, existing.to + 1)];
+                    this.claim(claimed, block[0]);
+                    return {
+                        text: [...lines.slice(0, existing.from), ...block, ...lines.slice(existing.to + 1)].join("\n"),
+                        outcome: "adopted", lines: op.lines, written: head, took: block[0], changed: ["time added"],
+                        series, droppedLog: !!carry.log && carry.log !== timeless.log,
+                    };
+                }
+                existing = null;   // the title can't sit inside a link (and nothing else matched earlier)
+            }
             if (!existing) {
                 this.claim(claimed, written[0]);
                 return { text: this.insert(lines, written), outcome: "inserted", lines: op.lines, written, series, droppedLog, took: written[0] };
@@ -787,7 +809,7 @@ class CalendarSync {
         };
     }
 
-    record(result, after, ledger, report, landed) {
+    async record(result, after, ledger, report, landed) {
         const { op, outcome, lines } = result;
         if (op.kind === "reserve") return;
         const entry = op.entry;
@@ -830,12 +852,15 @@ class CalendarSync {
                 ledger.events[op.key] = next;
                 if (op.handover) delete ledger.events[op.handover];
                 if (wrote && result.revived) delete ledger.canceled[result.revived];
+                const changed = [...(result.changed ?? [])];
+                if (wrote && found?.log && await this.fillLog(found.log, lines, date)) changed.push("log times updated");
+                const said = changed.length ? `${where(date, title)} (${changed.join("; ")})` : where(date, title);
                 if (!wrote) report.skipped.push(`${where(date, title)}: the line didn't land, will try again next run`);
-                else if (outcome === "adopted") report.adopted.push(result.changed?.length ? `${where(date, title)} (${result.changed.join("; ")})` : where(date, title));
-                else if (outcome === "replaced") report.updated.push(result.changed?.length ? `${where(date, title)} (${result.changed.join("; ")})` : where(date, title));
+                else if (outcome === "adopted") report.adopted.push(said);
+                else if (outcome === "replaced") report.updated.push(said);
                 else if (outcome === "linked") report.linked.push(where(date, title));
                 else if (outcome === "reinserted") report.added.push(`${where(date, title)} (written again)`);
-                else report.added.push(where(date, title));
+                else report.added.push(said);
                 return;
             }
             case "present": {
@@ -917,10 +942,11 @@ class CalendarSync {
         return { first, end };
     }
 
-    // Where an event line sorts: all-day events first by title, then timed ones by time
+    // Where an event line sorts: all-day events first by title, then timed ones by time, then
+    // event lines with no time (a log's line, see `timeless`), which nothing can order
     rank(line) {
         const match = line.match(/^\s*[-*+]\s+\[[<-]\]\s+(?:(all day)|(\d{1,2}):(\d{2})\s?([ap]m))\t(.*)$/i);
-        if (!match) return null;
+        if (!match) return this.timeless(line) ? [2, 0, ""] : null;
         if (match[1]) return [0, 0, match[5].toLowerCase()];
         let hour = Number(match[2]) % 12;
         if (match[4].toLowerCase() === "pm") hour += 12;
@@ -942,7 +968,7 @@ class CalendarSync {
             // No checklist yet: the events go straight after the frontmatter
             const start = this.afterFrontmatter(lines);
             const tail = lines.slice(start);
-            const spacer = tail.some((l) => l.trim() !== "") ? [""] : [];
+            const spacer = tail.some((l) => l.trim() !== "") && tail[0].trim() !== "" ? [""] : [];
             return [...lines.slice(0, start), ...block, ...spacer, ...tail].join("\n");
         }
         let at = list.first;
@@ -982,8 +1008,9 @@ class CalendarSync {
     }
 
     // An entry's block: its exact first line, else an event line with the same start whose title
-    // reads the same (so a title you've turned into a link still matches). Never a claimed line.
-    findBlock(lines, entry, claimed = new Map()) {
+    // reads the same (so a title you've turned into a link still matches), else, for an insert
+    // only (`timeless`), a log's line with no time and the same title. Never a claimed line.
+    findBlock(lines, entry, claimed = new Map(), timeless = false) {
         const wanted = this.head(entry.lines[0]);
         // Claims count how many lines of that exact text are already taken, so two events that
         // render the same line each get their own
@@ -1007,6 +1034,8 @@ class CalendarSync {
                 const near = lines.filter((l) => sameStart(l) && this.head(l).title.startsWith(wanted.title));
                 if (new Set(near).size === 1) from = pick((l) => l === near[0]);
             }
+            // Only a line at the top level: one nested under a task belongs to that task
+            if (from === -1 && timeless) from = pick((l) => /^[-*+]/.test(l) && this.logLine(l)?.shown === wanted.title);
         }
         if (from === -1) return null;
         let to = from;
@@ -1029,6 +1058,21 @@ class CalendarSync {
         const match = line.match(/^\s*[-*+]\s+\[.\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
         if (!match) return null;
         return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2]).rest) };
+    }
+
+    // An event line with no time: `- [<] [[log|Title]]`, which the Log template writes for a
+    // meeting the calendar doesn't have (OBS-10). Sorts after the timed events.
+    timeless(line) {
+        return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);
+    }
+
+    // A timeless line whose title is a log link, taken apart like eventHead: { log, shown,
+    // projects, free }. Null for any other line.
+    logLine(line) {
+        if (!this.timeless(line)) return null;
+        const { rest, projects, free } = this.splitTail(line.replace(/^\s*[-*+]\s+\[<\]\s+/, ""));
+        const wrapped = rest.match(CalendarSync.LOG_LINK);
+        return wrapped ? { log: rest, shown: (wrapped[2] ?? wrapped[1]).trim(), projects, free } : null;
     }
 
     // MARK: what you add to an event line
@@ -1224,6 +1268,31 @@ class CalendarSync {
         if (lines[0]?.trim() !== "---") return 0;
         const close = lines.findIndex((l, i) => i > 0 && l.trim() === "---");
         return close === -1 ? 0 : close + 1;
+    }
+
+    // A linked log follows its line (OBS-10): once the sync has written a line whose title is a
+    // log link, the log's `time` and `endTime` are the line's start and end, so a log made before
+    // its event reached the calendar, or whose event was retimed or moved, says when the meeting
+    // is. An all-day event says nothing about time, and an event with no end line (it ends on
+    // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Returns
+    // whether the log changed; checking the cached frontmatter first keeps an unchanged log unread.
+    async fillLog(log, lines, date) {
+        const target = log.match(CalendarSync.LOG_LINK)?.[1]?.trim();
+        const start = this.head(lines[0])?.start;
+        if (!target || !start || start === "all day") return false;
+        const file = app.metadataCache?.getFirstLinkpathDest?.(target, this.dailyPath(date));
+        if (!file || !app.fileManager?.processFrontMatter) return false;
+        const clean = (t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
+        const time = clean(start);
+        const end = (lines[1] ?? "").match(/^\s+[-*+]\s+(\d{1,2}:\d{2}\s?[ap]m)\s*$/i)?.[1];
+        const endTime = end === undefined ? undefined : clean(end);
+        const cached = app.metadataCache.getFileCache?.(file)?.frontmatter ?? {};
+        if (clean(cached.time) === time && (endTime === undefined || clean(cached.endTime) === endTime)) return false;
+        await app.fileManager.processFrontMatter(file, (front) => {
+            front.time = time;
+            if (endTime !== undefined) front.endTime = endTime;
+        });
+        return true;
     }
 
     // MARK: notes, files, folds

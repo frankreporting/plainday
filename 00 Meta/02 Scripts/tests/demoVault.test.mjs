@@ -9,6 +9,7 @@ import { test as baseTest } from "node:test";
 import fs from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import vm from "node:vm";
 import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
 
 // Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
@@ -196,18 +197,28 @@ test("demo vault: 🔗, ⭕, meeting log and property links all resolve", () => 
     assert.ok(checked > 50);
 });
 
-test("demo vault: meeting logs' time and endTime match the event lines that link them", () => {
-    const eventTimes = createRequire(import.meta.url)("../Templater/eventTimes.js");
+test("demo vault: every meeting log has its line in its daily note, and its time and endTime match that line", () => {
+    const require = createRequire(import.meta.url);
+    const eventTimes = require("../Templater/eventTimes.js");
+    const recordEvent = require("../Templater/recordEvent.js");
+    const code = fs.readFileSync(new URL("../CustomJS/calendarSync.js", import.meta.url), "utf8");
+    const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, customJS: {}, console })))();
     const logs = demoNotes.filter((p) => tagsOf(p).includes("log"));
     assert.ok(logs.length >= 3);
+    let timeless = 0;
     for (const p of logs) {
         const { fm } = vault.notes.get(p);
         assert.equal(dirname(p).split("/").pop(), "logs", `${p} is in a logs folder`);
         const day = vault.notes.get(`${DAYS}/${fm.date}.md`);
         assert.ok(day, `${p}: no daily note for ${fm.date}`);
         assert.equal(basename(p).slice(0, 10), fm.date);
-        assert.deepEqual(eventTimes(day.text, basename(p)), { time: fm.time, endTime: fm.endTime }, p);
+        // The line is there (OBS-10): recording the log again changes nothing
+        assert.equal(recordEvent(day.text, { log: basename(p), title: basename(p).slice(11) }, sync).outcome, "present", `${p} has no line in ${fm.date}`);
+        const times = eventTimes(day.text, basename(p));
+        if (times) assert.deepEqual(times, { time: fm.time, endTime: fm.endTime }, p);
+        else { assert.deepEqual({ time: fm.time, endTime: fm.endTime }, { time: null, endTime: null }, `${p}: its line has no time`); timeless++; }
     }
+    assert.equal(timeless, 1, "one sample log shows a meeting the calendar didn't have");
 });
 
 test("demo vault: daily notes carry only their M/D/YY dddd alias", () => {

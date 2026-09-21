@@ -75,7 +75,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `36 Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `36 Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `36 Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: asks for the project or area and files it in that folder's `logs/` (Esc: Inbox); fills `area`, `date`, `time`, `endTime` (from the calendar event line that links to it), `who` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: asks for the project or area and files it in that folder's `logs/` (Esc: Inbox); records the log in its daily note (the event line with that title links to it, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note filed in the chosen project or area (Esc: Inbox); dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
@@ -93,7 +93,7 @@ Other templates, inserted with Templater:
 | Custom PDF | Frontmatter for PDF export (Enhancing Export) |
 | Autonote - Empty Note | Empty note for notes created by other tools; moved to the Inbox |
 
-Templater user scripts (`00 Meta/02 Scripts/Templater/`): `pickParent` (area/project picker), `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line).
+Templater user scripts (`00 Meta/02 Scripts/Templater/`): `pickParent` (area/project picker), `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line), `recordEvent` (a new log's line in its daily note).
 
 ## Daily notes
 
@@ -108,6 +108,7 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 	- 5:00pm
 - [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
 	- 4:30pm: 🆓 not billing this one
+- [<] [[2026-09-15 Printer call|Printer call]]
 - [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🔗]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
@@ -117,7 +118,7 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 ```
 
 - **Markers:** `[<]` event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled.
-- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times. **An event that has ended counts** from its start to that end line, like a time entry, on the project its line points to or else as Unassigned (the standup above is 30 minutes Unassigned). Time entries typed under an event are its time instead, and its end line is then ignored (the kickoff call counts 45 minutes). A busy event with no end line under it is listed under Problems; one you skipped, mark `[-]` by hand. The end line takes a note after a colon like an entry: `- 4:30pm: 🆓 not billing this one`.
+- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times. **An event that has ended counts** from its start to that end line, like a time entry, on the project its line points to or else as Unassigned (the standup above is 30 minutes Unassigned). Time entries typed under an event are its time instead, and its end line is then ignored (the kickoff call counts 45 minutes). A busy event with no end line under it is listed under Problems; one you skipped, mark `[-]` by hand. The end line takes a note after a colon like an entry: `- 4:30pm: 🆓 not billing this one`. A log for a meeting the calendar doesn't have gets a `[<]` line with no time, after the timed events (or links one you typed yourself); if the event turns up later, the sync adopts that line and gives it, and the log, its times.
 - **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended is checked: work logged during it is an overlap under Problems.
 - **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
 - **🆓 on the line:** 🆓 as a word of its own on a task or event line makes every entry under it 🆓 (a task worked on all day that you won't bill); on an entry, or after the end line's colon, it applies to that one. Both at once is still 🆓, and listed under Problems so a stray mark is never decided silently.
@@ -136,7 +137,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | AddProjectLink | `⌥⌘P` | On a task or event line, picks a project or area from the same menu and links it at the end of the line as `[[Project\|⭕]]` or `[[Area\|🗃️]]`, for tying the line's time to a project when the task needs no note of its own; then puts the cursor after the checkbox. A ⭕ or 🗃️ the line already has is replaced: one per line. With a 🔗 task note on the line, or a meeting log linked from an event's title, the note is moved into the picked project instead (a log into its `logs/`) and no ⭕ is added: without asking when the note has no project or area yet, after a confirm when it's leaving one (its project is shared by every line that links it); a note already there needs nothing, and if the picked project already has a note of the same name the line is pointed at that one instead. Esc cancels |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
-| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, a 🆓, log links, a note after the end time and time entries added to them); marks canceled events `[-]` and free events ℹ️; writes no end line for a timed event that ends on another day, unless it only runs past midnight; maps recurring series to projects from the Calendar Sync note |
+| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, a 🆓, log links, a note after the end time and time entries added to them); adopts a log's line that has no time yet, and gives a linked log the line's `time` and `endTime` whenever it writes the line; marks canceled events `[-]` and free events ℹ️; writes no end line for a timed event that ends on another day, unless it only runs past midnight; maps recurring series to projects from the Calendar Sync note |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
 | TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes, counting time entries and ended busy events alike (each rounded up to 15 minutes); lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |

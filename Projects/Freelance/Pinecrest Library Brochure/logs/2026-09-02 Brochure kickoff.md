@@ -1,7 +1,6 @@
 ---
 id: 2026090209582741
 aliases: 
-- Brochure kickoff
 - 9/2/26 Brochure kickoff
 tags: log
 area: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
