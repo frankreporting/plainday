@@ -269,6 +269,132 @@ test("overlaps are found across midnight", () => {
     assert.deepEqual(plain(model.problems.map((p) => [p.date, p.kind])), [["2024-12-10", "overlap"]]);
 });
 
+// ------------------------------------------------------------------ events: free and busy (OBS-47)
+
+const overlaps = (model) => plain(model.problems.filter((p) => p.kind === "overlap").map((p) => [p.date, p.line, p.text, p.message]));
+const D = "2026-09-15";
+
+test("parseNote: a timed event line is read with its end line, its free mark and whether it has entries", () => {
+    const { events, entries } = entriesOf([
+        "- [<] All day\tFarmers market",
+        "- [<] 2:00pm\tDelivery window ℹ️ [[Household|⭕]]",
+        "\t- 4:00pm",
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:00am - 9:20am",
+        "\t- 9:30am",
+        "- [<] 11:00pm\tRed-eye check-in",
+        "\t- 1:00am",
+        "- [<] 5:00pm\tNo end line",
+        "- [-] 3:00pm\tCanceled",
+        "\t- 3:30pm",
+    ].join("\n"), D);
+    assert.deepEqual(events.map((e) => [e.line, e.start, e.end, e.free, e.ranges, e.text]), [
+        [2, 840, 960, true, false, "- [<] 2:00pm Delivery window ℹ️ [[Household|⭕]]"],
+        [4, 540, 570, false, true, "- [<] 9:00am Standup [[Orchard Lane Web 2026|⭕]]"],
+        [7, 1380, 1440 + 60, false, false, "- [<] 11:00pm Red-eye check-in"],
+        [9, 1020, null, false, false, "- [<] 5:00pm No end line"],
+    ]);
+    // The end line is still not an entry, and the entry under the standup counts as always
+    assert.deepEqual(entries.map((e) => [e.line, e.minutes]), [[5, 20]]);
+});
+
+test("freeEvent and taskText: ℹ️ after the title, with or without U+FE0F, before ⭕ links; never in table text", () => {
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window ℹ️"), true);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window ℹ [[Household|⭕]]"), true);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tℹ️ Delivery window"), false);
+    assert.equal(tr.freeEvent("[<] 2:00pm\tDelivery window"), false);
+    assert.equal(tr.taskText("[<] 2:00pm\tDelivery window ℹ️ [[Household|⭕]]"), "Delivery window");
+    assert.equal(tr.taskText("[<] 2:00pm\t[[2026-09-15 Flight|Flight]] ℹ️"), "Flight");
+});
+
+test("a busy event that has ended overlaps a typed entry, and another busy event; the totals don't change", () => {
+    const model = tr.build([note(D, [
+        "- [<] 2:00pm\tClient call [[Orchard Lane Web 2026|⭕]]",
+        "\t- 3:00pm",
+        "- [<] 2:30pm\tDentist",
+        "\t- 3:15pm",
+        "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
+        "\t- 2:45pm - 4:00pm",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(overlaps(model), [
+        [D, 3, "- [<] 2:30pm Dentist", "overlaps the event 2:00pm - 3:00pm (line 1)"],
+        [D, 6, "- 2:45pm - 4:00pm", "overlaps the event 2:30pm - 3:15pm (line 3)"],
+    ]);
+    // The event's project is where its overlap is listed; the entry's overlap names both
+    assert.deepEqual(plain(model.problems.map((p) => p.projects)), [[null, ORCHARD_WEB], [ORCHARD_WEB, null]]);
+    assert.deepEqual(plain(model.entries.map((e) => e.minutes)), [75]);
+});
+
+test("a free event never overlaps: free × busy, free × free, free × a typed entry, and an entry typed under it still counts", () => {
+    const model = tr.build([note(D, [
+        "- [<] 2:00pm\tDelivery window ℹ️",
+        "\t- 4:00pm",
+        "- [<] 2:00pm\tClient call [[Orchard Lane Web 2026|⭕]]",
+        "\t- 3:00pm",
+        "- [<] 2:30pm\tSchool pickup ℹ️ [[Household|⭕]]",
+        "\t- 3:30pm",
+        "- [<] 3:00pm\tOpen house ℹ️",
+        "\t- 3:15pm - 3:45pm: dropped by",
+        "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
+        "\t- 3:00pm - 4:00pm",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(overlaps(model), [[D, 8, "- 3:15pm - 3:45pm", "overlaps 3:00pm - 4:00pm (line 10)"]]);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[8, 30, "Open house"], [10, 60, "Charts"]]);
+});
+
+test("an event with time entries under it has no span of its own; without an end line, all day, canceled or forwarded, none either", () => {
+    const model = tr.build([note(D, [
+        "- [<] All day\tOffsite",
+        "- [<] 9:00am\tStandup",
+        "\t- 9:00am - 9:20am",
+        "\t- 9:30am",
+        "- [<] 9:10am\tNo end line",
+        "- [-] 9:00am\tCanceled",
+        "\t- 9:30am",
+        "- [>] [[2026-09-16|9/16]] 9:00am\tMoved",
+        "\t- 9:30am",
+        "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
+        "\t- 9:05am - 10:00am",
+    ].join("\n"))], INDEX);
+    // Only the typed entries overlap each other
+    assert.deepEqual(overlaps(model), [[D, 11, "- 9:05am - 10:00am", "overlaps 9:00am - 9:20am (line 3)"]]);
+});
+
+test("events overlap across midnight, unless free", () => {
+    const busy = tr.build([
+        note("2024-12-09", "- [<] 11:00pm\tRed-eye check-in\n\t- 1:00am"),
+        note("2024-12-10", "- [x] Early [[Orchard Lane Web 2026|⭕]]\n\t- 12:30am - 1:30am"),
+    ], INDEX);
+    assert.deepEqual(overlaps(busy), [["2024-12-10", 2, "- 12:30am - 1:30am", "overlaps the event 11:00pm - 1:00am (12/9/24 line 1)"]]);
+    const free = tr.build([
+        note("2024-12-09", "- [<] 11:00pm\tRed-eye check-in ℹ️\n\t- 1:00am"),
+        note("2024-12-10", "- [x] Early [[Orchard Lane Web 2026|⭕]]\n\t- 12:30am - 1:30am"),
+    ], INDEX);
+    assert.deepEqual(overlaps(free), []);
+    // An end before the start that isn't pm → am is no end at all
+    const odd = tr.build([note(D, "- [<] 9:00am\tOdd\n\t- 8:00am\n- [x] Charts\n\t- 8:30am - 9:30am")], INDEX);
+    assert.deepEqual(overlaps(odd), []);
+});
+
+test("an event that hasn't ended yet doesn't overlap anything (the sync writes days ahead)", () => {
+    const notes = [note(D, "- [<] 2:00pm\tClient call\n\t- 3:00pm\n- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 2:30pm - 3:30pm")];
+    assert.equal(overlaps(tr.build(notes, INDEX, { now: { date: D, minutes: 14 * 60 + 45 } })).length, 0);
+    assert.equal(overlaps(tr.build(notes, INDEX, { now: { date: D, minutes: 15 * 60 } })).length, 1);
+    assert.equal(overlaps(tr.build(notes, INDEX)).length, 1);
+});
+
+test("an event of an archived project overlaps live work but isn't reported on its own", () => {
+    const model = tr.build([note(D, [
+        "- [<] 2:00pm\tOld standup [[Kestrel Newsletter|⭕]]",
+        "\t- 3:00pm",
+        "- [<] 2:30pm\tOld review [[Kestrel Newsletter|⭕]]",
+        "\t- 3:30pm",
+        "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
+        "\t- 2:45pm - 4:00pm",
+    ].join("\n"))], INDEX);
+    assert.deepEqual(overlaps(model).map((p) => p[1]), [6]);
+});
+
 // ------------------------------------------------------------------ the report
 
 // Billing properties as they'd come from the project notes

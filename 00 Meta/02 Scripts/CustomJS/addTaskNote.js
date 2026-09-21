@@ -331,6 +331,13 @@ class AddTaskNote {
         const link = lineText.indexOf("[[", from);
         let to = link === -1 ? lineText.length : link;
         while (to > from && /\s/.test(lineText[to - 1])) to--;
+        // The calendar sync's free mark after an event's title (ℹ️, OBS-47) isn't part of the name:
+        // the link wraps the title and the mark stays after it, where the sync expects it
+        const mark = kind === "event" && lineText.slice(from, to).match(/\sℹ\uFE0F?$/u);
+        if (mark) {
+            to -= mark[0].length;
+            while (to > from && /\s/.test(lineText[to - 1])) to--;
+        }
         if (kind === "task" && /\[\[[^\]]*\|🔗\]\]/.test(lineText)) return { error: "This task already links a note" };
         if (to === from) return { error: kind === "event" ? "This event's title is already a link" : "No task text to name the note" };
         return { kind, mode: "text", from, to, name: lineText.slice(from, to) };

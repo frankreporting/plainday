@@ -24,6 +24,14 @@ class TimeReport {
     // looks like a time range is listed under Problems, never silently skipped. Frontmatter,
     // code blocks and %% / <!-- --> comments are skipped.
     //
+    // An event line (`- [<] 4:00pm⇥Title`) with the calendar sync's end time under it (`⇥- 4:30pm`)
+    // isn't counted as time, but a busy one that has ended is checked for overlaps against every
+    // entry and every other busy event (OBS-47). ℹ️ after the title, before its ⭕ links, marks
+    // an event the calendar says you're free during: not your time, so it's never counted and never
+    // overlaps anything. Time entries under an event replace its own span, so an event with entries
+    // can't overlap itself; typed under a free event, they count as always. All-day, canceled ([-])
+    // and forwarded ([>]) events have no span.
+    //
     // The project an entry belongs to, first match wins, looking at the task line and then the
     // lines it's nested under:
     //   1. a link to a project note (`[[Orchard Lane Web 2026|⭕]]`, or any alias);
@@ -75,6 +83,14 @@ class TimeReport {
     // An entry line up to where its end time goes: `\t- 9:00am - `
     static ENTRY_START = new RegExp(String.raw`^(\s*(?:[-*+]|\d+[.)])\s+)(${TimeReport.TIME})\s*[-–—]\s*`, "i");
     static OLD_EVENT = /^\d{1,2}:\d{2}\s?[ap]m\b/i;
+    // A timed event line's body, up to the tab before its title: `[<] 4:00pm⇥`
+    static EVENT_HEAD = new RegExp(String.raw`^\[<\]\s+(${TimeReport.TIME})\t`, "i");
+    // The calendar sync's end-time line under an event: `4:30pm` on its own
+    static END_LINE = new RegExp(String.raw`^(${TimeReport.TIME})$`, "i");
+    // The free mark at the end of an event's title; a phone may leave out the U+FE0F
+    static FREE_MARK = /(?:^|\s)ℹ️?$/u;
+    // 🔗, ⭕ and 🚩 links, which say nothing about what a line is
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🔗|⭕|🚩)[^\]]*\]\]/gu;
     static DATE_LINK = /^\d{4}-\d{2}(-\d{2})?$/;
     static SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -205,12 +221,20 @@ class TimeReport {
         return { kind: "text", body: t };
     }
 
-    // Reads one daily note. Returns { entries, problems }; each carries `context`, the task line
-    // and the lines it's nested under (nearest first), for working out its project later.
+    // Whether an event line's body carries the free mark after its title (its ⭕ links aside)
+    freeEvent(body) {
+        return TimeReport.FREE_MARK.test(body.replace(TimeReport.SYMBOL_LINK, "").trimEnd());
+    }
+
+    // Reads one daily note. Returns { entries, problems, events }; each carries `context`, the task
+    // line and the lines it's nested under (nearest first), for working out its project later.
+    // `events` are the timed event lines: { line, start, end (from the end-time line under it, or
+    // null), free, ranges (time entries under it), text }.
     parseNote(text, date) {
         const lines = this.lines(text);
         const entries = [];
         const problems = [];
+        const events = [];
         const { visible, hidden, starts, blocks, unclosed } = this.scan(lines);
         const problem = (i, kind, message, context = []) =>
             problems.push({ date, line: i + 1, kind, message, text: (visible[i].trim() || lines[i].trim()), context });
@@ -238,6 +262,22 @@ class TimeReport {
             stack.push(node);
 
             const timed = timedKinds.includes(node.kind);
+            // An event line, and what sits under it: its end-time line, or time entries in its place
+            const head = node.kind === "item" && node.box && node.body.match(TimeReport.EVENT_HEAD);
+            if (head) {
+                node.event = {
+                    date, line: i + 1, start: this.minutes(head[1]), startText: head[1], end: null, endText: null,
+                    free: this.freeEvent(node.body), ranges: false, text: raw.trim().replace(/\t+/g, " "),
+                    context: [node, ...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))].map((c) => ({ body: c.body, line: c.line + 1 })),
+                };
+                if (node.event.start !== null) events.push(node.event);
+            }
+            const under = ancestors.find((a) => a.event)?.event;
+            if (under && timed) under.ranges = true;
+            else if (under && ancestors[0].event && under.end === null && node.kind === "item" && !node.box && TimeReport.END_LINE.test(node.body)) {
+                under.end = this.minutes(node.body);
+                under.endText = node.body;
+            }
             if (width === 0) {
                 if (node.kind === "event") oldEvent = node;
                 else if (node.kind === "heading" || node.kind === "text" || node.box) oldEvent = null;
@@ -324,7 +364,14 @@ class TimeReport {
             if (anchored && context[0].body.includes("🆓")) problem(i, "free", "🆓 on the task line doesn't count; put it after the entry's colon", ctx);
             if (entry.minutes >= TimeReport.LONG_MINUTES) problem(i, "long", `is ${this.hours(entry.minutes)} hours long`, ctx);
         }
-        return { entries, problems };
+        // An event's end before its start runs past midnight when it reads pm → am; otherwise the
+        // end line isn't one, and the event has no span
+        for (const ev of events) {
+            if (ev.end === null || ev.end > ev.start) continue;
+            if (ev.end < ev.start && /pm$/i.test(ev.startText) && /am$/i.test(ev.endText)) ev.end += 1440;
+            else ev.end = null;
+        }
+        return { entries, problems, events };
     }
 
     // A task or event line as plain text for a table: no checkbox, event time, symbol links or
@@ -335,10 +382,12 @@ class TimeReport {
             .replace(/^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s*/, "")
             .replace(TimeReport.OLD_EVENT, "")
             .replace(/^all day\b/i, "")
-            .replace(/\[\[[^\]|]*\|\s*(?:🔗|⭕|🚩)[^\]]*\]\]/gu, "")
+            .replace(TimeReport.SYMBOL_LINK, "")
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
             .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1")
             .replace(/\s+/g, " ")
+            .trim()
+            .replace(TimeReport.FREE_MARK, "")
             .trim();
     }
 
@@ -477,10 +526,12 @@ class TimeReport {
     }
 
     // notes: [{ date: "YYYY-MM-DD", path, text }]. With `now` ({ date, minutes }), entries that haven't
-    // ended yet are left out; without it every entry counts.
+    // ended yet are left out, and events that haven't ended yet don't overlap anything; without it
+    // every entry counts.
     build(notes, index, { now = null } = {}) {
         const entries = [];
         const archived = [];     // entries whose only project is archived: out of the report, but still checked for overlaps
+        const events = [];       // every timed event line; busy ones that have ended join the overlap check
         const problems = [];
         // The first live project wins; an entry that only resolves to archived projects is archived work
         const place = (context, path) => {
@@ -502,12 +553,23 @@ class TimeReport {
                 p.projects = [where.project];
                 if (!where.archived) problems.push(p);
             }
+            for (const ev of parsed.events) {
+                ev.path = n.path;
+                const where = place(ev.context, n.path);
+                ev.project = where.project;
+                ev.archived = where.archived;
+                events.push(ev);
+            }
         }
 
-        // Overlaps, across every project and across midnight
+        // Overlaps, across every project and across midnight. A busy event that has ended, with the
+        // sync's end time under it and no time entries of its own, has a span like an entry's; a free
+        // one (ℹ️) never does.
         const day = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
-        const liveSet = new Set(entries);
-        const timeline = [...entries, ...archived].map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
+        const ended = (e) => !now || day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
+        const spans = events.filter((ev) => ev.end !== null && !ev.free && !ev.ranges && ended(ev));
+        const liveSet = new Set([...entries, ...spans.filter((ev) => !ev.archived)]);
+        const timeline = [...entries, ...archived, ...spans].map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
             .sort((a, b) => a.from - b.from || a.to - b.to);
         let latest = null;
         for (const t of timeline) {
@@ -516,8 +578,8 @@ class TimeReport {
                 const where = other.date === t.e.date ? `line ${other.line}` : `${this.shortDate(other.date)} line ${other.line}`;
                 problems.push({
                     date: t.e.date, line: t.e.line, path: t.e.path, kind: "overlap",
-                    message: `overlaps ${this.formatTime(other.start)} - ${this.formatTime(other.end)} (${where})`,
-                    text: `- ${this.formatTime(t.e.start)} - ${this.formatTime(t.e.end)}`,
+                    message: `overlaps ${other.startText ? "the event " : ""}${this.formatTime(other.start)} - ${this.formatTime(other.end)} (${where})`,
+                    text: t.e.startText ? t.e.text : `- ${this.formatTime(t.e.start)} - ${this.formatTime(t.e.end)}`,
                     projects: [t.e.project, other.project].filter(Boolean).length ? [t.e.project, other.project] : [null],
                 });
             }
@@ -626,7 +688,7 @@ class TimeReport {
         }
 
         problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
-        return { entries: counted, problems, parent, projectProblems, money };
+        return { entries: counted, problems, parent, projectProblems, money, events };
     }
 
     // A project and every project below it

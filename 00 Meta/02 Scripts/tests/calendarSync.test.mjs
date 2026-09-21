@@ -754,3 +754,102 @@ test("run: a series split with \"this and future events\" (a new series ID) rena
     await sync(moved, before);
     assert.equal(await sync(moved, [occ("S1", "Weekly sync", "2026-09-16"), occ("S2", "Studio sync", "2026-09-23", "11"), occ("S2", "Studio sync", "2026-09-30", "11")]), "Calendar sync: 2 added, 2 canceled");
 });
+
+// ------------------------------------------------------------------ free events (OBS-47)
+
+test("lines: a timed free event gets ℹ️ after its title; all-day, busy, tentative, unknown and an old events file don't", () => {
+    assert.deepEqual(plain(cs.lines(event({ availability: "free" }))), ["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"]);
+    assert.deepEqual(plain(cs.lines(event({ availability: "free", allDay: true }))), ["- [<] All day\tPlanning"]);
+    for (const availability of ["busy", "tentative", "unavailable", "unknown", undefined]) {
+        assert.deepEqual(plain(cs.lines(event({ availability }))), ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], String(availability));
+    }
+});
+
+test("splitTail and head: the mark and ⭕ links come off the end in either order, and don't change which line is meant", () => {
+    assert.deepEqual(plain(cs.splitTail("Planning ℹ️ [[Pinecone Studio|⭕]]")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true });
+    assert.deepEqual(plain(cs.splitTail("Planning [[Pinecone Studio|⭕]] ℹ")), { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true });
+    assert.deepEqual(plain(cs.splitTail("ℹ️")), { rest: "ℹ️", projects: [], free: false });
+    assert.deepEqual(plain(cs.splitTail("Planningℹ️")), { rest: "Planningℹ️", projects: [], free: false }, "no whitespace before it: part of the title");
+    assert.deepEqual(plain(cs.head("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]")), { start: "4:00pm", title: "Planning" });
+    const lines = note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm").split("\n");
+    assert.deepEqual(plain(cs.findBlock(lines, { lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] })), { from: 3, to: 4 });
+});
+
+test("run: busy → free → busy on an untouched line: the mark comes and goes, the report says so, the ledger carries it", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 updated");
+    assert.match(map.get(NOTE), /- 2026-09-16 Planning \(now free\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"));
+    assert.deepEqual(ledger(map).events.E1.lines, ["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"]);
+    assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, [event({ availability: "busy" })]), "Calendar sync: 1 updated");
+    assert.match(map.get(NOTE), /- 2026-09-16 Planning \(now busy\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: free → busy keeps the log link, the ⭕ and the time entry; the mark sits between the title and the links", async () => {
+    const map = vault();
+    await sync(map, [event({ availability: "free" })]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️\n\t- 4:30pm", "\t[[2026-09-16 Planning|Planning]] ℹ️ [[Pinecone Studio|⭕]]\n\t- 4:00pm - 4:30pm"));
+    assert.equal(await sync(map, [event({ availability: "free", title: "Planning call" })]), "Calendar sync: 1 updated");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\t[[2026-09-16 Planning|Planning call]] ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm"));
+    assert.equal(await sync(map, [event({ title: "Planning call" })]), "Calendar sync: 1 updated");
+    assert.match(map.get(NOTE), /Planning call \(now busy\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\t[[2026-09-16 Planning|Planning call]] [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm"));
+});
+
+test("run: the mark is the sync's: taken off or added by hand, the line is yours, and it's still found", async () => {
+    const map = vault();
+    await sync(map, [event({ availability: "free" })]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️", "\tPlanning"));
+    assert.equal(await sync(map, [event({ availability: "free", start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 left for you");
+    assert.match(map.get(NOTE), /this line is yours/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+
+    const map2 = vault();
+    await sync(map2, [event()]);
+    edit(map2, day("2026-09-16"), (t) => t.replace("\tPlanning", "\tPlanning ℹ️"));
+    assert.equal(await sync(map2, [event({ title: "Planning call" })]), "Calendar sync: 1 left for you");
+    assert.doesNotMatch(map2.get(NOTE), /you deleted/);
+});
+
+test("run: a free event that moves takes its mark along; a ledger from before this change gets the mark on its next run", async () => {
+    const map = vault();
+    await sync(map, [event({ availability: "free" })]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️", "\tPlanning ℹ️ [[Pinecone Studio|⭕]]"));
+    await sync(map, [event({ availability: "free", date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+
+    // A line written before the sync knew about availability, and its ledger entry
+    const old = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm") });
+    old.set(LEDGER, JSON.stringify({ version: 1, updatedAt: null, events: { E1: { ...ENTRY, projects: ["[[Pinecone Studio|⭕]]"] } }, dismissed: {} }));
+    assert.equal(await sync(old, [event({ availability: "free" })]), "Calendar sync: 1 updated");
+    assert.match(old.get(NOTE), /Planning \(now free\)/);
+    assert.equal(body(old.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+});
+
+test("run: a first run adopts a hand-written or older line and gives a free event its mark", async () => {
+    const map = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm") });
+    assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 adopted");
+    assert.match(map.get(NOTE), /Planning \(now free\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    // And a busy one adopting a line that has the mark by hand: the mark comes off
+    const map2 = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm") });
+    assert.equal(await sync(map2, [event()]), "Calendar sync: 1 adopted");
+    assert.match(map2.get(NOTE), /Planning \(now busy\)/);
+    assert.equal(body(map2.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: adopting a line whose end line a time entry replaced changes only the mark, and writes no end line back", async () => {
+    // A first run (no ledger): the line is in the sync's shape but for the entry in place of the end
+    const map = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm") });
+    assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 adopted");
+    assert.match(map.get(NOTE), /Planning \(now free\)/);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
+    // Deleted, then made again with a new ID as busy: the [-] line is revived and the mark comes off
+    await sync(map, []);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
+    assert.equal(await sync(map, [event({ key: "E2", id: "E2" })]), "Calendar sync: 1 adopted");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+});

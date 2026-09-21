@@ -97,6 +97,10 @@ test("target: on an event line the time is skipped and the title is used", () =>
     assert.equal(t(ev, 16).name, "Design review", "cursor in the title");
     assert.equal(t("- [<] all day\tConference", 7).name, "Conference");
     assert.equal(t("- [<] 11:30 AM Budget call", 8).name, "Budget call", "spaced, uppercase time");
+    // A free event's mark (OBS-47) stays outside the link, so the sync still reads the line
+    assert.deepEqual(t("- [<] 2:00pm\tDelivery window ℹ️ [[Hawk Ledger|⭕]]", 8), { kind: "event", mode: "text", from: "- [<] 2:00pm\t".length, to: "- [<] 2:00pm\tDelivery window".length, name: "Delivery window" });
+    assert.equal(t("- [<] 2:00pm\tDelivery window ℹ", 16).name, "Delivery window", "without U+FE0F");
+    assert.equal(t("- [<] 2:00pm\tℹ️", 8).name, "ℹ️", "a title that is only the mark");
     assert.deepEqual(t("- [<] all day\tConference", "- [<] all day\tConference".length), { kind: "event", mode: "blank" });
     assert.ok(t("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", 8).error, "title already a log link");
 });

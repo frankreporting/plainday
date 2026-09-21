@@ -1,5 +1,5 @@
 // Reads macOS Calendar with EventKit and writes every calendar and event the Obsidian sync might
-// want, as JSON. It makes no choices: which calendars count is ticked in the vault's Calendar Sync
+// want, as JSON, each event with its status and its Show As availability (busy or free). It makes no choices: which calendars count is ticked in the vault's Calendar Sync
 // note, and the note lines are formatted by the SyncCalendar command. Keeping this dumb means a
 // Google-API fetcher can produce the same file later without changing anything downstream.
 //
@@ -97,6 +97,9 @@ guard let lastDay = day.date(byAdding: .day, value: days, to: windowStart),
       let windowEnd = day.date(byAdding: .day, value: 1, to: day.startOfDay(for: lastDay)) else { fail("can't work out the window") }
 
 let statusNames = ["none", "confirmed", "tentative", "canceled"]
+// Show As in Calendar: whether the event takes your time. EKEventAvailability's notSupported (-1)
+// is what Birthdays and subscribed calendars report; the sync treats it, and tentative, as busy
+let availabilityNames = ["busy", "free", "tentative", "unavailable"]
 // An event belongs to the day it starts on, so anything that began before today is already past
 let events = store.events(matching: store.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: calendars))
     .filter { $0.startDate >= windowStart && $0.startDate < windowEnd }
@@ -120,6 +123,7 @@ let events = store.events(matching: store.predicateForEvents(withStart: windowSt
             "allDay": event.isAllDay,
             "recurring": event.hasRecurrenceRules,
             "status": statusNames[min(max(event.status.rawValue, 0), 3)],
+            "availability": event.availability.rawValue < 0 ? "unknown" : availabilityNames[min(event.availability.rawValue, 3)],
         ]
     }
 

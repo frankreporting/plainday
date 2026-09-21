@@ -104,6 +104,8 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 	- 9:30am
 - [<] 1:30pm	[[2026-09-15 Kickoff call|Kickoff call]] [[Kestrel Outfitters 2026|⭕]]
 	- 1:30pm - 2:15pm
+- [<] 3:00pm	Delivery window ℹ️
+	- 5:00pm
 - [ ] Draft the proposal [[Draft the proposal|🔗]] [[2026-09-18|🚩 9/18]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
@@ -112,6 +114,7 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 
 - **Markers:** `[<]` event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled.
 - **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times.
+- **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended, with its end time still under it, is checked: work logged during it is an overlap under Problems. Time entries typed under an event replace its span, and count as always.
 - **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
 - **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🚩 M/D` its due date.
 - **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned.
@@ -127,7 +130,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | AddTaskNote | ``⌥⌘` `` | Links the selected task name to its task note, creating the note through the Task template (asking for its project or area) if it doesn't exist, then puts the cursor after the checkbox. The name is the selection or, with nothing selected and text after the cursor, the task's text up to its first link (the 🔗 link then ends the line). A date in the name becomes the note's `due` and is removed from the line. The line's ⭕ project links decide where the note goes: one project files a new note, or moves an existing note that has no project, there without asking; several bring up the menu with the line's projects first. An existing note's `area` is set from its folder, and the Task template writes `area` on new notes. Once the note sits in one of the line's projects, or you picked from several, the ⭕ links are removed. An existing note in a different project keeps the ⭕ link, and TimeReport lists that conflict on both projects. With only whitespace after the cursor, inserts an empty link to type into. On an event line, links a meeting log for the selection or the title after the event's time |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
-| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, log links and time entries added to them); marks canceled events `[-]`; maps recurring series to projects from the Calendar Sync note |
+| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, log links and time entries added to them); marks canceled events `[-]` and free events ℹ️; maps recurring series to projects from the Calendar Sync note |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
 | TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes; lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
@@ -146,7 +149,7 @@ Startup scripts (run when Obsidian starts):
 
 | Script | What it does |
 | --- | --- |
-| `02 Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`; *CalendarSync* runs it |
+| `02 Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`, each event with its status and its free/busy availability; *CalendarSync* runs it |
 | `02 Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
 | `02 Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
 
