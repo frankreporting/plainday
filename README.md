@@ -160,6 +160,10 @@ Startup scripts (run when Obsidian starts):
 | `02 Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
 | `02 Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
 
+## Raycast
+
+[Obsidian PM for Raycast](https://github.com/frankreporting/obsidian-pm-raycast), a separate extension, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with this vault's own `timeReport.js`, the logic behind ⌘T.
+
 ## Tests
 
 From the vault root, with Node 20 or later:
