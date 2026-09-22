@@ -71,8 +71,9 @@ class RefoldDailyNotes {
         this.remember(view.file, view.getViewData(), view.currentMode.getFoldInfo?.()?.folds ?? []);
     }
 
-    // Returns true if the note's folds changed. `mode` is "open" (a note being opened), "sync"
-    // (the command after SnapshotDailyNotes) or "command" (the command on its own).
+    // Returns true if the note's folds changed; in "sync" and "command" an open editor gets its folds
+    // again either way. `mode` is "open" (a note being opened), "sync" (the command after
+    // SnapshotDailyNotes) or "command" (the command on its own).
     async refold(file, mode) {
         const text = await app.vault.read(file);
         const lines = text.split("\n");
@@ -124,12 +125,20 @@ class RefoldDailyNotes {
         // no record) and, for an open note, the editor already shows it
         const key = (fs) => JSON.stringify(fs.map((f) => [f.from, f.to]).sort((a, b) => a[0] - b[0]));
         const recordOk = folds.length ? savedOk && key(saved.folds) === key(folds) : !saved;
-        if (recordOk && (!editor || key(shown.folds) === key(folds))) return false;
+        const changed = !(recordOk && (!editor || key(shown.folds) === key(folds)));
+        if (!changed && !editor) return false;
 
+        // An open editor gets its folds again even when its lines already match (OBS-64): an
+        // outside edit that adds text to the last line inside a fold leaves the fold ending where
+        // that line used to end, so the new text shows beside the folded item, while getFoldInfo
+        // still reports the same lines. Cleared first, which is how the fix was verified.
         const info = { folds, lines: lines.length };
-        app.foldManager.save(file, info);
-        for (const view of ready) view.currentMode.applyFoldInfo?.(info);
-        return true;
+        if (changed) app.foldManager.save(file, info);
+        for (const view of ready) {
+            view.currentMode.applyFoldInfo?.({ folds: [], lines: lines.length });
+            view.currentMode.applyFoldInfo?.(info);
+        }
+        return changed;
     }
 
     // Whether every item sits on the line, with the text, the snapshot saw it
