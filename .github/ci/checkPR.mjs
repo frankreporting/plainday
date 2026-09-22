@@ -2,7 +2,9 @@
 //
 // - Linear link: the body names its issue as `Closes OBS-N`, `Fixes OBS-N`, `Resolves OBS-N`
 //   or `Part of OBS-N`. A branch named `<user>/obs-N-<slug>` closes OBS-N on merge by itself, so
-//   its body must close the same issue, not another one and not just "Part of".
+//   its body must close the same issue, not another one and not just "Part of". A PR for a cluster
+//   of issues lists them after one keyword (`Closes OBS-65, OBS-66` or `… OBS-65 and OBS-66`),
+//   the way Linear reads it, and every issue in the list counts.
 // - Docs gate: when system files change (CustomJS, Templater, the templates, the calendar
 //   scripts), the PR either changes README.md or has a `## Docs` section saying why the README
 //   needs nothing. Either way that section must have a `My Obsidian Setup:` line listing the
@@ -20,7 +22,8 @@ export const SYSTEM_DIRS = [
     "00 Meta/01 Templates/",
 ];
 
-const LINK = /\b(Closes|Fixes|Resolves|Part of)\s+OBS-(\d+)\b/gi;
+// A keyword and the issues after it: `Closes OBS-65, OBS-66 and OBS-67`
+const LINK = /\b(Closes|Fixes|Resolves|Part of)\s+(OBS-\d+\b(?:\s*(?:,|,?\s+and\b|&)\s*OBS-\d+\b)*)/gi;
 
 // The text under a `## Docs` heading (any level, case-insensitive), up to the next heading of
 // the same or a higher level; null when there is none.
@@ -40,7 +43,8 @@ export function docsSection(body) {
 
 export function checkLinearLink({ body, branch }) {
     const problems = [];
-    const links = [...(body ?? "").matchAll(LINK)].map((m) => ({ word: m[1].toLowerCase(), n: Number(m[2]) }));
+    const links = [...(body ?? "").matchAll(LINK)].flatMap((m) =>
+        [...m[2].matchAll(/OBS-(\d+)/gi)].map((i) => ({ word: m[1].toLowerCase(), n: Number(i[1]) })));
     const branchIssue = /(?:^|\/)obs-(\d+)(?:-|$)/i.exec(branch ?? "")?.[1];
     if (!links.length) {
         problems.push("PR body doesn't link a Linear issue: add `Closes OBS-N` (or `Part of OBS-N` for a PR that doesn't finish the issue)");

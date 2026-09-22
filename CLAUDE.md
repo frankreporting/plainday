@@ -25,13 +25,20 @@ For reading notes, `grep` on the markdown files is often faster.
   - Checks against a real vault's data go in `*.private.test.mjs` files with `*.private.json` fixtures, which git ignores.
 - **Docs:** a change a user would notice updates `README.md` in the same PR, and the sample notes too if they should show it. Before opening the PR, read each README section that names a changed script against the diff and fix what no longer matches: CI checks that the docs were touched, not that they are right.
 - **CI (`.github/workflows/ci.yml`)** runs on every PR and must be green before a merge. It runs the tests, loads every CustomJS class and Templater script the way the plugins do, checks the tracked JSON, scans the diff, commits, title, body and branch name for the patterns the "Privacy" rule names, and checks the PR body:
-  - it links its Linear issue (`Closes OBS-N`, or `Part of OBS-N`; see below), and
+  - it links its Linear issue (`Closes OBS-N`, a list such as `Closes OBS-N, OBS-M`, or `Part of OBS-N`; see below), and
   - when files under `CustomJS/`, `Templater/`, `Calendar/` or `01 Templates/` change, it has a `## Docs` section with a `My Obsidian Setup:` line (the sections changed in that untracked note, or `none`) and, unless `README.md` changes too, a sentence on why the README needs nothing.
   - The checks are plain Node scripts in `.github/ci/`; run one locally with the environment variables its header names, and `node --test .github/ci/*.test.mjs` tests them.
 - **Issues:** issues are tracked in Linear, not GitHub.
   - A branch named `<user>/obs-N-<slug>` and a `Closes OBS-N` line in the PR description link the PR and close the issue when it merges.
   - `Part of OBS-N` links without closing. Put a PR like that on a branch without `obs-N` in its name, since the branch name alone would close the issue.
   - Don't set Linear statuses by hand.
+  - **Clusters:** an agent working on an issue may take on a linked issue in the same PR when that saves real work. Review and the one-at-a-time dev vault are the slow part, not building, so a bigger PR only helps when it replaces two of them. All of these must hold, or the issue is left alone and named in the PR as a possible follow-up:
+    1. **Same code:** it changes the same script or function, so doing it separately would redo or conflict with this work. A "related" link on its own isn't enough.
+    2. **Nothing to decide:** it has no open questions left for the maintainer.
+    3. **Free:** it isn't In Progress, assigned or delegated to someone else, and no open PR or branch names it or changes the same files.
+    4. **One sitting:** the combined test plan still fits in one test round.
+    5. **Said first:** a comment on each issue says it's joining the cluster, and why, before the work starts.
+  - A cluster's PR closes every issue in one line, `Closes OBS-65, OBS-66` (CI reads the list), and its branch carries only the main issue's number.
 - **After a merge:** pull the change into this folder (`dev-vault.sh done` does, if a test was in progress), then install it in any vault that uses the system with the **UpdateObsidianPM** command (see README). The command refuses unless the clone is on `main` with a clean tree, so a half-tested branch can't be installed. A personal vault is never a git copy of this repository, because the sample notes' paths would collide with real notes. `CLAUDE.local.md` has the rest of the close-out, if there is any.
 
 ## Sample notes

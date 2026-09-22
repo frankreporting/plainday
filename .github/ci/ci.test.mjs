@@ -120,6 +120,17 @@ test("Linear link: a closing line matching the branch's issue", () => {
     assert.deepEqual(checkLinearLink({ body: "Closes OBS-21", branch: "someone/obs-210-other" }).length, 1);
 });
 
+test("Linear link: a cluster lists its issues after one keyword", () => {
+    for (const body of ["Closes OBS-65, OBS-66", "Closes OBS-65,OBS-66", "Closes OBS-65 and OBS-66", "Closes OBS-64, OBS-65, and OBS-66", "Fixes OBS-65 & OBS-66"]) {
+        assert.deepEqual(checkLinearLink({ body, branch: "someone/obs-66-due" }), [], body);
+    }
+    assert.deepEqual(checkLinearLink({ body: "Closes OBS-65\nCloses OBS-66", branch: "someone/obs-66-due" }), []);
+    // A list ends at anything that isn't another issue
+    assert.match(checkLinearLink({ body: "Closes OBS-65, see OBS-66", branch: "someone/obs-66-due" })[0], /Closes OBS-66/);
+    // "Part of" a list still doesn't close the branch's issue
+    assert.match(checkLinearLink({ body: "Part of OBS-65, OBS-66", branch: "someone/obs-66-due" })[0], /Part of/);
+});
+
 test("docs gate: only system changes need it; README or a Docs section; the setup line always", () => {
     const script = ["00 Meta/02 Scripts/CustomJS/plan.js"];
     assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "00 Meta/04 Bases/Projects.base"] }), []);
