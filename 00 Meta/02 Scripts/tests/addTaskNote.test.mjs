@@ -215,3 +215,46 @@ test("linktextFor: the note's name, or its path only when another note really sh
     assert.equal(add.linktextFor(note, [note.path, "Projects/Other/Check the numbers 1.md"]), "Check the numbers", "a numbered copy isn't a clash");
     assert.equal(add.linktextFor(note, [note.path]), "Check the numbers");
 });
+
+test("confirmMove: rows read Task, From and To, and Enter moves", async () => {
+    // A Modal and elements just real enough to lay the prompt out and press its buttons
+    const el = () => {
+        const e = { children: [], text: undefined };
+        e.createEl = (tag, o = {}) => { const c = el(); c.tag = tag; c.text = o.text; e.children.push(c); return c; };
+        e.createDiv = () => e.createEl("div");
+        return e;
+    };
+    let keys;
+    class Modal {
+        constructor() { this.titleEl = { setText: (t) => { this.title = t; } }; this.contentEl = el(); keys = {}; this.scope = { register: (m, k, fn) => { keys[k] = fn; } }; }
+        onOpen() {}
+        open() { opened = this; this.onOpen(); }
+        close() { this.onClose(); }
+    }
+    class ButtonComponent {
+        constructor() { this.buttonEl = { focus() {} }; }
+        setButtonText() { return this; }
+        setCta() { return this; }
+        onClick() { return this; }
+    }
+    let opened;
+    const Cls = vm.runInContext(
+        fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+        vm.createContext({ app: {}, customJS: { obsidian: { Modal, ButtonComponent } }, requestAnimationFrame: () => {}, setTimeout }),
+    );
+    const helper = new Cls();
+    helper.isArea = (f) => f.basename === "Household";
+    const rowsOf = () => opened.contentEl.children[0].children.map((tr) => tr.children.map((td) => td.text));
+
+    const task = helper.confirmMove({ basename: "Renew online", parent: { name: "Household" } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
+    assert.equal(opened.title, "Move task note?");
+    assert.deepEqual(rowsOf(), [["Task", "Renew online"], ["From", "🗃️ Household"], ["To", "⭕ Garden Club Newsletter"]]);
+    keys.Enter();
+    assert.equal(await task, "move");
+
+    const log = helper.confirmMove({ basename: "2026-09-18 Printer call", parent: { name: "logs" } }, { basename: "Garden Club Newsletter" }, { basename: "Household" });
+    assert.equal(opened.title, "Move log?");
+    assert.deepEqual(rowsOf(), [["Log", "2026-09-18 Printer call"], ["From", "⭕ Garden Club Newsletter"], ["To", "🗃️ Household"]]);
+    opened.close();
+    assert.equal(await log, null, "Esc (a close with no choice) leaves it");
+});

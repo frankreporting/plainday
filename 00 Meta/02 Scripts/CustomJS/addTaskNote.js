@@ -177,22 +177,25 @@ class AddTaskNote {
     }
 
     // Asks whether to move `note` from the project or area `from` into `to`. Resolves to "move",
-    // "leave", or null when dismissed (Esc). Enter moves. Laid out as facts, not a sentence: the
-    // note, the move as `🗃️ from → ⭕ to`, and one line on its time entries. The buttons follow
-    // the arrow's order: Leave it, then Move.
+    // "leave", or null when dismissed (Esc). Enter moves. Laid out as facts, not a sentence: a
+    // Task (or Log), From and To row, each project or area with its 🗃️ or ⭕, then one line on its
+    // time entries. The buttons follow the rows' order: Leave it, then Move.
     confirmMove(note, from, to) {
         const { Modal, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
             let choice = null;
             const modal = new (class extends Modal {
                 onClose() { setTimeout(() => resolve(choice), 0); }
+                // Move is the default: focused, so Enter or Space takes it; Tab reaches Leave it.
+                // Focused once the modal is open, not straight after open() (OBS-50)
+                onOpen() { requestAnimationFrame(() => move.buttonEl.focus()); }
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
             const log = note.parent?.name === "logs";
             const mark = (f) => `${this.isArea(f) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${f.basename}`;
             modal.titleEl.setText(log ? "Move log?" : "Move task note?");
             const rows = modal.contentEl.createEl("table", { attr: { style: "border-collapse: collapse; margin-bottom: 0.75em;" } });
-            for (const [k, v] of [[log ? "Log" : "Task", note.basename], ["Move", `${mark(from)}  \u2192  ${mark(to)}`]]) {
+            for (const [k, v] of [[log ? "Log" : "Task", note.basename], ["From", mark(from)], ["To", mark(to)]]) {
                 const tr = rows.createEl("tr");
                 tr.createEl("td", { text: k, attr: { style: "padding: 0.15em 1em 0.15em 0; color: var(--text-muted); white-space: nowrap;" } });
                 tr.createEl("td", { text: v, attr: { style: "padding: 0.15em 0; font-weight: var(--font-semibold);" } });
@@ -203,8 +206,6 @@ class AddTaskNote {
             const move = new ButtonComponent(row).setButtonText("Move").setCta().onClick(() => pick("move"));
             modal.scope.register([], "Enter", () => { pick("move"); return false; });
             modal.open();
-            // Move is the default: focused, so Enter or Space takes it; Tab reaches Leave it
-            move.buttonEl.focus();
         });
     }
 

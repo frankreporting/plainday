@@ -71,8 +71,9 @@ class DueDate {
             }, 50);
         });
 
+        // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
+        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
+        modal.onOpen = () => requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); });
         modal.open();
-        input.inputEl.focus();
-        input.inputEl.select();
     }
 }

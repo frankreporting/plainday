@@ -141,8 +141,10 @@ class Schedule {
                 new Notice("Couldn't write to the daily note — check console");
             }
         });
+        // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
+        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
+        modal.onOpen = () => requestAnimationFrame(() => input.inputEl.focus());
         modal.open();
-        input.inputEl.focus();
     }
 
     dailyOpts() {

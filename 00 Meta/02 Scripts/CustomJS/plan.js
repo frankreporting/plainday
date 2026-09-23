@@ -24,8 +24,10 @@ class Plan {
         }
         modal.scope.register([], "Enter", () => { run(Number(dropdown.getValue())); return false; });
 
+        // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
+        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
+        modal.onOpen = () => requestAnimationFrame(() => dropdown.selectEl.focus());
         modal.open();
-        dropdown.selectEl.focus();
     }
 
     async openDays(days) {
