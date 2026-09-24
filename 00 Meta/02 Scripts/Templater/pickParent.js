@@ -24,6 +24,8 @@ async function pickParent(tp, keepFolder, prompt) {
     // A command that already knows the parent hands it over for the one note it's creating, and the
     // menu is skipped for that note only (AddTaskNote, from the project linked on the task line)
     const preset = globalThis.customJS?.AddTaskNote?.takePresetParent?.(tp.config?.target_file?.path);
+    // "inbox": use the template's fallback folder without asking (Raycast's Open Log Note)
+    if (preset === "inbox") return null;
     if (preset) return preset;
     const candidates = app.vault.getMarkdownFiles()
         .filter((f) => {

@@ -193,6 +193,9 @@ test("pickParent: skips the menu for the preset note only, and shows it for ever
     const withPreset = load({ AddTaskNote: { takePresetParent: (p) => (p === "10 Inbox/Order toner.md" ? "PROJECT" : null) } });
     assert.equal(await withPreset(tp("10 Inbox/Order toner.md"), () => true, "?"), "PROJECT");
     assert.equal(menus, 0, "no menu for the preset note");
+    const inboxPreset = load({ AddTaskNote: { takePresetParent: (p) => (p === "10 Inbox/Log.md" ? "inbox" : null) } });
+    assert.equal(await inboxPreset(tp("10 Inbox/Log.md"), () => true, "?"), null, "the Inbox preset selects the template's fallback");
+    assert.equal(menus, 0, "no menu for an Inbox preset");
     assert.equal(await withPreset(tp("Projects/Other.md"), () => true, "?"), "FROM MENU");
     assert.equal(menus, 1);
     // Without CustomJS (or without AddTaskNote), templates work as before
