@@ -10,7 +10,7 @@
 //
 // What it reproduces from the app-facing code at the bottom of timeReport.js:
 //   - readDailyNotes: notes named YYYY-MM-DD in the daily notes folder whose text has a time in it;
-//   - projectTargets plus every live project note that already has a block (writeProjectNotes);
+//   - projectTargets plus every live project or area note that already has a block (writeProjectNotes);
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
 //   - writeBlock's plan: a blank line above "## Time tracking", then placeBlock unless sameBlock;
@@ -132,12 +132,12 @@ export function dailyNotes(vault) {
 }
 
 // Link helpers the app builds from the vault: project links and weekly/monthly link targets
-export function linkers(tr, vault) {
+export function linkers(tr, vault, index = makeIndex(tr, vault)) {
     const count = new Map();
     for (const p of vault.notes.keys()) count.set(basename(p), (count.get(basename(p)) ?? 0) + 1);
     const link = (p) => {
         const target = vault.notes.has(p) && count.get(basename(p)) === 1 ? basename(p) : p.replace(/\.md$/, "");
-        return `[[${target}|⭕ ${tr.basename(p)}]]`;
+        return `[[${target}|${tr.linkMark(p, index)} ${tr.basename(p)}]]`;
     };
     const linkTarget = (unit, key) => {
         const own = vault.notes.has(`${FOLDERS[unit]}/${key}.md`) ? 1 : 0;
@@ -164,7 +164,7 @@ export function planBlock(tr, content, block) {
 export function planReports(tr, vault, { stamp = STAMP } = {}) {
     const index = makeIndex(tr, vault);
     const model = tr.build(dailyNotes(vault), index);
-    const { link, linkTarget } = linkers(tr, vault);
+    const { link, linkTarget } = linkers(tr, vault, index);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();
     const targets = { project: [], week: [], month: [], year: [] };
@@ -181,7 +181,7 @@ export function planReports(tr, vault, { stamp = STAMP } = {}) {
     // writeProjectNotes
     const projects = tr.projectTargets(model);
     for (const p of vault.notes.keys()) {
-        if (!projects.has(p) && !tr.isArchived(p) && index.isProject(p) && hasBlock(p)) projects.add(p);
+        if (!projects.has(p) && !tr.isArchived(p) && tr.counts(p, index) && hasBlock(p)) projects.add(p);
     }
     for (const p of projects) {
         if (!vault.notes.has(p) || tr.isArchived(p)) continue;

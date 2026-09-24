@@ -45,6 +45,10 @@ class TimeReport {
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
     // sub-project: its hours also count toward the parent. Entries of archived projects (in
     // 90 Archive) are left out of every report.
+    // An area (a folder note tagged exactly #area) counts like a project in all three, as a row of
+    // its own, but is never a parent and never has one: the projects inside it don't add up into it.
+    // Its note gets a report the way a project's does, and with no `rate` or `rate_type` of its own
+    // its time is non-billable (OBS-51).
     //
     // Money comes from project note properties: `rate` (hourly; a sub-project without one uses its
     // parent's), `rate_type` (anything but hourly means no Earned), and a cap from `max_hours`, or
@@ -492,8 +496,25 @@ class TimeReport {
 
     // ---------------------------------------------------------------- projects
     // `index` answers questions about notes: { linkDest(linktext, fromPath) → path | null,
-    // isProject(path), area(path) → "[[link]]" | null, exists(path) }. makeIndex builds one from
-    // plain data (tests); appIndex from Obsidian's metadata cache.
+    // isProject(path), isArea(path), area(path) → "[[link]]" | null, exists(path) }. makeIndex builds
+    // one from plain data (tests); appIndex from Obsidian's metadata cache.
+    //
+    // Time counts toward a project or an area (OBS-51). An area (#area) takes time linked to it, or to
+    // a note filed straight under it, as its own row, but it's never a parent: projects inside it
+    // don't add up into it, so it isn't a total of anything.
+    counts(path, index) {
+        return index.isProject(path) || index.isArea(path);
+    }
+
+    // An area and not also a project: its own row, never a parent, 🆓 unless it sets a rate
+    isAreaOnly(path, index) {
+        return index.isArea(path) && !index.isProject(path);
+    }
+
+    // The mark on a report's link to a project or area: ⭕, or 🗃️ for an area
+    linkMark(path, index) {
+        return this.isAreaOnly(path, index) ? "🗃️" : "⭕";
+    }
 
     dirname(path) {
         return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
@@ -503,30 +524,35 @@ class TimeReport {
         return path.split("/").pop().replace(/\.md$/, "");
     }
 
-    areaProject(path, index) {
+    // What a note's `area` points at, when `want` says yes to it
+    areaProject(path, index, want = (p) => index.isProject(p)) {
         const area = index.area(path)?.match(/\[\[([^\]|#]+)/)?.[1]?.trim();
         const dest = area ? index.linkDest(area, path) : null;
-        return dest && dest !== path && index.isProject(dest) ? dest : null;
+        return dest && dest !== path && want(dest) ? dest : null;
     }
 
-    nearestProjectFolder(dir, path, index) {
+    // The nearest folder note at or above `dir` that `want` says yes to
+    nearestProjectFolder(dir, path, index, want = (p) => index.isProject(p)) {
         for (; dir; dir = this.dirname(dir)) {
             const folderNote = `${dir}/${this.basename(dir)}.md`;
-            if (folderNote !== path && index.exists(folderNote) && index.isProject(folderNote)) return folderNote;
+            if (folderNote !== path && index.exists(folderNote) && want(folderNote)) return folderNote;
         }
         return null;
     }
 
-    // The project a note belongs to: itself if it's a project, else the nearest project folder
-    // note above it, else whatever its `area` points at if that's a project
+    // The project or area a note belongs to: itself if it's one, else the nearest project or area
+    // folder note above it, else whatever its `area` points at if that's one
     projectOfNote(path, index) {
-        if (index.isProject(path)) return path;
-        return this.nearestProjectFolder(this.dirname(path), path, index) ?? this.areaProject(path, index);
+        const counts = (p) => this.counts(p, index);
+        if (counts(path)) return path;
+        return this.nearestProjectFolder(this.dirname(path), path, index, counts) ?? this.areaProject(path, index, counts);
     }
 
-    // The project a project sits inside: the nearest project folder note above its own folder,
-    // else its `area` if that's a project
+    // The project a project sits inside: the nearest project folder note above its own folder, else
+    // its `area` if that's a project. Never an area, and an area has none: time doesn't roll up into
+    // an area, and an area filed inside a project isn't a sub-project billed at its rate.
     parentProject(path, index) {
+        if (this.isAreaOnly(path, index)) return null;
         let dir = this.dirname(path);
         if (this.basename(dir) === this.basename(path)) dir = this.dirname(dir);
         return this.nearestProjectFolder(dir, path, index) ?? this.areaProject(path, index);
@@ -542,7 +568,7 @@ class TimeReport {
         // A ⭕ (or 🗃️) says where the line's time goes, ahead of a project merely mentioned in its text
         for (const mark of [true, false]) {
             for (const links of lines) {
-                for (const l of links) if (l.dest && isMark(l.alias) === mark && index.isProject(l.dest) && ok(l.dest)) return l.dest;
+                for (const l of links) if (l.dest && isMark(l.alias) === mark && this.counts(l.dest, index) && ok(l.dest)) return l.dest;
             }
         }
         for (const chain of [true, false]) {
@@ -564,7 +590,7 @@ class TimeReport {
     conflict(context, fromPath, index) {
         for (const c of context) {
             const links = this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) }));
-            const direct = links.find((l) => l.dest && index.isProject(l.dest) && !this.isArchived(l.dest));
+            const direct = links.find((l) => l.dest && this.counts(l.dest, index) && !this.isArchived(l.dest));
             if (!direct) continue;
             for (const l of links) {
                 if (!l.dest || l.alias.replace(/\uFE0F/g, "") !== "🔗") continue;
@@ -587,9 +613,11 @@ class TimeReport {
             const key = n.path.replace(/\.md$/, "").toLowerCase();
             byLower.set(key, n.path);
         }
+        const tagged = (path, tag) => [].concat(byPath.get(path)?.tags ?? []).some((t) => String(t).replace(/^#/, "").toLowerCase() === tag);
         return {
             exists: (path) => byPath.has(path),
-            isProject: (path) => [].concat(byPath.get(path)?.tags ?? []).some((t) => String(t).replace(/^#/, "").toLowerCase() === "project"),
+            isProject: (path) => tagged(path, "project"),
+            isArea: (path) => tagged(path, "area"),
             area: (path) => {
                 const value = [].concat(byPath.get(path)?.area ?? [])[0];
                 return typeof value === "string" ? value : null;
@@ -749,6 +777,9 @@ class TimeReport {
             const amount = rateRaw === undefined ? null : this.number(rateRaw);
             let type = typeRaw === undefined ? null : String(typeRaw).trim().toLowerCase();
             if (!type && amount !== null) type = "hourly";
+            // An area is someone's own time unless it says otherwise: with neither `rate` nor
+            // `rate_type` it's non-billable, and isn't asked for one (OBS-51)
+            if (!type && amount === null && this.isAreaOnly(p, index)) type = "non-billable";
             const rate = type === "hourly" ? amount : null;
             if (rateRaw !== undefined && amount === null && rateFrom === p) {
                 projectProblems.push({ project: p, message: `has a \`rate\` that isn't a positive number (${String(rateRaw).slice(0, 20)}), so it has no Earned` });
@@ -1533,19 +1564,19 @@ class TimeReport {
 
         try {
             const index = this.appIndex();
-            // No project notes at all means the metadata cache isn't ready; writing now would put
-            // every entry under Unassigned
-            if (!app.vault.getMarkdownFiles().some((f) => index.isProject(f.path))) {
+            // No project or area notes at all means the metadata cache isn't ready; writing now would
+            // put every entry under Unassigned
+            if (!app.vault.getMarkdownFiles().some((f) => this.counts(f.path, index))) {
                 console.warn("TimeReport: no project notes found (vault still indexing?); nothing written");
                 if (!quiet) new Notice("Time report: no project notes found yet; try again in a moment");
                 return;
             }
             const stamp = window.moment().format("YYYY-MM-DD h:mma");
-            // Project links, aliased "⭕ Name" (tables escape the | themselves)
+            // Project links, aliased "⭕ Name", and area links "🗃️ Name" (tables escape the | themselves)
             const link = (p) => {
                 const f = app.vault.getFileByPath(p);
                 const target = f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p);
-                return `[[${target}|⭕ ${this.basename(p)}]]`;
+                return `[[${target}|${this.linkMark(p, index)} ${this.basename(p)}]]`;
             };
             const clock = window.moment();
             const model = this.build(await this.readDailyNotes(), index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
@@ -1693,19 +1724,21 @@ class TimeReport {
             const f = app.vault.getFileByPath(path);
             return f ? app.metadataCache.getFileCache(f) : null;
         };
+        const tagged = (path, tag) => {
+            const c = cacheOf(path);
+            if (!c) return false;
+            const raw = c.frontmatter?.tags ?? c.frontmatter?.tag ?? [];
+            return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
+                .filter(Boolean)
+                .map((t) => String(t).replace(/^#/, ""))
+                .concat((c.tags ?? []).map((t) => t.tag.slice(1)))
+                .some((t) => t.toLowerCase() === tag);
+        };
         return {
             exists: (path) => !!app.vault.getFileByPath(path),
-            // Exact #project, in frontmatter or inline (same rule as pickParent and SyncArea)
-            isProject: (path) => {
-                const c = cacheOf(path);
-                if (!c) return false;
-                const raw = c.frontmatter?.tags ?? c.frontmatter?.tag ?? [];
-                return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
-                    .filter(Boolean)
-                    .map((t) => String(t).replace(/^#/, ""))
-                    .concat((c.tags ?? []).map((t) => t.tag.slice(1)))
-                    .some((t) => t.toLowerCase() === "project");
-            },
+            // Exact #project or #area, in frontmatter or inline (same rule as pickParent and SyncArea)
+            isProject: (path) => tagged(path, "project"),
+            isArea: (path) => tagged(path, "area"),
             area: (path) => {
                 const fm = cacheOf(path)?.frontmatter ?? {};
                 const key = Object.keys(fm).find((k) => k.toLowerCase() === "area");
@@ -1735,14 +1768,14 @@ class TimeReport {
         return notes;
     }
 
-    // Refreshes the block in every project note that has entries or already has a block.
+    // Refreshes the block in every project or area note that has entries or already has a block.
     // Returns { updated: how many were rewritten, broken: names of notes with broken markers }.
     // A link for a table cell: the `|` before its alias escaped, so it doesn't end the cell
     cell(text) {
         return String(text).replace(/\[\[[^\]]*\]\]/g, (l) => l.replace(/(?<!\\)\|/g, "\\|"));
     }
 
-    // The project notes a report goes to: every project with time, its parents, and any project a
+    // The project notes a report goes to: every project or area with time, its parents, and any project a
     // project-level problem is about (a conflict can name a project with no time of its own)
     projectTargets(model) {
         const targets = new Set();
@@ -1756,7 +1789,7 @@ class TimeReport {
     async writeProjectNotes(model, index, stamp, link, linkTarget) {
         const targets = this.projectTargets(model);
         for (const f of app.vault.getMarkdownFiles()) {
-            if (!targets.has(f.path) && !this.isArchived(f.path) && index.isProject(f.path) && this.hasBlock(await this.textOf(f))) targets.add(f.path);
+            if (!targets.has(f.path) && !this.isArchived(f.path) && this.counts(f.path, index) && this.hasBlock(await this.textOf(f))) targets.add(f.path);
         }
         let updated = 0;
         const broken = [];

@@ -238,6 +238,116 @@ test("parentProject: sub-projects by folder, archived projects too", () => {
     assert.equal(tr.parentProject(KESTREL, INDEX), null);
 });
 
+// ------------------------------------------------------------------ areas (OBS-51)
+
+const CYCLING = "20 Projects/Cycling/Cycling.md";
+const CENTURY = "20 Projects/Cycling/Century Ride/Century Ride.md";
+const AREA_INDEX = tr.makeIndex([
+    { path: CYCLING, tags: ["area"] },
+    { path: CENTURY, tags: ["project"], area: "[[Cycling|🗃️.Cycling]]", props: { rate_type: "non-billable" } },
+    { path: "20 Projects/Cycling/Tune the gears.md", tags: ["task"] },
+    { path: "20 Projects/Cycling/Century Ride/Route plan.md", tags: ["task"] },
+    { path: "30 Reference/Logs/2026-09-01 Group ride.md", tags: ["log"], area: "[[Cycling|🗃️]]" },
+    { path: "90 Archive/Hobbies/Hobbies.md", tags: ["area"] },
+    { path: PINECONE, tags: ["project"] },
+]);
+const areaFor = (line, context = [], live = false) =>
+    tr.resolve([{ body: line }, ...context.map((body) => ({ body }))], `${LOG}/2026-09-01.md`, AREA_INDEX, live);
+
+test("OBS-51 resolve: time linked to an area, on the line or through a note filed under it, counts toward the area", () => {
+    assert.equal(areaFor("[x] Run [[Cycling|⭕]]"), CYCLING);
+    assert.equal(areaFor("[x] Run [[Cycling|🗃️]]"), CYCLING, "the 🗃️ mark too");
+    assert.equal(areaFor("[x] Run [[Cycling]]"), CYCLING, "any alias");
+    assert.equal(areaFor("[x] Stretch [[Tune the gears|🔗]]"), CYCLING, "a task note filed straight under the area");
+    assert.equal(areaFor("[<] 7:00am\t[[2026-09-01 Group ride|Group ride]]"), CYCLING, "a log whose `area` is the area");
+    assert.equal(areaFor("[x] Subtask", ["[ ] Parent [[Cycling|⭕]]"]), CYCLING, "on a line it's nested under");
+    // A project inside the area keeps its own time: the nearest folder note wins
+    assert.equal(areaFor("[x] Plan [[Route plan|🔗]]"), CENTURY);
+    // A ⭕ area beats a project merely mentioned, and a ⭕ project beats an area mentioned
+    assert.equal(areaFor("[x] Rest day, no [[Pinecone Studio]] work [[Cycling|⭕]]"), CYCLING);
+    assert.equal(areaFor("[x] Skip [[Cycling]] today [[Pinecone Studio|⭕]]"), PINECONE);
+    // An archived area is passed over like an archived project
+    assert.equal(areaFor("[x] Paint [[Hobbies|⭕]]", [], true), null);
+});
+
+test("OBS-51 parentProject: an area is never a parent, so a project's time doesn't roll up into it", () => {
+    assert.equal(tr.parentProject(CENTURY, AREA_INDEX), null, "not by folder, nor by `area`");
+    assert.equal(tr.parentProject(CYCLING, AREA_INDEX), null);
+    assert.equal(tr.projectOfNote(CYCLING, AREA_INDEX), CYCLING);
+
+    const model = tr.build([note("2026-09-01", [
+        "- [x] Run [[Cycling|⭕]]",
+        "\t- 7:00am - 7:45am",
+        "- [x] Hill repeats [[Century Ride|⭕]]",
+        "\t- 8:00am - 9:30am",
+    ].join("\n"))], AREA_INDEX);
+    assert.deepEqual(plain(model.entries.map((e) => [e.project, e.minutes])), [[CYCLING, 45], [CENTURY, 90]]);
+    assert.equal(model.parent.get(CENTURY), null);
+    assert.equal(model.parent.get(CYCLING), null);
+    assert.deepEqual(plain([...tr.projectTargets(model)].sort()), [CENTURY, CYCLING]);
+
+    // The area's own report has only its own time, with no row for the project inside it
+    const block = tr.render(model, { kind: "project", path: CYCLING }, "s", (p) => `[[${tr.basename(p)}|${tr.linkMark(p, AREA_INDEX)} ${tr.basename(p)}]]`);
+    assert.ok(!block.includes("Century Ride"), block);
+    assert.match(block, /\| 1 \|  \| 0\.75 \| 0\.75 \| 0\.75 \|  \| non-billable \|/, "45 minutes, 🆓 since the area sets no rate");
+    assert.match(block, /### Problems\n\nNone\./, "and it isn't asked for a rate_type");
+});
+
+test("OBS-51 money: an area with its own rate bills; an area filed inside a project is no sub-project of it", () => {
+    const idx = tr.makeIndex([
+        { path: "P/Client/Client.md", tags: ["project"], props: { rate: 100, rate_type: "hourly" } },
+        { path: "P/Client/Admin/Admin.md", tags: ["area"] },
+        { path: "P/Coaching/Coaching.md", tags: ["area"], props: { rate: 60 } },
+    ]);
+    assert.equal(tr.parentProject("P/Client/Admin/Admin.md", idx), null);
+    const model = tr.build([note("2026-09-01", [
+        "- [x] Timesheets [[Admin|⭕]]",
+        "\t- 7:00am - 8:00am",
+        "- [x] Session [[Coaching|🗃️]]",
+        "\t- 9:00am - 10:00am",
+    ].join("\n"))], idx);
+    assert.deepEqual(plain(model.entries.map((e) => [e.project, e.billable])), [["P/Client/Admin/Admin.md", false], ["P/Coaching/Coaching.md", true]]);
+    assert.equal(model.parent.get("P/Client/Admin/Admin.md"), null, "not rolled into the client's hours");
+    assert.equal(model.money.get("P/Client/Admin/Admin.md").rate, null, "nor billed at its rate");
+    assert.equal(model.money.get("P/Coaching/Coaching.md").rate, 60);
+    assert.ok(!tr.projectTargets(model).has("P/Client/Client.md"));
+    assert.deepEqual(plain(model.projectProblems), []);
+});
+
+test("OBS-51 links: an area's report link is 🗃️; a note tagged both is a project", () => {
+    assert.equal(tr.linkMark(CYCLING, AREA_INDEX), "🗃️");
+    assert.equal(tr.linkMark(CENTURY, AREA_INDEX), "⭕");
+    assert.equal(tr.isAreaOnly(CYCLING, AREA_INDEX), true);
+    assert.equal(tr.isAreaOnly(CENTURY, AREA_INDEX), false);
+    const both = tr.makeIndex([{ path: "P/Both/Both.md", tags: ["area", "project"] }]);
+    assert.equal(tr.isAreaOnly("P/Both/Both.md", both), false, "a note tagged both is a project");
+    assert.equal(tr.linkMark("P/Both/Both.md", both), "⭕");
+});
+
+test("OBS-51 writing: an area note with time gets a report block added, like a project note", async () => {
+    const { planReports, frontmatter } = await import("./demo/renderReports.mjs");
+    const vaultOf = (files) => ({ notes: new Map(Object.entries(files).map(([p, text]) => [p, { text, fm: frontmatter(text) }])) });
+    const day = "- [x] Run [[Cycling|⭕]]\n\t- 7:00am - 7:45am\n- [x] Paint [[Studio|⭕]]\n\t- 9:00am - 9:30am\n";
+    const files = {
+        "30 Reference/36 Planner/days/2026-09-01.md": day,
+        "Projects/Cycling/Cycling.md": "---\ntags: area\n---\nRides.\n",
+        "Projects/Studio/Studio.md": "---\ntags: area\n---\n## Time tracking\n\n%% time:start %%\n%% time:end %%\n",
+        "Projects/Idle/Idle.md": "---\ntags: area\n---\nNothing logged here.\n",
+    };
+    const plan = planReports(tr, vaultOf(files));
+    assert.deepEqual(plan.errors, []);
+    assert.deepEqual(plain(plan.targets.project.slice().sort()), ["Projects/Cycling/Cycling.md", "Projects/Studio/Studio.md"], "an area with no time and no block is left alone");
+    const cycling = plan.changes.find((c) => c.path === "Projects/Cycling/Cycling.md").after;
+    assert.match(cycling, /^Rides\.\n\n## Time tracking\n\n%% time:start %%/m, "added under a new heading at the end");
+    assert.match(cycling, /\| 1 \|  \| 0\.75 \| 0\.75 \| 0\.75 \|  \| non-billable \|/, cycling);
+    const studio = plan.changes.find((c) => c.path === "Projects/Studio/Studio.md").after;
+    assert.match(studio, /\| 1 \|  \| 0\.50 \| 0\.50 \| 0\.50 \|/, "an existing block is filled in place");
+    // The weekly note lists both areas as rows of their own, linked with 🗃️
+    const week = plan.changes.find((c) => c.path.includes("/weeks/")).after;
+    assert.match(week, /\[\[Cycling\\\|🗃️ Cycling\]\]/, week);
+    assert.match(week, /\[\[Studio\\\|🗃️ Studio\]\]/, week);
+});
+
 test("table cells: hours always with two decimals, and blank for zero hours or zero Earned", () => {
     assert.equal(tr.hoursCell(60), "1.00");
     assert.equal(tr.hoursCell(45), "0.75");

@@ -45,7 +45,7 @@ Projects/
         2026-09-14 Homepage review with Imogen.md
       Kestrel Fall Catalog/        a sub-project: a project folder inside a project
     Pinecrest Library Brochure/
-  Household/                       an area with only task notes
+  Household/                       an area with only task notes, and time of its own
   Personal/
     Garden Club Newsletter/
 30 Reference/
@@ -123,7 +123,8 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 - **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
 - **🆓 on the line:** 🆓 as a word of its own on a task or event line makes every entry under it 🆓 (a task worked on all day that you won't bill); on an entry, or after the end line's colon, it applies to that one. Both at once is still 🆓, and listed under Problems so a stray mark is never decided silently.
 - **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🗃️` its area (*AddProjectLink* puts either there), `🚩 M/D` its due date. The note link comes last, after the due date, so End reaches the note. One of `🔗`, `⭕` and `🗃️` per line says where its time counts: a task note is filed in its project, so a line that links one needs no `⭕`, and the commands keep it that way.
-- **Which project an entry counts toward:** a `⭕` project link on the line or a parent line, else any other link to a project note there, else the project folder or `area` of a linked note (🔗 or a meeting log), else Unassigned. Time linked to an area counts as Unassigned for now.
+- **Which project an entry counts toward:** a `⭕` (or `🗃️`) link to a project or area on the line or a parent line, else any other link to a project or area note there, else the nearest project or area folder, or the `area`, of a linked note (🔗 or a meeting log), else Unassigned.
+- **Areas:** time linked to an area (a bike ride under a Cycling area, say) counts toward the area as a row of its own in the weekly, monthly and yearly reports. It never adds up the projects inside it: an area holds projects and its own time, not a total. An area note gets its own report under `## Time tracking`, as a project note does. An area's time is 🆓 unless the area note sets a `rate` or `rate_type`, which then work as on a project; an area is never a sub-project, even when filed inside a project's folder, so it never takes a client's rate. Only notes tagged exactly `#area` count, as the project and area menus read them.
 
 ## Commands (CustomJS)
 
@@ -139,7 +140,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | ConvertToProject | | Turns the selection into a new project folder and note |
 | CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, a 🆓, log links, a note after the end time and time entries added to them); adopts a log's line that has no time yet, and gives a linked log the line's `time` and `endTime` whenever it writes the line; marks canceled events `[-]` and free events ℹ️; writes no end line for a timed event that ends on another day, unless it only runs past midnight; maps recurring series to projects from the Calendar Sync note |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
-| TimeReport | | Writes time summaries into project notes and weekly, monthly and yearly notes, counting time entries and ended busy events alike (each rounded up to 15 minutes); lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Project links it writes read `[[Project\|⭕ Project]]` |
+| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, counting time entries and ended busy events alike (each rounded up to 15 minutes); lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Links it writes read `[[Project\|⭕ Project]]`, or `[[Area\|🗃️ Area]]` for an area |
 | ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
 | UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes, and refuses unless the clone is on `main` with nothing uncommitted |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |

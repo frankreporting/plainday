@@ -44,8 +44,12 @@ test("demo vault: reports go to every live project with time and every period wi
         `${P}/Kestrel Outfitters 2026/Kestrel Fall Catalog/Kestrel Fall Catalog.md`,
         `${P}/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md`,
         `${P}/Pinecrest Library Brochure/Pinecrest Library Brochure.md`,
+        "Projects/Household/Household.md",
         "Projects/Personal/Garden Club Newsletter/Garden Club Newsletter.md",
     ]);
+    // Household has time (OBS-51); Freelance, an area with none, gets no block
+    assert.ok(plan.model.entries.some((e) => e.project === "Projects/Household/Household.md"));
+    assert.ok(!tr.hasBlock(vault.notes.get(`${P}/Freelance.md`).text));
     assert.deepEqual(plan.targets.week, ["2026w35", "2026w36", "2026w37", "2026w38"].map((k) => `${FOLDERS.week}/${k}.md`));
     assert.deepEqual(plan.targets.month, ["2026-08", "2026-09"].map((k) => `${FOLDERS.month}/${k}.md`));
     assert.deepEqual(plan.targets.year, [`${FOLDERS.year}/2026.md`]);
