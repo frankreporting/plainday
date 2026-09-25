@@ -4,7 +4,7 @@ tags:
 ---
 # Welcome to the demo vault
 
-This is a small, made-up vault that shows the Obsidian PM system at work: a freelancer's notes from late August to mid-September 2026. Every person, client, amount and event in it is invented. For installing the plugins and setting up your own vault, see [[README]].
+This is a small, made-up vault that shows the Obsidian PM system at work: a freelancer's notes from late August to mid-September 2026. Every person, client, amount and event in it is invented. For installing the plugins and setting up your own vault, see [[README]]; for how everything works, see the [[Manual]].
 
 ## Where to look first
 
@@ -16,17 +16,18 @@ This is a small, made-up vault that shows the Obsidian PM system at work: a free
 
 Everything under "## Time tracking" is written by the TimeReport command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
 
-## Things to try
+## Basic commands
 
-| Try | How |
-| --- | --- |
-| Log time | Open today's daily note, put the cursor on a task and press `⌘T` (ToggleTimeEntry). Press it again to stop. |
-| Move a task to another day | `⌘S` (Schedule) on a task line |
-| Add a due date | `⇧⌘D` (DueDate) |
-| Make or link a task note | ``⌥⌘` `` (AddTaskNote) on a task line |
-| Refresh the reports | Command palette: "CustomJS: TimeReport" |
-| Fix the Problems example | On 9/16, add "pm" to `2:30 - 3:45pm`, then run TimeReport |
-| New notes | Create a note named `!task …`, `!project …`, `2026-09-21 Kickoff call` or `2026-09-21` and let the template file it |
-| Plan ahead | "CustomJS: Plan" opens the next few daily notes side by side |
+| Command | Action | Shortcut |
+| --- | --- | --- |
+| ToggleTimeEntry | Log time | `⌘T` |
+| Schedule | Move a task to another day | `⌘S` |
+| DueDate | Add a due date | `⇧⌘D` |
+| AddTaskNote | Make or link a task note | Command palette |
+| TimeReport | Refresh the reports | Command palette |
+| New note | Create note; include `!task …`, `!project …`, date + title like `2026-09-21 Kickoff call`, or plain dates like `2026-09-21`, and templates are applied | `⌘N` |
+| Plan | Plan ahead: the next few daily notes side by side | Command palette |
+
+Run the task commands with the cursor on a task line. ToggleTimeEntry times tasks in today's daily note; press it again to stop. In the command palette, the commands are "CustomJS: …".
 
 The calendar sync (CalendarSync) reads macOS calendars, so it needs setup first; see [[README]].

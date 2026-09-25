@@ -6,9 +6,8 @@
 //   of issues lists them after one keyword (`Closes OBS-65, OBS-66` or `… OBS-65 and OBS-66`),
 //   the way Linear reads it, and every issue in the list counts.
 // - Docs gate: when system files change (CustomJS, Templater, the templates, the calendar
-//   scripts), the PR either changes README.md or has a `## Docs` section saying why the README
-//   needs nothing. Either way that section must have a `My Obsidian Setup:` line listing the
-//   sections changed in that (untracked) note, or `My Obsidian Setup: none`.
+//   scripts), the PR either changes one of DOCS (the manual or the README) or has a `## Docs`
+//   section saying why neither needs anything.
 //
 // Inputs (environment): PR_TITLE, PR_BODY, PR_BRANCH, and CHANGED_FILES (one path per line) or
 // BASE_SHA + HEAD_SHA to compute it. Exit 1 with one line per problem.
@@ -21,6 +20,9 @@ export const SYSTEM_DIRS = [
     "00 Meta/02 Scripts/Calendar/",
     "00 Meta/01 Templates/",
 ];
+
+// Where the system is documented: the manual (how it works) and the README (installing it)
+export const DOCS = ["00 Meta/Manual.md", "README.md"];
 
 // A keyword and the issues after it: `Closes OBS-65, OBS-66 and OBS-67`
 const LINK = /\b(Closes|Fixes|Resolves|Part of)\s+(OBS-\d+\b(?:\s*(?:,|,?\s+and\b|&)\s*OBS-\d+\b)*)/gi;
@@ -60,24 +62,15 @@ export function checkLinearLink({ body, branch }) {
 }
 
 export function checkDocs({ body, changed }) {
-    const problems = [];
     const system = changed.filter((f) => SYSTEM_DIRS.some((d) => f.startsWith(d)));
-    if (!system.length) return problems;
-    const readme = changed.includes("README.md");
+    if (!system.length || DOCS.some((d) => changed.includes(d))) return [];
+    const files = `${system[0]}${system.length > 1 ? ` and ${system.length - 1} more` : ""}`;
     const section = docsSection(body);
     if (section === null) {
-        problems.push(`system files changed (${system[0]}${system.length > 1 ? ` and ${system.length - 1} more` : ""}); the PR body needs a \`## Docs\` section${readme ? "" : ", or the PR needs to change README.md"}`);
-        return problems;
+        return [`system files changed (${files}) but ${DOCS.join(" and ")} didn't; change one, or add a \`## Docs\` section saying why neither needs anything`];
     }
-    const setup = /^\s*(?:[-*]\s*)?(?:\*\*)?My Obsidian Setup(?:\*\*)?\s*:\s*(.*\S)/im.exec(section);
-    if (!setup) {
-        problems.push("the `## Docs` section needs a `My Obsidian Setup:` line: the sections changed in that note, or `none`");
-    }
-    if (!readme) {
-        const rest = section.split("\n").filter((l) => !/My Obsidian Setup\s*:/i.test(l)).join("\n").trim();
-        if (!rest) problems.push("README.md is unchanged; the `## Docs` section must say why the README needs nothing");
-    }
-    return problems;
+    if (!section) return [`${DOCS.join(" and ")} are unchanged; the \`## Docs\` section must say why neither needs anything`];
+    return [];
 }
 
 export function checkAll(env = process.env) {

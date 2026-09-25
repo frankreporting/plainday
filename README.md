@@ -4,6 +4,8 @@ An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and
 
 This repository **is** a vault: the system in `00 Meta/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference, not a plugin: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
 
+This README covers trying it and installing it. **[The manual](<00 Meta/Manual.md>)** (`00 Meta/Manual.md`) is the full description: how daily notes are written, what every command and script does to them, and how the time report and calendar sync decide what they do.
+
 ## Try it
 
 1. Clone or download this repository, and in Obsidian choose **Open folder as vault**.
@@ -15,7 +17,7 @@ This repository **is** a vault: the system in `00 Meta/`, plus made-up sample no
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `10 Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddTaskNote* ``⌥⌘` ``, *AddProjectLink* `⌥⌘P`, and *Daily notes: Open today's daily note*.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddProjectLink* `⌥⌘P`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
 Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
@@ -61,9 +63,7 @@ Projects/
 Welcome.md                         start here
 ```
 
-- Every note inside an area or project carries an `area` property linking to the nearest folder note above it. It's kept current automatically when notes or folders move.
-- Aliases mark note types in the Quick Switcher: `⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`.
-- Most notes have `id` (a `YYYYMMDDHHmmssSS` timestamp) and `tags` in their frontmatter; daily and monthly notes only have an alias.
+Every note inside an area or project has an `area` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
 
 ## Creating notes: the title picks the template
 
@@ -117,14 +117,9 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 - [>] Send the invoice [[Send the invoice|🔗]]
 ```
 
-- **Markers:** `[<]` event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled.
-- **Events:** start time, a tab, the title; the line under it is the end time. A title that links to a meeting log is how logs get their times. **An event that has ended counts** from its start to that end line, like a time entry, on the project its line points to or else as Unassigned (the standup above is 30 minutes Unassigned). Time entries typed under an event are its time instead, and its end line is then ignored (the kickoff call counts 45 minutes). A busy event with no end line under it is listed under Problems; one you skipped, mark `[-]` by hand. The end line takes a note after a colon like an entry: `- 4:30pm: 🆓 not billing this one`. A log for a meeting the calendar doesn't have gets a `[<]` line with no time, after the timed events (or links one you typed yourself); if the event turns up later, the sync adopts that line and gives it, and the log, its times.
-- **Free events:** ℹ️ after the title, before any ⭕ link, marks an event the calendar shows as *free* (Apple Calendar's *Show As*): it isn't your time, so the time report never counts it and never checks it for overlaps. Any other event that has ended is checked: work logged during it is an overlap under Problems.
-- **Time entries:** `- 9:40am - 11:05am` under a task or event, optionally `: note`. Billable unless the note starts with 🆓. `- 3:00pm - ` is a running clock.
-- **🆓 on the line:** 🆓 as a word of its own on a task or event line makes every entry under it 🆓 (a task worked on all day that you won't bill); on an entry, or after the end line's colon, it applies to that one. Both at once is still 🆓, and listed under Problems so a stray mark is never decided silently.
-- **Links at the end of a line:** `🔗` the task's own note (it threads a task across days), `⭕` its project, `🗃️` its area (*AddProjectLink* puts either there), `🚩 M/D` its due date. The note link comes last, after the due date, so End reaches the note. One of `🔗`, `⭕` and `🗃️` per line says where its time counts: a task note is filed in its project, so a line that links one needs no `⭕`, and the commands keep it that way.
-- **Which project an entry counts toward:** a `⭕` (or `🗃️`) link to a project or area on the line or a parent line, else any other link to a project or area note there, else the nearest project or area folder, or the `area`, of a linked note (🔗 or a meeting log), else Unassigned.
-- **Areas:** time linked to an area (a bike ride under a Cycling area, say) counts toward the area as a row of its own in the weekly, monthly and yearly reports. It never adds up the projects inside it: an area holds projects and its own time, not a total. An area note gets its own report under `## Time tracking`, as a project note does. An area's time is 🆓 unless the area note sets a `rate` or `rate_type`, which then work as on a project; an area is never a sub-project, even when filed inside a project's folder, so it never takes a client's rate. Only notes tagged exactly `#area` count, as the project and area menus read them.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `🔗` a task note, `⭕` a project, `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), with `🚩 M/D` for a due date.
+
+The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
 
 ## Commands (CustomJS)
 
@@ -132,18 +127,20 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
-| Schedule | `⌘S` | Moves the task (and its sub-bullets) to another day's checklist; a task already worked on stays behind as `[>]`, linked on both days to its task note, which is created first (asking for its project or area) if it doesn't exist. A line forwarded out of a project or area note links it back with `⭕` or `🗃️`. |
-| DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link: before the note link that ends the line (🔗, ⭕ or 🗃️), else at the end. |
-| AddTaskNote | ``⌥⌘` `` | Links the selected task name to its task note, creating the note through the Task template (asking for its project or area) if it doesn't exist, then puts the cursor after the checkbox. The name is the selection or, with nothing selected and text after the cursor, the task's text up to its first link (the 🔗 link then ends the line). A date in the name becomes the note's `due` and is removed from the line. The line's ⭕ links decide where the note goes: one project or area files a new note there, or moves an existing note that has no project or area yet, without asking; several bring up the menu with the line's projects first; an existing note already in a different project or area asks whether to move it or leave it, and a same-named note already in the picked project is linked instead of moving. Once the note is linked, the ⭕ links come off: the note says where the line's time counts. An existing note's `area` is set from its folder, and the Task template writes `area` on new notes. With only whitespace after the cursor, inserts an empty link to type into. On an event line, links a meeting log for the selection or the title after the event's time |
-| AddProjectLink | `⌥⌘P` | On a task or event line, picks a project or area from the same menu and links it at the end of the line as `[[Project\|⭕]]` or `[[Area\|🗃️]]`, for tying the line's time to a project when the task needs no note of its own; then puts the cursor after the checkbox. A ⭕ or 🗃️ the line already has is replaced: one per line. With a 🔗 task note on the line, or a meeting log linked from an event's title, the note is moved into the picked project instead (a log into its `logs/`) and no ⭕ is added: without asking when the note has no project or area yet, after a confirm when it's leaving one (its project is shared by every line that links it); a note already there needs nothing, and if the picked project already has a note of the same name the line is pointed at that one instead. Esc cancels |
+| Schedule | `⌘S` | Moves a task to another day; one already worked on stays behind as `[>]`, linked to its task note |
+| DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
+| AddTaskNote | | Links the task to its own note, creating it in the project or area you pick; on an event line, links a meeting log |
+| AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), or moves its task note or log there |
+| ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
-| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping lines it wrote current (through ⭕ project links, a 🆓, log links, a note after the end time and time entries added to them); adopts a log's line that has no time yet, and gives a linked log the line's `time` and `endTime` whenever it writes the line; marks canceled events `[-]` and free events ℹ️; writes no end line for a timed event that ends on another day, unless it only runs past midnight; maps recurring series to projects from the Calendar Sync note |
+| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
-| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, counting time entries and ended busy events alike (each rounded up to 15 minutes); lists a task whose ⭕ project and 🔗 task note's project disagree on both project notes. Links it writes read `[[Project\|⭕ Project]]`, or `[[Area\|🗃️ Area]]` for an area |
-| ToggleTimeEntry | `⌘T` | In today's daily note, starts a time entry under the task or event you're on (above its sub-tasks; an open task becomes `[/]`), or fills in its running one's end time; anywhere else, picks a running timer from any daily note or an open item from today's |
-| UpdateObsidianPM | | Installs this repository's system files into the vault it runs in, from a local clone: it pulls the clone, shows what would be added, updated and removed, and writes nothing until you say so. Never touches notes, and refuses unless the clone is on `main` with nothing uncommitted |
+| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes |
+| UpdateObsidianPM | | Installs this repository's system files into your vault from a local clone (see below) |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
+
+The manual's *Commands* section says exactly what each one does.
 
 Startup scripts (run when Obsidian starts):
 
@@ -191,7 +188,7 @@ Instead, clone this repository somewhere outside your vault, and install the sys
 2. Run **CustomJS: UpdateObsidianPM** from the command palette. It asks where your clone is the first time.
 3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
 
-What it installs: everything the repository has under `00 Meta/`, plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
+What it installs: everything the repository has under `00 Meta/` (the manual included), plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `00 Meta/02 Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 

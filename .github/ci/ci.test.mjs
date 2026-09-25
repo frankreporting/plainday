@@ -103,7 +103,7 @@ test("scanText labels commit messages and PR text", () => {
 // ------------------------------------------------------------------ PR metadata
 
 test("docsSection finds the section at any heading level and stops at the next heading", () => {
-    assert.equal(docsSection("## Summary\nx\n\n## Docs\n\nREADME updated.\nMy Obsidian Setup: none\n\n## Test plan\ny"), "README updated.\nMy Obsidian Setup: none");
+    assert.equal(docsSection("## Summary\nx\n\n## Docs\n\nREADME updated.\nNothing else.\n\n## Test plan\ny"), "README updated.\nNothing else.");
     assert.equal(docsSection("### docs\nline\n#### sub\nmore\n### Next\nz"), "line\n#### sub\nmore");
     assert.equal(docsSection("## Documentation\nline"), null);
     assert.equal(docsSection(""), null);
@@ -131,15 +131,14 @@ test("Linear link: a cluster lists its issues after one keyword", () => {
     assert.match(checkLinearLink({ body: "Part of OBS-65, OBS-66", branch: "someone/obs-66-due" })[0], /Part of/);
 });
 
-test("docs gate: only system changes need it; README or a Docs section; the setup line always", () => {
+test("docs gate: only system changes need it; the manual, the README or a Docs section saying why", () => {
     const script = ["00 Meta/02 Scripts/CustomJS/plan.js"];
     assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "00 Meta/04 Bases/Projects.base"] }), []);
     assert.match(checkDocs({ body: "Closes OBS-1", changed: script })[0], /## Docs/);
-    assert.deepEqual(checkDocs({ body: "## Docs\nMy Obsidian Setup: none", changed: [...script, "README.md"] }), []);
-    assert.deepEqual(checkDocs({ body: "## Docs\n- **My Obsidian Setup:** Commands, Daily notes", changed: [...script, "README.md"] }), []);
-    assert.match(checkDocs({ body: "## Docs\nInternal refactor.", changed: [...script, "README.md"] })[0], /My Obsidian Setup/);
-    assert.match(checkDocs({ body: "## Docs\nMy Obsidian Setup: none", changed: script })[0], /README\.md is unchanged/);
-    assert.deepEqual(checkDocs({ body: "## Docs\nInternal refactor, nothing a user sees.\nMy Obsidian Setup: none", changed: script }), []);
-    assert.deepEqual(checkDocs({ body: "## Docs\nMy Obsidian Setup: none", changed: ["00 Meta/01 Templates/Task.md", "README.md"] }), []);
-    assert.deepEqual(checkDocs({ body: "## Docs\nMy Obsidian Setup: none", changed: ["00 Meta/02 Scripts/Calendar/sync-calendar.sh", "README.md"] }), []);
+    assert.deepEqual(checkDocs({ body: "", changed: [...script, "00 Meta/Manual.md"] }), []);
+    assert.deepEqual(checkDocs({ body: "", changed: [...script, "README.md"] }), []);
+    assert.match(checkDocs({ body: "## Docs\n\n## Test plan\nx", changed: script })[0], /must say why/);
+    assert.deepEqual(checkDocs({ body: "## Docs\nInternal refactor, nothing a user sees.", changed: script }), []);
+    assert.deepEqual(checkDocs({ body: "", changed: ["00 Meta/01 Templates/Task.md", "00 Meta/Manual.md"] }), []);
+    assert.match(checkDocs({ body: "", changed: ["00 Meta/02 Scripts/Calendar/sync-calendar.sh"] })[0], /Manual\.md and README\.md/);
 });
