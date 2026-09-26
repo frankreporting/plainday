@@ -1824,3 +1824,57 @@ test("OBS-41: refresh keeps the Schedule it started with while CustomJS rebuilds
     assert.deepEqual(plain(report.periodFolders()), { week: "Planner/weeks", month: "Planner/months", year: "Planner/years" });
     assert.deepEqual(plain(await report.readDailyNotes()), [{ date: "2026-09-01", path: day.path, text: "- 9:00am - 9:30am" }]);
 });
+
+test("OBS-29: a weekly, monthly or yearly note lists the project problems of the projects with time in it", () => {
+    const idx = tr.makeIndex([
+        { path: "P/Par/Par.md", tags: ["project"], props: { rate: "TBD", rate_type: "hourly" } },
+        { path: "P/Par/Kid/Kid.md", tags: ["project"] },
+        { path: "P/Bare/Bare.md", tags: ["project"] },
+        { path: "P/Late/Late.md", tags: ["project"] },
+        { path: "P/A.md", tags: ["project"], area: "[[B]]", props: { rate_type: "non-billable" } },
+        { path: "P/B.md", tags: ["project"], area: "[[A]]", props: { rate_type: "non-billable" } },
+        { path: "P/Hawk/Hawk.md", tags: ["project"], props: { rate_type: "non-billable" } },
+        { path: "P/Tin/Tin.md", tags: ["project"], props: { rate_type: "non-billable" } },
+        { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
+    ]);
+    const m = tr.build([
+        note("2026-09-01", [
+            "- [x] Kid [[Kid|⭕]]", "\t- 9:00am - 10:00am",
+            "- [x] Bare [[Bare|⭕]]", "\t- 10:00am - 11:00am",
+            "- [x] Loop [[A|⭕]]", "\t- 11:00am - 12:00pm",
+            "- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|🔗]]", "\t- 1:00pm - 2:00pm",
+        ].join("\n")),
+        note("2026-09-08", "- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|🔗]]\n\t- 1:00pm - 2:00pm"),
+        note("2026-10-05", "- [x] Late [[Late|⭕]]\n\t- 9:00am - 10:00am"),
+    ], idx);
+    const problems = (block) => block.slice(block.indexOf("### Problems")).split("\n").filter((l) => l.startsWith("- "));
+
+    const week = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-01") }, "s"));
+    assert.deepEqual(plain(week), [
+        "- [[B|⭕ B]] and [[A|⭕ A]] are each inside the other (check their folders and `area`); [[B|⭕ B]] is counted as top-level",
+        // A conflict is said once, from the project the time counts on, with this period's entries only
+        "- [[Tin|⭕ Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk|⭕ Hawk]]; move the note here, or change the line's project link",
+        // A parent's problem reaches the period through its sub-project's time
+        "- [[Par|⭕ Par]] has a `rate` that isn't a positive number (TBD), so it has no Earned",
+        "- [[Bare|⭕ Bare]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)",
+    ]);
+    // Only the conflict has time in the next week
+    const next = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-08") }, "s"));
+    assert.equal(next.length, 1);
+    assert.ok(next[0].includes("has time (1 entry)"), next[0]);
+
+    const sept = problems(tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s"));
+    assert.equal(sept.length, 4);
+    assert.ok(sept.some((l) => l.includes("has time (2 entries)")), sept.join("\n"));
+    assert.ok(!sept.some((l) => l.includes("Late")), "a project with no time in the period isn't listed");
+    assert.deepEqual(plain(problems(tr.render(m, { kind: "period", unit: "month", key: "2026-10" }, "s"))),
+        ["- [[Late|⭕ Late]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)"]);
+
+    const year = problems(tr.render(m, { kind: "period", unit: "year", key: "2026" }, "s"));
+    assert.equal(year.length, 5);
+    assert.ok(year.some((l) => l.includes("has time (2 entries)")) && year.some((l) => l.includes("[[Late")));
+
+    // The project notes are unchanged: the conflict is still said on both
+    assert.ok(tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s").includes("so its time (2 entries) counts there"));
+    assert.ok(tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s").includes("has time (2 entries)"));
+});

@@ -740,11 +740,12 @@ class TimeReport {
             const c = this.conflict(e.context, e.path, index);
             if (!c || c.lineProject !== e.project) continue;
             const key = `${c.note}\n${c.lineProject}\n${c.noteProject}`;
-            conflicts.set(key, { ...c, count: (conflicts.get(key)?.count ?? 0) + 1 });
+            const had = conflicts.get(key)?.entries ?? [];
+            conflicts.set(key, { ...c, count: had.length + 1, entries: [...had, e] });
         }
-        for (const { lineProject, note, noteProject, count } of conflicts.values()) {
+        for (const { lineProject, note, noteProject, count, entries: those } of conflicts.values()) {
             addChain(noteProject);
-            projectProblems.push({ project: lineProject, conflict: { side: "line", note, other: noteProject, count } });
+            projectProblems.push({ project: lineProject, conflict: { side: "line", note, other: noteProject, count, entries: those } });
             projectProblems.push({ project: noteProject, conflict: { side: "note", note, other: lineProject, count } });
         }
         // A chain can also close into a loop found earlier from another start
@@ -846,11 +847,25 @@ class TimeReport {
         const want = scope.kind === "all" ? () => true
             : scope.kind === "period" ? (d) => this.periodOf(d, scope.unit) === scope.key
             : (d) => d.startsWith(scope.month + "-");
-        return {
-            entries: model.entries.filter((e) => want(e.date)),
-            problems: model.problems.filter((p) => want(p.date)),
-            projectProblems: model.projectProblems,
-        };
+        const entries = model.entries.filter((e) => want(e.date));
+        // A problem about a project is the period's when the period has time on that project or on a
+        // project below it, whose hours add up into it and which can take its rate from it (OBS-29)
+        const worked = new Set();
+        for (const e of entries) {
+            for (let up = e.project; up && !worked.has(up); up = model.parent.get(up)) worked.add(up);
+        }
+        const mine = new Set(entries);
+        const projectProblems = [];
+        for (const p of model.projectProblems) {
+            if (p.conflict) {
+                // Said once, by the project the time counts on, with the period's own entries
+                const count = p.conflict.side === "line" ? p.conflict.entries.filter((e) => mine.has(e)).length : 0;
+                if (count) projectProblems.push({ ...p, conflict: { ...p.conflict, count } });
+            } else if (worked.has(p.project) || (p.parent && worked.has(p.parent))) {
+                projectProblems.push(p);
+            }
+        }
+        return { entries, problems: model.problems.filter((p) => want(p.date)), projectProblems };
     }
 
     // ---------------------------------------------------------------- periods
@@ -1184,13 +1199,13 @@ class TimeReport {
             const mine = this.inScope(model, scope);
             out.push("### Earned", "", ...this.yearTable(model, mine.entries, scope, link, "earned"), "");
             out.push("### Hours", "", ...this.yearTable(model, mine.entries, scope, link, "hours"), "");
-            out.push("### Problems", "", ...this.problemLines(model, mine.problems, [], mine.entries, link));
+            out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
         } else if (scope.kind === "period") {
             const mine = this.inScope(model, scope);
             out.push("### Totals", "", ...this.summaryTable(model, mine.entries, link, { total: true }), "");
             if (scope.unit === "week" && mine.entries.length) out.push("### By Day", "", ...this.weekDaysTable(model, mine.entries, scope, link), "");
             if (scope.unit === "month" && mine.entries.length) out.push("### By Week", "", ...this.monthWeeksTable(model, mine.entries, scope, link), "");
-            out.push("### Problems", "", ...this.problemLines(model, mine.problems, [], mine.entries, link));
+            out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
         } else {
             const mine = this.inScope(model, scope);
             out.push(...this.projectTables(model, mine.entries, scope, link), "");
