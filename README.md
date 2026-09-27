@@ -50,6 +50,7 @@ Projects/
   Household/                       an area with only task notes, and time of its own
   Personal/
     Garden Club Newsletter/
+    Block Party Poster/
 30 Reference/
   31 Notes/                        general notes
   33 Subjects/                     maps of content (§)

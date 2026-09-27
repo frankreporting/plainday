@@ -3,7 +3,7 @@
 //   node --test "00 Meta/02 Scripts/tests/*.test.mjs"
 // The time reports in the notes are rendered by tests/demo/renderReports.mjs; after changing a sample
 // note, run that script and commit what it writes. These checks keep the demo opening cleanly: the
-// startup report run finds nothing to rewrite, the only Problem is the deliberate one, and every
+// startup report run finds nothing to rewrite, the only Problems are the deliberate ones, and every
 // `area` and link is right.
 import { test as baseTest } from "node:test";
 import fs from "node:fs";
@@ -26,6 +26,7 @@ const basename = (p) => p.split("/").pop().replace(/\.md$/, "");
 const dirname = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
 const demoNotes = [...vault.notes.keys()].filter((p) => p === "Welcome.md" || NOTE_FOLDERS.some((f) => p.startsWith(f)));
 const PROBLEM_NOTE = `${DAYS}/2026-09-16.md`;
+const PROBLEM_PROJECT = "Projects/Personal/Block Party Poster/Block Party Poster.md";
 
 // ------------------------------------------------------------------ time reports
 
@@ -45,6 +46,7 @@ test("demo vault: reports go to every live project with time and every period wi
         `${P}/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md`,
         `${P}/Pinecrest Library Brochure/Pinecrest Library Brochure.md`,
         "Projects/Household/Household.md",
+        PROBLEM_PROJECT,
         "Projects/Personal/Garden Club Newsletter/Garden Club Newsletter.md",
     ]);
     // Household has time (OBS-51); Freelance, an area with none, gets no block
@@ -59,26 +61,40 @@ test("demo vault: reports go to every live project with time and every period wi
     }
 });
 
-test("demo vault: the only Problem is the deliberate mistyped entry on 9/16", () => {
+test("demo vault: the only Problems are the deliberate ones: a mistyped entry on 9/16 and a project with no rate_type", () => {
     const { model } = plan;
     const lines = vault.notes.get(PROBLEM_NOTE).text.split("\n");
     const line = lines.findIndex((l) => l.trim() === "- 2:30 - 3:45pm") + 1;
     assert.ok(line > 0);
     assert.match(lines[line], /Deliberate mistake for the demo/, "the example is labeled in the note");
     assert.deepEqual(plain(model.problems).map((p) => [p.path, p.line, p.kind]), [[PROBLEM_NOTE, line, "format"]]);
-    assert.deepEqual(plain(model.projectProblems), []);
+    // One project-level Problem (OBS-85): a project made from the template, its `rate_type` never
+    // filled in, so its one hour on 9/17 counts as billable
+    const { fm, text } = vault.notes.get(PROBLEM_PROJECT);
+    assert.equal(fm.rate_type, null);
+    assert.match(text, /Deliberate mistake for the demo/, "the example is labeled in the note");
+    assert.deepEqual(plain(model.projectProblems).map((p) => [p.project, p.message]),
+        [[PROBLEM_PROJECT, "has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)"]]);
+    assert.deepEqual(plain(model.entries.filter((e) => e.project === PROBLEM_PROJECT).map((e) => [e.date, e.minutes, e.billable])), [["2026-09-17", 60, true]]);
     // The only Unassigned time is the busy events with no project: they count from their end lines (OBS-24)
     assert.deepEqual(plain(model.entries.filter((e) => !e.project).map((e) => [e.date, e.task, e.minutes])), [
         ["2026-08-27", "Weekly planning", 15], ["2026-09-11", "Coffee with Esme", 60], ["2026-09-14", "Weekly planning", 30], ["2026-09-15", "Run with the club", 60],
     ]);
-    // Rendered: under the brochure project and the week, month and year of 9/16, plus the count of
-    // Unassigned entries in every period with a busy event that has no project; None. everywhere else
+    // Rendered: the mistyped entry under the brochure project, the rate_type under the poster project,
+    // both under the week, month and year of 9/16 and 9/17, plus the count of Unassigned entries in
+    // every period with a busy event that has no project; None. everywhere else
     const flagged = [...plan.blocks].filter(([, b]) => !/### Problems\n\nNone\.\n/.test(b)).map(([p]) => p).sort();
     assert.deepEqual(flagged, [
         `${FOLDERS.month}/2026-08.md`, `${FOLDERS.month}/2026-09.md`,
         `${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
-        "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md",
+        "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", PROBLEM_PROJECT,
     ].sort());
+    // The poster's Problem is on its own note and on the week, month and year of its hour, and nowhere else
+    const said = "- [[Block Party Poster|⭕ Block Party Poster]] has no `rate_type`";
+    for (const [p, b] of plan.blocks) {
+        const listed = [PROBLEM_PROJECT, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.month}/2026-09.md`, `${FOLDERS.year}/2026.md`].includes(p);
+        assert.equal(b.split("### Problems")[1].split("\n").some((l) => l.startsWith(said)), listed, p);
+    }
     for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.month}/2026-08.md`]) {
         assert.match(plan.blocks.get(p), /### Problems\n\n- 1 entry has no project \(see Unassigned\)\n/, p);
     }
