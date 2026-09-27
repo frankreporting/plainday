@@ -283,6 +283,7 @@ The alias is `M/D`, with no year and no leading zeros. Daily notes don't get pre
 - **Today's daily note:** Daily notes' *Open today's daily note*, on a hotkey of your choice.
 - **Previous and next daily note:** Daily notes' commands, or Notebook Navigator's calendar.
 - ***Plan*** ("CustomJS: Plan"): opens the next 2–5 days side by side, starting from the day you're on, or from today.
+- ***JumpToDate*** ("CustomJS: JumpToDate"): type a date in words and open its daily note, or its weekly or monthly note for `next week` or `last month`.
 
 ### Calendar sync
 
@@ -350,11 +351,34 @@ Obsidian saves folds separately on each device, and forgets a note's folds when 
 
 ## Commands
 
-The system's commands are CustomJS scripts, run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command id=customjs:invoke-<Name>`. The hotkeys below are suggestions; set them under Settings → Hotkeys. Some use Natural Language Dates' date parsing. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
+The system's commands are CustomJS scripts, run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command id=customjs:invoke-<Name>`. The hotkeys below are suggestions; set them under Settings → Hotkeys. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
+
+### Typing a date
+
+*Schedule*, *DueDate* and *JumpToDate* ask for a date in words, and Natural Language Dates reads them. The line under the box shows the date they mean as you type (`Fri 10/2 · in 5 days`), and Enter takes it.
+
+- **Words it can't read:** the line says "Not a date I can read", and Enter does nothing but say so. Natural Language Dates (Revived) answers with today for words it doesn't know, so a typo like `fridya` would otherwise pick today.
+- **Words it only partly read:** the line says which (`Thu 10/1 · in 4 days · read as "october"` for `end of october`), and Enter takes that date. A partial reading that comes out as today (`tomorow at 5pm` read as `at 5pm`) counts as unreadable.
+- **Weeks start on the day your settings say:** Notebook Navigator's calendar **Locale** (Settings → Notebook Navigator → Calendar), where *System default* means Obsidian's language, or Obsidian's language when its **Periodic notes locale** is set to follow Obsidian. Without Notebook Navigator, Obsidian's language decides. English starts weeks on Sunday. This is the week `next week` means, and the one Notebook Navigator's weekly notes cover.
+- **Revived or the original:** either plugin works, and only one can be on at a time. Use Revived: the original reads a bare weekday as last week's (`friday` on a Monday gives the Friday before).
+
+What the words mean, typed on Sunday 9/27/26:
+
+| You type | You get | Why |
+|---|---|---|
+| `friday` | Fri 10/2 | The coming Friday, or today on a Friday |
+| `this friday` | Fri 10/2 | This week's, in weeks that start on Sunday: on a Saturday, yesterday |
+| `next friday` | Fri 10/9 | Next week's, so on a Sunday it's 12 days away; `friday` is the one you usually want |
+| `last friday` | Fri 9/25 | Last week's: on a Saturday, 8 days back |
+| `tomorrow`, `in 3 days`, `in 2 weeks` | Mon 9/28, Wed 9/30, Sun 10/11 | Counted from today |
+| `10/2`, `oct 2` | Fri 10/2 | The next 10/2: a date already past this year is next year's, so give the year (`9/1/26`) for one behind you. *JumpToDate* takes the closer one instead: `9/16` is 11 days back, not next year's |
+| `next week`, `this week` | Sun 10/4, Sun 9/27 | The first day of next week, by your week setting; today for this week. *JumpToDate* opens the weekly note instead |
+| `week of oct 5` | Sun 10/4 | The first day of the week that day is in. *JumpToDate* opens that weekly note |
+| `next month`, `this month` | Thu 10/1, Tue 9/1 | The first of the month. *JumpToDate* opens the monthly note |
 
 ### Schedule (`⌘S`)
 
-- Asks for a date and moves the line (with its sub-bullets) to the end of that day's first checklist. *What Schedule does to a line* has the whole table.
+- Asks for a date (see *Typing a date*) and moves the line (with its sub-bullets) to the end of that day's first checklist. *What Schedule does to a line* has the whole table.
 - **Worked on** (time entries under it): the original stays as `[>]`, and both lines link the task note. If the task has no note yet, one is made first, the way *AddTaskNote* makes it (asking for its project or area); dismissing that picker cancels the schedule. A date in front of the task name goes to the note's `due` and comes off both lines, and the line's ⭕ or 🗃️ picks the note's home and comes off: `- [>] Draft homepage wireframes [[Draft homepage wireframes|🗒️]]`.
 - **From any note that isn't a daily note** (a sub-task in a task note, a task in a project note or log): the original gets the forward mark and a link to the day, `- [>] [[2026-09-18|9/18]] Sign-off call on Friday`, and the new line links back to the source with 🗒️, or ⭕ / 🗃️ when the source is tagged `#project` / `#area`.
 - `[/]` tasks keep their marker on the new day.
@@ -362,7 +386,7 @@ The system's commands are CustomJS scripts, run from the command palette ("Custo
 
 ### DueDate (`⇧⌘D`)
 
-Asks for a date in plain language and adds ` [[2026-09-30|🚩 9/30]] ` before the note links that end the line (🗒️, ⭕ or 🗃️), or else at the end.
+Asks for a date (see *Typing a date*) and adds ` [[2026-09-30|🚩 9/30]] ` before the note links that end the line (🗒️, ⭕ or 🗃️), or else at the end.
 
 ### AddTaskNote
 
@@ -403,6 +427,20 @@ Moves the note you're on into a project or area picked from the same menu as *Ad
 ### Plan
 
 Asks how many days (2–5) and opens that many consecutive daily notes side by side, from the daily note you're on, or from today. Missing notes are made from the template.
+
+### JumpToDate (`⌘J`)
+
+Asks for a date (see *Typing a date*) and opens its note in the pane you're in; `⌘↵` opens it in a split to the right.
+
+- **A day** opens its daily note. **`this`, `next` or `last` with `week`, `month` or `year`** opens the weekly, monthly or yearly note, named and filed by Notebook Navigator's week, month and year patterns (else `weeks/gggg[w]ww`, `months/YYYY-MM` and `years/YYYY` beside the daily notes).
+- **Weeks** start on the day your settings say (see *Typing a date*), so `next week` is always the week after this one's note. Revived's own weeks start on Monday, which on a Sunday would land in this week's note; JumpToDate counts the weeks from today instead. A week written with its year (`2026-W41`) is the one holding that ISO week's Monday.
+- **A week or a month in words:** `week of oct 5` (or of any date: `week of friday`, or `week starting oct 4`) opens the weekly note holding that day, and the preview says when it starts and names it (`Week starting 10/4 · 2026w41`). `w38`, `wk 38` or `week 38` is week 38, counted the way the weekly notes count, and `sep`, `sept`, `september` or `9/2026` is that month. They mean this year unless a year comes before or after: `w1 2027`, `2027 w1`, `Sep 2027`.
+- **A periodic note's own name** opens it too, spelled the way the patterns spell it: `2026w41`, `2026-10`, `2027`.
+- **A quarter** (`Q4`, `next quarter`) opens the daily note of its first day: there are no quarterly notes.
+- **A month and day without a year** (`9/16`, `sep 16`) is whichever is closer, this year's or next year's, since jumping goes back as often as forward. Schedule and DueDate take the next one.
+- **With the original Natural Language Dates**, words always mean a day, so `next week` opens a daily note; a note's own name still works.
+- **A note that doesn't exist yet** is created from its template after asking: the Daily Note template, or for a period the template Notebook Navigator's calendar uses (else *Weekly Note*, *Monthly Note* or *Yearly Note*). Tick **Don't ask again on this device** to skip the question from then on; while it's skipped, the prompt says so and offers **Ask again**. If a template files the note somewhere other than the pattern's folder (the Weekly Note template moves its note into `36 Planner/weeks`), JumpToDate says so: make the two agree, or the next jump won't find the note.
+- It replaces the *Natural Language Date* command of the Jump-to-Date plugin, which only works with the original Natural Language Dates plugin. If `⌘J` runs that command, move the hotkey to *CustomJS: JumpToDate*.
 
 ### ConvertToProject
 
@@ -445,7 +483,7 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 ## Plugins
 
-**Required:** Templater (script folder `00 Meta/02 Scripts/Templater`, trigger on new file creation), CustomJS (script folder `00 Meta/02 Scripts/CustomJS/`), Natural Language Dates, and the core Daily notes and Bases plugins.
+**Required:** Templater (script folder `00 Meta/02 Scripts/Templater`, trigger on new file creation), CustomJS (script folder `00 Meta/02 Scripts/CustomJS/`), [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
 
 **Recommended:**
 

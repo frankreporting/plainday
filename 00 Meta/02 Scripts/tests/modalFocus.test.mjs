@@ -29,17 +29,16 @@ test("no script focuses anything straight after a modal's open()", () => {
 
 test("each prompt focuses its control from onOpen, a frame later", () => {
     for (const [f, control] of [
-        ["schedule.js", "input.inputEl.focus()"],
-        ["setDueDate.js", "input.inputEl.focus()"],
+        ["datePrompt.js", "input.inputEl.focus()"],   // Schedule, Due and JumpToDate
+        ["jumpToDate.js", "yes.focus()"],
         ["plan.js", "dropdown.selectEl.focus()"],
         ["calendarSyncRange.js", "dropdown.selectEl.focus()"],
         ["addTaskNote.js", "move.buttonEl.focus()"],
     ]) {
-        const src = read(f);
-        const at = src.indexOf(control);
-        assert.ok(at > 0, `${f} focuses ${control}`);
-        const line = src.slice(src.lastIndexOf("\n", at), src.indexOf("\n", at));
-        assert.match(line, /onOpen.*requestAnimationFrame\(/, `${f} focuses inside onOpen, after a frame`);
+        // The focus that opens the prompt; a later one, after a click, may focus the same control
+        const lines = read(f).split("\n").filter((l) => l.includes(control));
+        assert.ok(lines.length > 0, `${f} focuses ${control}`);
+        assert.ok(lines.some((l) => /onOpen.*requestAnimationFrame\(/.test(l)), `${f} focuses inside onOpen, after a frame`);
     }
 });
 

@@ -127,9 +127,22 @@ class Plan {
         const templater = app.plugins.getPlugin("templater-obsidian")?.templater;
         if (tpl && templater) {
             await templater.write_template_to_file(tpl, file);
+            this.holdOffTemplater(file.path);
         } else if (tpl) {
             new Notice("Templater unavailable — created a blank daily note");
         }
         return file;
+    }
+
+    // Templater's trigger for new notes waits 300ms, then runs Get Template on a new note whose body
+    // is empty and that it no longer lists as in progress. A note just made from its template is only
+    // frontmatter, and write_template_to_file takes it off that list when it's done, so it would be
+    // templated again, through the editor once it's open, pulling the cursor to the top. Call this
+    // right after the template ran to keep it listed a while longer, as the Log template does (OBS-57).
+    holdOffTemplater(path) {
+        const pending = app.plugins?.plugins?.["templater-obsidian"]?.templater?.files_with_pending_templates;
+        if (!pending) return;
+        pending.add(path);
+        setTimeout(() => pending.delete(path), 1500);
     }
 }

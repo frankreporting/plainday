@@ -14,6 +14,7 @@
     "AddProjectLink",
     "MoveToProject",
     "Schedule",
+    "JumpToDate",
     "Plan",
     "ConvertToProject",
     "RefoldDailyNotes",

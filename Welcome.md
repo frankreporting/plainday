@@ -27,6 +27,7 @@ Everything under "## Time tracking" is written by the TimeReport command, not by
 | TimeReport | Refresh the reports | Command palette |
 | New note | Create note; include `!task …`, `!project …`, date + title like `2026-09-21 Kickoff call`, or plain dates like `2026-09-21`, and templates are applied | `⌘N` |
 | Plan | Plan ahead: the next few daily notes side by side | Command palette |
+| JumpToDate | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
 
 Run the task commands with the cursor on a task line. ToggleTimeEntry times tasks in today's daily note; press it again to stop. In the command palette, the commands are "CustomJS: …".
 

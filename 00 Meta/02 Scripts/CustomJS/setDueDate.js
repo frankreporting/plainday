@@ -22,10 +22,9 @@ class DueDate {
     }
 
     async invoke() {
-        const { Modal, TextComponent, MarkdownView } = customJS.obsidian;
-        const nld = app.plugins.getPlugin("nldates-obsidian");
+        const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
-        if (!nld || !view) { new Notice("Need NLD + an active editor"); return; }
+        if (!view) { new Notice("Need an active editor"); return; }
 
         const editor = view.editor;
         const lineNum = editor.getCursor().line;
@@ -38,20 +37,7 @@ class DueDate {
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
-        const modal = new Modal(app);
-        modal.titleEl.setText("Due date");
-        const input = new TextComponent(modal.contentEl);
-        input.setValue("");
-        input.inputEl.style.width = "100%";
-
-        input.inputEl.addEventListener("keydown", (e) => {
-            if (e.key !== "Enter") return;
-            e.preventDefault();
-
-            const parsed = nld.parseDate(input.getValue());
-            if (!parsed?.moment?.isValid()) { new Notice("Couldn't parse that date"); return; }
-            const m = parsed.moment;
-
+        customJS.DatePrompt.open("Due date", ({ m }, modal) => {
             const lineText = editor.getLine(lineNum);
             const { from, to, text } = this.placement(lineText, `[[${m.format("YYYY-MM-DD")}|🚩 ${m.format("M/D")}]]`);
 
@@ -70,10 +56,5 @@ class DueDate {
                 }
             }, 50);
         });
-
-        // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
-        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
-        modal.onOpen = () => requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); });
-        modal.open();
     }
 }

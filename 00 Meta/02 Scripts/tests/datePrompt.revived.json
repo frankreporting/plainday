@@ -1,0 +1,1723 @@
+{
+  "plugin": "nldates-revived 0.9.85",
+  "settings": "weekStart locale-default (en: Sunday), weekFormat GGGG[w]ww, monthFormat YYYY-MM, yearFormat YYYY",
+  "days": {
+    "2026-09-27": {
+      "friday": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "friday"
+        ],
+        "chronoBest": {
+          "text": "friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "monday": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-28",
+        "chronoWords": [
+          "monday"
+        ],
+        "chronoBest": {
+          "text": "monday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "sunday": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "sunday"
+        ],
+        "chronoBest": {
+          "text": "sunday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "today"
+        ],
+        "chronoBest": {
+          "text": "today",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "tomorrow": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-28",
+        "chronoWords": [
+          "tomorrow"
+        ],
+        "chronoBest": {
+          "text": "tomorrow",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 3 days": {
+        "parseDate": "2026-09-30",
+        "period": {
+          "date": "2026-09-30",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-30",
+        "chronoWords": [
+          "in 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next friday": {
+        "parseDate": "2026-10-09",
+        "period": {
+          "date": "2026-10-09",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "next friday"
+        ],
+        "chronoBest": {
+          "text": "next friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "10/2": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "10/2"
+        ],
+        "chronoBest": {
+          "text": "10/2",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "fridya": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "tomorow": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "asdf": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of month": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of october": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-01",
+        "chronoWords": [
+          "october"
+        ],
+        "chronoBest": {
+          "text": "october",
+          "year": false,
+          "month": true,
+          "day": false
+        }
+      },
+      "tomorow at 5pm": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "at 5pm"
+        ],
+        "chronoBest": {
+          "text": "at 5pm",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today at 5pm": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "today at 5pm"
+        ],
+        "chronoBest": {
+          "text": "today at 5pm",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 2 weeks and 3 days": {
+        "parseDate": "2026-10-14",
+        "period": {
+          "date": "2026-10-14",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-14",
+        "chronoWords": [
+          "in 2 weeks and 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 2 weeks and 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next quarter": {
+        "parseDate": "2026-12-27",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "quarter"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-27",
+        "chronoWords": [
+          "next quarter"
+        ],
+        "chronoBest": {
+          "text": "next quarter",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "9/16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "9/16"
+        ],
+        "chronoBest": {
+          "text": "9/16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "sep 16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "sep 16"
+        ],
+        "chronoBest": {
+          "text": "sep 16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "jan 5": {
+        "parseDate": "2027-01-05",
+        "period": {
+          "date": "2027-01-05",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-01-05",
+        "chronoWords": [
+          "jan 5"
+        ],
+        "chronoBest": {
+          "text": "jan 5",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "march 3": {
+        "parseDate": "2027-03-03",
+        "period": {
+          "date": "2027-03-03",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-03-03",
+        "chronoWords": [
+          "march 3"
+        ],
+        "chronoBest": {
+          "text": "march 3",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "12/25": {
+        "parseDate": "2026-12-25",
+        "period": {
+          "date": "2026-12-25",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-25",
+        "chronoWords": [
+          "12/25"
+        ],
+        "chronoBest": {
+          "text": "12/25",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 7 months": {
+        "parseDate": "2027-04-27",
+        "period": {
+          "date": "2027-04-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-04-27",
+        "chronoWords": [
+          "in 7 months"
+        ],
+        "chronoBest": {
+          "text": "in 7 months",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "9/16/26": {
+        "parseDate": "2026-09-16",
+        "period": {
+          "date": "2026-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-16",
+        "chronoWords": [
+          "9/16/26"
+        ],
+        "chronoBest": {
+          "text": "9/16/26",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "the 16th": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "16th"
+        ],
+        "chronoBest": {
+          "text": "16th",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "this week": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "this week"
+        ],
+        "chronoBest": {
+          "text": "this week",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "next week": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-04",
+        "chronoWords": [
+          "next week"
+        ],
+        "chronoBest": {
+          "text": "next week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "last week": {
+        "parseDate": "2026-09-14",
+        "period": {
+          "date": "2026-09-14",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-20",
+        "chronoWords": [
+          "last week"
+        ],
+        "chronoBest": {
+          "text": "last week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "this month": {
+        "parseDate": "2026-09-01",
+        "period": {
+          "date": "2026-09-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-01",
+        "chronoWords": [
+          "this month"
+        ],
+        "chronoBest": {
+          "text": "this month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next month": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-27",
+        "chronoWords": [
+          "next month"
+        ],
+        "chronoBest": {
+          "text": "next month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "last month": {
+        "parseDate": "2026-08-01",
+        "period": {
+          "date": "2026-08-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-08-27",
+        "chronoWords": [
+          "last month"
+        ],
+        "chronoBest": {
+          "text": "last month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next year": {
+        "parseDate": "2027-01-01",
+        "period": {
+          "date": "2027-01-01",
+          "granularity": "year"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-27",
+        "chronoWords": [
+          "next year"
+        ],
+        "chronoBest": {
+          "text": "next year",
+          "year": true,
+          "month": false,
+          "day": false
+        }
+      },
+      "Q3": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-07-01",
+          "granularity": "quarter"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "2026-W40": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      }
+    },
+    "2026-09-21": {
+      "friday": {
+        "parseDate": "2026-09-25",
+        "period": {
+          "date": "2026-09-25",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-25",
+        "chronoWords": [
+          "friday"
+        ],
+        "chronoBest": {
+          "text": "friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "monday": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-21",
+        "chronoWords": [
+          "monday"
+        ],
+        "chronoBest": {
+          "text": "monday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "sunday": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "sunday"
+        ],
+        "chronoBest": {
+          "text": "sunday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-21",
+        "chronoWords": [
+          "today"
+        ],
+        "chronoBest": {
+          "text": "today",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "tomorrow": {
+        "parseDate": "2026-09-22",
+        "period": {
+          "date": "2026-09-22",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-22",
+        "chronoWords": [
+          "tomorrow"
+        ],
+        "chronoBest": {
+          "text": "tomorrow",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 3 days": {
+        "parseDate": "2026-09-24",
+        "period": {
+          "date": "2026-09-24",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-24",
+        "chronoWords": [
+          "in 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next friday": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "next friday"
+        ],
+        "chronoBest": {
+          "text": "next friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "10/2": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "10/2"
+        ],
+        "chronoBest": {
+          "text": "10/2",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "fridya": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "tomorow": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "asdf": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of month": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of october": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-01",
+        "chronoWords": [
+          "october"
+        ],
+        "chronoBest": {
+          "text": "october",
+          "year": false,
+          "month": true,
+          "day": false
+        }
+      },
+      "tomorow at 5pm": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-21",
+        "chronoWords": [
+          "at 5pm"
+        ],
+        "chronoBest": {
+          "text": "at 5pm",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today at 5pm": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-21",
+        "chronoWords": [
+          "today at 5pm"
+        ],
+        "chronoBest": {
+          "text": "today at 5pm",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 2 weeks and 3 days": {
+        "parseDate": "2026-10-08",
+        "period": {
+          "date": "2026-10-08",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-08",
+        "chronoWords": [
+          "in 2 weeks and 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 2 weeks and 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next quarter": {
+        "parseDate": "2026-12-21",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "quarter"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-21",
+        "chronoWords": [
+          "next quarter"
+        ],
+        "chronoBest": {
+          "text": "next quarter",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "9/16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "9/16"
+        ],
+        "chronoBest": {
+          "text": "9/16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "sep 16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "sep 16"
+        ],
+        "chronoBest": {
+          "text": "sep 16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "jan 5": {
+        "parseDate": "2027-01-05",
+        "period": {
+          "date": "2027-01-05",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-01-05",
+        "chronoWords": [
+          "jan 5"
+        ],
+        "chronoBest": {
+          "text": "jan 5",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "march 3": {
+        "parseDate": "2027-03-03",
+        "period": {
+          "date": "2027-03-03",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-03-03",
+        "chronoWords": [
+          "march 3"
+        ],
+        "chronoBest": {
+          "text": "march 3",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "12/25": {
+        "parseDate": "2026-12-25",
+        "period": {
+          "date": "2026-12-25",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-25",
+        "chronoWords": [
+          "12/25"
+        ],
+        "chronoBest": {
+          "text": "12/25",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 7 months": {
+        "parseDate": "2027-04-21",
+        "period": {
+          "date": "2027-04-21",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-04-21",
+        "chronoWords": [
+          "in 7 months"
+        ],
+        "chronoBest": {
+          "text": "in 7 months",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "9/16/26": {
+        "parseDate": "2026-09-16",
+        "period": {
+          "date": "2026-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-16",
+        "chronoWords": [
+          "9/16/26"
+        ],
+        "chronoBest": {
+          "text": "9/16/26",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "the 16th": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "16th"
+        ],
+        "chronoBest": {
+          "text": "16th",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "this week": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-09-21",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-22",
+        "chronoWords": [
+          "this week"
+        ],
+        "chronoBest": {
+          "text": "this week",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "next week": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-28",
+        "chronoWords": [
+          "next week"
+        ],
+        "chronoBest": {
+          "text": "next week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "last week": {
+        "parseDate": "2026-09-14",
+        "period": {
+          "date": "2026-09-14",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-14",
+        "chronoWords": [
+          "last week"
+        ],
+        "chronoBest": {
+          "text": "last week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "this month": {
+        "parseDate": "2026-09-01",
+        "period": {
+          "date": "2026-09-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-01",
+        "chronoWords": [
+          "this month"
+        ],
+        "chronoBest": {
+          "text": "this month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next month": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-21",
+        "chronoWords": [
+          "next month"
+        ],
+        "chronoBest": {
+          "text": "next month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "last month": {
+        "parseDate": "2026-08-01",
+        "period": {
+          "date": "2026-08-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-08-21",
+        "chronoWords": [
+          "last month"
+        ],
+        "chronoBest": {
+          "text": "last month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next year": {
+        "parseDate": "2027-01-01",
+        "period": {
+          "date": "2027-01-01",
+          "granularity": "year"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-21",
+        "chronoWords": [
+          "next year"
+        ],
+        "chronoBest": {
+          "text": "next year",
+          "year": true,
+          "month": false,
+          "day": false
+        }
+      },
+      "Q3": {
+        "parseDate": "2026-09-21",
+        "period": {
+          "date": "2026-07-01",
+          "granularity": "quarter"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "2026-W40": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      }
+    },
+    "2026-09-26": {
+      "friday": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "friday"
+        ],
+        "chronoBest": {
+          "text": "friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "monday": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-28",
+        "chronoWords": [
+          "monday"
+        ],
+        "chronoBest": {
+          "text": "monday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "sunday": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "sunday"
+        ],
+        "chronoBest": {
+          "text": "sunday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-26",
+        "chronoWords": [
+          "today"
+        ],
+        "chronoBest": {
+          "text": "today",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "tomorrow": {
+        "parseDate": "2026-09-27",
+        "period": {
+          "date": "2026-09-27",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "tomorrow"
+        ],
+        "chronoBest": {
+          "text": "tomorrow",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 3 days": {
+        "parseDate": "2026-09-29",
+        "period": {
+          "date": "2026-09-29",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-29",
+        "chronoWords": [
+          "in 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next friday": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "next friday"
+        ],
+        "chronoBest": {
+          "text": "next friday",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "10/2": {
+        "parseDate": "2026-10-02",
+        "period": {
+          "date": "2026-10-02",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-02",
+        "chronoWords": [
+          "10/2"
+        ],
+        "chronoBest": {
+          "text": "10/2",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "fridya": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "tomorow": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "asdf": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of month": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "end of october": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-01",
+        "chronoWords": [
+          "october"
+        ],
+        "chronoBest": {
+          "text": "october",
+          "year": false,
+          "month": true,
+          "day": false
+        }
+      },
+      "tomorow at 5pm": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-26",
+        "chronoWords": [
+          "at 5pm"
+        ],
+        "chronoBest": {
+          "text": "at 5pm",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "today at 5pm": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-26",
+        "chronoWords": [
+          "today at 5pm"
+        ],
+        "chronoBest": {
+          "text": "today at 5pm",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 2 weeks and 3 days": {
+        "parseDate": "2026-10-13",
+        "period": {
+          "date": "2026-10-13",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-13",
+        "chronoWords": [
+          "in 2 weeks and 3 days"
+        ],
+        "chronoBest": {
+          "text": "in 2 weeks and 3 days",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "next quarter": {
+        "parseDate": "2026-12-26",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "quarter"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-26",
+        "chronoWords": [
+          "next quarter"
+        ],
+        "chronoBest": {
+          "text": "next quarter",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "9/16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "9/16"
+        ],
+        "chronoBest": {
+          "text": "9/16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "sep 16": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "sep 16"
+        ],
+        "chronoBest": {
+          "text": "sep 16",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "jan 5": {
+        "parseDate": "2027-01-05",
+        "period": {
+          "date": "2027-01-05",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-01-05",
+        "chronoWords": [
+          "jan 5"
+        ],
+        "chronoBest": {
+          "text": "jan 5",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "march 3": {
+        "parseDate": "2027-03-03",
+        "period": {
+          "date": "2027-03-03",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-03-03",
+        "chronoWords": [
+          "march 3"
+        ],
+        "chronoBest": {
+          "text": "march 3",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "12/25": {
+        "parseDate": "2026-12-25",
+        "period": {
+          "date": "2026-12-25",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-12-25",
+        "chronoWords": [
+          "12/25"
+        ],
+        "chronoBest": {
+          "text": "12/25",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "in 7 months": {
+        "parseDate": "2027-04-26",
+        "period": {
+          "date": "2027-04-26",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-04-26",
+        "chronoWords": [
+          "in 7 months"
+        ],
+        "chronoBest": {
+          "text": "in 7 months",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "9/16/26": {
+        "parseDate": "2026-09-16",
+        "period": {
+          "date": "2026-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-16",
+        "chronoWords": [
+          "9/16/26"
+        ],
+        "chronoBest": {
+          "text": "9/16/26",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "the 16th": {
+        "parseDate": "2027-09-16",
+        "period": {
+          "date": "2027-09-16",
+          "granularity": "day"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-16",
+        "chronoWords": [
+          "16th"
+        ],
+        "chronoBest": {
+          "text": "16th",
+          "year": false,
+          "month": true,
+          "day": true
+        }
+      },
+      "this week": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-09-26",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-27",
+        "chronoWords": [
+          "this week"
+        ],
+        "chronoBest": {
+          "text": "this week",
+          "year": false,
+          "month": false,
+          "day": false
+        }
+      },
+      "next week": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-03",
+        "chronoWords": [
+          "next week"
+        ],
+        "chronoBest": {
+          "text": "next week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "last week": {
+        "parseDate": "2026-09-14",
+        "period": {
+          "date": "2026-09-14",
+          "granularity": "week"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-19",
+        "chronoWords": [
+          "last week"
+        ],
+        "chronoBest": {
+          "text": "last week",
+          "year": true,
+          "month": true,
+          "day": true
+        }
+      },
+      "this month": {
+        "parseDate": "2026-09-01",
+        "period": {
+          "date": "2026-09-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-09-01",
+        "chronoWords": [
+          "this month"
+        ],
+        "chronoBest": {
+          "text": "this month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next month": {
+        "parseDate": "2026-10-01",
+        "period": {
+          "date": "2026-10-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-10-26",
+        "chronoWords": [
+          "next month"
+        ],
+        "chronoBest": {
+          "text": "next month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "last month": {
+        "parseDate": "2026-08-01",
+        "period": {
+          "date": "2026-08-01",
+          "granularity": "month"
+        },
+        "chrono": true,
+        "chronoDate": "2026-08-26",
+        "chronoWords": [
+          "last month"
+        ],
+        "chronoBest": {
+          "text": "last month",
+          "year": true,
+          "month": true,
+          "day": false
+        }
+      },
+      "next year": {
+        "parseDate": "2027-01-01",
+        "period": {
+          "date": "2027-01-01",
+          "granularity": "year"
+        },
+        "chrono": true,
+        "chronoDate": "2027-09-26",
+        "chronoWords": [
+          "next year"
+        ],
+        "chronoBest": {
+          "text": "next year",
+          "year": true,
+          "month": false,
+          "day": false
+        }
+      },
+      "Q3": {
+        "parseDate": "2026-09-26",
+        "period": {
+          "date": "2026-07-01",
+          "granularity": "quarter"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      },
+      "2026-W40": {
+        "parseDate": "2026-09-28",
+        "period": {
+          "date": "2026-09-28",
+          "granularity": "week"
+        },
+        "chrono": false,
+        "chronoDate": null,
+        "chronoWords": [],
+        "chronoBest": null
+      }
+    }
+  },
+  "how": "Recorded from the plugin's own code with its test setup and a fixed clock at 10am on each day: parseDate(text).moment as YYYY-MM-DD (null if invalid); parser.getParsedPeriod(text, 'locale-default'); whether parser.getParsedDateResult(text, now) found anything; its date with { forwardDate: true } (chronoDate); the words parser.getParsedResult(text) matched (chronoWords); and for the longest of them, which of year, month and day the words stated (chronoBest, from start.isCertain)"
+}

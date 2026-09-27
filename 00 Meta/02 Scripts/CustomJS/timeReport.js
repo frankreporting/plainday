@@ -1635,11 +1635,12 @@ class TimeReport {
 
     // weeks/months/years folders: Notebook Navigator's periodic notes folder plus the folder part of
     // its week/month/year pattern ("[weeks]/gggg[w]ww" → "30 Reference/36 Planner/weeks"); without
-    // that, weeks/months/years beside the daily notes folder
+    // that, weeks/months/years beside the daily notes folder. JumpToDate calls it outside a report
+    // run too, before `this.schedule` is set.
     periodFolders() {
         const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
         const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
-        const daily = this.schedule.dailyOpts().folder;
+        const daily = (this.schedule ?? customJS.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
         const folderOf = (pattern, fallback) => {
             const p = String(pattern ?? "");

@@ -12,12 +12,12 @@ This README covers trying it and installing it. **[The manual](<00 Meta/Manual.m
 2. **Settings → Community plugins:** turn on community plugins, then install and enable:
    - [Templater](https://github.com/SilentVoid13/Templater)
    - [CustomJS](https://github.com/saml-dev/obsidian-custom-js)
-   - [Natural Language Dates](https://github.com/argenos/nldates-obsidian)
+   - [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
    Their settings for this vault are already in the repository.
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `10 Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *JumpToDate* `⌘J`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
 Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).

@@ -5,11 +5,10 @@ class Schedule {
     static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
 
     async invoke() {
-        const { Modal, TextComponent, MarkdownView } = customJS.obsidian;
-        const nld = app.plugins.getPlugin("nldates-obsidian");
+        const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         const srcFile = app.workspace.getActiveFile();
-        if (!nld || !view || !srcFile) { new Notice("Need NLD + an active editor"); return; }
+        if (!view || !srcFile) { new Notice("Need an active editor"); return; }
         const editor = view.editor;
         const lineNum = editor.getCursor().line;
         const lineText = editor.getLine(lineNum);
@@ -49,17 +48,7 @@ class Schedule {
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
-        const modal = new Modal(app);
-        modal.titleEl.setText("Schedule for");
-        const input = new TextComponent(modal.contentEl);
-        input.inputEl.style.width = "100%";
-        input.inputEl.addEventListener("keydown", async (e) => {
-            if (e.key !== "Enter") return;
-            e.preventDefault();
-            const parsed = nld.parseDate(input.getValue());
-            if (!parsed?.moment?.isValid()) { new Notice("Couldn't parse that date"); return; }
-            const m = parsed.moment;
-
+        customJS.DatePrompt.open("Schedule for", async ({ m }, modal) => {
             // Forwarding a worked-on task links it to its task note on both lines. The time already
             // logged only counts toward a project once that note exists, so find or create it first
             // (through AddTaskNote, which asks where a new one goes). No project picked: nothing moves.
@@ -146,10 +135,6 @@ class Schedule {
                 new Notice("Couldn't write to the daily note — check console");
             }
         });
-        // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
-        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
-        modal.onOpen = () => requestAnimationFrame(() => input.inputEl.focus());
-        modal.open();
     }
 
     dailyOpts() {
