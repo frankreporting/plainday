@@ -2,15 +2,18 @@ class CalendarSync {
     // Writes calendar events into daily notes and keeps them current: an event that moves, is
     // renamed or is canceled updates the line the sync wrote (a canceled one is marked [-], kept as
     // a record of what was planned, and back to [<] if the event returns). A line you've touched is yours,
-    // except for what you add on top of an event: ⭕ project links and a 🆓 after the title, a log
-    // link around it, a note after the end time's colon, and time entries under it. Those are kept
+    // except for what you add on top of an event: ⭕ project links, a 🆓 and a link to its log after
+    // the title, a note after the end time's colon, and time entries under it. Those are kept
     // through every update, and a moved event takes its links and 🆓 (not its time entries or the
     // end line's note) to the new day. A ⭕ put after a recurring
     // series in the Calendar Sync note reaches every upcoming line of that series. An event the
     // calendar shows as free gets ℹ️ after its title (see FREE_MARK), kept current the same way.
-    // A log's line with no time, `- [<] [[log|Title]]` (the Log template writes one when the
+    // A log's line with no time, `- [<] Title [[log|🗒️]]` (the Log template writes one when the
     // calendar has no event for a meeting, OBS-10), is adopted when the event arrives and given
     // its time, and a log a line links takes the line's times whenever the sync writes the line.
+    // An event links its log at the end, `Title [[log|🗒️]]`, as a task links its note (OBS-57).
+    // Lines from before wrap the title in the link instead, `[[log|Title]]`; they're still read,
+    // and written the new way whenever the sync rewrites them.
     //
     // Three files, all in 00 Meta:
     // - `calendar-events.json`   every calendar and event, written by the fetcher
@@ -40,7 +43,17 @@ class CalendarSync {
     // A ⭕ project link, or a 🗃️ area link (OBS-36), at the end of a title (a phone may add or
     // drop the U+FE0F)
     static PROJECT_LINK = /\s*\[\[[^[\]|]+\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u;
+    // A title wrapped in a link to its log, the way lines were written before OBS-57:
+    // `[[2026-09-16 Planning|Planning]]`. CalNav reads titles with this too. Only a link to a
+    // log's name (its date first, LOG_NAME) is the event's log: a title wrapped in a link to
+    // anything else (a person, say) is a hand edit, which makes the line yours.
     static LOG_LINK = /^\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]$/;
+    static LOG_NAME = /^\[\[(?:[^[\]|#]*\/)?\d{4}-\d{2}-\d{2} /;
+    // A note link at the end of a line: an event's log, the way a task links its note (OBS-57).
+    // 🗒️ is written; 🔗, its symbol before OBS-87, is still read. A phone may add or drop the
+    // U+FE0F. It needs a space before it, so a title that is only a link keeps it.
+    static NOTE_MARK = "🗒️";
+    static NOTE_LINK = /\s+\[\[[^[\]|]+\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]$/u;
     // ℹ️ after the title marks an event the calendar says you're free during (Show As: Free): not
     // your time, so TimeReport never counts it or checks it for overlaps (OBS-47). The sync writes
     // it on timed events, before any ⭕ links, and keeps it current with the calendar; an all-day
@@ -577,7 +590,8 @@ class CalendarSync {
             if (!file) return { projects: [], log: null, nonbillable: false, series: entry.series };
             text = await app.vault.read(file);
         } catch (e) {
-            return { projects: entry.projects ?? [], log: entry.log ?? null, nonbillable: entry.nonbillable ?? false, series: entry.series };
+            // A ledger from before OBS-57 may hold the log link in its old form
+            return { projects: entry.projects ?? [], log: this.noteLink(entry.log), nonbillable: entry.nonbillable ?? false, series: entry.series };
         }
         const lines = text.split("\n");
         const block = this.findBlock(lines, entry);
@@ -657,34 +671,28 @@ class CalendarSync {
             // A moved event brings the old line's links; a series may add its ⭕
             const carry = op.carry ?? { projects: [], log: null, nonbillable: false, series: undefined };
             const links = carry.log ? null : this.seriesLinks(carry.projects, carry.series, op.series);
-            const withLog = this.decorate(op.lines, { projects: links ?? carry.projects, log: carry.log, nonbillable: carry.nonbillable });
-            // A new title that can't sit inside a link loses the log link here, so the old line stays
-            const droppedLog = !withLog;
-            const written = withLog ?? this.decorate(op.lines, { projects: links ?? carry.projects, log: null, nonbillable: carry.nonbillable });
+            const written = this.decorate(op.lines, { projects: links ?? carry.projects, log: carry.log, nonbillable: carry.nonbillable });
             const series = this.seriesApplied(carry.projects, carry.series, links, op.series);
-            let existing = this.findBlock(lines, { lines: op.lines }, claimed, true);
+            const existing = this.findBlock(lines, { lines: op.lines }, claimed, true);
             // A log's line with no time (the Log template wrote it before the sync had the event):
-            // written in the sync's shape around the log link, with its ⭕ links and any a moved
-            // event or a series brings, and whatever sits under it kept below the end time. A moved
-            // event's old log link can't come along, so its old line stays, as with any dropped link.
+            // written in the sync's shape with its log link, its 🆓, its ⭕ links and any a moved
+            // event or a series brings, and whatever sits under it kept below the end time. A line holds one
+            // log, so a moved event's other log link can't come along, and its old line stays.
             const timeless = existing && this.logLine(lines[existing.from]);
             if (timeless) {
                 const projects = [...new Set([...timeless.projects, ...(links ?? carry.projects)])];
-                const head = this.decorate(op.lines, { projects, log: timeless.log });
-                if (head) {
-                    const block = [...head, ...lines.slice(existing.from + 1, existing.to + 1)];
-                    this.claim(claimed, block[0]);
-                    return {
-                        text: [...lines.slice(0, existing.from), ...block, ...lines.slice(existing.to + 1)].join("\n"),
-                        outcome: "adopted", lines: op.lines, written: head, took: block[0], changed: ["time added"],
-                        series, droppedLog: !!carry.log && carry.log !== timeless.log,
-                    };
-                }
-                existing = null;   // the title can't sit inside a link (and nothing else matched earlier)
+                const head = this.decorate(op.lines, { projects, log: timeless.log, nonbillable: timeless.nonbillable || carry.nonbillable });
+                const block = [...head, ...lines.slice(existing.from + 1, existing.to + 1)];
+                this.claim(claimed, block[0]);
+                return {
+                    text: [...lines.slice(0, existing.from), ...block, ...lines.slice(existing.to + 1)].join("\n"),
+                    outcome: "adopted", lines: op.lines, written: head, took: block[0], changed: ["time added"],
+                    series, droppedLog: !!carry.log && this.noteLink(carry.log) !== timeless.log,
+                };
             }
             if (!existing) {
                 this.claim(claimed, written[0]);
-                return { text: this.insert(lines, written), outcome: "inserted", lines: op.lines, written, series, droppedLog, took: written[0] };
+                return { text: this.insert(lines, written), outcome: "inserted", lines: op.lines, written, series, took: written[0] };
             }
             // A line for this event is already there: adopt it rather than duplicate it.
             // (A second event that would match the same line finds it claimed and inserts its own.)
@@ -785,7 +793,7 @@ class CalendarSync {
             // Anything more (time entries, a note on the end line), or links that didn't make it
             // across, and it's forwarded.
             const carried = op.carry && op.landed?.asIntended && ann && !ann.entries && !ann.endNote
-                && this.same(ann.projects, op.carry.projects) && (ann.log ?? null) === (op.carry.log ?? null)
+                && this.same(ann.projects, op.carry.projects) && this.noteLink(ann.log) === this.noteLink(op.carry.log)
                 && !!ann.nonbillable === !!op.carry.nonbillable;
             return carried
                 ? { text: without.join("\n"), outcome: "removed" }
@@ -1008,7 +1016,7 @@ class CalendarSync {
     }
 
     // An entry's block: its exact first line, else an event line with the same start whose title
-    // reads the same (so a title you've turned into a link still matches), else, for an insert
+    // reads the same (so a line with its log linked, either way, still matches), else, for an insert
     // only (`timeless`), a log's line with no time and the same title. Never a claimed line.
     findBlock(lines, entry, claimed = new Map(), timeless = false) {
         const wanted = this.head(entry.lines[0]);
@@ -1052,27 +1060,28 @@ class CalendarSync {
     }
 
     // The start and displayed title of an event line, or null if it isn't one. Any checkbox
-    // marker counts: marking a line [!] or [x] annotates it, it doesn't delete it. ⭕ links and
-    // the free mark after the title aren't part of it.
+    // marker counts: marking a line [!] or [x] annotates it, it doesn't delete it. ⭕ links, the
+    // free mark and the log link after the title aren't part of it.
     head(line) {
         const match = line.match(/^\s*[-*+]\s+\[.\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
         if (!match) return null;
-        return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2]).rest) };
+        return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2], true).rest) };
     }
 
-    // An event line with no time: `- [<] [[log|Title]]`, which the Log template writes for a
+    // An event line with no time: `- [<] Title [[log|🗒️]]`, which the Log template writes for a
     // meeting the calendar doesn't have (OBS-10). Sorts after the timed events.
     timeless(line) {
         return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);
     }
 
-    // A timeless line whose title is a log link, taken apart like eventHead: { log, shown,
-    // projects, free }. Null for any other line.
+    // A timeless line that links a log, at the end or (from before OBS-57) around its title, taken
+    // apart like eventHead: { log, shown, projects, free, nonbillable }. Null for any other line.
     logLine(line) {
         if (!this.timeless(line)) return null;
-        const { rest, projects, free } = this.splitTail(line.replace(/^\s*[-*+]\s+\[<\]\s+/, ""));
-        const wrapped = rest.match(CalendarSync.LOG_LINK);
-        return wrapped ? { log: rest, shown: (wrapped[2] ?? wrapped[1]).trim(), projects, free } : null;
+        const { rest, projects, free, nonbillable, log } = this.splitTail(line.replace(/^\s*[-*+]\s+\[<\]\s+/, ""), true);
+        if (log) return { log: this.noteLink(log), shown: rest, projects, free, nonbillable };
+        const wrapped = CalendarSync.LOG_NAME.test(rest) && rest.match(CalendarSync.LOG_LINK);
+        return wrapped ? { log: this.noteLink(rest), shown: (wrapped[2] ?? wrapped[1]).trim(), projects, free, nonbillable } : null;
     }
 
     // MARK: what you add to an event line
@@ -1089,23 +1098,33 @@ class CalendarSync {
         return { rest: rest.trim(), projects };
     }
 
-    // "Title ℹ️ 🆓 [[A|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]"], free: true, nonbillable: true }:
+    // "Title ℹ️ 🆓 [[A|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]"], free: true, nonbillable: true, log: null }:
     // the ⭕ links, the free mark and your 🆓 come off the end, in any order. A title that is only
-    // a mark keeps it.
-    splitTail(text) {
+    // a mark keeps it. With `note`, a note link at the end comes off too, as `log` (the link as
+    // written); without it, it stays in `rest`, which is how CalNav reads a line.
+    splitTail(text, note = false) {
         let rest = text.trimEnd();
         const projects = [];
-        let free = false, nonbillable = false;
+        let free = false, nonbillable = false, log = null;
         for (;;) {
             const link = rest.match(CalendarSync.PROJECT_LINK);
             if (link) { projects.unshift(link[0].trim()); rest = rest.slice(0, link.index); continue; }
+            const own = note && !log && rest.match(CalendarSync.NOTE_LINK);
+            if (own) { log = own[0].trim(); rest = rest.slice(0, own.index); continue; }
             const mark = !free && rest.match(CalendarSync.FREE);
             if (mark) { free = true; rest = rest.slice(0, mark.index); continue; }
             const yours = !nonbillable && rest.match(CalendarSync.NONBILLABLE);
             if (yours) { nonbillable = true; rest = rest.slice(0, yours.index); continue; }
             break;
         }
-        return { rest: rest.trim(), projects, free, nonbillable };
+        return { rest: rest.trim(), projects, free, nonbillable, log };
+    }
+
+    // An event's log link as the sync writes it, `[[target|🗒️]]`, from either form (the note link
+    // at the end, or a title wrapped in the link), whatever its alias; null for no link
+    noteLink(link) {
+        const target = link?.match(/^\[\[([^[\]|]+)/)?.[1];
+        return target ? `[[${target}|${CalendarSync.NOTE_MARK}]]` : null;
     }
 
     // Whether one of the sync's own lines carries the free mark
@@ -1119,23 +1138,25 @@ class CalendarSync {
         return free ? `${bare} ${CalendarSync.FREE_MARK}` : bare;
     }
 
-    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <⭕ links>`,
-    // where the title may be wrapped in a log link. `shown` is the title as it reads, `log` the
-    // link around it as written, `free` whether it carries the mark, `nonbillable` whether you've
-    // put 🆓 on it, `trail` any whitespace at the end of the line. Null otherwise.
+    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <log link> <⭕ links>`,
+    // or from before OBS-57 with the title wrapped in the log link. `shown` is the title as it
+    // reads, `log` the log link as the sync writes it (`[[log|🗒️]]`, whichever form the line has),
+    // `free` whether it carries the mark, `nonbillable` whether you've put 🆓 on it, `trail` any
+    // whitespace at the end of the line. Null otherwise.
     eventHead(line) {
         const match = line.match(/^- \[<\] ([^\t]+)\t(.*?)(\s*)$/);
         if (!match) return null;
-        const { rest, projects, free, nonbillable } = this.splitTail(match[2]);
-        const wrapped = rest.match(CalendarSync.LOG_LINK);
+        const { rest, projects, free, nonbillable, log } = this.splitTail(match[2], true);
+        const wrapped = !log && CalendarSync.LOG_NAME.test(rest) && rest.match(CalendarSync.LOG_LINK);
         return {
             start: match[1], shown: wrapped ? (wrapped[2] ?? wrapped[1]).trim() : rest,
-            log: wrapped ? rest : null, projects, free, nonbillable, trail: match[3],
+            log: this.noteLink(log ?? (wrapped ? rest : null)), projects, free, nonbillable, trail: match[3],
         };
     }
 
     // What you've added to a block the sync wrote as `synced`, if that's all you've changed: ⭕
-    // links, a 🆓, a log link around the title, a note after the end time's colon, time entries
+    // links, a 🆓, a link to its log (at the end, or around the title from before OBS-57), a note
+    // after the end time's colon, time entries
     // (and the lines under them) beside or in place of the end time. `children` keeps the order
     // under the event line. Null if the block has any other change, which makes it yours (the free
     // mark is the sync's: taking it off, or adding it, counts as a change).
@@ -1165,23 +1186,17 @@ class CalendarSync {
     }
 
     // The sync's lines for an event with your additions put back: the new start and title, the
-    // log link keeping its target (only its text follows a rename), the free mark as the sync's
-    // lines have it, your 🆓, the ⭕ links, and the children in their order with the end time
-    // updated and its note kept. Given only { projects, log, nonbillable } (a moved event, or a
-    // series), the links go on the sync's lines as they are. Null if the new title can't sit inside
-    // a link, or the event has no end line any more (all day now) for a noted one to move to.
+    // free mark as the sync's lines have it, your 🆓, the log link (`[[log|🗒️]]`, whichever form
+    // it was in), the ⭕ links, and the children in their order with the end time updated and its
+    // note kept. A rename changes only the title; the log keeps its name. Given only { projects,
+    // log, nonbillable } (a moved event, or a series), the links go on the sync's lines as they
+    // are. Null if the event has no end line any more (all day now) for a noted one to move to.
     decorate(lines, ann) {
         const lead = lines[0].slice(0, lines[0].indexOf("\t"));
         const { rest: title, free } = this.splitTail(lines[0].slice(lines[0].indexOf("\t") + 1));
-        let shown = title;
-        if (ann.log) {
-            const [, target, alias] = ann.log.match(CalendarSync.LOG_LINK);
-            if (title === (alias ?? target).trim()) shown = ann.log;
-            else if (/[[\]|]/.test(title)) return null;
-            else shown = `[[${target}|${title}]]`;
-        }
         const marks = [...(free ? [CalendarSync.FREE_MARK] : []), ...(ann.nonbillable ? [CalendarSync.NONBILLABLE_MARK] : [])];
-        const first = `${lead}\t${[shown, ...marks, ...ann.projects].join(" ")}${ann.trail ?? ""}`;
+        const log = ann.log ? [this.noteLink(ann.log)] : [];
+        const first = `${lead}\t${[title, ...marks, ...log, ...ann.projects].join(" ")}${ann.trail ?? ""}`;
         const end = lines.slice(1);
         if (!ann.children) return [first, ...end];
         const out = [first];
@@ -1270,29 +1285,42 @@ class CalendarSync {
         return close === -1 ? 0 : close + 1;
     }
 
-    // A linked log follows its line (OBS-10): once the sync has written a line whose title is a
-    // log link, the log's `time` and `endTime` are the line's start and end, so a log made before
+    // A linked log follows its line (OBS-10): once the sync has written a line that links a log,
+    // the log's `time` and `endTime` are the line's start and end, so a log made before
     // its event reached the calendar, or whose event was retimed or moved, says when the meeting
     // is. An all-day event says nothing about time, and an event with no end line (it ends on
-    // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Returns
-    // whether the log changed; checking the cached frontmatter first keeps an unchanged log unread.
+    // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Only a log
+    // is changed (see isLog): a 🗒️ on an event line can point at any note. Returns whether the
+    // log changed; checking the cached frontmatter first keeps an unchanged log unread.
     async fillLog(log, lines, date) {
-        const target = log.match(CalendarSync.LOG_LINK)?.[1]?.trim();
+        const target = log.match(/^\[\[([^[\]|#]+)/)?.[1]?.trim();
         const start = this.head(lines[0])?.start;
         if (!target || !start || start === "all day") return false;
         const file = app.metadataCache?.getFirstLinkpathDest?.(target, this.dailyPath(date));
         if (!file || !app.fileManager?.processFrontMatter) return false;
+        const cache = app.metadataCache.getFileCache?.(file) ?? {};
+        if (!this.isLog(file, cache)) return false;
         const clean = (t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
         const time = clean(start);
         const end = (lines[1] ?? "").match(/^\s+[-*+]\s+(\d{1,2}:\d{2}\s?[ap]m)\s*$/i)?.[1];
         const endTime = end === undefined ? undefined : clean(end);
-        const cached = app.metadataCache.getFileCache?.(file)?.frontmatter ?? {};
+        const cached = cache.frontmatter ?? {};
         if (clean(cached.time) === time && (endTime === undefined || clean(cached.endTime) === endTime)) return false;
         await app.fileManager.processFrontMatter(file, (front) => {
             front.time = time;
             if (endTime !== undefined) front.endTime = endTime;
         });
         return true;
+    }
+
+    // A meeting log, as AddTaskNote.isLog and MoveToProject know one: filed in a `logs/` folder,
+    // or tagged #log (in its frontmatter or its text) wherever it waits
+    isLog(file, cache) {
+        if (/(?:^|\/)logs\/[^/]+$/i.test(file.path ?? "")) return true;
+        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
+        return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
+            .concat((cache.tags ?? []).map((t) => t.tag))
+            .some((t) => String(t).replace(/^#/, "").toLowerCase() === "log");
     }
 
     // MARK: notes, files, folds

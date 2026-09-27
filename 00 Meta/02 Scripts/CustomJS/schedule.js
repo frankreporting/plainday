@@ -1,4 +1,9 @@
 class Schedule {
+    // A task's link to its note: 🗒️ is written (OBS-87); 🔗, the symbol before it, is still read,
+    // and a phone may add or drop the U+FE0F
+    static NOTE_MARK = "🗒️";
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
+
     async invoke() {
         const { Modal, TextComponent, MarkdownView } = customJS.obsidian;
         const nld = app.plugins.getPlugin("nldates-obsidian");
@@ -38,9 +43,9 @@ class Schedule {
         const wasWorkedOn = children.some(t => /\b\d{1,2}:\d{2}\s?[ap]m\b/i.test(t));
         const destStatus = status === "/" ? "/" : " ";
 
-        const hasLink = /\[\[[^\]]*\|🔗\]\]/.test(body);
+        const hasLink = Schedule.NOTE_LINK.test(body);
         const taskName = body.split("[[")[0].trim();
-        const taskLink = `[[${taskName}|🔗]]`;
+        const taskLink = `[[${taskName}|${Schedule.NOTE_MARK}]]`;
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
@@ -67,7 +72,7 @@ class Schedule {
                     new Notice("The line changed while picking a project, so it wasn't scheduled");
                     return;
                 }
-                link = `[[${found.linktext}|🔗]]`;
+                link = `[[${found.linktext}|${Schedule.NOTE_MARK}]]`;
                 name = found.name;   // a date in the name went to the note's due date
                 projectLinks = found.projectLinks;   // the note now ties the task to its project
             }
@@ -81,7 +86,7 @@ class Schedule {
                 // Task/project/other note: forward with a link to the daily note, and link back from there
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
                 editor.replaceRange(`[[${dailyName}|${m.format("M/D")}]] `, { line: lineNum, ch: bodyCh });
-                const alias = this.isProjectNote(srcFile) ? "⭕" : this.isAreaNote(srcFile) ? "🗃️" : "🔗";
+                const alias = this.isProjectNote(srcFile) ? "⭕" : this.isAreaNote(srcFile) ? "🗃️" : Schedule.NOTE_MARK;
                 outgoing = [`${bullet}[${destStatus}] ${body.trimEnd()} [[${srcFile.basename}|${alias}]] `];
             } else if (wasWorkedOn && !sourceIsMonthly) {
                 // Daily note, already worked on: forward in place, fresh copy goes forward

@@ -1,9 +1,10 @@
 class AddProjectLink {
-    // A 🔗 task note link, as AddTaskNote writes it (a phone may add U+FE0F to the emoji)
-    static TASK_LINK = /\[\[[^\]]*\|🔗️?\]\]/u;
-    // An event line whose title is a link to its meeting log, as AddTaskNote writes it:
-    // "- [<] 1:30pm⇥[[2026-09-15 Kickoff call|Kickoff call]]", or with no time yet, as the Log
-    // template writes a log's line before the calendar sync brings its event:
+    // A line's note link, as AddTaskNote writes it: 🗒️, or 🔗 from before OBS-87 (a phone may add or drop
+    // the U+FE0F). An event's log linked at the end of its line is one too (OBS-57).
+    static TASK_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
+    // An event line whose title is a link to its meeting log, the way lines were written before
+    // OBS-57: "- [<] 1:30pm⇥[[2026-09-15 Kickoff call|Kickoff call]]", or with no time yet, as the Log
+    // template wrote a log's line before the calendar sync brought its event:
     // "- [<] [[2026-09-18 Printer call|Printer call]]". A log's name starts with its date, which
     // keeps a title that merely starts with a link ("[[Rafe Oakes|@Rafe]] lunch") from reading as
     // one. Captures up to the link's target.
@@ -15,8 +16,8 @@ class AddProjectLink {
     // cancels and nothing changes; the cursor ends up right after the checkbox, as after *Add task
     // note*.
     //
-    // One link per line says where its time counts: a ⭕ or 🗃️, or a 🔗 task note filed in its
-    // project (OBS-36). So a ⭕ or 🗃️ the line already has is replaced, and with a 🔗 task note on the line the
+    // One link per line says where its time counts: a ⭕ or 🗃️, or a 🗒️ task note filed in its
+    // project (OBS-36). So a ⭕ or 🗃️ the line already has is replaced, and with a 🗒️ task note on the line the
     // note is moved into the picked project instead, and no ⭕ is added: without asking when the
     // note has no project or area yet, after a confirm when it's leaving one (its project is
     // shared by every line that links it). A note already in the picked project needs nothing.
@@ -72,7 +73,7 @@ class AddProjectLink {
                 const movedFrom = note.path;
                 if (!(await helper.moveInto(note, home))) return;
                 await customJS.SyncArea?.sync?.(note, false);
-                // The move can rewrite the 🔗 link's text (a path, when the name isn't unique), so
+                // The move can rewrite the 🗒️ link's text (a path, when the name isn't unique), so
                 // the line is read again, and only the link may differ
                 before = editor.getLine(line);
                 if (!this.sameButTaskLink(before, lineText) || !helper.isSameNote(this.taskNoteOf(before, source.path), note, movedFrom)) {
@@ -99,30 +100,30 @@ class AddProjectLink {
         return `${bare.trimEnd()} ${link}`;
     }
 
-    // Whether two lines differ at most in their note link's target (the 🔗, or an event's log link),
+    // Whether two lines differ at most in their note link's target (the 🗒️, or an event's title link),
     // which Obsidian rewrites when the note moves and its name isn't unique
     sameButTaskLink(a, b) {
-        const bare = (t) => t.replace(AddProjectLink.TASK_LINK, "[[|🔗]]").replace(AddProjectLink.LOG_TITLE, "$1[[");
+        const bare = (t) => t.replace(AddProjectLink.TASK_LINK, "[[|🗒️]]").replace(AddProjectLink.LOG_TITLE, "$1[[");
         return bare(a) === bare(b);
     }
 
-    // The line with its note link (a task's 🔗, or an event's title link) pointing at `linktext`
+    // The line with its note link (its 🗒️, or an event's title link) pointing at `linktext`
     // instead; the alias is kept
     relinked(lineText, linktext) {
         if (AddProjectLink.LOG_TITLE.test(lineText)) return lineText.replace(AddProjectLink.LOG_TITLE, `$1[[${linktext}`);
         return lineText.replace(AddProjectLink.TASK_LINK, (m) => `[[${linktext}${m.slice(m.indexOf("|"))}`);
     }
 
-    // The target of the line's note link: a task's 🔗, or the log an event's title links to. Null
+    // The target of the line's note link: its 🗒️ (a task's note, an event's log), or the log an event's title links to. Null
     // when there's neither.
     taskLinkpath(lineText) {
         const log = lineText.match(AddProjectLink.LOG_TITLE);
         if (log) return log[2].trim() || null;
         const match = lineText.match(AddProjectLink.TASK_LINK);
-        return match ? match[0].slice(2).replace(/\|🔗\uFE0F?\]\]$/u, "").split("#")[0].trim() || null : null;
+        return match ? match[0].slice(2).replace(/\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]$/u, "").split("#")[0].trim() || null : null;
     }
 
-    // The note a line's link points at (a task's 🔗 note, or an event's log), or null when there's
+    // The note a line's link points at (a task's 🗒️ note, or an event's log), or null when there's
     // none, it's broken, or it's a project or area note itself (Schedule links one from a line
     // forwarded out of an area), which is never moved
     taskNoteOf(lineText, sourcePath) {
@@ -140,7 +141,7 @@ class AddProjectLink {
             .replace(EVENT_TIME, "")
             .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/gu, (m, target, alias) => {
                 const shown = (alias ?? target).trim();
-                return /^(?:🔗|⭕|🗃|🚩)/u.test(shown) ? "" : shown;
+                return /^(?:🗒|🔗|⭕|🗃|🚩)/u.test(shown) ? "" : shown;
             })
             .replace(/\s+/g, " ").trim();
     }

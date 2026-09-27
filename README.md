@@ -76,7 +76,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `36 Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `36 Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `36 Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: asks for the project or area and files it in that folder's `logs/` (Esc: Inbox); Raycast's Open Log Note can preset Inbox and skip the picker. Records the log in its daily note (the event line with that title links to it, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `logs/` of the project or area its event line's one ⭕ or 🗃️ names, and takes that link off the line, or else asks (Esc: Inbox); Raycast's Open Log Note can preset Inbox and skip the picker. Records the log in its daily note (the event line with that title links to it at the end, `[[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note filed in the chosen project or area (Esc: Inbox); dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
@@ -103,22 +103,22 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 ```markdown
 - [<] 9:00am	Team standup
 	- 9:30am
-- [<] 1:30pm	[[2026-09-15 Kickoff call|Kickoff call]] [[Kestrel Outfitters 2026|⭕]]
+- [<] 1:30pm	Kickoff call [[2026-09-15 Kickoff call|🗒️]]
 	- 1:30pm - 2:15pm
 - [<] 3:00pm	Delivery window ℹ️
 	- 5:00pm
 - [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
 	- 4:30pm: 🆓 not billing this one
-- [<] [[2026-09-15 Printer call|Printer call]]
-- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🔗]]
+- [<] Printer call [[2026-09-15 Printer call|🗒️]]
+- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🗒️]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
 - [x] Redo the nav I broke 🆓 [[Kestrel Outfitters 2026|⭕]]
 	- 5:00pm - 5:20pm
-- [>] Send the invoice [[Send the invoice|🔗]]
+- [>] Send the invoice [[Send the invoice|🗒️]]
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `🔗` a task note, `⭕` a project, `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), with `🚩 M/D` for a due date.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `🗒️` the line's own note (a task's note, or an event's meeting log, whose project the time counts toward), `⭕` a project, `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), with `🚩 M/D` for a due date.
 
 The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
 

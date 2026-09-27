@@ -2,18 +2,27 @@ class AddTaskNote {
     // "- [ ]", "- [x]", "- [<]", … at the start of a line
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\] ?/;
     static TASK_TEMPLATE = "00 Meta/01 Templates/Task.md";
+    static LOG_TEMPLATE = "00 Meta/01 Templates/Log.md";
     // Where a new task note is made before the Task template's picker files it. The picker only
     // offers folders under Projects/, so a note still here afterwards means the picker was dismissed.
     static STAGING_FOLDER = "10 Inbox";
     static DATE = /\d{4}-\d{2}-\d{2}/g;
-    // An event line's time, which comes before its title: "1:00pm\t", "all day\t"
-    static EVENT_TIME = /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+/i;
+    // An event line's time, which comes before its title: "1:00pm\t", "all day\t", or a time with
+    // nothing after it (a line with no title)
+    static EVENT_TIME = /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)(?:[\t ]+|$)/i;
     // A project link on a task line, [[Project|⭕]], or an area link, [[Area|🗃️]] (a phone may add
     // or drop the U+FE0F, and the calendar sync allows spaces around the emoji)
     static PROJECT_LINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]/gu;
     // The suffix a home gets on a line: ⭕ for a project, 🗃️ for an area (its Quick Switcher alias)
     static AREA_MARK = "🗃️";
     static PROJECT_MARK = "⭕";
+    // A line's link to its own note: a task's note, or an event's meeting log (OBS-57). 🗒️ is
+    // written (OBS-87); 🔗, the symbol before it, is still read, and a phone may add or drop the
+    // U+FE0F on either.
+    static NOTE_MARK = "🗒️";
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
+    // An event title wrapped in a link to its log, the way lines were written before OBS-57
+    static LOG_TITLE = /^\s*[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
     // The parent picked in advance for the one note being created ({ path, parent }), read by pickParent
     static preset = null;
 
@@ -22,7 +31,8 @@ class AddTaskNote {
     // The name is the selected text or, with nothing selected, the task's text, as long as some text
     // comes after the cursor. With only whitespace after the cursor, insert an empty link to type a
     // name into. On an event line (`- [<]`), link a meeting log named with the daily note's date and
-    // the event's title (the selection, or the text after its time).
+    // the event's title (the selection, or the text after its time), at the end of the line like a
+    // task's note (OBS-57), and make the log right away, as a task's note is made (see makeLog).
     async invoke() {
         const editor = app.workspace.activeLeaf?.view?.editor;
         const source = app.workspace.getActiveFile();
@@ -44,14 +54,9 @@ class AddTaskNote {
                 new Notice(target.error);
             } else if (target.mode === "blank") {
                 const before = /\S/.test(lineText.slice(from.ch - 1, from.ch)) ? " " : "";
-                const template = target.kind === "event"
-                    ? before + this.eventLink(this.dailyNoteDate(), "")
-                    : before + "[[|🔗]]" + this.spacer(lineText.slice(from.ch));
-                this.insert(editor, from, "", template);
+                this.insert(editor, from, "", before + `[[|${AddTaskNote.NOTE_MARK}]]` + this.spacer(lineText.slice(from.ch)));
             } else if (target.kind === "event") {
-                const link = this.eventLink(this.dailyNoteDate(), target.name).trimEnd();
-                editor.replaceRange(link, { line: from.line, ch: target.from }, { line: from.line, ch: target.to });
-                editor.setCursor({ line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
+                await this.linkEvent(editor, from.line, lineText, target.name);
             } else {
                 const found = await this.noteFor(target.name, source.path, lineText);
                 if (!found) return;
@@ -66,14 +71,13 @@ class AddTaskNote {
             return;
         }
 
-        if (this.isEvent(lineText)) {
-            this.insert(editor, from, selection, this.eventLink(this.dailyNoteDate(), selection));
-            editor.setCursor({ line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
+        if (selection.includes("\n")) {
+            new Notice(this.isEvent(lineText) ? "Select an event name on one line" : "Select a task name on one line");
             return;
         }
 
-        if (selection.includes("\n")) {
-            new Notice("Select a task name on one line");
+        if (this.isEvent(lineText)) {
+            await this.linkEvent(editor, from.line, lineText, selection.trim());
             return;
         }
 
@@ -94,7 +98,7 @@ class AddTaskNote {
     // date, not part of its name: the note is looked up by the name without it, and a new one is made
     // through the Task template from the full text, so the template can set `due`.
     //
-    // `lineText` is the whole task line. One link per line says where its time counts: the 🔗 note
+    // `lineText` is the whole task line. One link per line says where its time counts: the 🗒️ note
     // filed in its project or area, or a ⭕ (OBS-36), so once the note is linked every ⭕ comes off
     // the line, and the line's ⭕ links decide where the note goes first:
     //   - one project or area linked: a new note is filed there, and an existing note with no
@@ -109,7 +113,7 @@ class AddTaskNote {
     //
     // Resolves to { note, linktext, name, created, projectLinks }, where `name` is the text to leave on
     // the line (without its dates) and `projectLinks` the ⭕ link texts to take off it, or null when no
-    // note could be made or nothing was picked. Schedule uses this too, so a 🔗 link it writes always
+    // note could be made or nothing was picked. Schedule uses this too, so a 🗒️ link it writes always
     // has a note behind it.
     async noteFor(text, sourcePath, lineText = "") {
         const name = this.withoutDates(text);
@@ -413,38 +417,103 @@ class AddTaskNote {
         return note;
     }
 
-    // With nothing selected, what to link, from where the cursor is on the line:
-    //   { kind, mode: "text", from, to, name }: some text comes after the cursor, so link the task's text
-    //     (up to its first link) or an event's title (after its time), which spans `from`–`to`
-    //   { kind, mode: "blank" }: only whitespace follows the cursor, so insert an empty link
-    //   { error }: there's no text to use, or the task already links a note
+    // With nothing selected, what to link:
+    //   { kind, mode: "text", from, to, name }: the task's text (up to its first link), when some text
+    //     comes after the cursor; on an event line, its title (after its time), wherever the cursor is
+    //   { kind: "task", mode: "blank" }: only whitespace follows the cursor on a task line with no note
+    //     link, so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |🗒️]]` would point
+    //     at the daily note itself.
+    //   { error }: there's no text to use, or the task already links a note, or the event a log
     // `kind` is "task" or "event".
     target(lineText, ch) {
         const kind = this.isEvent(lineText) ? "event" : "task";
-        if (!/\S/.test(lineText.slice(ch))) return { kind, mode: "blank" };
+        if (kind === "event" && this.linksLog(lineText)) return { error: "This event already links a log" };
+        // Wherever the cursor is: a task with a note never gets a second, blank link
+        if (kind === "task" && AddTaskNote.NOTE_LINK.test(lineText)) return { error: "This task already links a note" };
+        if (kind === "task" && !/\S/.test(lineText.slice(ch))) return { kind, mode: "blank" };
         let from = this.afterCheckbox(lineText);
         if (kind === "event") from += lineText.slice(from).match(AddTaskNote.EVENT_TIME)?.[0].length ?? 0;
         from += lineText.slice(from).match(/^\s*/)[0].length;
         const link = lineText.indexOf("[[", from);
         let to = link === -1 ? lineText.length : link;
         while (to > from && /\s/.test(lineText[to - 1])) to--;
-        // The calendar sync's free mark after an event's title (ℹ️, OBS-47) isn't part of the name:
-        // the link wraps the title and the mark stays after it, where the sync expects it
-        const mark = kind === "event" && lineText.slice(from, to).match(/\sℹ\uFE0F?$/u);
-        if (mark) {
+        // The calendar sync's free mark after an event's title (ℹ️, OBS-47) isn't part of the name,
+        // and neither is your 🆓: both stay after the title, before the log link, where the sync
+        // expects them
+        for (let mark; kind === "event" && (mark = lineText.slice(from, to).match(/\s(?:ℹ|🆓)\uFE0F?$/u));) {
             to -= mark[0].length;
             while (to > from && /\s/.test(lineText[to - 1])) to--;
         }
-        if (kind === "task" && /\[\[[^\]]*\|🔗\]\]/.test(lineText)) return { error: "This task already links a note" };
-        if (to === from) return { error: kind === "event" ? "This event's title is already a link" : "No task text to name the note" };
+        if (to === from && kind === "event") return { error: /\S/.test(lineText.slice(from)) ? "This event's title is already a link" : "This event has no title to name its log" };
+        if (to === from) return { error: "No task text to name the note" };
         return { kind, mode: "text", from, to, name: lineText.slice(from, to) };
     }
 
     // The task line once it links its note: the name without its dates where the task text was, any
-    // links it already had, then the 🔗 link, which ends the line
+    // links it already had, then the 🗒️ link, which ends the line
     lineWithLink(lineText, target, found) {
         const text = lineText.slice(0, target.from) + found.name + lineText.slice(target.to);
-        return `${text.trimEnd()} [[${found.linktext}|🔗]]`;
+        return `${text.trimEnd()} [[${found.linktext}|${AddTaskNote.NOTE_MARK}]]`;
+    }
+
+    // Links an event line to its meeting log (see eventLine), puts the cursor after the checkbox and
+    // makes the log
+    async linkEvent(editor, line, lineText, name) {
+        const date = this.dailyNoteDate();
+        const linked = this.eventLine(lineText, name, date);
+        if (linked.error) {
+            new Notice(linked.error);
+            return;
+        }
+        editor.replaceRange(linked, { line, ch: 0 }, { line, ch: lineText.length });
+        editor.setCursor({ line, ch: this.afterCheckbox(editor.getLine(line)) });
+        await this.makeLog(`${date} ${this.logName(name)}`);
+    }
+
+    // A log's name from an event's title, as CalNav names them: ": " becomes " - ", a slash or bar
+    // becomes "-", and characters a file name can't hold are dropped. The title on the line stays
+    // as the calendar wrote it.
+    logName(title) {
+        return title.replace(/\s*:\s*/g, " - ").replace(/[\\/|]/g, "-").replace(/[*"<>?#^[\]]/g, "")
+            .replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
+    }
+
+    // Makes the meeting log `name` right away, the way a task's note is made: through the Log
+    // template, without opening it, so you stay in the daily note. The template files it in the
+    // project the event line's ⭕ or 🗃️ names (and takes that link off the line), or asks; Esc leaves
+    // it in 10 Inbox. A log that already has the name is left where it is. The daily note is saved
+    // first, so the template reads the line just linked rather than the one on disk.
+    async makeLog(name) {
+        if (app.metadataCache.getFirstLinkpathDest(name, app.workspace.getActiveFile()?.path ?? "")) return;
+        const templater = app.plugins.plugins["templater-obsidian"]?.templater;
+        const template = app.vault.getFileByPath(AddTaskNote.LOG_TEMPLATE);
+        if (!templater || !template) {
+            new Notice("Templater or the Log template is missing, so the log wasn't made: click its link to make it");
+            return;
+        }
+        try {
+            await app.workspace.activeLeaf?.view?.save?.();
+            await templater.create_new_note_from_template(template, AddTaskNote.STAGING_FOLDER, name, false);
+        } catch (e) {
+            console.error("AddTaskNote: couldn't make the log", e);
+            new Notice(`Couldn't make the log "${name}": click its link to make it`);
+        }
+    }
+
+    // The event line with a link to its meeting log, `[[date name|🗒️]]`: after the title and its
+    // ℹ️ or 🆓, before the ⭕ and 🗃️ links that end the line, as the calendar sync writes it
+    // (OBS-57). { error } when the line already links a log.
+    eventLine(lineText, name, date) {
+        if (this.linksLog(lineText)) return { error: "This event already links a log" };
+        let at = lineText.trimEnd().length;
+        for (let link; (link = lineText.slice(0, at).match(/\s*\[\[[^\]]*\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u));) at = link.index;
+        const rest = lineText.slice(at).trim();
+        return `${lineText.slice(0, at).trimEnd()} ${this.eventLink(date, this.logName(name))}${rest ? " " + rest : ""}`;
+    }
+
+    // Whether an event line links a log already: a note link, or its title wrapped in a dated link
+    linksLog(lineText) {
+        return AddTaskNote.NOTE_LINK.test(lineText) || AddTaskNote.LOG_TITLE.test(lineText);
     }
 
     // Replace the selection with `template`; with nothing selected, put the cursor where the link's name goes
@@ -461,11 +530,11 @@ class AddTaskNote {
         return /^\s*[-*+]\s+\[<\]/.test(lineText);
     }
 
-    // "Task" → "Task [[Task|🔗]]", linking to `linktext` (the note's name, or its path when the name is
+    // "Task" → "Task [[Task|🗒️]]", linking to `linktext` (the note's name, or its path when the name is
     // ambiguous). The link ends the line, so End then a click (or the open-link key) reaches it; a space
     // follows only when the selection was mid-line and text comes right after it.
     taskLink(selection, linktext, followedBy = "") {
-        return `${selection} [[${linktext}|🔗]]${this.spacer(followedBy)}`;
+        return `${selection} [[${linktext}|${AddTaskNote.NOTE_MARK}]]${this.spacer(followedBy)}`;
     }
 
     // " " when `followedBy` starts with something other than whitespace, so a link doesn't run into it
@@ -473,9 +542,9 @@ class AddTaskNote {
         return /^\S/.test(followedBy) ? " " : "";
     }
 
-    // "Event name" → "[[2026-05-31 Event name|Event name]] "; nothing selected → "[[2026-05-31 |]] "
-    eventLink(date, selection) {
-        return selection ? `[[${date} ${selection}|${selection}]] ` : `[[${date} |]] `;
+    // "Event name" → "[[2026-05-31 Event name|🗒️]]"
+    eventLink(date, name) {
+        return `[[${date} ${name}|${AddTaskNote.NOTE_MARK}]]`;
     }
 
     // The column right after a line's checkbox and the space that follows it: "- [ ] |Task"

@@ -27,3 +27,9 @@ test("placement: with no note link at the end, the due date ends the line with a
     assert.equal(apply("- [ ] A [[A|🔗]] and more"), "- [ ] A [[A|🔗]] and more [[2026-09-30|🚩 9/30]] ", "a 🔗 that isn't at the end stays where it is");
     assert.equal(apply("- [ ] "), "- [ ] [[2026-09-30|🚩 9/30]] ");
 });
+
+test("placement: a 🗒️ note link (OBS-87), with or without U+FE0F, and an event's log at the end (OBS-57) are note links too", () => {
+    assert.equal(apply("- [ ] Renew the car [[Renew the car|🗒️]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🗒️]]");
+    assert.equal(apply("- [ ] Renew the car [[Renew the car|🗒]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🗒]]");
+    assert.equal(apply("- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]] [[P|⭕]]"), "- [<] 9:00am\tStandup [[2026-09-30|🚩 9/30]] [[2026-09-14 Standup|🗒️]] [[P|⭕]]");
+});

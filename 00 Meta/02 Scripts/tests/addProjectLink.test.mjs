@@ -114,3 +114,18 @@ test("relinked: the line's note link points at another note, alias kept (a same-
         "- [<] 1:30pm\t[[P/logs/2026-09-15 Kickoff call|Kickoff call]] [[Hawk Ledger|⭕]]", "an event's title link keeps its alias");
     assert.equal(cmd.relinked("- [ ] No link here", "A"), "- [ ] No link here");
 });
+
+test("🗒️ (OBS-87), a phone's 🗒 and the 🔗 before it are all a line's note link; an event's log at the end is its note (OBS-57)", () => {
+    for (const mark of ["🗒️", "🗒", "🔗", "🔗️"]) {
+        assert.equal(cmd.taskLinkpath(`- [ ] Order toner [[Order toner|${mark}]]`), "Order toner", mark);
+        assert.equal(cmd.relinked(`- [ ] A [[A|${mark}]]`, "P/A"), `- [ ] A [[P/A|${mark}]]`, mark);
+        assert.equal(cmd.label(`- [ ] Order toner [[Order toner|${mark}]] [[Hawk Ledger|⭕]]`), "Order toner", mark);
+        assert.ok(cmd.sameButTaskLink(`- [ ] A [[P/A|${mark}]]`, `- [ ] A [[A|${mark}]]`), mark);
+    }
+    const ev = "- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]";
+    assert.equal(cmd.taskLinkpath(ev), "2026-09-15 Kickoff call");
+    assert.equal(cmd.label(ev), "Kickoff call");
+    assert.equal(cmd.relinked(ev, "P/logs/2026-09-15 Kickoff call"), "- [<] 1:30pm\tKickoff call [[P/logs/2026-09-15 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]");
+    assert.equal(cmd.taskLinkpath("- [<] Printer call [[2026-09-18 Printer call|🗒️]]"), "2026-09-18 Printer call", "a log's line with no time yet");
+    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]]", P), `- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]] ${P}`, "a log not made yet: the ⭕ goes last");
+});

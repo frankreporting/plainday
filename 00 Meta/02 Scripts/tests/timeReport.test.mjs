@@ -212,6 +212,15 @@ test("resolve: a project link wins over everything, whatever its alias", () => {
     assert.equal(tr.taskText("[x] Water the beds [[Household|🗃️]] [[Water the beds|🔗]]"), "Water the beds");
 });
 
+test("resolve and taskText: a 🗒️ note link (OBS-87) is read like 🔗, with or without U+FE0F", () => {
+    for (const mark of ["🗒️", "🗒", "🔗"]) {
+        // The note link's note decides ahead of another note merely linked in the text
+        assert.equal(projectFor(`[x] Update [[Update chart data]] then wrap up [[2026-09-02 Launch wrapup|${mark}]]`), PINECONE, mark);
+        assert.equal(tr.taskText(`[x] Wrap up [[2026-09-02 Launch wrapup|${mark}]] [[Orchard Lane Web 2026|⭕]]`), "Wrap up", mark);
+    }
+    assert.equal(tr.taskText("[<] 4:00pm\tKickoff [[2026-09-02 Launch wrapup|🗒️]]"), "Kickoff", "an event's log link at the end (OBS-57)");
+});
+
 test("resolve: the 🔗 note's project folder, then its area", () => {
     assert.equal(projectFor("[x] Wrap up [[2026-09-02 Launch wrapup|🔗]]"), PINECONE);
     assert.equal(projectFor("[x] Update [[Update chart data|🔗]]"), ORCHARD_WEB);
@@ -1877,4 +1886,26 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
     // The project notes are unchanged: the conflict is still said on both
     assert.ok(tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s").includes("so its time (2 entries) counts there"));
     assert.ok(tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s").includes("has time (2 entries)"));
+});
+
+test("OBS-57, OBS-87: an event whose ⭕ and 🗒️ log disagree is a problem worded for an event and its log; a 🗒️ task note conflicts like 🔗", () => {
+    const idx = tr.makeIndex([
+        { path: "P/Hawk/Hawk.md", tags: ["project"] },
+        { path: "P/Tin/Tin.md", tags: ["project"] },
+        { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
+        { path: "P/Hawk/logs/2026-09-01 Kickoff.md", tags: ["log"] },
+    ]);
+    const text = [
+        "- [<] 9:00am\tKickoff [[2026-09-01 Kickoff|🗒️]] [[Tin|⭕]]",
+        "\t- 9:30am",
+        "- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|🗒️]]",
+        "\t- 10:00am - 10:30am",
+    ].join("\n");
+    const m = tr.build([note("2026-09-01", text)], idx);
+    assert.deepEqual(plain([...new Set(m.entries.map((e) => e.project))]), ["P/Tin/Tin.md"], "the ⭕ still decides where the time counts");
+    const tin = tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s");
+    assert.ok(tin.includes("- [[Tin|⭕ Tin]] has time (1 entry) from an event line whose log [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]] is filed under [[Hawk|⭕ Hawk]]; move the log here, or change the line's project link"), tin);
+    assert.ok(tin.includes("- [[Tin|⭕ Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk|⭕ Hawk]]"), tin);
+    const hawk = tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s");
+    assert.ok(hawk.includes("- [[Hawk|⭕ Hawk]] has a log, [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]], whose event line links [[Tin|⭕ Tin]], so its time (1 entry) counts there; move the log, or change the line's project link"), hawk);
 });

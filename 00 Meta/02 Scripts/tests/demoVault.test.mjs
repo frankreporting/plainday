@@ -126,19 +126,22 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.match(days, /^- \[<\] \d{1,2}:\d{2}[ap]m\t/m, "event line");
     assert.match(days, /^- \[<\] All day\t/m, "all-day event");
     assert.match(days, /^- \[-\] \d{1,2}:\d{2}[ap]m\t/m, "canceled event");
-    assert.match(days, /^- \[>\] .*\|🔗\]\]/m, "forwarded task");
+    assert.match(days, /^- \[>\] .*\|🗒️\]\]/m, "forwarded task");
     assert.match(days, /^- \[\/\] |^- \[x\] /m, "started or done task");
     assert.match(days, /\[\[\d{4}-\d{2}-\d{2}\|🚩 \d{1,2}\/\d{1,2}\]\]/, "due date");
     assert.match(days, /^## Notes$/m, "notes section");
-    assert.match(days, /^- \[<\] [^\n]*\t\[\[\d{4}-\d{2}-\d{2} [^\]|]+\|[^\]]+\]\]\n\t- \d/m, "event linking a meeting log");
+    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]\n\t- \d/m, "event linking a meeting log at the end of its line");
+    assert.match(days, /^- \[<\] [^\t\n[]+ \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]$/m, "a log's line with no time yet");
+    assert.doesNotMatch(days, /\|🔗\]\]/, "the demo writes note links as 🗒️ (OBS-87)");
+    assert.doesNotMatch(days, /^- \[.\] (?:[^\t\n]*\t)?\[\[\d{4}-\d{2}-\d{2} [^\]|]+\|(?!🗒)[^\]]+\]\]/m, "no event title wrapped in its log link (OBS-57)");
     assert.match(days, /^- \[<\] [^\n]*\|⭕\]\]\n\t- \d{1,2}:\d{2}[ap]m - /m, "event with a ⭕ link and a time entry");
     assert.ok(entries.some((e) => e.free), "🆓 entry");
     assert.ok(entries.some((e) => !e.free && e.note), "entry with a note");
     assert.ok(entries.some((e) => e.context.length > 1 && /^\[.\]/.test(e.context[1].body)), "sub-task with its own entries");
-    // One task note threads entries on two days through its 🔗 link, with no ⭕ on the line
+    // One task note threads entries on two days through its 🗒️ link, with no ⭕ on the line
     const threaded = new Map();
     for (const e of entries) {
-        const chain = e.context[0].body.match(/\[\[([^\]|]+)\|🔗\]\]/);
+        const chain = e.context[0].body.match(/\[\[([^\]|]+)\|🗒️\]\]/);
         if (chain && !e.context[0].body.includes("⭕")) threaded.set(chain[1], new Set([...(threaded.get(chain[1]) ?? []), e.date]));
     }
     assert.ok([...threaded.values()].some((d) => d.size >= 2), "task with entries across two days through its task note");
@@ -186,7 +189,7 @@ test("demo vault: every note in an area or project has `area` pointing at its ne
     assert.ok(checked >= 10);
 });
 
-test("demo vault: 🔗, ⭕, meeting log and property links all resolve", () => {
+test("demo vault: 🗒️, ⭕, meeting log and property links all resolve", () => {
     const files = new Set(vault.files);
     const resolves = (target, from) => plan.index.linkDest(target, from) !== null || files.has(target) || vault.files.some((f) => basename(f) === target || f.endsWith(`/${target}`));
     const isPeriod = (t) => /^\d{4}(-\d{2}(-\d{2})?|w\d{2})?$/.test(t);

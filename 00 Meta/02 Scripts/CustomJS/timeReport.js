@@ -40,7 +40,8 @@ class TimeReport {
     // The project an entry belongs to, first match wins, looking at the task line and then the
     // lines it's nested under:
     //   1. a link to a project note: one aliased ⭕ (`[[Orchard Lane Web 2026|⭕]]`) first, then any alias;
-    //   2. the 🔗 note's nearest project folder note (Folder/Folder.md tagged #project), or its `area`;
+    //   2. the note link's note (🗒️, or 🔗 before OBS-87: a task's note, an event's log): its nearest
+    //      project folder note (Folder/Folder.md tagged #project), or its `area`;
     //   3. the same for any other linked note (a meeting log, say).
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
     // sub-project: its hours also count toward the parent. Entries of archived projects (in
@@ -104,8 +105,11 @@ class TimeReport {
     static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
-    // 🔗, ⭕, 🗃️ and 🚩 links, which say nothing about what a line is
-    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🔗|⭕|🗃|🚩)[^\]]*\]\]/gu;
+    // 🗒️ (or 🔗, before OBS-87), ⭕, 🗃️ and 🚩 links, which say nothing about what a line is
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🗒|🔗|⭕|🗃|🚩)[^\]]*\]\]/gu;
+    // The alias of a line's link to its own note (a task's note, an event's log): 🗒️, or 🔗 from
+    // before OBS-87, compared once U+FE0F and spaces are dropped
+    static NOTE_ALIAS = /^(?:🗒|🔗)$/u;
     static DATE_LINK = /^\d{4}-\d{2}(-\d{2})?$/;
     static SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -562,7 +566,7 @@ class TimeReport {
     // With `live`, archived projects are passed over and the search goes on.
     resolve(context, fromPath, index, live = false) {
         const lines = context.map((c) => this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) })));
-        const isChain = (alias) => alias.replace(/\uFE0F/g, "") === "🔗";
+        const isChain = (alias) => this.isNoteAlias(alias);
         const isMark = (alias) => /^(?:⭕|🗃)$/u.test(alias.replace(/[\uFE0F\s]/g, ""));
         const ok = (p) => p && !(live && this.isArchived(p));
         // A ⭕ (or 🗃️) says where the line's time goes, ahead of a project merely mentioned in its text
@@ -583,20 +587,25 @@ class TimeReport {
         return null;
     }
 
-    // A task line that links a project directly and also a 🔗 task note filed under a different live
-    // project. The line's own link decides where its time counts (see resolve), so the note's project
-    // never sees that time. Checks the first context line with a live project link, the one resolve
-    // uses. { lineProject, note, noteProject } or null.
+    // Whether a link's alias marks a line's own note (NOTE_ALIAS)
+    isNoteAlias(alias) {
+        return TimeReport.NOTE_ALIAS.test(alias.replace(/[\uFE0F\s]/g, ""));
+    }
+
+    // A task line that links a project directly and also a 🗒️ task note filed under a different live
+    // project, or an event line whose 🗒️ log is (OBS-57). The line's own link decides where its time
+    // counts (see resolve), so the note's project never sees that time. Checks the first context line
+    // with a live project link, the one resolve uses. { lineProject, note, noteProject, event } or null.
     conflict(context, fromPath, index) {
         for (const c of context) {
             const links = this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) }));
             const direct = links.find((l) => l.dest && this.counts(l.dest, index) && !this.isArchived(l.dest));
             if (!direct) continue;
             for (const l of links) {
-                if (!l.dest || l.alias.replace(/\uFE0F/g, "") !== "🔗") continue;
+                if (!l.dest || !this.isNoteAlias(l.alias)) continue;
                 const noteProject = this.projectOfNote(l.dest, index);
                 if (noteProject && noteProject !== direct.dest && !this.isArchived(noteProject)) {
-                    return { lineProject: direct.dest, note: l.dest, noteProject };
+                    return { lineProject: direct.dest, note: l.dest, noteProject, event: /^\[<\]/.test(c.body) };
                 }
             }
             return null;
@@ -732,8 +741,8 @@ class TimeReport {
         for (const e of entries) addChain(e.project);
         for (const p of problems) p.projects.forEach(addChain);
 
-        // Time on a task line whose ⭕ project and 🔗 task note disagree: said on both project notes,
-        // once per task note and pair of projects (OBS-34)
+        // Time on a task line whose ⭕ project and 🗒️ task note disagree, or an event line whose ⭕
+        // and log do: said on both project notes, once per note and pair of projects (OBS-34)
         const conflicts = new Map();
         for (const e of entries) {
             if (!e.project) continue;
@@ -743,10 +752,10 @@ class TimeReport {
             const had = conflicts.get(key)?.entries ?? [];
             conflicts.set(key, { ...c, count: had.length + 1, entries: [...had, e] });
         }
-        for (const { lineProject, note, noteProject, count, entries: those } of conflicts.values()) {
+        for (const { lineProject, note, noteProject, event, count, entries: those } of conflicts.values()) {
             addChain(noteProject);
-            projectProblems.push({ project: lineProject, conflict: { side: "line", note, other: noteProject, count, entries: those } });
-            projectProblems.push({ project: noteProject, conflict: { side: "note", note, other: lineProject, count } });
+            projectProblems.push({ project: lineProject, conflict: { side: "line", note, other: noteProject, event, count, entries: those } });
+            projectProblems.push({ project: noteProject, conflict: { side: "note", note, other: lineProject, event, count } });
         }
         // A chain can also close into a loop found earlier from another start
         for (const p of [...parent.keys()]) {
@@ -1171,12 +1180,13 @@ class TimeReport {
         }
         for (const p of projectProblems) {
             if (p.conflict) {
-                const { side, note, other, count } = p.conflict;
+                const { side, note, other, event, count } = p.conflict;
                 const n = `${count} ${count === 1 ? "entry" : "entries"}`;
                 const noteLink = `[[${note.replace(/\.md$/, "")}|${this.basename(note)}]]`;
+                const [line, kind, it] = event ? ["event line", "log", "log"] : ["task line", "task note", "note"];
                 out.push(side === "line"
-                    ? `- ${link(p.project)} has time (${n}) from a task line whose task note ${noteLink} is filed under ${link(other)}; move the note here, or change the line's project link`
-                    : `- ${link(p.project)} has a task note, ${noteLink}, whose task line links ${link(other)}, so its time (${n}) counts there; move the note, or change the line's project link`);
+                    ? `- ${link(p.project)} has time (${n}) from ${event ? "an" : "a"} ${line} whose ${kind} ${noteLink} is filed under ${link(other)}; move the ${it} here, or change the line's project link`
+                    : `- ${link(p.project)} has a ${kind}, ${noteLink}, whose ${line} links ${link(other)}, so its time (${n}) counts there; move the ${it}, or change the line's project link`);
                 continue;
             }
             out.push(p.message ? `- ${link(p.project)} ${p.message}`

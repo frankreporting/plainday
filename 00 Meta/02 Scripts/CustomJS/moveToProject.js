@@ -265,7 +265,7 @@ class MoveToProject {
     }
 
     // `text` with the ⭕ and 🗃️ links to `from` (the project or area `note` just left) taken off
-    // every checklist line whose note link (its 🔗, or an event's log link) is `note`: they'd keep
+    // every checklist line whose note link (its 🗒️, or an event's log link, either way) is `note`: they'd keep
     // that line's time where the note no longer is. Links to anywhere else are the line's own
     // choice and stay. Lines are read as the time report reads them: frontmatter and code blocks
     // are skipped, and a comment on a line doesn't count (a link is taken off only when it's

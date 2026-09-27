@@ -534,3 +534,18 @@ test("MoveToProject and MoveToProjectMenu are registered, the menus before the t
     const startup = settings.startupScriptNames;
     assert.ok(startup.includes("MoveToProjectMenu") && startup.indexOf("MoveToProjectMenu") < startup.indexOf("TimeReportOnStartup"), "the report can take a while");
 });
+
+test("unlinkStale: a 🗒️ note link (OBS-87) and an event's log at the end of its line (OBS-57) are the line's note too", () => {
+    const { mover, file } = setup(VAULT);
+    const resolve = (l) => context.app.metadataCache.getFirstLinkpathDest(l);
+    const [kestrel, pinecrest] = [file("Projects/Freelance/Kestrel/Kestrel.md"), file("Projects/Freelance/Pinecrest/Pinecrest.md")];
+    const task = file("Projects/Freelance/Kestrel/Draft wireframes.md");
+    assert.equal(mover.unlinkStale("- [/] Draft wireframes [[Draft wireframes|🗒️]] [[Kestrel|⭕]]", task, kestrel, pinecrest, resolve).text,
+        "- [/] Draft wireframes [[Draft wireframes|🗒️]]");
+    const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
+    const strip = (text) => mover.unlinkStale(text, log, kestrel, pinecrest, resolve).text;
+    assert.equal(strip("- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]] [[Kestrel|⭕]]\n- 10:45am\n"),
+        "- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]]\n- 10:45am\n");
+    assert.equal(strip("- [<] Homepage review [[2026-09-14 Homepage review|🗒]] [[Kestrel|⭕]]"), "- [<] Homepage review [[2026-09-14 Homepage review|🗒]]",
+        "a log's line with no time, typed on a phone");
+});

@@ -31,3 +31,14 @@ test("monthly notes: the months folder follows Notebook Navigator, or sits besid
     assert.equal(load(app({ ...NN, calendarCustomMonthPattern: "YYYY/[months]/MM" })).monthsFolder(), `${PLANNER}/months`);
     assert.equal(load(app(null)).monthsFolder(), `${PLANNER}/months`);
 });
+
+test("Schedule reads 🗒️, 🗒 and 🔗 as a task's note link, and writes 🗒️ (OBS-87)", () => {
+    const Schedule = vm.runInContext(code + "\n;Schedule", vm.createContext({}));
+    for (const mark of ["🗒️", "🗒", "🔗", "🔗️"]) assert.ok(Schedule.NOTE_LINK.test(`Draft the brief [[Draft the brief|${mark}]]`), mark);
+    assert.ok(!Schedule.NOTE_LINK.test("Draft the brief [[Studio|⭕]]"));
+    assert.equal(Schedule.NOTE_MARK, "🗒️");
+    // The three links it writes (a worked-on task, one made through AddTaskNote, a line sent from
+    // another note) all use the mark, and none is written with 🔗
+    assert.equal((code.match(/Schedule\.NOTE_MARK/g) ?? []).length, 3);
+    assert.doesNotMatch(code, /\|🔗\]\]`/);
+});

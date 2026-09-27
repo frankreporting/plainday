@@ -1,7 +1,7 @@
 class DueDate {
-    // Note links end a line (🔗 task note or log, ⭕ project, 🗃️ area), so End reaches the note; the
+    // Note links end a line (🗒️ task note or log, or 🔗 from before OBS-87, ⭕ project, 🗃️ area), so End reaches the note; the
     // due date goes in front of them (OBS-36). A phone may add or drop the U+FE0F on an emoji.
-    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🔗|⭕|🗃)\uFE0F?\s*\]\]/gu;
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗|⭕|🗃)\uFE0F?\s*\]\]/gu;
 
     // Where the due link goes on `lineText`, and the text to insert there: right before the line's
     // trailing note links (with one space either side), else at the end
