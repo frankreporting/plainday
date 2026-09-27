@@ -181,7 +181,7 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 
 ### The time report
 
-The **TimeReport** command writes summaries of the time logged in daily notes. On the desktop it runs by itself when Obsidian starts (*TimeReportOnStartup*); to see fresh numbers after logging time, reload Obsidian or run **CustomJS: TimeReport**. A phone doesn't run it at startup: it gets the updated notes through Sync, so two devices never rewrite the same blocks (the command still works there). It never writes into the note you're on, and it writes to:
+The **TimeReport** command writes summaries of the time logged in daily notes. On the desktop it runs by itself when Obsidian starts (*TimeReportOnStartup*); to see fresh numbers after logging time, reload Obsidian or run **CustomJS: TimeReport**. A phone doesn't run it at startup: it gets the updated notes through Sync, so two devices never rewrite the same blocks (the command still works there). It writes to these notes, the one you're on included: an open note is updated through its editor, which keeps its folds.
 
 | Note | What it shows |
 | --- | --- |
@@ -397,7 +397,7 @@ Turns the selected text into a project: a note of that name from the Project tem
 
 ### TimeReport
 
-Refreshes every time report where the numbers changed, never in the note you're on. See *The time report*.
+Refreshes every time report where the numbers changed, in the note you're on too. See *The time report*.
 
 ### SnapshotDailyNotes and RefoldDailyNotes
 
