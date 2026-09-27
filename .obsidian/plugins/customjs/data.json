@@ -5,6 +5,7 @@
     "SyncArea",
     "RefoldOnOpen",
     "MoveToProjectMenu",
+    "TrailingLinks",
     "TimeReportOnStartup"
   ],
   "registeredInvocableScriptNames": [

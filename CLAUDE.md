@@ -23,6 +23,17 @@ For reading notes, `grep` on the markdown files is often faster.
 - **Tests:** run `node --test "00 Meta/02 Scripts/tests/*.test.mjs"` from the repo root.
   - `demoVault.test.mjs` checks the sample notes against the scripts: the committed time reports must equal what the scripts render, and every link and `area` must be right. If a change alters what the report writes, re-render the sample notes with `node "00 Meta/02 Scripts/tests/demo/renderReports.mjs"` and commit the result.
   - Checks against a real vault's data go in `*.private.test.mjs` files with `*.private.json` fixtures, which git ignores.
+- **Speed:** a change that adds work on every keystroke (an editor extension) or on vault events stays within the speed budget: each feature adds at most 1 ms per keystroke, everything the system adds at most 2 ms, and the cost doesn't grow with note length. Background work on a save or metadata event is debounced and stays under 10 ms. Measure it and put the numbers in the PR. Until `dev-vault.sh perf` does it (OBS-92), measure by hand:
+  - **In a throwaway vault, never the dev vault:** a scratch folder with CustomJS, the branch's scripts and invented notes.
+    - The CLI can't open a folder as a vault. From any open vault, `obsidian vault=<open vault> eval code="require('electron').ipcRenderer.sendSync('vault-open', '<folder>', false)"` does.
+    - `eval` only exists in a vault with community plugins allowed (`plugins:restrict off`).
+    - It runs in the app, so it needs Obsidian running and can't run in CI.
+  - **What to time:** type 100 characters and delete them inside a line the feature draws, calling the editor's `measure()` after each edit so layout counts.
+    - Do it in a 150-line note and a 3,000-line note.
+    - Take the best of three runs, with the feature's extension removed and then back.
+  - **A background window doesn't repaint.**
+    - Screenshots go through `dev:cdp method=Page.captureScreenshot`.
+    - `dev:cdp method=Emulation.setFocusEmulationEnabled` makes the editor count as focused, which Live Preview needs before it opens a link for editing.
 - **Docs:** a change a user would notice updates `00 Meta/Manual.md` in the same PR, `README.md` too when it changes installing or the overview there, and the sample notes if they should show it. The manual is the full description, the README a front door that points at it; don't copy the manual's detail into the README. Before opening the PR, read each manual and README section that names a changed script against the diff and fix what no longer matches: CI checks that the docs were touched, not that they are right.
 - **CI (`.github/workflows/ci.yml`)** runs on every PR and must be green before a merge. It runs the tests, loads every CustomJS class and Templater script the way the plugins do, checks the tracked JSON, scans the diff, commits, title, body and branch name for the patterns the "Privacy" rule names, and checks the PR body:
   - it links its Linear issue (`Closes OBS-N`, a list such as `Closes OBS-N, OBS-M`, or `Part of OBS-N`; see below), and

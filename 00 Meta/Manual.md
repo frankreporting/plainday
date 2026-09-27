@@ -232,6 +232,20 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 - **The 🗒️ link threads one task across days:** every forwarded copy keeps the same 🗒️, so that note's backlinks show the task's whole history. In the demo, *Draft homepage wireframes* is worked on 9/14 and 9/15 through one task note.
 - **Order:** the note link (🗒️, ⭕ or 🗃️) ends the line, so End reaches the note; the 🚩 due date goes before it, and *DueDate* puts it there. On an event line it's the title, ℹ️, 🆓, the log's 🗒️, then any ⭕, as the calendar sync writes it.
 
+**How they look.** In Live Preview, the *TrailingLinks* startup script draws these links small, at the right of the line's last row, the way Things shows a deadline. Only the display changes; the line stays as it's written.
+
+- **Which links:** only 🚩, 🗒️ (or an older 🔗), ⭕ and 🗃️ links at the end of a task or event line. A person, a link in the middle of the text, or an old event whose title is its log link stays where it is.
+- **On screen:** the project or area first, then the note, then the due date at the edge.
+  - A ⭕ or 🗃️ shows as the project's shortest name, its file name or a plain alias (never a `⭕.Area.Project` one), in faint text.
+  - The due date is faint, and turns red once its day has passed.
+  - A line with a 🗒️ but no ⭕ shows the project its time counts toward in faint italics. That's a name the time report works out, not a link.
+- **Wrapping:** when the links don't fit after the text, the text's last word wraps with them. The other rows keep their full width.
+- **Keys and clicks:**
+  - A click opens the link, and ⌘-click or a middle click opens it in a new tab.
+  - End and ⌘→ go to the end of the line, after the note link.
+  - → from the end of the text opens the first link for editing, and the line reads as its markdown until the cursor leaves the links.
+- **Elsewhere:** source mode and reading view show the links as written.
+
 ### Links at the start of a line: only outside daily notes
 
 A daily-note link as the **first** thing after the checkbox is a breadcrumb meaning "this was sent to that day." It appears only on `[>]` lines in **non-daily notes**: meeting logs, task notes, project notes, anything else.
@@ -417,6 +431,7 @@ These run on their own when Obsidian starts, and again whenever a script file ch
 - ***SyncArea*** keeps `area` current when notes move to another folder, one at a time or as a whole folder: it points at the nearest project or area above them, the first folder note (`Folder/Folder.md`) tagged `#project` or `#area`. A moved project's own note points at its new parent. It says "Updated area on N notes". It leaves `area` alone when notes land outside any project or area (`10 Inbox`, `30 Reference`), anywhere in `90 Archive` or `00 Meta`, or when a folder is only renamed in place (Obsidian updates those links itself), and keeps a template's own pick for a brand-new note. It runs on every device, and each device handles only its own moves: Obsidian Sync delivers a move made elsewhere as a delete and a new file, so nothing is processed twice.
 - ***RefoldOnOpen*** refolds each daily note as it opens, on every device. See *Folding*.
 - ***MoveToProjectMenu*** puts *Move to project…* (*MoveToProject*) in the file menus: Notebook Navigator's menu for a note, for several selected, and for a project or area's folder; a tab's **⋯** menu; a link's right-click menu (for notes, not the project a ⭕ points at); and the core file explorer's. The item appears only for what *MoveToProject* moves.
+- ***TrailingLinks*** draws the links that end a task or event line small, at the right of the line, on every device (see *Links at the end of a line*). It only looks at the lines on screen, and while you type only at the line you're on and the lines nested under it. It uses Obsidian's own editor code, which CustomJS scripts can reach; if they ever can't, it logs a warning and lines stay as they are.
 - ***TimeReportOnStartup*** refreshes the time reports on the desktop once the vault is indexed. If CustomJS is still reloading its scripts, it waits a few seconds for them and otherwise skips with a console warning. A report already running finishes with the scripts it started with, so saving a script part-way through doesn't break it.
 
 ## Templates
