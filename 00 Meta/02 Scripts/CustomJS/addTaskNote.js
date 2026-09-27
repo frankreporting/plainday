@@ -116,6 +116,7 @@ class AddTaskNote {
         const line = this.lineProjects(lineText, sourcePath);
         const existing = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
         let note = existing;
+        let movedFrom = null;
         if (existing) {
             const noteHome = this.homeOf(existing);
             if (line.projects.length && !this.isHome(existing) && !line.projects.includes(noteHome)) {
@@ -137,6 +138,7 @@ class AddTaskNote {
                         choice = await this.confirmMove(existing, noteHome, home);
                         if (!choice) return this.cancelled();
                     }
+                    movedFrom = existing.path;
                     if (choice === "move" && !(await this.moveInto(existing, home))) return null;
                     if (choice === "leave") new Notice(`${existing.basename} stays in ${noteHome.basename}, which this line's time counts toward`);
                 }
@@ -156,9 +158,18 @@ class AddTaskNote {
         }
         return {
             note, name, created: !existing,
-            linktext: this.linktextFor(note, app.vault.getMarkdownFiles().map((f) => f.path)),
+            // A note just moved can still show at its old path for a moment (see isSameNote)
+            linktext: this.linktextFor(note, app.vault.getMarkdownFiles().map((f) => f.path).filter((p) => p !== movedFrom)),
             projectLinks: line.links,
         };
+    }
+
+    // Whether `file`, a link's target looked up by name, is `note`, which may have just moved from
+    // `oldPath`. For a moment after a move the vault can hold a second entry at the old path (seen
+    // in a vault with a rename-handling plugin): it's gone within 50ms, but a lookup by name in
+    // that moment returns it whenever its path is shorter than the moved note's.
+    isSameNote(file, note, oldPath = null) {
+        return !!file && (file === note || file.path === note.path || (!!oldPath && file.path === oldPath));
     }
 
     // The link text for a task note: its name, or its path (without .md) when another note in `paths`
@@ -178,8 +189,9 @@ class AddTaskNote {
 
     // Asks whether to move `note` from the project or area `from` into `to`. Resolves to "move",
     // "leave", or null when dismissed (Esc). Enter moves. Laid out as facts, not a sentence: a
-    // Task (or Log), From and To row, each project or area with its 🗃️ or ⭕, then one line on its
-    // time entries. The buttons follow the rows' order: Leave it, then Move.
+    // Task (or Log, Project, Area or Note), From and To row, each project or area with its 🗃️ or ⭕,
+    // then one line on what happens to its time. The buttons follow the rows' order: Leave it, then
+    // Move. MoveToProject asks for a project or area too, whose `from` can be null (nothing above it).
     confirmMove(note, from, to) {
         const { Modal, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
@@ -191,16 +203,21 @@ class AddTaskNote {
                 onOpen() { requestAnimationFrame(() => move.buttonEl.focus()); }
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
-            const log = note.parent?.name === "logs";
-            const mark = (f) => `${this.isArea(f) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${f.basename}`;
-            modal.titleEl.setText(log ? "Move log?" : "Move task note?");
+            const cache = app.metadataCache.getFileCache(note);
+            const tags = cache ? this.tagsOf(cache) : [];
+            const kind = this.isLog(note) ? "Log" : tags.includes("task") ? "Task"
+                : tags.includes("area") ? "Area" : tags.includes("project") ? "Project" : "Note";
+            const mark = (f) => (f ? `${this.isArea(f) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${f.basename}` : "No project or area");
+            modal.titleEl.setText(kind === "Task" ? "Move task note?" : `Move ${kind.toLowerCase()}?`);
             const rows = modal.contentEl.createEl("table", { attr: { style: "border-collapse: collapse; margin-bottom: 0.75em;" } });
-            for (const [k, v] of [[log ? "Log" : "Task", note.basename], ["From", mark(from)], ["To", mark(to)]]) {
+            for (const [k, v] of [[kind, note.basename], ["From", mark(from)], ["To", mark(to)]]) {
                 const tr = rows.createEl("tr");
                 tr.createEl("td", { text: k, attr: { style: "padding: 0.15em 1em 0.15em 0; color: var(--text-muted); white-space: nowrap;" } });
                 tr.createEl("td", { text: v, attr: { style: "padding: 0.15em 0; font-weight: var(--font-semibold);" } });
             }
-            modal.contentEl.createEl("p", { text: "Time entries will be reallocated accordingly." });
+            modal.contentEl.createEl("p", { text: kind === "Area" ? "Its time, and its projects', stays their own."
+                : kind === "Project" ? "Its time stays its own. Inside another project, it counts toward that project's totals and takes its rate if it has none of its own."
+                : "Time entries will be reallocated accordingly." });
             const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
             new ButtonComponent(row).setButtonText("Leave it").onClick(() => pick("leave"));
             const move = new ButtonComponent(row).setButtonText("Move").setCta().onClick(() => pick("move"));
@@ -245,6 +262,14 @@ class AddTaskNote {
         return !!cache && this.tagsOf(cache).includes("area");
     }
 
+    // A meeting log: a note tagged #log, or any note in a `logs` folder. Logs are filed in their
+    // project's `logs/`, so one waiting in 10 Inbox still goes there when it's moved.
+    isLog(file) {
+        if (file.parent?.name?.toLowerCase() === "logs") return true;
+        const cache = app.metadataCache.getFileCache(file);
+        return !!cache && this.tagsOf(cache).includes("log");
+    }
+
     // The suffix link for a home: [[Project|⭕]] or [[Area|🗃️]], with `linktext` as linktextFor gives it
     homeLink(home, linktext) {
         return `[[${linktext}|${this.isArea(home) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK}]]`;
@@ -261,14 +286,16 @@ class AddTaskNote {
 
     // Asks which area or project the note `name` belongs to, with `preferred` (the task line's
     // projects) first, then every other area and project the Task template's picker offers. Resolves
-    // to the picked area or project note, or null when dismissed. AddProjectLink uses the same menu.
-    pickHome(name, preferred) {
+    // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject
+    // use the same menu; MoveToProject leaves out the ones it can't file into (`exclude(file)` true)
+    // and asks its own question (`placeholder`).
+    pickHome(name, preferred, { exclude = () => false, placeholder = null } = {}) {
         const { FuzzySuggestModal } = customJS.obsidian;
         const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
         const others = app.vault.getMarkdownFiles()
             .filter((f) => f.parent?.path.startsWith("Projects/") && !preferred.includes(f) && this.isHome(f))
             .sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
-        const items = [...preferred, ...others];
+        const items = [...preferred, ...others].filter((f) => !exclude(f));
         return new Promise((resolve) => {
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
@@ -278,7 +305,7 @@ class AddTaskNote {
                 // Obsidian closes the modal before it reports the choice
                 onClose() { setTimeout(() => resolve(picked), 0); }
             })(app);
-            modal.setPlaceholder(`Which project or area is "${name}" for? (Esc: cancel)`);
+            modal.setPlaceholder(placeholder ?? `Which project or area is "${name}" for? (Esc: cancel)`);
             modal.open();
         });
     }
@@ -294,29 +321,33 @@ class AddTaskNote {
     // other than `note` itself; null when there's none. A line whose note has that twin in the picked
     // project is pointed at the twin rather than the move being refused (OBS-36).
     sameNameIn(note, home) {
-        const folder = note.parent?.name === "logs" ? `${home.parent.path}/logs` : home.parent.path;
+        const folder = this.isLog(note) ? this.logsFolder(home) : home.parent.path;
         const target = `${folder}/${note.name}`;
         const twin = app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target);
         return twin && twin !== note && twin.extension === "md" ? twin : null;
     }
 
     // Moves `note` into the folder of `home` (an area or project note), updating links to it; a
-    // meeting log (one sitting in a `logs` folder) goes into that folder's `logs/`, where the Log
-    // template files them. False, with a notice, when the target already has a note of the same name.
+    // meeting log (see isLog) goes into that folder's `logs/`, where the Log template files them.
+    // False, with a notice, when the target already has a note of the same name.
     async moveInto(note, home) {
-        let folder = home.parent.path;
-        if (note.parent?.name === "logs") {
-            folder = `${folder}/logs`;
-            if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
-        }
+        const folder = this.isLog(note) ? this.logsFolder(home) : home.parent.path;
         const target = `${folder}/${note.name}`;
         if (app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target)) {
             new Notice(`${folder} already has a note named ${note.basename}, so nothing changed`);
             return false;
         }
+        if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
         await app.fileManager.renameFile(note, target);
         new Notice(`Moved ${note.basename} to ${folder}`);
         return true;
+    }
+
+    // The `logs` folder of `home` (an area or project note): the one it has, spelled as it is, or
+    // where a new one goes
+    logsFolder(home) {
+        const path = `${home.parent.path}/logs`;
+        return (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path))?.path ?? path;
     }
 
     // The ⭕ project and 🗃️ area links on a line: [{ raw, linkpath }]

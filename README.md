@@ -17,7 +17,7 @@ This README covers trying it and installing it. **[The manual](<00 Meta/Manual.m
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `10 Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddProjectLink* `⌥⌘P`, and *Daily notes: Open today's daily note*.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
 Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
@@ -131,6 +131,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
 | AddTaskNote | | Links the task to its own note, creating it in the project or area you pick; on an event line, links a meeting log |
 | AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), or moves its task note or log there |
+| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `logs/`, a project with its whole folder. Also *Move to project…* in the file menus |
 | ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |
@@ -148,6 +149,7 @@ Startup scripts (run when Obsidian starts):
 | --- | --- |
 | SyncArea | Updates `area` when notes or folders move |
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
+| MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
 | TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian

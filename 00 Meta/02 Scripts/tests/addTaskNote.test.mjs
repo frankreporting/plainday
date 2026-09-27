@@ -219,7 +219,7 @@ test("linktextFor: the note's name, or its path only when another note really sh
     assert.equal(add.linktextFor(note, [note.path]), "Check the numbers");
 });
 
-test("confirmMove: rows read Task, From and To, and Enter moves", async () => {
+test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter moves", async () => {
     // A Modal and elements just real enough to lay the prompt out and press its buttons
     const el = () => {
         const e = { children: [], text: undefined };
@@ -243,13 +243,13 @@ test("confirmMove: rows read Task, From and To, and Enter moves", async () => {
     let opened;
     const Cls = vm.runInContext(
         fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app: {}, customJS: { obsidian: { Modal, ButtonComponent } }, requestAnimationFrame: () => {}, setTimeout }),
+        vm.createContext({ app: { metadataCache: { getFileCache: (f) => f.cache ?? null } }, customJS: { obsidian: { Modal, ButtonComponent } }, requestAnimationFrame: () => {}, setTimeout }),
     );
     const helper = new Cls();
     helper.isArea = (f) => f.basename === "Household";
     const rowsOf = () => opened.contentEl.children[0].children.map((tr) => tr.children.map((td) => td.text));
 
-    const task = helper.confirmMove({ basename: "Renew online", parent: { name: "Household" } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
+    const task = helper.confirmMove({ basename: "Renew online", parent: { name: "Household" }, cache: { frontmatter: { tags: ["task"] } } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
     assert.equal(opened.title, "Move task note?");
     assert.deepEqual(rowsOf(), [["Task", "Renew online"], ["From", "🗃️ Household"], ["To", "⭕ Garden Club Newsletter"]]);
     keys.Enter();
@@ -260,4 +260,128 @@ test("confirmMove: rows read Task, From and To, and Enter moves", async () => {
     assert.deepEqual(rowsOf(), [["Log", "2026-09-18 Printer call"], ["From", "⭕ Garden Club Newsletter"], ["To", "🗃️ Household"]]);
     opened.close();
     assert.equal(await log, null, "Esc (a close with no choice) leaves it");
+
+    // A log waiting in the Inbox is still a log; a note that's neither is a note (MoveToProject)
+    const inbox = helper.confirmMove({ basename: "2026-09-18 Printer call", parent: { name: "10 Inbox" }, cache: { frontmatter: { tags: "log" } } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
+    assert.equal(opened.title, "Move log?");
+    opened.close();
+    await inbox;
+    const note = helper.confirmMove({ basename: "Seed catalog", parent: { name: "Household" }, cache: { frontmatter: { tags: [] } } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
+    assert.equal(opened.title, "Move note?");
+    assert.deepEqual(rowsOf()[0], ["Note", "Seed catalog"]);
+    assert.equal(opened.contentEl.children[1].text, "Time entries will be reallocated accordingly.");
+    opened.close();
+    await note;
+
+    // A project or area moving (MoveToProject): its own time stays with it; one at the top has no From
+    const project = helper.confirmMove({ basename: "Garden Club Newsletter", parent: { name: "Garden Club Newsletter" }, cache: { frontmatter: { tags: ["project"] } } }, { basename: "Household" }, { basename: "Freelance" });
+    assert.equal(opened.title, "Move project?");
+    assert.deepEqual(rowsOf(), [["Project", "Garden Club Newsletter"], ["From", "🗃️ Household"], ["To", "⭕ Freelance"]]);
+    assert.match(opened.contentEl.children[1].text, /^Its time stays its own/);
+    opened.close();
+    await project;
+    const area = helper.confirmMove({ basename: "Household", parent: { name: "Household" }, cache: { frontmatter: { tags: ["area"] } } }, null, { basename: "Freelance" });
+    assert.equal(opened.title, "Move area?");
+    assert.deepEqual(rowsOf()[1], ["From", "No project or area"]);
+    assert.equal(opened.contentEl.children[1].text, "Its time, and its projects', stays their own.", "an area has no parent to count toward");
+    opened.close();
+    await area;
+});
+
+// A stand-in `app` with notes at `paths`, each file carrying its own metadata cache
+const withApp = (paths, extra = {}) => {
+    const files = paths.map(([path, tags]) => {
+        const name = path.split("/").pop();
+        const parentPath = path.slice(0, path.lastIndexOf("/"));
+        return { path, name, basename: name.replace(/\.md$/, ""), extension: "md", parent: { path: parentPath, name: parentPath.split("/").pop() }, cache: { frontmatter: { tags } } };
+    });
+    const app = {
+        vault: { getMarkdownFiles: () => files, getAbstractFileByPath: (p) => files.find((f) => f.path === p) ?? null, getAbstractFileByPathInsensitive: (p) => files.find((f) => f.path.toLowerCase() === p.toLowerCase()) ?? null },
+        metadataCache: { getFileCache: (f) => f.cache ?? null },
+        ...extra,
+    };
+    return { files, app };
+};
+
+test("isLog: a note in a logs folder (any case), or one tagged #log wherever it waits; logsFolder: the one there, as it's spelled", () => {
+    const { files, app } = withApp([
+        ["Projects/A/logs/2026-09-02 Kickoff.md", []],
+        ["Projects/B/Logs/2026-09-03 Standup.md", []],
+        ["10 Inbox/2026-09-18 Printer call.md", "log"],
+        ["10 Inbox/Order toner.md", ["task"]],
+        ["Projects/A/A.md", ["project"]],
+        ["Projects/B/B.md", ["project"]],
+    ]);
+    app.vault.getAbstractFileByPathInsensitive = (p) => (p.toLowerCase() === "projects/b/logs" ? { path: "Projects/B/Logs" } : null);
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({ app }));
+    const helper = new Cls();
+    assert.deepEqual(files.slice(0, 4).map((f) => helper.isLog(f)), [true, true, true, false]);
+    assert.equal(helper.logsFolder(files[4]), "Projects/A/logs", "none yet: where a new one goes");
+    assert.equal(helper.logsFolder(files[5]), "Projects/B/Logs");
+});
+
+test("isSameNote: the note itself, its current path, or the path it was just moved from; nothing else", () => {
+    const helper = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const note = { path: "Projects/A/logs/2026-09-14 Review.md" };
+    assert.ok(helper.isSameNote(note, note));
+    assert.ok(helper.isSameNote({ path: note.path }, note), "another object for the same path");
+    assert.ok(helper.isSameNote({ path: "10 Inbox/2026-09-14 Review.md" }, note, "10 Inbox/2026-09-14 Review.md"), "a stale entry where it was");
+    assert.ok(!helper.isSameNote({ path: "10 Inbox/2026-09-14 Review.md" }, note), "without the old path, that's another note");
+    assert.ok(!helper.isSameNote({ path: "Projects/B/2026-09-14 Review.md" }, note, "10 Inbox/2026-09-14 Review.md"));
+    assert.ok(!helper.isSameNote(null, note, "10 Inbox/2026-09-14 Review.md"));
+});
+
+test("a note just moved isn't mistaken for a clash or another note (AddTaskNote's link text, AddProjectLink's check)", () => {
+    const addTaskNote = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
+    assert.match(addTaskNote, /movedFrom = existing\.path;\n\s*if \(choice === "move" && !\(await this\.moveInto\(existing, home\)\)\)/);
+    assert.match(addTaskNote, /\.filter\(\(p\) => p !== movedFrom\)/, "the old path isn't counted as a second note of that name");
+    const addProjectLink = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
+    assert.match(addProjectLink, /const movedFrom = note\.path;\n\s*if \(!\(await helper\.moveInto\(note, home\)\)\) return;/);
+    assert.match(addProjectLink, /helper\.isSameNote\(this\.taskNoteOf\(before, source\.path\), note, movedFrom\)/);
+});
+
+test("pickHome: MoveToProject can leave homes out of the menu and ask its own question; otherwise it's unchanged", async () => {
+    const { files, app } = withApp([
+        ["Projects/A/A.md", ["area"]],
+        ["Projects/A/B/B.md", ["project"]],
+        ["Projects/A/C/C.md", ["project"]],
+        ["10 Inbox/Loose idea.md", []],
+    ]);
+    let shown;
+    class FuzzySuggestModal {
+        setPlaceholder(p) { this.placeholder = p; }
+        open() { shown = { placeholder: this.placeholder, items: this.getItems().map((f) => this.getItemText(f)) }; this.onClose(); }
+    }
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+        vm.createContext({ app, customJS: { obsidian: { FuzzySuggestModal } }, setTimeout }));
+    const helper = new Cls();
+    await helper.pickHome("Order toner", [files[2]]);
+    assert.deepEqual(Array.from(shown.items), ["C", "A", "B"], "the line's projects first, then the rest");
+    assert.equal(shown.placeholder, 'Which project or area is "Order toner" for? (Esc: cancel)');
+    await helper.pickHome("B", [], { exclude: (f) => f.path.startsWith("Projects/A/B/"), placeholder: 'Move "B" to which project or area? (Esc: cancel)' });
+    assert.deepEqual(Array.from(shown.items), ["A", "C"]);
+    assert.equal(shown.placeholder, 'Move "B" to which project or area? (Esc: cancel)');
+});
+
+test("moveInto: a clash is refused before anything is made; a log from the Inbox goes into logs/", async () => {
+    const made = [];
+    const renamed = [];
+    const notices = [];
+    const { files, app } = withApp([
+        ["Projects/A/A.md", ["project"]],
+        ["Projects/A/Order toner.md", ["task"]],
+        ["10 Inbox/Order toner.md", ["task"]],
+        ["10 Inbox/2026-09-18 Printer call.md", ["log"]],
+    ], {
+        fileManager: { renameFile: async (f, to) => renamed.push([f.path, to]) },
+    });
+    app.vault.createFolder = async (p) => made.push(p);
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+        vm.createContext({ app, Notice: class { constructor(m) { notices.push(m); } } }));
+    const helper = new Cls();
+    assert.equal(await helper.moveInto(files[2], files[0]), false);
+    assert.deepEqual(notices, ["Projects/A already has a note named Order toner, so nothing changed"]);
+    assert.equal(await helper.moveInto(files[3], files[0]), true);
+    assert.deepEqual(made, ["Projects/A/logs"]);
+    assert.deepEqual(renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/A/logs/2026-09-18 Printer call.md"]]);
 });

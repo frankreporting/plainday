@@ -82,7 +82,7 @@ Area and project names are yours; the top-level folders and `36 Planner` are wha
 - **⭕ Projects** are folders inside an area, or inside another project (a sub-project), each with a folder note tagged `#project`. They hold every note and task note for that project.
 - A project note's properties come from the Project template: `id`, `aliases`, `icon`, `color`, `tags`, `area`, `start`, `due`, `who`, `client`, `rate` and `rate_type`. `client`, `rate` and `rate_type` start empty, to be filled in rather than assumed. Two optional properties cap the work: `max_hours`, or `contract_max` (an amount, divided by the rate).
 - **Task notes** are notes tagged `#task` that give a task room for notes and sub-tasks. The task's line in a daily note always links its task note (see *Links at the end of a line*).
-- **`area`:** every note inside a project or area has an `area` property linking the nearest folder note above it. Moving notes or folders keeps it current (see *SyncArea*).
+- **`area`:** every note inside a project or area has an `area` property linking the nearest folder note above it. Moving notes or folders keeps it current (see *SyncArea*), and *MoveToProject* moves a note, a log or a whole project into another project or area.
 - **Meeting logs** keep their details as properties: `area`, `date`, `time`, `endTime`, `who`, `topic`, `series`, and sometimes `absent`, `guest`, `project` or `related`.
 - **Finished projects** move whole into `90 Archive`. Exclude `90 Archive` from search in Obsidian's settings, and old projects drop out of the Quick Switcher and the project lists. The time reports leave archived projects out too.
 
@@ -225,7 +225,7 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 - [x] Water the tomato beds [[Household|🗃️]]
 ```
 
-- **One of 🔗, ⭕ and 🗃️ per line.** A task note is filed in its project, so a line that links one needs no ⭕: *AddTaskNote*, *AddProjectLink* and *Schedule* take it off.
+- **One of 🔗, ⭕ and 🗃️ per line.** A task note is filed in its project, so a line that links one needs no ⭕: *AddTaskNote*, *AddProjectLink* and *Schedule* take it off, and *MoveToProject* takes off one for the project a note has just left.
 - **The 🔗 link threads one task across days:** every forwarded copy keeps the same 🔗, so that note's backlinks show the task's whole history. In the demo, *Draft homepage wireframes* is worked on 9/14 and 9/15 through one task note.
 - **Order:** the note link (🔗, ⭕ or 🗃️) ends the line, so End reaches the note; the 🚩 due date goes before it, and *DueDate* puts it there.
 
@@ -255,7 +255,7 @@ The alias is `M/D`, with no year and no leading zeros. Daily notes don't get pre
 ### Meeting logs
 
 - Named `YYYY-MM-DD Title`, or `!today Title` for today. A note with that title gets the Log template, with properties `area`, `series`, `topic`, `date`, `time`, `endTime` and `who`.
-- **Filed by project:** the template asks which project or area the log belongs to (the same picker as new tasks and projects), moves it into that folder's `logs/` subfolder (creating it) and fills `area`. Esc leaves the log in `10 Inbox`, with no `area`; Raycast's Open Log Note can preset Inbox and skip the picker. A log moved later gets its `area` updated on the move.
+- **Filed by project:** the template asks which project or area the log belongs to (the same picker as new tasks and projects), moves it into that folder's `logs/` subfolder (creating it) and fills `area`. Esc leaves the log in `10 Inbox`, with no `area`; Raycast's Open Log Note can preset Inbox and skip the picker. A log moved later gets its `area` updated on the move, and *MoveToProject* files it straight into the new project's `logs/`.
 - **Every log has a line in its daily note.** Made from a calendar event (click the event's `[[YYYY-MM-DD Title|…]]` link, or *AddTaskNote* on its line), the log takes `time` and `endTime` from the event line: its start, and the end time on the line under it, or the last time of the entry that replaced it. (`endTime` is text, like `time`; `end` would be a date property.) Typed as `YYYY-MM-DD Title` or `!today Title`, the template links the event line whose title matches, and takes its times the same way. With no such line it adds a `[<]` line with no time and leaves both properties empty until the calendar sync brings the event; the demo's `2026-09-18 Printer call` is one.
 - A name a log already has opens that log instead.
 - The event's link keeps working wherever the log is filed, because links go by note name.
@@ -364,6 +364,17 @@ Links a task to a note of its own: `- [ ] Write brochure copy [[Write brochure c
 - With a 🔗 task note on the line, or a meeting log linked from an event's title, the note is moved into the picked project instead (a log into its `logs/`), and no ⭕ is added: without asking when the note has no project or area yet, after the *Move task note?* confirm when it's leaving one. A note already there needs nothing; a same-named note already in the picked project is linked instead.
 - On an event line the ⭕ goes at the very end, where the calendar sync keeps it through updates and moves.
 
+### MoveToProject (`⌥⌘M`)
+
+Moves the note you're on into a project or area picked from the same menu as *AddProjectLink*, so refiling never means hunting for a folder. It's also *Move to project…* in the file menus (see *MoveToProjectMenu*). To file the note a daily-note line links, use *AddProjectLink* on the line.
+
+- **Where it goes:** a meeting log (tagged `#log`, or in a `logs/` folder) into the project's `logs/`, made if missing, so a log left in `10 Inbox` is filed the way the Log template files it. A project or area's own note takes its whole folder along, sub-projects and logs included. Anything else goes into the project's folder. Obsidian's move updates the links, and *SyncArea* sets `area`.
+- **Several at once:** while Notebook Navigator has the focus, it moves the notes selected there. A note inside a project that's moving with it goes along with its project.
+- **It asks first** when a single note leaves a project or area (*Move task note?*, *Move log?* or *Move note?*, with its From and To), since every line that links it follows it. Moving a project or area always asks (*Move project?*, *Move area?*): its own time stays with it, but a project moved inside another project counts toward that project's totals, and takes its rate if it has none of its own (see *The time report*). Moving several at once doesn't ask.
+- **The ⭕ on its lines:** a line that links the note and also has a ⭕ or 🗃️ for the project it just left would go on counting its time there, so that link comes off: one link per line. A ⭕ or 🗃️ for anywhere else is that line's own choice and stays, and the notice says how many lines kept one. A moved project's notes keep their project, so their lines are left alone.
+- **It refuses, with a notice:** a name already taken where it would go, a note already there, and a project into itself or one of its sub-projects (the menu leaves those out, along with project notes that have no folder to hold anything). It never moves anything in `00 Meta`, `36 Planner` or `90 Archive`: archived work is out of the reports and usually invoiced, so bring it back by hand. Esc cancels.
+- Finished projects still go into `90 Archive` by hand: the menu only lists projects and areas under `Projects/`.
+
 ### ToggleTimeEntry (`⌘T`)
 
 - **On or under a task or event in today's daily note:** with no running entry, adds `- 9:01am - ` just above the task's first sub-task, or after its sub-bullets if it has none, and an open `[ ]` task becomes `[/]` (it stays `[/]` after the timer stops; events and other markers never change). With a running entry, fills in the end time; a `: 🆓` typed on the running entry stays. A task's timers are its own entries, not its sub-tasks'.
@@ -402,6 +413,7 @@ These run on their own when Obsidian starts, and again whenever a script file ch
 
 - ***SyncArea*** keeps `area` current when notes move to another folder, one at a time or as a whole folder: it points at the nearest project or area above them, the first folder note (`Folder/Folder.md`) tagged `#project` or `#area`. A moved project's own note points at its new parent. It says "Updated area on N notes". It leaves `area` alone when notes land outside any project or area (`10 Inbox`, `30 Reference`), anywhere in `90 Archive` or `00 Meta`, or when a folder is only renamed in place (Obsidian updates those links itself), and keeps a template's own pick for a brand-new note. It runs on every device, and each device handles only its own moves: Obsidian Sync delivers a move made elsewhere as a delete and a new file, so nothing is processed twice.
 - ***RefoldOnOpen*** refolds each daily note as it opens, on every device. See *Folding*.
+- ***MoveToProjectMenu*** puts *Move to project…* (*MoveToProject*) in the file menus: Notebook Navigator's menu for a note, for several selected, and for a project or area's folder; a tab's **⋯** menu; a link's right-click menu (for notes, not the project a ⭕ points at); and the core file explorer's. The item appears only for what *MoveToProject* moves.
 - ***TimeReportOnStartup*** refreshes the time reports on the desktop once the vault is indexed. If CustomJS is still reloading its scripts, it waits a few seconds for them and otherwise skips with a console warning. A report already running finishes with the scripts it started with, so saving a script part-way through doesn't break it.
 
 ## Templates

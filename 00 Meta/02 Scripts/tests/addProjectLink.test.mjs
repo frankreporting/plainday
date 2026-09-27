@@ -69,6 +69,15 @@ test("taskLinkpath: the first 🔗 link's target; a heading is dropped; other li
     assert.equal(cmd.taskLinkpath("- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "2026-09-15 Kickoff call");
     assert.equal(cmd.taskLinkpath("- [<] All day\t[[Projects/Hawk/logs/2026-09-15 Offsite|Offsite]] [[Hawk Ledger|⭕]]"), "Projects/Hawk/logs/2026-09-15 Offsite");
     assert.equal(cmd.taskLinkpath("- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]]"), null, "a plain event title");
+    // A log's line written before its event arrives has no time yet (the Log template, OBS-10)
+    assert.equal(cmd.taskLinkpath("- [<] [[2026-09-18 Printer call|Printer call]]"), "2026-09-18 Printer call");
+    assert.equal(cmd.taskLinkpath("- [<] [[2026-09-18 Printer call|Printer call]] [[Hawk Ledger|⭕]]"), "2026-09-18 Printer call");
+    assert.equal(cmd.relinked("- [<] [[2026-09-18 Printer call|Printer call]]", "P/logs/2026-09-18 Printer call"), "- [<] [[P/logs/2026-09-18 Printer call|Printer call]]");
+    assert.equal(cmd.taskLinkpath("- [x] [[2026-09-18 Printer call|Printer call]]"), null, "a task that starts with a link still isn't an event");
+    // A log is named with its date first; a title that only starts with a link isn't a log's
+    assert.equal(cmd.taskLinkpath("- [<] 12:00pm\t[[Rafe Oakes|@Rafe]] lunch"), null);
+    assert.equal(cmd.taskLinkpath("- [<] [[Rafe Oakes|@Rafe]] lunch"), null);
+    assert.equal(cmd.taskLinkpath("- [x] 9:00am [[Hawk Ledger|⭕]] call about it [[Call notes|🔗]]"), "Call notes", "a task with a time in its text keeps its 🔗");
     assert.equal(cmd.taskLinkpath("- [ ] [[Some note|Some]] task"), null, "a task starting with a link isn't an event");
     assert.ok(cmd.sameButTaskLink("- [<] 1:30pm\t[[Projects/Hawk/logs/2026-09-15 Kickoff call|Kickoff call]]", "- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "a moved log's rewritten link is the same line");
     assert.ok(!cmd.sameButTaskLink("- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff]]", "- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "but not an edited title");

@@ -4,12 +4,14 @@
   "startupScriptNames": [
     "SyncArea",
     "RefoldOnOpen",
+    "MoveToProjectMenu",
     "TimeReportOnStartup"
   ],
   "registeredInvocableScriptNames": [
     "DueDate",
     "AddTaskNote",
     "AddProjectLink",
+    "MoveToProject",
     "Schedule",
     "Plan",
     "ConvertToProject",

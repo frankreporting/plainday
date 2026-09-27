@@ -2,8 +2,12 @@ class AddProjectLink {
     // A 🔗 task note link, as AddTaskNote writes it (a phone may add U+FE0F to the emoji)
     static TASK_LINK = /\[\[[^\]]*\|🔗️?\]\]/u;
     // An event line whose title is a link to its meeting log, as AddTaskNote writes it:
-    // "- [<] 1:30pm⇥[[2026-09-15 Kickoff call|Kickoff call]]". Captures up to the link's target.
-    static LOG_TITLE = /^(\s*[-*+]\s+\[.\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)\[\[([^\]|#]+)/iu;
+    // "- [<] 1:30pm⇥[[2026-09-15 Kickoff call|Kickoff call]]", or with no time yet, as the Log
+    // template writes a log's line before the calendar sync brings its event:
+    // "- [<] [[2026-09-18 Printer call|Printer call]]". A log's name starts with its date, which
+    // keeps a title that merely starts with a link ("[[Rafe Oakes|@Rafe]] lunch") from reading as
+    // one. Captures up to the link's target.
+    static LOG_TITLE = /^(\s*[-*+]\s+(?:\[.\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+|\[<\]\s+))\[\[((?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} [^\]|#]*)/iu;
 
     // On a task or event line: pick a project or area from the menu and link it at the end of the
     // line as [[Project|⭕]] or [[Area|🗃️]], the forms the time report and the calendar sync read.
@@ -65,12 +69,13 @@ class AddProjectLink {
                         return;
                     }
                 }
+                const movedFrom = note.path;
                 if (!(await helper.moveInto(note, home))) return;
                 await customJS.SyncArea?.sync?.(note, false);
                 // The move can rewrite the 🔗 link's text (a path, when the name isn't unique), so
                 // the line is read again, and only the link may differ
                 before = editor.getLine(line);
-                if (!this.sameButTaskLink(before, lineText) || this.taskNoteOf(before, source.path) !== note) {
+                if (!this.sameButTaskLink(before, lineText) || !helper.isSameNote(this.taskNoteOf(before, source.path), note, movedFrom)) {
                     new Notice(`${note.basename} moved, but the line changed, so its ⭕ links were left`);
                     return;
                 }
