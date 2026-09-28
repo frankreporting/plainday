@@ -76,7 +76,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `36 Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `36 Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `36 Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `logs/` of the project or area its event line's one ⭕ or 🗃️ names, and takes that link off the line, or else asks (Esc: Inbox); Raycast's Open Log Note can preset Inbox and skip the picker. Records the log in its daily note (the event line with that title links to it at the end, `[[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else asks and sets the line's ⭕ to the pick (Esc: Inbox); Raycast's Open Log Note can preset Inbox and skip the picker. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note filed in the chosen project or area (Esc: Inbox); dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
@@ -103,22 +103,22 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 ```markdown
 - [<] 9:00am	Team standup
 	- 9:30am
-- [<] 1:30pm	Kickoff call [[2026-09-15 Kickoff call|🗒️]]
+- [<] 1:30pm	Kickoff call [[Kestrel Outfitters 2026|⭕]] [[2026-09-15 Kickoff call|🗒️]]
 	- 1:30pm - 2:15pm
 - [<] 3:00pm	Delivery window ℹ️
 	- 5:00pm
 - [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
 	- 4:30pm: 🆓 not billing this one
-- [<] Printer call [[2026-09-15 Printer call|🗒️]]
-- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Draft the proposal|🗒️]]
+- [<] Printer call [[Pinecrest Library Brochure|⭕]] [[2026-09-15 Printer call|🗒️]]
+- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft the proposal|🗒️]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
 - [x] Redo the nav I broke 🆓 [[Kestrel Outfitters 2026|⭕]]
 	- 5:00pm - 5:20pm
-- [>] Send the invoice [[Send the invoice|🗒️]]
+- [>] Send the invoice [[Pinecrest Library Brochure|⭕]] [[Send the invoice|🗒️]]
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `🗒️` the line's own note (a task's note, or an event's meeting log, whose project the time counts toward), `⭕` a project, `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), with `🚩 M/D` for a due date.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `🗒️` the line's own note (a task's note, or an event's meeting log), filed in that project. The note link comes last, and a `🚩 M/D` due date first. A link in the text is part of the title, even a link to a project.
 
 The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
 
@@ -130,9 +130,9 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | --- | --- | --- |
 | Schedule | `⌘S` | Moves a task to another day; one already worked on stays behind as `[>]`, linked to its task note |
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
-| AddTaskNote | | Links the task to its own note, creating it in the project or area you pick; on an event line, links a meeting log |
-| AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), or moves its task note or log there |
-| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `logs/`, a project with its whole folder. Also *Move to project…* in the file menus |
+| AddTaskNote | | Links the task to its own note, creating it in the project or area you pick, and keeps the line's ⭕ for it; on an event line, links a meeting log |
+| AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
+| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `logs/`, a project with its whole folder. The lines that link a moved note get its new ⭕. Also *Move to project…* in the file menus |
 | ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |

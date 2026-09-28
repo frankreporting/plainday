@@ -11,9 +11,10 @@ class CalendarSync {
     // A log's line with no time, `- [<] Title [[log|🗒️]]` (the Log template writes one when the
     // calendar has no event for a meeting, OBS-10), is adopted when the event arrives and given
     // its time, and a log a line links takes the line's times whenever the sync writes the line.
-    // An event links its log at the end, `Title [[log|🗒️]]`, as a task links its note (OBS-57).
-    // Lines from before wrap the title in the link instead, `[[log|Title]]`; they're still read,
-    // and written the new way whenever the sync rewrites them.
+    // An event links its log at the end, `Title [[log|🗒️]]`, as a task links its note (OBS-57),
+    // after its ⭕ links, so the note link ends the line (OBS-90). Lines from before put the log
+    // link ahead of the ⭕, or wrap the title in it, `[[log|Title]]`; they're still read, and
+    // written the new way whenever the sync rewrites them.
     //
     // Three files, all in 00 Meta:
     // - `calendar-events.json`   every calendar and event, written by the fetcher
@@ -1138,8 +1139,9 @@ class CalendarSync {
         return free ? `${bare} ${CalendarSync.FREE_MARK}` : bare;
     }
 
-    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <log link> <⭕ links>`,
-    // or from before OBS-57 with the title wrapped in the log link. `shown` is the title as it
+    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <⭕ links> <log link>`,
+    // with the log link before the ⭕ links as it was written before OBS-90, or from before OBS-57
+    // with the title wrapped in the log link. `shown` is the title as it
     // reads, `log` the log link as the sync writes it (`[[log|🗒️]]`, whichever form the line has),
     // `free` whether it carries the mark, `nonbillable` whether you've put 🆓 on it, `trail` any
     // whitespace at the end of the line. Null otherwise.
@@ -1186,9 +1188,9 @@ class CalendarSync {
     }
 
     // The sync's lines for an event with your additions put back: the new start and title, the
-    // free mark as the sync's lines have it, your 🆓, the log link (`[[log|🗒️]]`, whichever form
-    // it was in), the ⭕ links, and the children in their order with the end time updated and its
-    // note kept. A rename changes only the title; the log keeps its name. Given only { projects,
+    // free mark as the sync's lines have it, your 🆓, the ⭕ links, the log link (`[[log|🗒️]]`,
+    // whichever form it was in) last, as every note link ends its line (OBS-90), and the children in
+    // their order with the end time updated and its note kept. A rename changes only the title; the log keeps its name. Given only { projects,
     // log, nonbillable } (a moved event, or a series), the links go on the sync's lines as they
     // are. Null if the event has no end line any more (all day now) for a noted one to move to.
     decorate(lines, ann) {
@@ -1196,7 +1198,7 @@ class CalendarSync {
         const { rest: title, free } = this.splitTail(lines[0].slice(lines[0].indexOf("\t") + 1));
         const marks = [...(free ? [CalendarSync.FREE_MARK] : []), ...(ann.nonbillable ? [CalendarSync.NONBILLABLE_MARK] : [])];
         const log = ann.log ? [this.noteLink(ann.log)] : [];
-        const first = `${lead}\t${[title, ...marks, ...log, ...ann.projects].join(" ")}${ann.trail ?? ""}`;
+        const first = `${lead}\t${[title, ...marks, ...ann.projects, ...log].join(" ")}${ann.trail ?? ""}`;
         const end = lines.slice(1);
         if (!ann.children) return [first, ...end];
         const out = [first];

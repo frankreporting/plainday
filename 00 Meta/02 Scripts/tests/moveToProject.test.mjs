@@ -185,7 +185,7 @@ test("plan: what's inside a folder that's moving goes along with it, whatever or
     assert.deepEqual(steps.map((s) => s.skip), ["inside", null, "inside"]);
 });
 
-test("unlinkStale: only a link to the project the note left comes off; the lines' other ⭕s are their own", () => {
+test("relinkStale: a ⭕ for the project the note left becomes the new one's, a line with none gets it, the lines' other ⭕s are their own (OBS-90)", () => {
     const { mover, file } = setup(VAULT);
     const resolve = (l) => context.app.metadataCache.getFirstLinkpathDest(l);
     const note = file("Projects/Freelance/Kestrel/Draft wireframes.md");
@@ -198,50 +198,64 @@ test("unlinkStale: only a link to the project the note left comes off; the lines
         "- [ ] Draft wireframes [[Draft wireframes|🔗]] [[Gone project|⭕]]",
         "Draft wireframes [[Draft wireframes|🔗]] [[Kestrel|⭕]]",
         "- [x] Two of them [[Draft wireframes|🔗]] [[Kestrel|⭕]] [[Household|🗃️]]",
+        "- [ ] No project yet [[2026-09-30|🚩 9/30]] [[Draft wireframes|🗒️]]",
         "",
     ].join("\n");
-    const out = mover.unlinkStale(text, note, kestrel, pinecrest, resolve);
+    const relink = (from, home = pinecrest) => mover.relinkStale(text, { note, from, home, link: `[[${home.basename}|⭕]]`, resolve });
+    const out = relink(kestrel);
     assert.deepEqual(out.text.split("\n"), [
-        "- [/] Draft wireframes [[Draft wireframes|🔗]]",
+        "- [/] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🔗]]",
         "\t- [ ] Sub-task [[Draft wireframes|🔗]] [[Household|🗃️]]",
         "- [ ] Draft wireframes [[Draft wireframes|🔗]] [[Pinecrest|⭕]]",
         "- [ ] Other task [[Write copy|🔗]] [[Kestrel|⭕]]",
         "- [ ] Draft wireframes [[Draft wireframes|🔗]] [[Gone project|⭕]]",
         "Draft wireframes [[Draft wireframes|🔗]] [[Kestrel|⭕]]",
         "- [x] Two of them [[Draft wireframes|🔗]] [[Household|🗃️]]",
+        "- [ ] No project yet [[2026-09-30|🚩 9/30]] [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]",
         "",
     ], "a 🗃️ for somewhere else, the new home's ⭕, another note's line, a broken link and a line that isn't a checklist item are left");
-    assert.equal(out.unlinked, 2);
+    assert.equal(out.relinked, 3);
     assert.equal(out.kept, 2, "the Household lines still count elsewhere");
-    assert.deepEqual([mover.unlinkStale(text, note, null, pinecrest, resolve).unlinked, mover.unlinkStale(text, note, pinecrest, pinecrest, resolve).unlinked], [0, 0],
-        "a note that had no project, or didn't leave one, takes nothing off");
+    // A note that had no project, or didn't leave one: only the line with no ⭕ gets one
+    for (const from of [null, pinecrest]) {
+        const again = relink(from);
+        assert.equal(again.relinked, 1, `from ${from?.basename}`);
+        assert.equal(again.text.split("\n")[0], "- [/] Draft wireframes [[Draft wireframes|🔗]] [[Kestrel|⭕]]", "a ⭕ for anywhere else stays");
+    }
+    // An area gets its 🗃️
+    assert.equal(mover.relinkStale("- [ ] Draft wireframes [[Draft wireframes|🗒️]]", { note, from: kestrel, home: file("Projects/Household/Household.md"), link: "[[Household|🗃️]]", resolve }).text,
+        "- [ ] Draft wireframes [[Household|🗃️]] [[Draft wireframes|🗒️]]");
+    // The line a command is writing itself is left to it
+    assert.equal(mover.relinkStale(text, { note, from: kestrel, home: pinecrest, link: "[[Pinecrest|⭕]]", resolve, skip: 0 }).text.split("\n")[0], text.split("\n")[0]);
 });
 
-test("unlinkStale: event lines, timed or not; code blocks, comments and line endings are left as they are", () => {
+test("relinkStale: event lines, timed or not; code blocks, comments and line endings are left as they are", () => {
     const { mover, file } = setup(VAULT);
     const resolve = (l) => context.app.metadataCache.getFirstLinkpathDest(l);
     const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
     const [kestrel, pinecrest] = [file("Projects/Freelance/Kestrel/Kestrel.md"), file("Projects/Freelance/Pinecrest/Pinecrest.md")];
-    const strip = (text) => mover.unlinkStale(text, log, kestrel, pinecrest, resolve).text;
+    const args = { note: log, from: kestrel, home: pinecrest, link: "[[Pinecrest|⭕]]", resolve };
+    const strip = (text) => mover.relinkStale(text, args).text;
     assert.equal(strip("- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\n- 10:45am\n"),
-        "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]]\n- 10:45am\n");
-    assert.equal(strip("- [<] [[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]"), "- [<] [[2026-09-14 Homepage review|Homepage review]]",
+        "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Pinecrest|⭕]]\n- 10:45am\n");
+    assert.equal(strip("- [<] [[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]"), "- [<] [[2026-09-14 Homepage review|Homepage review]] [[Pinecrest|⭕]]",
         "a log's line from before its event arrived");
     const hidden = "```\n- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\n```\n"
         + "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] %%billed [[Kestrel|⭕]]%%\n";
     assert.equal(strip(hidden), hidden);
     assert.equal(strip("- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\r\n- 10:45am\r\n"),
-        "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]]\r\n- 10:45am\r\n");
-    // A comment on the line: the link outside it comes off and the comment stays; a link the
-    // comment repeats is left, and the line counts as keeping it
+        "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Pinecrest|⭕]]\r\n- 10:45am\r\n");
+    // A comment on the line: the link outside it comes off and the comment stays, and nothing is
+    // added where it might land inside it; a link the comment repeats is left, and the line counts
+    // as keeping it
     assert.equal(strip("- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]] %%billed 9/30%%"),
         "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] %%billed 9/30%%");
     const twice = "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]] %%was [[Kestrel|⭕]]%%";
-    const out = mover.unlinkStale(twice, log, kestrel, pinecrest, resolve);
-    assert.deepEqual([out.text, out.unlinked, out.kept], [twice, 0, 1]);
+    const out = mover.relinkStale(twice, args);
+    assert.deepEqual([out.text, out.relinked, out.kept], [twice, 0, 1]);
 });
 
-test("unlinkStale: right after a move, a lookup by name can return a stale entry at the old path; it still counts as the note", () => {
+test("relinkStale: right after a move, a lookup by name can return a stale entry at the old path; it still counts as the note", () => {
     // Seen in a vault with a rename-handling plugin: for under 50ms after a move, the vault holds a
     // second entry at the old path, and a lookup by name returns it when its path is shorter
     const { mover, file } = setup(VAULT);
@@ -252,14 +266,15 @@ test("unlinkStale: right after a move, a lookup by name can return a stale entry
     const stale = { path: oldPath, basename: log.basename, extension: "md" };
     const resolve = (l) => (l === "2026-09-14 Homepage review" ? stale : context.app.metadataCache.getFirstLinkpathDest(l));
     const text = "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\n";
-    assert.equal(mover.unlinkStale(text, log, kestrel, catalog, resolve).unlinked, 0, "without the old path, the stale entry isn't recognised");
-    const out = mover.unlinkStale(text, log, kestrel, catalog, resolve, oldPath);
-    assert.equal(out.text, "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]]\n");
+    const args = { note: log, from: kestrel, home: catalog, link: "[[Catalog|⭕]]", resolve };
+    assert.equal(mover.relinkStale(text, args).relinked, 0, "without the old path, the stale entry isn't recognised");
+    const out = mover.relinkStale(text, { ...args, oldPath });
+    assert.equal(out.text, "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Catalog|⭕]]\n");
     const other = { path: "Projects/Elsewhere/2026-09-14 Homepage review.md", basename: log.basename, extension: "md" };
-    assert.equal(mover.unlinkStale(text, log, kestrel, catalog, () => other, oldPath).unlinked, 0, "a same-named note elsewhere is not the note");
+    assert.equal(mover.relinkStale(text, { ...args, oldPath, resolve: () => other }).relinked, 0, "a same-named note elsewhere is not the note");
 });
 
-test("move: a stale entry at the old path right after the move doesn't stop the ⭕ coming off", async () => {
+test("move: a stale entry at the old path right after the move doesn't stop the ⭕ following the note", async () => {
     const t = setup(VAULT, {
         texts: { [DAY]: "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\n" },
         links: { [DAY]: { "Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md": 1 } },
@@ -276,8 +291,8 @@ test("move: a stale entry at the old path right after the move doesn't stop the 
     t.answer({ pick: "Projects/Freelance/Kestrel/Catalog/Catalog.md" });
     await t.mover.move([log]);
     assert.deepEqual(t.done.renamed, [[oldPath, "Projects/Freelance/Kestrel/Catalog/logs/2026-09-14 Homepage review.md"]]);
-    assert.equal(t.texts[DAY], "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]]\n");
-    assert.deepEqual(notices, ["Moved 2026-09-14 Homepage review to Projects/Freelance/Kestrel/Catalog/logs. Took the ⭕ Kestrel off 1 line linking it"]);
+    assert.equal(t.texts[DAY], "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Catalog|⭕]]\n");
+    assert.deepEqual(notices, ["Moved 2026-09-14 Homepage review to Projects/Freelance/Kestrel/Catalog/logs. A line linking it now links ⭕ Catalog"]);
 });
 
 test("itemFor: a project or area's folder note moves as its folder, finished or not; other notes by themselves", () => {
@@ -303,7 +318,7 @@ test("itemFor: a project or area's folder note moves as its folder, finished or 
     assert.ok(!mover.movable([file("Projects/Freelance/Kestrel/Kestrel.md")], { homes: false }), "not from a link's menu");
 });
 
-test("move: a task note leaving its project asks, and the lines' ⭕ for that project comes off", async () => {
+test("move: a task note leaving its project asks, and the lines' ⭕ for that project becomes the new one's", async () => {
     const t = setup(VAULT, {
         texts: { [DAY]: "- [x] Draft wireframes [[Draft wireframes|🔗]] [[Kestrel|⭕]]\n\t- 9:00am - 10:00am\n- [x] Billed elsewhere [[Draft wireframes|🔗]] [[Household|🗃️]]\n" },
         links: { [DAY]: { "Projects/Freelance/Kestrel/Draft wireframes.md": 1 } },
@@ -313,8 +328,8 @@ test("move: a task note leaving its project asks, and the lines' ⭕ for that pr
     assert.equal(t.asked.picker[0].options.placeholder, 'Move "Draft wireframes" to which project or area? (Esc: cancel)');
     assert.deepEqual(t.asked.confirm, [["Draft wireframes", "Kestrel", "Pinecrest"]]);
     assert.deepEqual(t.done.renamed, [["Projects/Freelance/Kestrel/Draft wireframes.md", "Projects/Freelance/Pinecrest/Draft wireframes.md"]]);
-    assert.equal(t.texts[DAY], "- [x] Draft wireframes [[Draft wireframes|🔗]]\n\t- 9:00am - 10:00am\n- [x] Billed elsewhere [[Draft wireframes|🔗]] [[Household|🗃️]]\n");
-    assert.deepEqual(notices, ["Moved Draft wireframes to Projects/Freelance/Pinecrest. Took the ⭕ Kestrel off 1 line linking it. A line linking it has 🗃️ Household too, so that line's time still counts there, not in Pinecrest"]);
+    assert.equal(t.texts[DAY], "- [x] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🔗]]\n\t- 9:00am - 10:00am\n- [x] Billed elsewhere [[Draft wireframes|🔗]] [[Household|🗃️]]\n");
+    assert.deepEqual(notices, ["Moved Draft wireframes to Projects/Freelance/Pinecrest. A line linking it now links ⭕ Pinecrest. A line linking it has 🗃️ Household too, so that line's time still counts there, not in Pinecrest"]);
     assert.deepEqual(logged.map((a) => Array.from(a[1])), [[DAY]], "the notes changed go to the console");
     assert.deepEqual(t.snapshotted, [DAY], "and their fold snapshot is taken again");
 });
@@ -348,13 +363,20 @@ test("move: an Inbox log goes to the project's logs/ without asking, and a ⭕ i
     assert.deepEqual(notices, ["Moved 2026-09-18 Printer call to Projects/Freelance/Pinecrest/logs. A line linking it has ⭕ Kestrel too, so that line's time still counts there, not in Pinecrest"]);
 });
 
-test("move: a note with no project and nothing counting elsewhere moves without asking or writing", async () => {
+test("move: a note with no project moves without asking, and the lines that link it get its new area (OBS-90)", async () => {
     const t = setup(VAULT, { texts: { [DAY]: "- [ ] Loose idea [[Loose idea|🔗]]\n" }, links: { [DAY]: { "10 Inbox/Loose idea.md": 1 } } });
     t.answer({ pick: "Projects/Household/Household.md" });
     await t.mover.move([t.file("10 Inbox/Loose idea.md")]);
     assert.deepEqual(t.asked.confirm, []);
     assert.deepEqual(t.done.renamed, [["10 Inbox/Loose idea.md", "Projects/Household/Loose idea.md"]]);
-    assert.deepEqual(t.done.written, []);
+    assert.equal(t.texts[DAY], "- [ ] Loose idea [[Household|🗃️]] [[Loose idea|🔗]]\n");
+    assert.deepEqual(notices, ["Moved Loose idea to Projects/Household. A line linking it now links 🗃️ Household"]);
+
+    // With nothing linking it, nothing is written
+    const alone = setup(VAULT);
+    alone.answer({ pick: "Projects/Household/Household.md" });
+    await alone.mover.move([alone.file("10 Inbox/Loose idea.md")]);
+    assert.deepEqual(alone.done.written, []);
     assert.deepEqual(notices, ["Moved Loose idea to Projects/Household"]);
 });
 
@@ -535,17 +557,226 @@ test("MoveToProject and MoveToProjectMenu are registered, the menus before the t
     assert.ok(startup.includes("MoveToProjectMenu") && startup.indexOf("MoveToProjectMenu") < startup.indexOf("TimeReportOnStartup"), "the report can take a while");
 });
 
-test("unlinkStale: a 🗒️ note link (OBS-87) and an event's log at the end of its line (OBS-57) are the line's note too", () => {
+test("relinkStale: a 🗒️ note link (OBS-87) and an event's log at the end of its line (OBS-57) are the line's note too, in either order", () => {
     const { mover, file } = setup(VAULT);
     const resolve = (l) => context.app.metadataCache.getFirstLinkpathDest(l);
     const [kestrel, pinecrest] = [file("Projects/Freelance/Kestrel/Kestrel.md"), file("Projects/Freelance/Pinecrest/Pinecrest.md")];
     const task = file("Projects/Freelance/Kestrel/Draft wireframes.md");
-    assert.equal(mover.unlinkStale("- [/] Draft wireframes [[Draft wireframes|🗒️]] [[Kestrel|⭕]]", task, kestrel, pinecrest, resolve).text,
-        "- [/] Draft wireframes [[Draft wireframes|🗒️]]");
+    const relink = (text, note) => mover.relinkStale(text, { note, from: kestrel, home: pinecrest, link: "[[Pinecrest|⭕]]", resolve }).text;
+    for (const line of ["- [/] Draft wireframes [[Draft wireframes|🗒️]] [[Kestrel|⭕]]", "- [/] Draft wireframes [[Kestrel|⭕]] [[Draft wireframes|🗒️]]"]) {
+        assert.equal(relink(line, task), "- [/] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]", line);
+    }
     const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
-    const strip = (text) => mover.unlinkStale(text, log, kestrel, pinecrest, resolve).text;
-    assert.equal(strip("- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]] [[Kestrel|⭕]]\n- 10:45am\n"),
-        "- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]]\n- 10:45am\n");
-    assert.equal(strip("- [<] Homepage review [[2026-09-14 Homepage review|🗒]] [[Kestrel|⭕]]"), "- [<] Homepage review [[2026-09-14 Homepage review|🗒]]",
+    assert.equal(relink("- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]] [[Kestrel|⭕]]\n- 10:45am\n", log),
+        "- [<] 10:00am\tHomepage review [[Pinecrest|⭕]] [[2026-09-14 Homepage review|🗒️]]\n- 10:45am\n");
+    assert.equal(relink("- [<] 10:00am\tHomepage review ℹ️ [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]]", log),
+        "- [<] 10:00am\tHomepage review ℹ️ [[Pinecrest|⭕]] [[2026-09-14 Homepage review|🗒️]]");
+    assert.equal(relink("- [<] Homepage review [[2026-09-14 Homepage review|🗒]] [[Kestrel|⭕]]", log), "- [<] Homepage review [[Pinecrest|⭕]] [[2026-09-14 Homepage review|🗒]]",
         "a log's line with no time, typed on a phone");
+});
+
+// ------------------------------------------------------------------ OBS-90: every command's move
+
+// The note at `path` open in the active editor, with the cursor on line `line`; edits land in `t.texts`
+const editorOn = (t, path, line = 0) => {
+    const lines = () => t.texts[path].split("\n");
+    const editor = {
+        getCursor: () => ({ line, ch: 0 }),
+        getLine: (n) => lines()[n],
+        getValue: () => t.texts[path],
+        replaceRange: (s, from, to) => {
+            const all = lines();
+            all[from.line] = all[from.line].slice(0, from.ch) + s + all[to.line].slice(to.ch);
+            t.texts[path] = all.join("\n");
+        },
+        setCursor: () => {},
+    };
+    t.app.workspace.activeLeaf = { view: { editor, file: t.file(path) } };
+    t.app.workspace.getActiveFile = () => t.file(path);
+    t.app.vault.cachedRead = t.app.vault.read;
+    return editor;
+};
+const DAY2 = "30 Reference/36 Planner/days/2026-09-18.md";
+const WIREFRAMES = "Projects/Freelance/Kestrel/Draft wireframes.md";
+
+test("OBS-90 AddProjectLink: on a line with a note elsewhere, it asks, moves the note, sets the line's ⭕ before its 🗒️, and the other lines follow", async () => {
+    const t = setup(VAULT, {
+        texts: {
+            [DAY]: "- [x] Draft wireframes [[Kestrel|⭕]] [[Draft wireframes|🗒️]]\n- [x] Same note, later [[Draft wireframes|🗒️]] [[Kestrel|⭕]]\n",
+            [DAY2]: "- [>] Draft wireframes [[Draft wireframes|🗒️]]\n",
+        },
+        links: { [DAY]: { [WIREFRAMES]: 2 }, [DAY2]: { [WIREFRAMES]: 1 } },
+    });
+    editorOn(t, DAY, 0);
+    t.answer({ pick: "Projects/Freelance/Pinecrest/Pinecrest.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual(t.asked.confirm, [["Draft wireframes", "Kestrel", "Pinecrest"]]);
+    assert.deepEqual(t.done.renamed, [[WIREFRAMES, "Projects/Freelance/Pinecrest/Draft wireframes.md"]]);
+    assert.equal(t.texts[DAY], "- [x] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]\n- [x] Same note, later [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]\n",
+        "its own line, and another line in the same note through the editor");
+    assert.equal(t.texts[DAY2], "- [>] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]\n", "a line in another note through the vault");
+    assert.deepEqual(t.done.written, [DAY2], "the open note isn't written behind the editor's back");
+    assert.deepEqual(notices, ["Moved Draft wireframes to Projects/Freelance/Pinecrest. 2 lines linking it now link ⭕ Pinecrest"]);
+});
+
+test("OBS-90 AddProjectLink: Leave it changes nothing; a note already in the project only gets its ⭕", async () => {
+    const text = "- [x] Draft wireframes [[Draft wireframes|🗒️]]\n";
+    const left = setup(VAULT, { texts: { [DAY]: text }, links: { [DAY]: { [WIREFRAMES]: 1 } } });
+    editorOn(left, DAY);
+    left.answer({ pick: "Projects/Freelance/Pinecrest/Pinecrest.md", confirm: "leave" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual([left.done.renamed, left.texts[DAY]], [[], text]);
+    assert.deepEqual(notices, ["Draft wireframes stays in Kestrel, so nothing changed"]);
+
+    const home = setup(VAULT, { texts: { [DAY]: text }, links: { [DAY]: { [WIREFRAMES]: 1 } } });
+    editorOn(home, DAY);
+    home.answer({ pick: "Projects/Freelance/Kestrel/Kestrel.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual(home.asked.confirm, []);
+    assert.deepEqual(home.done.renamed, []);
+    assert.equal(home.texts[DAY], "- [x] Draft wireframes [[Kestrel|⭕]] [[Draft wireframes|🗒️]]\n");
+});
+
+test("OBS-90 AddProjectLink: a note in no project moves without asking, unless other lines link it", async () => {
+    const LOOSE = "10 Inbox/Loose idea.md";
+    const alone = setup(VAULT, { texts: { [DAY]: "- [ ] Loose idea [[Loose idea|🗒️]]\n" }, links: { [DAY]: { [LOOSE]: 1 } } });
+    editorOn(alone, DAY);
+    alone.answer({ pick: "Projects/Household/Household.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual(alone.asked.confirm, []);
+    assert.deepEqual(alone.done.renamed, [[LOOSE, "Projects/Household/Loose idea.md"]]);
+    assert.equal(alone.texts[DAY], "- [ ] Loose idea [[Household|🗃️]] [[Loose idea|🗒️]]\n");
+
+    for (const [where, texts, links] of [
+        ["another note", { [DAY]: "- [ ] Loose idea [[Loose idea|🗒️]]\n", [DAY2]: "- [x] Earlier [[Loose idea|🗒️]]\n" }, { [DAY]: { [LOOSE]: 1 }, [DAY2]: { [LOOSE]: 1 } }],
+        ["the same note", { [DAY]: "- [ ] Loose idea [[Loose idea|🗒️]]\n- [x] Earlier [[Loose idea|🗒️]]\n" }, { [DAY]: { [LOOSE]: 2 } }],
+    ]) {
+        const shared = setup(VAULT, { texts, links });
+        editorOn(shared, DAY);
+        shared.answer({ pick: "Projects/Household/Household.md", confirm: "leave" });
+        await context.customJS.AddProjectLink.invoke();
+        assert.deepEqual(shared.asked.confirm, [["Loose idea", null, "Household"]], where);
+        assert.deepEqual(shared.done.renamed, [], where);
+        assert.deepEqual(notices, ["Loose idea stays where it is, so nothing changed"], where);
+    }
+    // A mention that isn't a line's note doesn't count
+    const mentioned = setup(VAULT, { texts: { [DAY]: "- [ ] Loose idea [[Loose idea|🗒️]]\n", [DAY2]: "See [[Loose idea]] later\n- [ ] Read [[Loose idea]] again\n" }, links: { [DAY]: { [LOOSE]: 1 }, [DAY2]: { [LOOSE]: 2 } } });
+    editorOn(mentioned, DAY);
+    mentioned.answer({ pick: "Projects/Household/Household.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual(mentioned.asked.confirm, []);
+});
+
+test("OBS-90 AddTaskNote.settle: where an existing note ends up and which project the line names", async () => {
+    const t = setup({
+        ...VAULT,
+        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], completed: true },
+        "Projects/Freelance/Old Job/Old task.md": { tags: ["task"] },
+    }, { texts: {}, links: {} });
+    const { helper, file } = t;
+    const line = (text) => helper.lineProjects(text, DAY);
+    const settle = async (path, text, answers = {}) => {
+        t.answer({ confirm: "move", ...answers });
+        const out = await helper.settle(file(path), line(text));
+        return out && { note: out.note.path, home: out.home?.basename ?? null, movedFrom: out.movedFrom };
+    };
+    // No ⭕ on the line: the note stays, and the line names where it's filed
+    assert.deepEqual(await settle(WIREFRAMES, "- [ ] Draft wireframes"), { note: WIREFRAMES, home: "Kestrel", movedFrom: null });
+    assert.deepEqual(await settle(WIREFRAMES, "- [ ] Draft wireframes [[Kestrel|⭕]]"), { note: WIREFRAMES, home: "Kestrel", movedFrom: null });
+    // The line names another project: asked; Leave it names where the note stays
+    assert.deepEqual(await settle(WIREFRAMES, "- [ ] Draft wireframes [[Pinecrest|⭕]]", { confirm: "leave" }), { note: WIREFRAMES, home: "Kestrel", movedFrom: null });
+    assert.deepEqual(t.asked.confirm, [["Draft wireframes", "Kestrel", "Pinecrest"]]);
+    assert.equal(await settle(WIREFRAMES, "- [ ] Draft wireframes [[Pinecrest|⭕]]", { confirm: null }), null, "Esc");
+    assert.deepEqual(await settle(WIREFRAMES, "- [ ] Draft wireframes [[Pinecrest|⭕]]"),
+        { note: "Projects/Freelance/Pinecrest/Draft wireframes.md", home: "Pinecrest", movedFrom: WIREFRAMES });
+    // A note in no project goes where the line says, without asking
+    t.asked.confirm.length = 0;
+    assert.deepEqual(await settle("10 Inbox/Loose idea.md", "- [ ] Loose idea [[Household|🗃️]]"), { note: "Projects/Household/Loose idea.md", home: "Household", movedFrom: "10 Inbox/Loose idea.md" });
+    assert.deepEqual(t.asked.confirm, []);
+    // Nothing to name: a note in no project, one in a finished project (its time counts there, and
+    // naming the area above would move it), and a project note itself
+    assert.deepEqual(await settle("10 Inbox/2026-09-18 Printer call.md", "- [<] Printer call"), { note: "10 Inbox/2026-09-18 Printer call.md", home: null, movedFrom: null });
+    assert.deepEqual(await settle("Projects/Freelance/Old Job/Old task.md", "- [ ] Old task"), { note: "Projects/Freelance/Old Job/Old task.md", home: null, movedFrom: null });
+    assert.deepEqual(await settle("Projects/Freelance/Kestrel/Kestrel.md", "- [ ] Kestrel [[Pinecrest|⭕]]"), { note: "Projects/Freelance/Kestrel/Kestrel.md", home: null, movedFrom: null });
+});
+
+test("OBS-90 review: a note in a finished project, a project note that isn't a folder note, and notes that never move", async () => {
+    const t = setup({
+        ...VAULT,
+        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], completed: true },
+        "Projects/Freelance/Old Job/Old task.md": { tags: ["task"] },
+        "Projects/Household/Tires.md": { tags: ["task"] },
+    }, { texts: {}, links: {} });
+    const { helper, file } = t;
+    const settle = async (path, text, answers = {}) => {
+        t.answer({ confirm: "move", ...answers });
+        const out = await helper.settle(file(path), helper.lineProjects(text, DAY));
+        return out && { note: out.note.path, home: out.home?.basename ?? null, clear: out.clear };
+    };
+    // Left in a finished project: the line names nothing, and its ⭕ comes off, so the time still
+    // counts where the note is (the area above would have moved it)
+    t.asked.confirm.length = 0;
+    assert.deepEqual(await settle("Projects/Freelance/Old Job/Old task.md", "- [ ] Old task [[Pinecrest|⭕]]", { confirm: "leave" }),
+        { note: "Projects/Freelance/Old Job/Old task.md", home: null, clear: true });
+    assert.deepEqual(t.asked.confirm, [["Old task", "Old Job", "Pinecrest"]], "asked From the finished project, not the area above it");
+    // The line names the area the finished project sits in: that's a move out of it, asked first
+    t.asked.confirm.length = 0;
+    await settle("Projects/Freelance/Old Job/Old task.md", "- [ ] Old task [[Freelance|🗃️]]", { confirm: "leave" });
+    assert.deepEqual(t.asked.confirm, [["Old task", "Old Job", "Freelance"]]);
+    // A project note that isn't its folder's own note: a note in that folder is already where it'd go
+    t.asked.confirm.length = 0;
+    assert.deepEqual(await settle("Projects/Household/Tires.md", "- [ ] Tires [[Car checklist|⭕]]"), { note: "Projects/Household/Tires.md", home: "Car checklist", clear: false });
+    assert.deepEqual([t.asked.confirm, t.done.renamed], [[], []]);
+    // The system is never moved, whatever the line says
+    assert.deepEqual(await settle("00 Meta/Manual.md", "- [ ] Manual [[Pinecrest|⭕]]"), { note: "00 Meta/Manual.md", home: null, clear: false });
+    assert.deepEqual(t.done.renamed, []);
+});
+
+test("OBS-90 review: AddProjectLink doesn't move the system or a note already in the pick's folder, and still links the pick", async () => {
+    const t = setup({ ...VAULT, "Projects/Household/Tires.md": { tags: ["task"] } }, {
+        texts: { [DAY]: "- [ ] Read [[Manual|🗒️]]\n- [ ] Tires [[Tires|🗒️]]\n" },
+        links: { [DAY]: { "00 Meta/Manual.md": 1, "Projects/Household/Tires.md": 1 } },
+    });
+    editorOn(t, DAY, 0);
+    t.answer({ pick: "Projects/Freelance/Pinecrest/Pinecrest.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual([t.asked.confirm, t.done.renamed], [[], []]);
+    assert.equal(t.texts[DAY].split("\n")[0], "- [ ] Read [[Pinecrest|⭕]] [[Manual|🗒️]]");
+    assert.deepEqual(notices, ["Manual stays where it is, since nothing there is moved; the line links Pinecrest"]);
+    editorOn(t, DAY, 1);
+    t.answer({ pick: "Projects/Household/Car checklist.md" });
+    await context.customJS.AddProjectLink.invoke();
+    assert.deepEqual([t.asked.confirm, t.done.renamed], [[], []]);
+    assert.equal(t.texts[DAY].split("\n")[1], "- [ ] Tires [[Car checklist|⭕]] [[Tires|🗒️]]");
+});
+
+test("OBS-90 review: after a command moves a note, its notice says which lines kept a ⭕ of their own", async () => {
+    const t = setup(VAULT, {
+        texts: { [DAY2]: "- [x] Own [[Household|🗃️]] [[Draft wireframes|🗒️]]\n- [x] Plain [[Draft wireframes|🗒️]]\n" },
+        links: { [DAY2]: { [WIREFRAMES]: 2 } },
+    });
+    await t.helper.moveInto(t.file(WIREFRAMES), t.file("Projects/Freelance/Pinecrest/Pinecrest.md"));
+    assert.equal(t.texts[DAY2], "- [x] Own [[Household|🗃️]] [[Draft wireframes|🗒️]]\n- [x] Plain [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]\n");
+    assert.deepEqual(notices, ["Moved Draft wireframes to Projects/Freelance/Pinecrest. A line linking it now links ⭕ Pinecrest. A line linking it has 🗃️ Household too, so that line's time still counts there, not in Pinecrest"]);
+});
+
+test("OBS-90 re-review: a log left in a finished project takes the line's ⭕ off; a move out of one leaves its lines' ⭕", async () => {
+    const OLD = "Projects/Freelance/Old Job";
+    const t = setup({
+        ...VAULT,
+        [`${OLD}/Old Job.md`]: { tags: ["project"], completed: true },
+        [`${OLD}/logs/2026-09-14 Review.md`]: { tags: ["log"] },
+        [`${OLD}/Old task.md`]: { tags: ["task"] },
+    }, {
+        texts: { [DAY]: "- [<] 2:00pm\tReview [[Pinecrest|⭕]]\n", [DAY2]: "- [x] Old task [[Old Job|⭕]] [[Old task|🗒️]]\n- [x] Loose [[Old task|🗒️]]\n" },
+        links: { [DAY2]: { [`${OLD}/Old task.md`]: 2 } },
+    });
+    const editor = editorOn(t, DAY, 0);
+    t.answer({ confirm: "leave" });
+    await t.helper.linkEvent(editor, 0, "- [<] 2:00pm\tReview [[Pinecrest|⭕]]", "Review");
+    assert.deepEqual(t.asked.confirm, [["2026-09-14 Review", "Old Job", "Pinecrest"]]);
+    assert.equal(t.texts[DAY], "- [<] 2:00pm\tReview [[2026-09-14 Review|🗒️]]\n", "the log's time counts where it's filed");
+    // Moving a note out of a finished project: a line's ⭕ for it stays (that time may be invoiced)
+    await t.helper.moveInto(t.file(`${OLD}/Old task.md`), t.file("Projects/Freelance/Pinecrest/Pinecrest.md"));
+    assert.equal(t.texts[DAY2], "- [x] Old task [[Old Job|⭕]] [[Old task|🗒️]]\n- [x] Loose [[Pinecrest|⭕]] [[Old task|🗒️]]\n");
 });

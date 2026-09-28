@@ -14,10 +14,10 @@ class MoveToProject {
     // since every line that links it follows it, and whenever a project or area moves, since its
     // parent's totals and any rate it inherits change. Moving several at once doesn't ask.
     //
-    // A line that links the note and also carries a ⭕ or 🗃️ for the project it's leaving would go
-    // on counting its time there, so that link comes off once the note has moved (one link per
-    // line, OBS-36). A ⭕ for anywhere else is the line's own choice and stays; the notice says how
-    // many lines kept one. A moved project's notes keep their project, so their lines are left alone.
+    // The lines that link a moved note follow it (OBS-90): a ⭕ or 🗃️ for the project it left becomes
+    // the new one's, and a line with none gets one, so each line and its note keep agreeing. A ⭕ for
+    // anywhere else is the line's own choice and stays; the notice says how many lines kept one. A
+    // moved project's notes keep their project, so their lines are left alone.
     //
     // It refuses, with a notice, a move whose target already has a note or folder of that name, one
     // already where it would go, and a folder into itself; the menu leaves out the projects inside a
@@ -83,7 +83,7 @@ class MoveToProject {
 
         const into = home.parent.path;
         const moved = [];
-        const lines = { unlinked: 0, kept: 0, from: [], keptIn: [] };
+        const lines = { relinked: 0, kept: 0, keptIn: [] };
         for (const step of this.plan(items, into, (p) => this.exists(p), helper.logsFolder(home))) {
             if (step.skip === "inside") continue;
             if (step.skip) { told.push(this.why(step, home)); continue; }
@@ -96,10 +96,9 @@ class MoveToProject {
             if (result.told) told.push(result.told);
             if (!result.moved) continue;
             moved.push(step);
-            lines.unlinked += result.unlinked ?? 0;
+            lines.relinked += result.relinked ?? 0;
             lines.kept += result.kept ?? 0;
             for (const f of result.keptIn ?? []) if (!lines.keptIn.includes(f)) lines.keptIn.push(f);
-            if (result.unlinked && !lines.from.includes(step.from)) lines.from.push(step.from);
         }
         if (moved.length) new Notice(this.summary(moved, home, lines));
         tell();
@@ -197,8 +196,8 @@ class MoveToProject {
     }
 
     // Moves one thing, asking first (when `ask`) if a note leaves a project or area or a project or
-    // area moves at all; then, for a note, takes the ⭕ for the project it left off the lines that
-    // link it. Resolves to { moved, unlinked, kept, told, cancelled }.
+    // area moves at all; then, for a note, sets the ⭕ on the lines that link it to where it went
+    // (relinkAll). Resolves to { moved, relinked, kept, keptIn, told, cancelled }.
     async moveOne(step, home, into, ask) {
         const helper = customJS.AddTaskNote;
         const { file, from } = step;
@@ -217,21 +216,7 @@ class MoveToProject {
         const folder = step.to.slice(0, step.to.lastIndexOf("/"));
         if (!this.exists(folder)) await app.vault.createFolder(folder);
         await app.fileManager.renameFile(file, step.to);
-        const lines = { unlinked: 0, kept: 0, keptIn: [] };
-        const changed = [];
-        for (const source of sources) {
-            try {
-                const out = await this.unlinkIn(source, file, from, home, step.path);
-                lines.unlinked += out.unlinked;
-                lines.kept += out.kept;
-                for (const f of out.keptIn) if (!lines.keptIn.includes(f)) lines.keptIn.push(f);
-                if (out.unlinked) changed.push(source.path);
-            } catch (e) {
-                console.error(`MoveToProject: couldn't update the lines in ${source.path}`, e);
-            }
-        }
-        if (changed.length) console.info(`MoveToProject: took the link to ${from.basename} off lines linking ${step.label} in`, changed);
-        return { moved: true, ...lines };
+        return { moved: true, ...(await this.relinkAll(sources, file, from, home, step.path)) };
     }
 
     // The notes that link `note`, other than itself
@@ -242,16 +227,45 @@ class MoveToProject {
             .filter((f) => f?.extension === "md");
     }
 
-    // Takes the ⭕ for `from` off `source`'s lines that link `note` (see unlinkStale), writing the
-    // note only when something changes; `oldPath` is where `note` was. Resolves to unlinkStale's
-    // counts.
-    async unlinkIn(source, note, from, home, oldPath = null) {
-        const resolve = (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, source.path);
-        const dry = this.unlinkStale(await app.vault.read(source), note, from, home, resolve, oldPath);
-        if (!dry.unlinked) return dry;
+    // After `note` moved from the project or area `from` (null: none) into `home`, from `oldPath`: the
+    // lines in `sources` (the notes that linked it, collected before the move) that link it get their
+    // ⭕ set to `home` (relinkStale). The note in the active editor is changed through the editor,
+    // except its line `line`, which the command that moved the note writes itself; the others
+    // through the vault. AddTaskNote.moveInto uses this too, so every command's move does it
+    // (OBS-90). Resolves to { relinked, kept, keptIn } (see relinkStale), summed over the notes.
+    async relinkAll(sources, note, from, home, oldPath = null, { line = null } = {}) {
+        const helper = customJS.AddTaskNote;
+        const lines = { relinked: 0, kept: 0, keptIn: [] };
+        if (!sources.length) return lines;
+        const link = helper.homeLink(home, helper.linktextFor(home, app.vault.getMarkdownFiles().map((f) => f.path)));
+        const view = app.workspace.activeLeaf?.view;
+        const changed = [];
+        for (const source of sources) {
+            try {
+                const editor = view?.file?.path === source.path ? view.editor : null;
+                const out = editor
+                    ? this.relinkEditor(editor, source, note, from, home, link, oldPath, line)
+                    : await this.relinkIn(source, note, from, home, link, oldPath);
+                lines.relinked += out.relinked;
+                lines.kept += out.kept;
+                for (const f of out.keptIn) if (!lines.keptIn.includes(f)) lines.keptIn.push(f);
+                if (out.relinked) changed.push(source.path);
+            } catch (e) {
+                console.error(`MoveToProject: couldn't update the lines in ${source.path}`, e);
+            }
+        }
+        if (changed.length) console.info(`MoveToProject: set the ⭕ to ${home.basename} on lines linking ${note.basename} in`, changed);
+        return lines;
+    }
+
+    // relinkStale on `source`, writing the note only when something changes. Resolves to its counts.
+    async relinkIn(source, note, from, home, link, oldPath = null) {
+        const args = { note, from, home, link, oldPath, resolve: (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, source.path) };
+        const dry = this.relinkStale(await app.vault.read(source), args);
+        if (!dry.relinked) return dry;
         let out = dry;
         await app.vault.process(source, (text) => {
-            out = this.unlinkStale(text, note, from, home, resolve, oldPath);
+            out = this.relinkStale(text, args);
             return out.text;
         });
         // A daily note's fold snapshot, taken again: RefoldOnOpen matches items by text, and would
@@ -264,49 +278,81 @@ class MoveToProject {
         return out;
     }
 
-    // `text` with the ⭕ and 🗃️ links to `from` (the project or area `note` just left) taken off
-    // every checklist line whose note link (its 🗒️, or an event's log link, either way) is `note`: they'd keep
-    // that line's time where the note no longer is. Links to anywhere else are the line's own
-    // choice and stay. Lines are read as the time report reads them: frontmatter and code blocks
-    // are skipped, and a comment on a line doesn't count (a link is taken off only when it's
-    // outside the comment and appears once). Only a line's end changes, so the note keeps its line
-    // count, its folds and its line endings. `resolve(linkpath)` finds a link's note; a note just
-    // moved from `oldPath` can briefly resolve to an entry there, which counts as the note
-    // (AddTaskNote.isSameNote). Returns { text, unlinked: lines changed, kept: lines that still
-    // count their time somewhere other than `home`, keptIn: where those lines' own links point }.
-    unlinkStale(text, note, from, home, resolve, oldPath = null) {
+    // relinkStale on the note open in `editor`, changing only the lines that change (never line
+    // `skip`), so the editor keeps its cursor and folds. Returns its counts.
+    relinkEditor(editor, source, note, from, home, link, oldPath = null, skip = null) {
+        const before = editor.getValue().split("\n");
+        const out = this.relinkStale(before.join("\n"), {
+            note, from, home, link, oldPath, skip,
+            resolve: (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, source.path),
+        });
+        const after = out.text.split("\n");
+        for (let i = 0; i < before.length; i++) {
+            if (after[i] !== before[i]) editor.replaceRange(after[i], { line: i, ch: 0 }, { line: i, ch: before[i].length });
+        }
+        return out;
+    }
+
+    // `text` with the ⭕ on every checklist line whose note link (its 🗒️, or an event's log link,
+    // either way) is `note` set to where the note now is, `home`, whose ⭕ or 🗃️ link is `link`
+    // (OBS-90):
+    //   - a ⭕ or 🗃️ for `from`, where the note was, becomes `link`, before the 🗒️;
+    //   - a line with no ⭕ gets `link`, as a note from the Inbox or no project does;
+    //   - a ⭕ for anywhere else (or one that's broken) is that line's own choice and stays, and a
+    //     link for `from` beside it just comes off: the line keeps counting where its own links say.
+    // Lines are read as the time report reads them: frontmatter and code blocks are skipped, and a
+    // comment on a line doesn't count (there a link for `from` comes off only when it's outside the
+    // comment and appears once, and nothing is added). Line `skip` is left alone. Only a line's end
+    // changes, so the note keeps its line count, its folds and its line endings. `resolve(linkpath)`
+    // finds a link's note; a note just moved from `oldPath` can briefly resolve to an entry there,
+    // which counts as the note (AddTaskNote.isSameNote). Returns { text, relinked: lines changed,
+    // kept: lines that still count their time somewhere other than `home`, keptIn: where those
+    // lines' own links point }.
+    relinkStale(text, { note, from, home, link, resolve, oldPath = null, skip = null }) {
         const helper = customJS.AddTaskNote;
         const linker = customJS.AddProjectLink;
         const raw = text.split("\n");
         const bare = raw.map((line) => line.replace(/\r$/, ""));
         const shown = customJS.TimeReport?.scan?.(bare);
-        let unlinked = 0, kept = 0;
+        let relinked = 0, kept = 0;
         const keptIn = [];
         const out = bare.map((line, i) => {
             const cr = raw[i].endsWith("\r") ? "\r" : "";
-            if (shown?.hidden[i]) return raw[i];
+            if (i === skip || shown?.hidden[i]) return raw[i];
             const seen = shown ? shown.visible[i] : line;
             if (!helper.constructor.CHECKBOX.test(seen)) return raw[i];
             const linkpath = linker.taskLinkpath(seen);
             if (!linkpath || !helper.isSameNote(resolve(linkpath), note, oldPath)) return raw[i];
             const links = helper.projectLinks(seen).map((l) => ({ ...l, dest: resolve(l.linkpath) }));
+            const commented = seen !== line;
             let stale = links.filter((l) => from && from !== home && l.dest === from);
             // With a comment on the line, only a link that can't also be inside it is taken off
-            if (seen !== line && !stale.every((l) => line.split(l.raw).length === 2)) stale = [];
+            if (commented && !stale.every((l) => line.split(l.raw).length === 2)) stale = [];
             const own = links.filter((l) => l.dest && l.dest !== home && !stale.includes(l));
             if (own.length) kept++;
             for (const l of own) if (!keptIn.includes(l.dest)) keptIn.push(l.dest);
-            if (!stale.length) return raw[i];
-            unlinked++;
-            return helper.withoutLinks(line, stale.map((l) => l.raw)) + cr;
+            // The new home's link in place of `from`'s, or on a line with no ⭕ at all; a line whose
+            // other ⭕ (or a broken one) is its own choice gets none
+            const add = commented ? null : stale.length ? (!own.length && !links.some((l) => l.dest === home) ? link : null) : !links.length ? link : null;
+            if (!stale.length && !add) return raw[i];
+            const next = helper.withHome(line, add, stale.map((l) => l.raw));
+            if (next === line) return raw[i];
+            relinked++;
+            return next + cr;
         });
-        return { text: out.join("\n"), unlinked, kept, keptIn };
+        return { text: out.join("\n"), relinked, kept, keptIn };
+    }
+
+    // "2 lines linking them now link ⭕ Pinecrest Library Brochure"
+    linesNow(count, them, home) {
+        const mark = customJS.AddTaskNote.isArea(home) ? "🗃️" : "⭕";
+        return `${count === 1 ? `A line linking ${them} now links` : `${count} lines linking ${them} now link`} ${mark} ${home.basename}`;
     }
 
     // "Moved Printer call to Projects/…/logs", or for several, "Moved 2 notes and 1 folder to
-    // Pinecrest Library Brochure"; then what happened to the lines that link them (`from`: the
-    // projects or areas whose links came off; `keptIn`: where the other lines' own links point)
-    summary(moved, home, { unlinked, kept, from = [], keptIn = [] }) {
+    // Pinecrest Library Brochure"; then what happened to the lines that link them (`relinked`: lines
+    // now naming `home`; `keptIn`: where the other lines' own links point)
+    summary(moved, home, { relinked, kept, keptIn = [] }) {
         const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
         const them = moved.length === 1 ? "it" : "them";
         let text;
@@ -320,9 +366,16 @@ class MoveToProject {
             if (folders) parts.push(plural(folders, "folder"));
             text = `Moved ${parts.join(" and ")} to ${home.basename}`;
         }
+        return text + this.linesSaid({ relinked, kept, keptIn }, them, home);
+    }
+
+    // What happened to the lines that link what moved (relinkAll's counts), for a notice:
+    // ". 2 lines linking it now link ⭕ Pinecrest. A line linking it has 🗃️ Household too, so …",
+    // or "" when there were none. AddTaskNote.moveInto says the same after its moves.
+    linesSaid({ relinked = 0, kept = 0, keptIn = [] }, them, home) {
         const helper = customJS.AddTaskNote;
-        const old = from.length === 1 ? `${helper.isArea(from[0]) ? "🗃️" : "⭕"} ${from[0].basename}` : "old ⭕ and 🗃️ links";
-        if (unlinked) text += `. Took the ${old} off ${plural(unlinked, "line")} linking ${them}`;
+        let text = "";
+        if (relinked) text += `. ${this.linesNow(relinked, them, home)}`;
         const marks = (list) => list.map((f) => `${helper.isArea(f) ? "🗃️" : "⭕"} ${f.basename}`).join(", ");
         if (kept) text += `. ${kept === 1 ? `A line linking ${them} has` : `${kept} lines linking ${them} have`} ${marks(keptIn)} too, so ${kept === 1 ? "that line's" : "their"} time still counts there, not in ${home.basename}`;
         return text;

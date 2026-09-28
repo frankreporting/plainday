@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
+import { convert } from "./demo/addProjectLinks.mjs";
 
 // Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
 // failure text says to run renderReports.mjs, which writes report blocks into notes: so skip them,
@@ -130,19 +131,19 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.match(days, /^- \[\/\] |^- \[x\] /m, "started or done task");
     assert.match(days, /\[\[\d{4}-\d{2}-\d{2}\|🚩 \d{1,2}\/\d{1,2}\]\]/, "due date");
     assert.match(days, /^## Notes$/m, "notes section");
-    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]\n\t- \d/m, "event linking a meeting log at the end of its line");
-    assert.match(days, /^- \[<\] [^\t\n[]+ \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]$/m, "a log's line with no time yet");
+    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]\n\t- \d/m, "event linking its project, then its meeting log at the end of its line");
+    assert.match(days, /^- \[<\] [^\t\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|🗒️\]\]$/m, "a log's line with no time yet");
     assert.doesNotMatch(days, /\|🔗\]\]/, "the demo writes note links as 🗒️ (OBS-87)");
     assert.doesNotMatch(days, /^- \[.\] (?:[^\t\n]*\t)?\[\[\d{4}-\d{2}-\d{2} [^\]|]+\|(?!🗒)[^\]]+\]\]/m, "no event title wrapped in its log link (OBS-57)");
     assert.match(days, /^- \[<\] [^\n]*\|⭕\]\]\n\t- \d{1,2}:\d{2}[ap]m - /m, "event with a ⭕ link and a time entry");
     assert.ok(entries.some((e) => e.free), "🆓 entry");
     assert.ok(entries.some((e) => !e.free && e.note), "entry with a note");
     assert.ok(entries.some((e) => e.context.length > 1 && /^\[.\]/.test(e.context[1].body)), "sub-task with its own entries");
-    // One task note threads entries on two days through its 🗒️ link, with no ⭕ on the line
+    // One task note threads entries on two days through its 🗒️ link, which ends the line, after the ⭕ for the note's project (OBS-90)
     const threaded = new Map();
     for (const e of entries) {
-        const chain = e.context[0].body.match(/\[\[([^\]|]+)\|🗒️\]\]/);
-        if (chain && !e.context[0].body.includes("⭕")) threaded.set(chain[1], new Set([...(threaded.get(chain[1]) ?? []), e.date]));
+        const chain = e.context[0].body.match(/\|⭕\]\] \[\[([^\]|]+)\|🗒️\]\]$/);
+        if (chain) threaded.set(chain[1], new Set([...(threaded.get(chain[1]) ?? []), e.date]));
     }
     assert.ok([...threaded.values()].some((d) => d.size >= 2), "task with entries across two days through its task note");
     // Billing kinds
@@ -151,6 +152,29 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.ok([...plan.model.parent.values()].some(Boolean), "a sub-project");
     // A task note forwarded to a day from outside the daily notes
     assert.ok(demoNotes.some((p) => !p.startsWith(DAYS) && /^- \[>\] \[\[\d{4}-\d{2}-\d{2}\|\d{1,2}\/\d{1,2}\]\] /m.test(vault.notes.get(p).text)));
+});
+
+test("demo vault: every line that links a note also links its project or area, before the note link (OBS-90)", () => {
+    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const { changes, skipped, moved } = convert(vault, tr, tr, tasks);
+    assert.deepEqual(changes.map((c) => `${c.path}:${c.line}: ${c.after}`), [], "the conversion (tests/demo/addProjectLinks.mjs) finds nothing left to do");
+    assert.deepEqual([skipped, moved].map((l) => l.length), [0, 0]);
+    const noted = dailyNotes(vault).flatMap((n) => n.text.split("\n")).filter((l) => /^\s*- \[.\] .*\|🗒️\]\]$/.test(l));
+    assert.ok(noted.length >= 10, "the demo has lines to show it");
+    for (const l of noted) assert.match(l, /\|(?:⭕|🗃️)\]\] \[\[[^\]]+\|🗒️\]\]$/, l);
+});
+
+test("the conversion's check: an entry counted on one side only, or with other minutes or 🆓, is caught (OBS-90 review)", () => {
+    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    // The old report stood in for by the new one with some of its entries changed
+    const before = tr.build(dailyNotes(vault), plan.index);
+    const withEntries = (change) => Object.assign(Object.create(tr), { build: () => ({ ...before, entries: change(before.entries.map((e) => ({ ...e }))) }) });
+    const moved = (old) => plain(convert(vault, old, tr, tasks).moved.map((m) => [!!m.before, !!m.after]));
+    assert.deepEqual(moved(withEntries((es) => es)), [], "the same entries: nothing");
+    assert.deepEqual(moved(withEntries((es) => es.slice(1))), [[false, true]], "one the old report left out (archived) and the new one counts");
+    assert.deepEqual(moved(withEntries((es) => [...es, { ...es[0], line: 999 }])), [[true, false]], "one the new report leaves out");
+    assert.deepEqual(moved(withEntries((es) => { es[0].free = !es[0].free; return es; })), [[true, true]], "a 🆓 that changed");
+    assert.deepEqual(moved(withEntries((es) => { es[0].minutes += 1; return es; })), [[true, true]], "minutes that changed");
 });
 
 // ------------------------------------------------------------------ areas and links

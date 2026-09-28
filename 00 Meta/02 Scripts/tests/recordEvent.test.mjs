@@ -33,19 +33,19 @@ const DAY = note(
 
 // ------------------------------------------------------------------ linking a line that's there
 
-test("a plain event line with the log's title: the log link goes after the title and its marks, before the ⭕; the end line stays", () => {
+test("a plain event line with the log's title: the log link ends the line, after the title, its marks and the ⭕ (OBS-90); the end line stays", () => {
     const { text: after, outcome } = record(DAY, "2026-09-16 Planning");
     assert.equal(outcome, "linked");
-    assert.equal(after, DAY.replace("\tPlanning ℹ️ [[", "\tPlanning ℹ️ [[2026-09-16 Planning|🗒️]] [["));
+    assert.equal(after, DAY.replace("\tPlanning ℹ️ [[Pinecone Studio|⭕]]   ", "\tPlanning ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]"));
     // The Log template then reads the times from the linked line
     assert.deepEqual(eventTimes(after, "2026-09-16 Planning"), { time: "4:00pm", endTime: "4:30pm" });
 });
 
-test("an all-day line links too; the ⭕ link stays last", () => {
+test("an all-day line links too; the log link is last, after the ⭕", () => {
     assert.equal(record(DAY, "2026-09-16 Offsite").text, DAY.replace("\tOffsite", "\tOffsite [[2026-09-16 Offsite|🗒️]]"));
-    assert.equal(record(DAY, "2026-09-16 Standup").text, DAY.replace("\tStandup [[", "\tStandup [[2026-09-16 Standup|🗒️]] [["));
+    assert.equal(record(DAY, "2026-09-16 Standup").text, DAY.replace("\tStandup [[Pinecone Studio|⭕]]", "\tStandup [[Pinecone Studio|⭕]] [[2026-09-16 Standup|🗒️]]"));
     const marked = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] 🆓", "\t- 4:30pm");
-    assert.equal(record(marked, "2026-09-16 Planning").text, note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]] 🆓", "\t- 4:30pm"));
+    assert.equal(record(marked, "2026-09-16 Planning").text, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] 🆓 [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
 });
 
 test("already linked (the log was made from the line): nothing changes, whatever the link's alias or path", () => {
@@ -196,25 +196,47 @@ test("the event line it matched comes back, so the Log template can read its ⭕
     assert.equal(record(day, "2026-09-16 Wrap-up").line, null, "inserted");
 });
 
-test("drop: the ⭕ for the project the log was filed in comes off its event line, linked or already present; other links stay", () => {
+test("home: the line names the project the log was filed in, in place of its own ⭕ links, before the 🗒️, linked, present or inserted (OBS-90)", () => {
+    const record = (text, home) => recordEvent(text, { log: "2026-09-16 Planning", title: "Planning", home }, sync);
     const day = note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]] [[Hawk Ledger|⭕]]", "\t- 4:30pm");
-    const linked = recordEvent(day, { log: "2026-09-16 Planning", title: "Planning", drop: ["[[Pinecone Studio|⭕]]"] }, sync);
+    const linked = record(day, "[[Hawk Ledger|⭕]]");
     assert.equal(linked.outcome, "linked");
-    assert.equal(linked.text, note("- [<] 4:00pm\tPlanning 🆓 [[2026-09-16 Planning|🗒️]] [[Hawk Ledger|⭕]]", "\t- 4:30pm"));
-    const present = note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "\t- 4:30pm");
-    const dropped = recordEvent(present, { log: "2026-09-16 Planning", title: "Planning", drop: ["[[Pinecone Studio|⭕]]"] }, sync);
-    assert.equal(dropped.outcome, "present");
-    assert.equal(dropped.text, note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
-    // Nothing to drop: the note is left exactly as it was
-    assert.equal(recordEvent(present, { log: "2026-09-16 Planning", title: "Planning", drop: [] }, sync).text, present);
-    assert.equal(recordEvent(present, { log: "2026-09-16 Planning", title: "Planning", drop: ["[[Tin|⭕]]"] }, sync).text, present);
+    assert.equal(linked.text, note("- [<] 4:00pm\tPlanning 🆓 [[Hawk Ledger|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    // Already present, in either order: the ⭕ is set and comes before the 🗒️
+    for (const line of ["- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]"]) {
+        const present = record(note(line, "\t- 4:30pm"), "[[Household|🗃️]]");
+        assert.equal(present.outcome, "present", line);
+        assert.equal(present.text, note("- [<] 4:00pm\tPlanning [[Household|🗃️]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"), line);
+    }
+    // The line already names it: the note is left exactly as it was, and so it is with no home (Esc)
+    const agreed = note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm");
+    assert.equal(record(agreed, "[[Pinecone Studio|⭕]]").text, agreed);
+    const older = note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "\t- 4:30pm");
+    assert.equal(record(older, null).text, older);
+    // A line with no ⭕ gets it; so does a line that's added
+    assert.equal(record(note("- [<] 4:00pm\tPlanning", "\t- 4:30pm"), "[[Tin|⭕]]").text, note("- [<] 4:00pm\tPlanning [[Tin|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    const added = record(note("- [ ] A task"), "[[Tin|⭕]]");
+    assert.equal(added.outcome, "inserted");
+    assert.equal(added.text, note("- [<] Planning [[Tin|⭕]] [[2026-09-16 Planning|🗒️]]", "- [ ] A task"));
 });
 
 test("an event typed by hand with a space after its time is found by its title, and by its time (fix round 5)", () => {
     const day = note("- [<] 3:00pm Quick sync [[Household|🗃️]]", "- [<] 4:00pm Quick sync", "- [ ] A task");
-    const linked = recordEvent(day, { log: "2026-09-27 Quick sync", title: "Quick sync", drop: ["[[Household|🗃️]]"] }, sync);
+    const linked = recordEvent(day, { log: "2026-09-27 Quick sync", title: "Quick sync", home: "[[Household|🗃️]]" }, sync);
     assert.equal(linked.outcome, "linked");
     assert.equal(linked.line, "- [<] 3:00pm Quick sync [[Household|🗃️]]");
-    assert.equal(linked.text, note("- [<] 3:00pm Quick sync [[2026-09-27 Quick sync|🗒️]]", "- [<] 4:00pm Quick sync", "- [ ] A task"));
+    assert.equal(linked.text, note("- [<] 3:00pm Quick sync [[Household|🗃️]] [[2026-09-27 Quick sync|🗒️]]", "- [<] 4:00pm Quick sync", "- [ ] A task"));
     assert.equal(recordEvent(day, { log: "2026-09-27 Quick sync", title: "Quick sync", time: "4:00pm" }, sync).line, "- [<] 4:00pm Quick sync");
+});
+
+test("a block ID at the end of an event line: found, and kept last (OBS-90 review)", () => {
+    const day = note("- [<] 2:00pm\tReview [[Hawk|⭕]] ^mtg1", "\t- 3:00pm");
+    const linked = recordEvent(day, { log: "2026-09-16 Review", title: "Review" }, sync);
+    assert.equal(linked.outcome, "linked");
+    assert.equal(linked.text, note("- [<] 2:00pm\tReview [[Hawk|⭕]] [[2026-09-16 Review|🗒️]] ^mtg1", "\t- 3:00pm"));
+    const present = recordEvent(linked.text, { log: "2026-09-16 Review", title: "Review", home: "[[Hawk|⭕]]" }, sync);
+    assert.deepEqual([present.outcome, present.text], ["present", linked.text], "no second line for it");
+    // Taking a ⭕ off keeps a 🆓 a word of its own
+    const freed = recordEvent(note("- [<] 2:00pm\tReview [[Old|⭕]]🆓 [[2026-09-16 Review|🗒️]]"), { log: "2026-09-16 Review", title: "Review", home: "[[Hawk|⭕]]" }, sync);
+    assert.equal(freed.text, note("- [<] 2:00pm\tReview 🆓 [[Hawk|⭕]] [[2026-09-16 Review|🗒️]]"));
 });

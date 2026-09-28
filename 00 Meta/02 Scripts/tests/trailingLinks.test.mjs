@@ -163,3 +163,9 @@ test("subtreeEnd: the last line nested under a line", () => {
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 2), 3);
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 6), 6);
 });
+
+test("reportContext: the lines a line is nested under, as the time report reads them (OBS-90)", () => {
+    assert.deepEqual(plain(TrailingLinks.reportContext(["\t- [x] Sub [[Loose|🗒️]]", "\tsee [[Beta|⭕]]", "- [<] 9:00am\t[[2026-09-14 Review|Review]]"])),
+        [{ body: "[x] Sub [[Loose|🗒️]]" }, { body: "[<] 9:00am\t[[2026-09-14 Review|Review]]" }], "indented text isn't a parent; bullets come off");
+    assert.deepEqual(plain(TrailingLinks.reportContext(["\t1. [ ] Step [[Loose|🗒️]]", "## Plan"])), [{ body: "[ ] Step [[Loose|🗒️]]" }, { body: "## Plan" }]);
+});

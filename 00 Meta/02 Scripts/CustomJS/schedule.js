@@ -43,8 +43,8 @@ class Schedule {
         const destStatus = status === "/" ? "/" : " ";
 
         const hasLink = Schedule.NOTE_LINK.test(body);
-        const taskName = body.split("[[")[0].trim();
-        const taskLink = `[[${taskName}|${Schedule.NOTE_MARK}]]`;
+        // Up to its first link, without a block ID at the end
+        const taskName = body.split("[[")[0].replace(/\s+\^[A-Za-z0-9-]+\s*$/, "").trim();
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
@@ -52,18 +52,15 @@ class Schedule {
             // Forwarding a worked-on task links it to its task note on both lines. The time already
             // logged only counts toward a project once that note exists, so find or create it first
             // (through AddTaskNote, which asks where a new one goes). No project picked: nothing moves.
-            let link = taskLink, name = taskName, projectLinks = [];
+            let found = null;
             if (sourceIsDaily && wasWorkedOn && !hasLink && taskName) {
                 modal.close();
-                const found = await customJS.AddTaskNote.noteFor(taskName, srcFile.path, lineText);
+                found = await customJS.AddTaskNote.noteFor(taskName, srcFile.path, lineText);
                 if (!found) return;
                 if (editor.getLine(lineNum) !== lineText) {
                     new Notice("The line changed while picking a project, so it wasn't scheduled");
                     return;
                 }
-                link = `[[${found.linktext}|${Schedule.NOTE_MARK}]]`;
-                name = found.name;   // a date in the name went to the note's due date
-                projectLinks = found.projectLinks;   // the note now ties the task to its project
             }
 
             const dailyPath = this.dailyNotePath(m);
@@ -75,24 +72,18 @@ class Schedule {
                 // Task/project/other note: forward with a link to the daily note, and link back from there
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
                 editor.replaceRange(`[[${dailyName}|${m.format("M/D")}]] `, { line: lineNum, ch: bodyCh });
-                const alias = this.isProjectNote(srcFile) ? "⭕" : this.isAreaNote(srcFile) ? "🗃️" : Schedule.NOTE_MARK;
-                outgoing = [`${bullet}[${destStatus}] ${body.trimEnd()} [[${srcFile.basename}|${alias}]] `];
+                outgoing = [this.sentLine(`${bullet}[${destStatus}] ${body}`, srcFile)];
             } else if (wasWorkedOn && !sourceIsMonthly) {
                 // Daily note, already worked on: forward in place, fresh copy goes forward
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
-                if (!hasLink) {
-                    if (name !== taskName) editor.replaceRange(name, { line: lineNum, ch: bodyCh }, { line: lineNum, ch: bodyCh + taskName.length });
+                if (found) {
                     const current = editor.getLine(lineNum);
-                    editor.setCursor({ line: lineNum, ch: current.length });
-                    editor.replaceSelection((current.endsWith(" ") ? "" : " ") + link);
-                    if (projectLinks.length) {
-                        const linked = editor.getLine(lineNum);
-                        editor.replaceRange(customJS.AddTaskNote.withoutLinks(linked, projectLinks), { line: lineNum, ch: 0 }, { line: lineNum, ch: linked.length });
-                    }
+                    const done = this.withNote(current, bodyCh, taskName, found);
+                    editor.replaceRange(done, { line: lineNum, ch: 0 }, { line: lineNum, ch: current.length });
+                    editor.setCursor({ line: lineNum, ch: done.length });
                 }
-                const destBody = hasLink ? body : `${(name + body.slice(taskName.length)).trimEnd()} ${link}`;
-                outgoing = [`${bullet}[${destStatus}] ${destBody}`];
-                if (projectLinks.length) outgoing = [customJS.AddTaskNote.withoutLinks(outgoing[0], projectLinks)];
+                const copy = `${bullet}[${destStatus}] `;
+                outgoing = [found ? this.withNote(copy + body, copy.length, taskName, found) : copy + body];
             } else {
                 // Daily note untouched, or any monthly note: move the line and its sub-bullets
                 lineSurvives = false;
@@ -178,6 +169,42 @@ class Schedule {
         const { folder } = this.dailyOpts();
         const parent = folder.includes("/") ? folder.slice(0, folder.lastIndexOf("/")) : "";
         return `${parent ? parent + "/" : ""}months`;
+    }
+
+    // A line of a worked-on task once it links its note (`found`, from AddTaskNote.noteFor): the task's
+    // name, `taskName` where the text starts at `at`, without its dates; the note's project in place
+    // of its ⭕ (AddTaskNote.homed); and the 🗒️ last (OBS-90)
+    withNote(text, at, taskName, found) {
+        const named = text.slice(0, at) + found.name + text.slice(at + taskName.length);
+        const helper = customJS.AddTaskNote;
+        return helper.endWith(helper.homed(named, found), `[[${found.linktext}|${Schedule.NOTE_MARK}]]`);
+    }
+
+    // A line sent here from `src`, a note that isn't a daily or monthly note: it links back to `src`,
+    // as its ⭕ or 🗃️ when `src` is a project or area, else as its 🗒️ note, after that note's own
+    // project or area (OBS-90). A line that already ends in a note link of its own (a sub-task with
+    // its own note) keeps that as its note, named with that note's project, and gets no second one.
+    // A line with a ⭕ or 🗃️ of its own keeps it, and gets no other.
+    sentLine(line, src) {
+        const helper = customJS.AddTaskNote;
+        const paths = () => app.vault.getMarkdownFiles().map((f) => f.path);
+        // Only the ⭕ links that end the line are its own (OBS-90); one in the text is its title's
+        const own = helper.trailingProjectLinks(line).length > 0;
+        const tagged = this.isProjectNote(src) || this.isAreaNote(src);
+        const srcLink = tagged ? `[[${helper.linktextFor(src, paths())}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]` : null;
+        const srcHome = tagged ? null : helper.lineHome(src);
+        const homeLink = (home) => (home ? helper.homeLink(home, helper.linktextFor(home, paths())) : null);
+        const linked = helper.trailingNote(line);
+        if (linked) {
+            if (own) return helper.withHome(line, null);
+            // Named with the note's project; the source's only when the note isn't filed anywhere
+            // (a finished project's note names none: its time counts there)
+            const note = app.metadataCache.getFirstLinkpathDest(linked, src.path);
+            if (note && helper.filedIn(note)) return helper.withHome(line, homeLink(helper.lineHome(note)));
+            return helper.withHome(line, srcLink ?? homeLink(srcHome));
+        }
+        if (tagged) return helper.withHome(line, own ? null : srcLink);
+        return helper.endWith(helper.withHome(line, own ? null : homeLink(srcHome)), `[[${src.basename}|${Schedule.NOTE_MARK}]]`);
     }
 
     isProjectNote(file) {

@@ -126,19 +126,19 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 - [<] All day	Farmers market
 - [<] 9:00am	Weekly planning
 	- 9:30am
-- [<] 10:00am	Homepage review with Imogen [[2026-09-14 Homepage review with Imogen|🗒️]]
+- [<] 10:00am	Homepage review with Imogen [[Kestrel Outfitters 2026|⭕]] [[2026-09-14 Homepage review with Imogen|🗒️]]
 	- 10:00am - 10:45am
 - [<] 1:00pm	Call with Rafe Oakes [[Pinecrest Library Brochure|⭕]]
 	- 1:30pm: 🆓 quick check-in, not billing it
 - [<] 2:00pm	Delivery window for the new monitor ℹ️
 	- 4:00pm
-- [<] Printer call [[2026-09-18 Printer call|🗒️]]
+- [<] Printer call [[Pinecrest Library Brochure|⭕]] [[2026-09-18 Printer call|🗒️]]
 ```
 
 - **Order:** events sit at the top of the checklist. All-day events come first, then timed events in time order. The calendar sync inserts events in that order; Schedule never moves events.
-- **A meeting with notes** gets a log, linked at the end of its line the way a task links its note: `[[2026-09-14 Homepage review with Imogen|🗒️]]`, a meeting log named with the date and the title. The title stays plain text. *AddTaskNote* on an event line adds the link, with the daily note's date, and makes the log.
+- **A meeting with notes** gets a log, linked at the end of its line the way a task links its note: `[[2026-09-14 Homepage review with Imogen|🗒️]]`, a meeting log named with the date and the title, after the ⭕ for the project it's filed in. The title stays plain text. *AddTaskNote* on an event line adds the link, with the daily note's date, and makes the log.
 - **Older lines** wrap the title in the log link instead (`[[2026-09-14 Homepage review with Imogen|Homepage review with Imogen]]`). Every script still reads them, and the calendar sync writes one the new way whenever it updates the line.
-- **The Log template writes that link itself.** A new log links the event line whose title matches it (exactly, or else the one line its title is the start of), with a 🗒️ after the title and before any ⭕. A meeting with no event line gets `- [<] Title [[log|🗒️]]` with no time, after the timed events and above the tasks (the printer call above); a missing daily note is created first. When the calendar later brings that event, the sync adopts the timeless line and gives it, and the log, their times.
+- **The Log template writes that link itself.** A new log links the event line whose title matches it (exactly, or else the one line its title is the start of), with a 🗒️ at the end, and the line's ⭕ set to the project the log is filed in. A meeting with no event line gets `- [<] Title [[Project|⭕]] [[log|🗒️]]` with no time, after the timed events and above the tasks (the printer call above); a missing daily note is created first. When the calendar later brings that event, the sync adopts the timeless line and gives it, and the log, their times.
 - **The line under an event** is its end time (`- 9:30am`), and that's the event's time: once the event has ended, the report counts it from start to end, on the project the line resolves to (a ⭕ link, or the meeting log's project), else *Unassigned*.
 - **Ranges under an event** are its time instead (`- 10:00am - 10:45am`), and the end line is then ignored. An interrupted meeting has two ranges. A range with a label (`- 10:30am - 12:00pm: prep`) is related work.
 - **The end line can take a note** after a colon, like a time entry: `- 1:30pm: 🆓 quick check-in, not billing it`. The sync keeps the note when the end time changes. When the event moves to another day, the note stays on the forwarded line; a 🆓 on the event line itself travels with the event, like a ⭕.
@@ -150,12 +150,12 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 ### Tasks and time tracking
 
 ```markdown
-- [x] Draft homepage wireframes [[2026-09-18|🚩 9/18]] [[Draft homepage wireframes|🗒️]]
+- [x] Draft homepage wireframes [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|🗒️]]
 	- 9:15am - 11:15am: mobile layout
 	- 11:15am - 11:45am: 🆓 redid the nav after misreading my own notes
 - [x] Plan the catalog shoot [[Kestrel Fall Catalog|⭕]]
 	- 1:00pm - 1:50pm: call sheet
-	- [x] Shot list for catalog [[Shot list for catalog|🗒️]]
+	- [x] Shot list for catalog [[Kestrel Fall Catalog|⭕]] [[Shot list for catalog|🗒️]]
 		- 2:00pm - 3:05pm
 - [x] Redo the hero crop I got wrong 🆓 [[Kestrel Outfitters 2026|⭕]]
 	- 10:00am - 10:40am
@@ -165,7 +165,7 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 - Tasks come after the events, in the order they were added. Schedule adds new arrivals at the end of the first checklist.
 - **Time entries** are sub-bullets under a task: a range like `- 9:15am - 11:15am`, optionally followed by `: what you did`. An open range (`- 1:50pm - `) is a running clock.
 - **A time entry under a task marks it "worked on."** That changes what Schedule does with it (see *What Schedule does to a line*).
-- A sub-task's entries are its own, and its own links are checked first: the shot list above counts toward the project its 🗒️ note is filed in, and only a line with no project of its own falls back to the line it's nested under.
+- A sub-task's entries are its own. Its project is the first ⭕ or 🗃️ on it or on a line it's nested under, and only then its 🗒️ note's, so a parent's ⭕ counts ahead of a sub-task's note: the shot list above counts toward its own ⭕, Kestrel Fall Catalog, which is also where its note is filed, and without that ⭕ it would count toward its parent's.
 - Lines nested under a time entry (`- Invoiced under 9/30`) are notes about it, not entries. A single time (`- 9:30am`) is an event's end time, not an entry. An end earlier than a pm start runs past midnight: `- 10:30pm - 1:15am`.
 - Ranges under events count the same as ranges under tasks.
 - **An ended event counts, and is checked for overlaps.** With the sync's end line under it and no ranges of its own, its start-to-end span is an entry: its hours count (Unassigned when nothing on the line names a project, so busy personal events add to Total and never to Billable), and work logged during a busy meeting shows under Problems. Free (ℹ️), all-day, `[-]` and `[>]` events never count and never overlap anything, and an event that hasn't ended yet counts for nothing.
@@ -199,14 +199,14 @@ Weeks run Sunday to Saturday, the same weeks Notebook Navigator names `2026w38`.
 - **Columns:** Entries, Billable, 🆓, Total, Exact, **Max Hrs** (the project's `max_hours`, or `contract_max` ÷ its hourly rate), **Rate** (from `rate` and `rate_type`: `$95/hr`, `$1,200 flat`, `non-billable`…) and **Earned** (billable hours × an hourly rate). A sub-project with no `rate` or `rate_type` of its own uses its parent's: the demo's Kestrel Fall Catalog bills at Kestrel Outfitters 2026's rate. `rate_type: non-billable` keeps a project's hours out of Billable as well as Earned.
 - **Only past work counts:** an entry that hasn't ended yet (times filled in ahead under a synced event, say) is left out until it has.
 - **Rows add up:** in the tables that list projects (weekly, monthly, yearly), each row counts only that project's own entries, so the rows add up to **All**; a parent project gets a row only when time was logged to it directly. A project's own note totals it with its sub-projects.
-- **Which project an entry belongs to**, first match wins, checking the task line and then each line it's nested under: (1) a `⭕` or `🗃️` link to a project or area note, e.g. `[[Kestrel Outfitters 2026|⭕]]`; (2) any other link to a project or area note; (3) the nearest project or area folder, or the `area`, of a linked note: the 🗒️ note first (a task note, or an event's meeting log), then any other. Anything else is *Unassigned*.
+- **Which project an entry belongs to:** only the links that end a line count (see *Links at the end of a line*). First match wins, checking the task line and then each line it's nested under: (1) a `⭕` or `🗃️` link to a project or area note, e.g. `[[Kestrel Outfitters 2026|⭕]]`; (2) the nearest project or area folder, or the `area`, of the line's 🗒️ note (a task note, or an event's meeting log; an older event whose title is wrapped in its log link has that log). A link in the text is part of the title, even a link to a project. Anything else is *Unassigned*.
 - **Areas:** time linked to an area (the demo's *Water the tomato beds* on 9/14, under Household) counts toward the area, as a row of its own in the weekly, monthly and yearly reports. It never adds up the projects inside it: an area holds projects and its own time, not a total. An area note gets its own report under `## Time tracking`, as a project note does. An area's time is 🆓 unless the area note sets a `rate` or `rate_type`, which then work as on a project; an area is never a sub-project, even when filed inside a project's folder, so it never takes a client's rate. Only notes tagged exactly `#area` count, as the project and area menus read them.
 - **Archived projects** (in `90 Archive`) are left out of every report, and their notes aren't written. The demo's Marlowe Bakery Rebrand has entries on 8/27 and 8/28 that no report counts.
 - **Sub-projects** (a project folder inside another project's folder) keep their own hours; only the parent's own note adds them to its total.
 - **Rounding:** Billable, 🆓 and Total round each entry **up** to the next 15 minutes (2:01 → 2:15), so any work counts and 15 minutes is the minimum. Exact is unrounded. The step is `ROUND_TO` in `timeReport.js`.
 - **Daily notes are only read.**
 
-**Problems** lists what the report couldn't count cleanly: a task whose ⭕ project differs from the project its 🗒️ task note is filed under, or an event whose ⭕ differs from its log's project (listed on both project notes), running clocks, ends before starts, overlapping entries (on any day, even across midnight), list lines that look like time ranges but aren't `- h:mmam - h:mmpm` bullets, entries not under a task or event, 🆓 after other text on an entry or on both a line and an entry under it, busy events with no end line, entries or events of 12 hours or more, unclosed code blocks or comments, and entries with no project. Problems about a project itself (such as a `rate` that isn't a positive number, an hourly project with no `rate`, no `rate_type`, two projects each inside the other, a ⭕ and 🗒️ that disagree) are listed on the project's note, and on every weekly, monthly and yearly note whose period has time on that project or on a sub-project of it, so a period's report says why its hours count the way they do. There a ⭕ and 🗒️ disagreement is listed once, under the project the time counts on, with that period's entries. Quoted lines stop at 80 characters. Malformed and running entries are listed but not counted. Code blocks and `%%` / `<!-- -->` comments are skipped. The demo has one of each kind on purpose: the 9/16 note has a mistyped entry (`2:30 - 3:45pm`), and Block Party Poster, a volunteer project whose `rate_type` was never filled in, is listed on its own note and on `2026w38`, `2026-09` and `2026`.
+**Problems** lists what the report couldn't count cleanly: a task whose ⭕ project differs from the project its 🗒️ task note is filed under, or an event whose ⭕ differs from its log's project (listed on both project notes; a note moved by hand leaves its lines like that), running clocks, ends before starts, overlapping entries (on any day, even across midnight), list lines that look like time ranges but aren't `- h:mmam - h:mmpm` bullets, entries not under a task or event, 🆓 after other text on an entry or on both a line and an entry under it, busy events with no end line, entries or events of 12 hours or more, unclosed code blocks or comments, and entries with no project. Problems about a project itself (such as a `rate` that isn't a positive number, an hourly project with no `rate`, no `rate_type`, two projects each inside the other, a ⭕ and 🗒️ that disagree) are listed on the project's note, and on every weekly, monthly and yearly note whose period has time on that project or on a sub-project of it, so a period's report says why its hours count the way they do. There a ⭕ and 🗒️ disagreement is listed once, under the project the time counts on, with that period's entries. Quoted lines stop at 80 characters. Malformed and running entries are listed but not counted. Code blocks and `%%` / `<!-- -->` comments are skipped. The demo has one of each kind on purpose: the 9/16 note has a mistyped entry (`2:30 - 3:45pm`), and Block Party Poster, a volunteer project whose `rate_type` was never filled in, is listed on its own note and on `2026w38`, `2026-09` and `2026`.
 
 ### Links at the end of a line
 
@@ -215,22 +215,27 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 | Suffix | Points to | Added by |
 | --- | --- | --- |
 | `[[Task name\|🗒️]]` | The line's own note: a task's note, an event's meeting log, or the note a task came from (a meeting log, a task note) | *AddTaskNote*, *Schedule*, the Log template |
-| `[[Project\|⭕]]` | The project the line's time counts toward | *AddProjectLink*; *Schedule*, when the source is tagged `#project` |
-| `[[Area\|🗃️]]` | The area the line's time counts toward | *AddProjectLink*; *Schedule*, when the source is tagged `#area` |
+| `[[Project\|⭕]]` | The project the line's time counts toward, where its note is filed | *AddProjectLink*; *AddTaskNote*, *Schedule* and the Log template, for the note's project; *Schedule*, when the source is tagged `#project` |
+| `[[Area\|🗃️]]` | The area the line's time counts toward, where its note is filed | The same, for an area; *Schedule*, when the source is tagged `#area` |
 | `[[YYYY-MM-DD\|🚩 M/D]]` | The due date (that day's daily note) | *DueDate* |
 
 ```markdown
-- [<] 10:00am	Homepage review with Imogen [[2026-09-14 Homepage review with Imogen|🗒️]]
-- [ ] Send final copy to Rafe [[Write brochure copy|🗒️]]
-- [ ] Renew car registration [[2026-09-30|🚩 9/30]] [[Renew car registration|🗒️]]
+- [<] 10:00am	Homepage review with Imogen [[Kestrel Outfitters 2026|⭕]] [[2026-09-14 Homepage review with Imogen|🗒️]]
+- [ ] Send final copy to Rafe [[Pinecrest Library Brochure|⭕]] [[Write brochure copy|🗒️]]
+- [ ] Renew car registration [[2026-09-30|🚩 9/30]] [[Household|🗃️]] [[Renew car registration|🗒️]]
 - [x] Reply to Rafe about proof dates [[Pinecrest Library Brochure|⭕]]
 - [x] Water the tomato beds [[Household|🗃️]]
 ```
 
 - **Older lines use 🔗** for the same link. Every script reads 🔗 and 🗒️ alike, with or without the invisible character (U+FE0F) a phone may add or drop, and writes 🗒️.
-- **One of 🗒️, ⭕ and 🗃️ per line.** A task note is filed in its project, so a line that links one needs no ⭕: *AddTaskNote*, *AddProjectLink* and *Schedule* take it off, and *MoveToProject* takes off one for the project a note has just left. When a log is made for an event line, a single ⭕ or 🗃️ on the line decides where it's filed and comes off. A ⭕ stays beside a log's 🗒️ only when the log is filed somewhere else (picked from the menu, or made before the ⭕ was added); the ⭕ then decides, and the report lists the line under Problems.
+- **Only the links that end a line count.** A link in the text is part of the title, even a link to a project, and even with a ⭕: `Ask [[Kestrel Outfitters 2026]] about dates` counts toward no project. A block ID after the links (`^a1b2c3`, which *Copy link to block* adds) doesn't count as text, and the scripts keep it last. The links at the end are what *TrailingLinks* draws on the right, and what the time report reads.
+- **A line keeps its project next to its note.** A line that links a note also links the project or area the note is filed in, so the line and its note agree, and the project shown on the right is a link you can open. Every command that writes a note link keeps them together:
+  - *AddTaskNote* keeps the line's ⭕ where it files the note, sets it to the note's project when you leave the note where it is, and adds it to a line that had none. The Log template does the same for a meeting log.
+  - *AddProjectLink* changes the line's ⭕ and moves its note along.
+  - *MoveToProject* moves a note, and the ⭕ on every line that links it follows.
+  - A note moved by hand (a drag, *Move file to another folder*) leaves its lines' ⭕ behind for now. Where a line and its note disagree, the line's ⭕ decides where the time counts, and the report lists the line under Problems.
 - **The 🗒️ link threads one task across days:** every forwarded copy keeps the same 🗒️, so that note's backlinks show the task's whole history. In the demo, *Draft homepage wireframes* is worked on 9/14 and 9/15 through one task note.
-- **Order:** the note link (🗒️, ⭕ or 🗃️) ends the line, so End reaches the note; the 🚩 due date goes before it, and *DueDate* puts it there. On an event line it's the title, ℹ️, 🆓, the log's 🗒️, then any ⭕, as the calendar sync writes it.
+- **Order:** the 🚩 due date, then the ⭕ or 🗃️, then the 🗒️, which ends the line so End reaches the note. On an event line it's the title, ℹ️, 🆓, any ⭕, then the log's 🗒️, as the calendar sync writes it. Lines written before (the 🗒️, then the ⭕) are still read, and the scripts write them the new way when they change them.
 
 **How they look.** In Live Preview, the *TrailingLinks* startup script draws these links small, at the right of the line's last row, the way Things shows a deadline. Only the display changes; the line stays as it's written.
 
@@ -238,7 +243,7 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 - **On screen:** the project or area first, then the note, then the due date at the edge.
   - A ⭕ or 🗃️ shows as the project's shortest name, its file name or a plain alias (never a `⭕.Area.Project` one), in faint text.
   - The due date is faint, and turns red once its day has passed.
-  - A line with a 🗒️ but no ⭕ shows the project its time counts toward in faint italics. That's a name the time report works out, not a link.
+  - A line with a 🗒️ but no ⭕ (one written before lines kept their project) shows the project its time counts toward in faint italics. That's a name the time report works out, not a link.
 - **Wrapping:** when the links don't fit after the text, the text's last word wraps with them. The other rows keep their full width.
 - **Keys and clicks:**
   - A click opens the link, and ⌘-click or a middle click opens it in a new tab.
@@ -261,9 +266,9 @@ The alias is `M/D`, with no year and no leading zeros. Daily notes don't get pre
 | Scheduling from… | The original line | The new line on the target day |
 | --- | --- | --- |
 | A daily note, task **not** worked on | Removed along with its sub-bullets (it moves) | Same line and sub-bullets |
-| A daily note, task worked on (time entries) | Stays and becomes `[>]`; gets a 🗒️ link if it had none | `[ ]` (or `[/]`), same text and 🗒️ link, no sub-bullets |
+| A daily note, task worked on (time entries) | Stays and becomes `[>]`; gets a 🗒️ link, after its note's ⭕, if it had none | `[ ]` (or `[/]`), same text, ⭕ and 🗒️ link, no sub-bullets |
 | A monthly note | Removed along with its sub-bullets, even if worked on | Same line and sub-bullets |
-| Any other note (log, task, project…) | Becomes `[>] [[YYYY-MM-DD\|M/D]] text` | `[ ] text [[Source\|🗒️]]`, or `[[Source\|⭕]]` / `[[Source\|🗃️]]` if the source is a project or area |
+| Any other note (log, task, project…) | Becomes `[>] [[YYYY-MM-DD\|M/D]] text` | `[ ] text [[Project\|⭕]] [[Source\|🗒️]]`, the ⭕ for the source's project; or `[[Source\|⭕]]` / `[[Source\|🗃️]]` if the source is a project or area |
 
 - Scheduled lines go to the end of the target day's first checklist. A daily note that doesn't exist yet is created from its template.
 - **Events can't be scheduled:** on a `[<]` line, Schedule changes nothing and shows "Events must be moved in your calendar app."
@@ -272,11 +277,11 @@ The alias is `M/D`, with no year and no leading zeros. Daily notes don't get pre
 ### Meeting logs
 
 - Named `YYYY-MM-DD Title`, or `!today Title` for today. Made from an event, the title is cleaned for a file name the way CalNav does it: `Sync: Q3` becomes `2026-09-14 Sync - Q3`, and characters a file can't be named with are dropped. The event's own title stays as it is. A note with that title gets the Log template, with properties `area`, `series`, `topic`, `date`, `time`, `endTime` and `who`.
-- **Filed by project:** the log goes into its project or area's `logs/` subfolder (made if missing), and `area` is filled. When its event line has one `[[Project|⭕]]` or `[[Area|🗃️]]`, that's where it goes, with no menu, and the link comes off the line: the log now says where the meeting's time counts. Otherwise the template asks (the same picker as new tasks and projects), and only the ⭕ for the project you pick comes off. Esc leaves the log in `10 Inbox`, with no `area`; Raycast's Open Log Note can preset Inbox and skip the picker. A log moved later gets its `area` updated on the move, and *MoveToProject* files it straight into the new project's `logs/`.
+- **Filed by project:** the log goes into its project or area's `logs/` subfolder (made if missing), and `area` is filled. When its event line's `[[Project|⭕]]` or `[[Area|🗃️]]` links name one project or area, that's where it goes, with no menu, and the link stays: the line and its log say the same. Otherwise the template asks (the same picker as new tasks and projects), and the line's ⭕ becomes the one you pick. Esc leaves the log in `10 Inbox`, with no `area`, and the line as it was; Raycast's Open Log Note can preset Inbox and skip the picker. A log moved later gets its `area` updated on the move, and *MoveToProject* files it straight into the new project's `logs/`.
 - **Every log has a line in its daily note.** Made from a calendar event (*AddTaskNote* on its line, which adds the `[[YYYY-MM-DD Title|🗒️]]` link and makes the log), the log takes `time` and `endTime` from the event line: its start, and the end time on the line under it, or the last time of the entry that replaced it. (`endTime` is text, like `time`; `end` would be a date property.) Typed as `YYYY-MM-DD Title` or `!today Title`, the template links the event line whose title matches, and takes its times the same way. With no such line it adds a `[<]` line with no time and leaves both properties empty until the calendar sync brings the event; the demo's `2026-09-18 Printer call` is one.
 - A name a log already has opens that log instead.
 - The event's link keeps working wherever the log is filed, because links go by note name.
-- **Action items** are checklist items inside the log. Schedule them from there: the log keeps `[>] [[date|M/D]] …` and the daily note gets the task, with a 🗒️ link back to the log.
+- **Action items** are checklist items inside the log. Schedule them from there: the log keeps `[>] [[date|M/D]] …` and the daily note gets the task, with the log's ⭕ and a 🗒️ link back to the log.
 
 ### Getting around
 
@@ -297,7 +302,7 @@ Two parts, no AI. `00 Meta/02 Scripts/Calendar/fetchCalendar.swift` reads the Ma
 
 **Lines it keeps current.** An event line it wrote, and you haven't touched, is its to keep current: when the event changes or moves in the calendar, the line changes or moves.
 
-- **Three additions don't count as touching it:** `[[Project|⭕]]` links after the title, a link to its log after the title (`Planning call [[2026-09-20 Planning call|🗒️]]`, or around the title on older lines), and time entries under it (with notes nested under them), beside or in place of the end time. The sync keeps updating such a line and puts your additions back.
+- **Three additions don't count as touching it:** `[[Project|⭕]]` links after the title, a link to its log at the end (`Planning call [[Kestrel Outfitters 2026|⭕]] [[2026-09-20 Planning call|🗒️]]`, before the ⭕ or around the title on older lines), and time entries under it (with notes nested under them), beside or in place of the end time. The sync keeps updating such a line and puts your additions back.
 - **New time or title:** the line is updated and keeps its ⭕ links, log link and time entries. A rename changes only the title; the log keeps its name. A line whose title is wrapped in its log link is written with the 🗒️ at the end instead. Time entries are never changed, so when the time moves on a line that has them, the report adds "check its time entries".
 - **Moved to another day:** the ⭕ links and log link go to the new day's line. Time entries stay on the day they were worked: a line with time entries is forwarded, and keeps its links too. A line with only links is removed once the new day's line has them; if it doesn't (that day already had a line for the event, say), the old line is forwarded instead.
 - **Free events get ℹ️:** a timed event whose Show As is Free is written with ℹ️ after its title, and the mark follows the calendar (busy → free adds it, free → busy takes it off, reported as *now free* / *now busy*), keeping the ⭕ links, log link and time entries. Tentative and unknown (birthdays, subscribed calendars) count as busy; all-day events get no mark. The mark is the sync's: take it off or add it by hand and the line is yours. Days already past aren't touched, so mark an old event by hand.
@@ -340,6 +345,7 @@ Obsidian saves folds separately on each device, and forgets a note's folds when 
 ### Rules for agents
 
 - Read this section before editing any daily or monthly note, and write lines exactly as the scripts would: the tab after an event's time, the symbol aliases, `M/D` link aliases.
+- A line that links a note ends `[[Project|⭕]] [[Note|🗒️]]` (or `[[Area|🗃️]]`), with the ⭕ for the project the note is filed in and any `🚩 M/D` before both: keep the note link last and its project next to it. Only the links at the end say where time counts; a link in the text doesn't.
 - Keep events at the top: `All day` events first, then timed events in time order. Add tasks after the last item of the first checklist.
 - Don't check off, forward, move or restyle a `[<]` event. Events are moved in the calendar app, not in Obsidian. The calendar sync is the one exception: it moves and removes the event lines it wrote, forwards events and marks canceled ones `[-]`, as *Calendar sync* describes.
 - Don't edit `calendar-sync.json` or `calendar-events.json` in `00 Meta/02 Scripts/Calendar/`; only the calendar sync writes them.
@@ -379,8 +385,8 @@ What the words mean, typed on Sunday 9/27/26:
 ### Schedule (`⌘S`)
 
 - Asks for a date (see *Typing a date*) and moves the line (with its sub-bullets) to the end of that day's first checklist. *What Schedule does to a line* has the whole table.
-- **Worked on** (time entries under it): the original stays as `[>]`, and both lines link the task note. If the task has no note yet, one is made first, the way *AddTaskNote* makes it (asking for its project or area); dismissing that picker cancels the schedule. A date in front of the task name goes to the note's `due` and comes off both lines, and the line's ⭕ or 🗃️ picks the note's home and comes off: `- [>] Draft homepage wireframes [[Draft homepage wireframes|🗒️]]`.
-- **From any note that isn't a daily note** (a sub-task in a task note, a task in a project note or log): the original gets the forward mark and a link to the day, `- [>] [[2026-09-18|9/18]] Sign-off call on Friday`, and the new line links back to the source with 🗒️, or ⭕ / 🗃️ when the source is tagged `#project` / `#area`.
+- **Worked on** (time entries under it): the original stays as `[>]`, and both lines link the task note. If the task has no note yet, one is made first, the way *AddTaskNote* makes it (asking for its project or area); dismissing that picker cancels the schedule. A date in front of the task name goes to the note's `due` and comes off both lines, and the line's ⭕ or 🗃️ picks the note's home and stays, set to where the note is filed: `- [>] Draft homepage wireframes [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|🗒️]]`.
+- **From any note that isn't a daily note** (a sub-task in a task note, a task in a project note or log): the original gets the forward mark and a link to the day, `- [>] [[2026-09-18|9/18]] Sign-off call on Friday`, and the new line links back to the source with 🗒️, after the ⭕ or 🗃️ for the project or area the source is filed in; or with ⭕ / 🗃️ when the source is tagged `#project` / `#area`. A line with a ⭕ or 🗃️ of its own keeps it and gets no other.
 - `[/]` tasks keep their marker on the new day.
 - Event lines can't be scheduled: it says "Events must be moved in your calendar app" and changes nothing.
 
@@ -390,20 +396,21 @@ Asks for a date (see *Typing a date*) and adds ` [[2026-09-30|🚩 9/30]] ` befo
 
 ### AddTaskNote
 
-Links a task to a note of its own: `- [ ] Write brochure copy [[Write brochure copy|🗒️]]`.
+Links a task to a note of its own, keeping the line's link to the note's project next to it: `- [ ] Write brochure copy [[Pinecrest Library Brochure|⭕]] [[Write brochure copy|🗒️]]`.
 
-- **The name** is the selection. With nothing selected and text after the cursor, it's the task's text up to its first link, and the 🗒️ then ends the line. A task that already has a 🗒️ (or an older 🔗) is left alone, wherever the cursor is. With only whitespace after the cursor, it inserts an empty link (`[[|🗒️]]`) with the cursor inside, to search for a note with another name.
+- **The name** is the selection. With nothing selected and text after the cursor, it's the task's text up to its first link. Either way the 🗒️ ends the line. A task that already has a 🗒️ (or an older 🔗) is left alone, wherever the cursor is. With only whitespace after the cursor, it inserts an empty link (`[[|🗒️]]`) with the cursor inside, to search for a note with another name.
 - **A new note** is made on the spot with the Task template, which asks for its project or area, so time logged under the task counts toward that project right away. You stay in the daily note; dismissing the picker cancels, with no note and no link. The cursor ends up after the checkbox.
 - **A date in the name** (`2026-09-30 Renew car registration`) becomes the new note's `due` and comes off the line; with two dates, the last one.
-- **The line's ⭕ or 🗃️ decides where the note goes.** One project or area: a new note is filed there, and an existing note with no home yet is moved there, without a menu. Several: the menu, with the line's first. An existing note already in a different project or area asks **Move task note?**, showing the task and its From and To (Move is the default; Leave it keeps it where it is), since its project is shared by every line that links it. A same-named note already in the picked project is linked instead. Once the note is linked, the ⭕ and 🗃️ come off the line: the note says where the time counts.
+- **The ⭕ or 🗃️ that ends the line decides where the note goes** (one in the text is part of the title). One project or area: a new note is filed there, and an existing note with no home yet is moved there, without a menu. Several: the menu, with the line's first. An existing note already in a different project or area asks **Move task note?**, showing the task and its From and To (Move is the default; Leave it keeps it where it is), since its project is shared by every line that links it; the other lines that link a moved note follow it (see *MoveToProject*). A same-named note already in the picked project is linked instead.
+- **The line's ⭕ says where the note is filed**, before the 🗒️: kept when the note is filed there, set to the note's project when you leave the note where it is, and added to a line that had none. A note in no project leaves the line's links as they are; one left in a finished project takes the line's ⭕ off, so its time still counts there. A note in `00 Meta`, `36 Planner` or `90 Archive` is linked where it is, never moved.
 - An existing note's `area` is set from its folder; new notes get it from the Task template.
-- **On an event line** it links a meeting log instead, after the title and its ℹ️ or 🆓 and before any ⭕, putting the daily note's date in front of the name so the Log template picks it up: `- [<] 10:00am⇥Homepage review with Imogen [[2026-09-14 Homepage review with Imogen|🗒️]]`. It makes the log right away, the way it makes a task note: through the Log template, which files it by the line's ⭕ or 🗃️ (and takes that link off) or asks. You stay in the daily note, and the 🗒️ opens the log. The name is the selection or, with nothing selected, the title after the time, without its marks, wherever the cursor is on the line. A line that already links a log is left alone, and so is one with no title (a time with nothing after it).
+- **On an event line** it links a meeting log instead, at the end of the line after the title, its ℹ️ or 🆓 and any ⭕, putting the daily note's date in front of the name so the Log template picks it up: `- [<] 10:00am⇥Homepage review with Imogen [[Kestrel Outfitters 2026|⭕]] [[2026-09-14 Homepage review with Imogen|🗒️]]`. It makes the log right away, the way it makes a task note: through the Log template, which files it by the line's ⭕ or 🗃️, or asks and sets the line's ⭕ to the pick. You stay in the daily note, and the 🗒️ opens the log. A log of that name already is linked instead, and it and the line are made to agree as a task's note is: moved to the line's project, after asking if it's filed in another, or the line given the log's project. The name is the selection or, with nothing selected, the title after the time, without its marks, wherever the cursor is on the line. A line that already links a log is left alone, and so is one with no title (a time with nothing after it).
 
 ### AddProjectLink (`⌥⌘P`)
 
-- On a task or event line, asks for a project or area (the same menu as *AddTaskNote*) and adds `[[Project|⭕]]`, or `[[Area|🗃️]]`, at the end of the line, replacing one the line already has. For a line whose time belongs to a project but that needs no note of its own. The cursor ends up after the checkbox; Esc cancels.
-- With a 🗒️ task note on the line, or an event's meeting log (its 🗒️, or its title's link on an older line), the note is moved into the picked project instead (a log into its `logs/`), and no ⭕ is added: without asking when the note has no project or area yet, after the *Move task note?* confirm when it's leaving one. A note already there needs nothing; a same-named note already in the picked project is linked instead.
-- On an event line the ⭕ goes at the very end, where the calendar sync keeps it through updates and moves.
+- On a task or event line, asks for a project or area (the same menu as *AddTaskNote*) and adds `[[Project|⭕]]`, or `[[Area|🗃️]]`, replacing one the line already has: before the 🗒️ that ends the line, or at the end when there's none. The cursor ends up after the checkbox; Esc cancels.
+- **With a note on the line** (a task's 🗒️ note, or an event's meeting log: its 🗒️, or its title's link on an older line), the note moves into the picked project too (a log into its `logs/`), so the line and its note agree. It asks first with *Move task note?* (From and To) when that's in doubt: the note is filed in another project or area, or other lines link it and would follow it. Leave it changes nothing. The other lines that link the moved note follow it (see *MoveToProject*). A note already in the picked project, or in its folder (a project note that isn't its folder's own note), only gets the line's ⭕; so does a note in `00 Meta`, `36 Planner` or `90 Archive`, which is never moved; a same-named note already in the picked project is linked instead.
+- On an event line the ⭕ goes after the title and its marks, before the log link, where the calendar sync keeps it through updates and moves.
 
 ### MoveToProject (`⌥⌘M`)
 
@@ -412,7 +419,7 @@ Moves the note you're on into a project or area picked from the same menu as *Ad
 - **Where it goes:** a meeting log (tagged `#log`, or in a `logs/` folder) into the project's `logs/`, made if missing, so a log left in `10 Inbox` is filed the way the Log template files it. A project or area's own note takes its whole folder along, sub-projects and logs included. Anything else goes into the project's folder. Obsidian's move updates the links, and *SyncArea* sets `area`.
 - **Several at once:** while Notebook Navigator has the focus, it moves the notes selected there. A note inside a project that's moving with it goes along with its project.
 - **It asks first** when a single note leaves a project or area (*Move task note?*, *Move log?* or *Move note?*, with its From and To), since every line that links it follows it. Moving a project or area always asks (*Move project?*, *Move area?*): its own time stays with it, but a project moved inside another project counts toward that project's totals, and takes its rate if it has none of its own (see *The time report*). Moving several at once doesn't ask.
-- **The ⭕ on its lines:** a line that links the note and also has a ⭕ or 🗃️ for the project it just left would go on counting its time there, so that link comes off: one link per line. A ⭕ or 🗃️ for anywhere else is that line's own choice and stays, and the notice says how many lines kept one. A moved project's notes keep their project, so their lines are left alone.
+- **The ⭕ on its lines follows the note:** a line that links the note and has a ⭕ or 🗃️ for the project or area it just left gets the new one's, before its 🗒️, and a line with none gets one, so its time keeps following the note. A ⭕ or 🗃️ for anywhere else is that line's own choice and stays, and the notice says how many lines kept one. A ⭕ for a finished project stays too, since that time may already be invoiced. A moved project's notes keep their project, so their lines are left alone. *AddTaskNote* and *AddProjectLink* update the lines this way too when they move a note.
 - **It refuses, with a notice:** a name already taken where it would go, a note already there, and a project into itself or one of its sub-projects (the menu leaves those out, along with project notes that have no folder to hold anything). It never moves anything in `00 Meta`, `36 Planner` or `90 Archive`: archived work is out of the reports and usually invoiced, so bring it back by hand. Esc cancels.
 - Finished projects still go into `90 Archive` by hand: the menu only lists projects and areas under `Projects/`.
 
@@ -466,7 +473,7 @@ Installs the system from a local clone of the repository into the vault it runs 
 
 These run on their own when Obsidian starts, and again whenever a script file changes (CustomJS's *rerun startup scripts on file change*):
 
-- ***SyncArea*** keeps `area` current when notes move to another folder, one at a time or as a whole folder: it points at the nearest project or area above them, the first folder note (`Folder/Folder.md`) tagged `#project` or `#area`. A moved project's own note points at its new parent. It says "Updated area on N notes". It leaves `area` alone when notes land outside any project or area (`10 Inbox`, `30 Reference`), anywhere in `90 Archive` or `00 Meta`, or when a folder is only renamed in place (Obsidian updates those links itself), and keeps a template's own pick for a brand-new note. It runs on every device, and each device handles only its own moves: Obsidian Sync delivers a move made elsewhere as a delete and a new file, so nothing is processed twice.
+- ***SyncArea*** keeps `area` current when notes move to another folder, one at a time or as a whole folder: it points at the nearest project or area above them, the first folder note (`Folder/Folder.md`) tagged `#project` or `#area`. A moved project's own note points at its new parent. It says "Updated area on N notes". It leaves `area` alone when notes land outside any project or area (`10 Inbox`, `30 Reference`), anywhere in `90 Archive` or `00 Meta`, or when a folder is only renamed in place (Obsidian updates those links itself), and keeps a template's own pick for a brand-new note. It doesn't change the ⭕ on the lines that link a note moved this way, by a drag or *Move file to another folder*: until those follow too, move notes with *MoveToProject* to keep their lines current, and the report lists a line whose ⭕ and note disagree under Problems. It runs on every device, and each device handles only its own moves: Obsidian Sync delivers a move made elsewhere as a delete and a new file, so nothing is processed twice.
 - ***RefoldOnOpen*** refolds each daily note as it opens, on every device. See *Folding*.
 - ***MoveToProjectMenu*** puts *Move to project…* (*MoveToProject*) in the file menus: Notebook Navigator's menu for a note, for several selected, and for a project or area's folder; a tab's **⋯** menu; a link's right-click menu (for notes, not the project a ⭕ points at); and the core file explorer's. The item appears only for what *MoveToProject* moves.
 - ***TrailingLinks*** draws the links that end a task or event line small, at the right of the line, on every device (see *Links at the end of a line*). It only looks at the lines on screen, and while you type only at the line you're on and the lines nested under it. It uses Obsidian's own editor code, which CustomJS scripts can reach; if they ever can't, it logs a warning and lines stay as they are.
@@ -476,7 +483,7 @@ These run on their own when Obsidian starts, and again whenever a script file ch
 
 New notes run `Get Template.md`, which picks a template from the title; the README's *Creating notes* table lists them. Two Templater user scripts in `00 Meta/02 Scripts/Templater/` shape what happens next:
 
-- **`pickParent.js`** is the "Select parent…" picker the Area, Project, Task and Log templates show. It lists notes tagged exactly `#area` or `#project` (not nested tags like `#project/sample`) that don't have `completed` set, labelled by alias. Picking one moves the note there; Esc leaves it where it is. A command that already knows the parent hands it over and the menu is skipped: *AddTaskNote* passes the project on the task line, and Raycast's Open Log Note can preset Inbox. The Log template doesn't ask when the log's event line names one project or area with a ⭕ or 🗃️. Either way the `!…` trigger (and any dates) come off the name.
+- **`pickParent.js`** is the "Select parent…" picker the Area, Project, Task and Log templates show. It lists notes tagged exactly `#area` or `#project` (not nested tags like `#project/sample`) that don't have `completed` set, labelled by alias. Picking one moves the note there; Esc leaves it where it is. A command that already knows the parent hands it over and the menu is skipped: *AddTaskNote* passes the project on the task line, and Raycast's Open Log Note can preset Inbox. The Log template doesn't ask when the log's event line names one project or area with a ⭕ or 🗃️, and otherwise sets the line's ⭕ to the pick. Either way the `!…` trigger (and any dates) come off the name.
 - **`showNewNote.js`** runs once those templates finish: it redraws the properties panel (after the picker and the move, Obsidian's panel otherwise stays empty in Live Preview until the note is reopened) and moves the cursor from the title into the body.
 
 `eventTimes.js` reads a start and end time from a calendar event line, and `recordEvent.js` writes a new log's line into its daily note.

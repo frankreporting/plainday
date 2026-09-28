@@ -33,9 +33,14 @@ test("placed: on an event line the ⭕ ends the line, after the title, a log lin
     assert.equal(cmd.placed("- [<] All day\tConference ", P), "- [<] All day\tConference [[Hawk Ledger|⭕]]");
 });
 
-test("placed: with a 🔗 on the line the ⭕ still ends the line (only reached when the note couldn't be moved)", () => {
-    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|🔗]]", P), "- [ ] Order toner [[Order toner|🔗]] [[Hawk Ledger|⭕]]");
-    assert.equal(cmd.placed("- [ ] Order toner [[Tin Works|⭕]] [[Order toner|🔗]]", P), "- [ ] Order toner [[Order toner|🔗]] [[Hawk Ledger|⭕]]");
+test("placed: with a note link at the end the ⭕ goes before it, so the note link stays last (OBS-90)", () => {
+    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|🔗]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]]");
+    assert.equal(cmd.placed("- [ ] Order toner [[Tin Works|⭕]] [[Order toner|🗒️]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
+    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|🗒️]] [[Tin Works|⭕]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "the older order comes out in the new one");
+    assert.equal(cmd.placed("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|🗒️]]", P), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "after a due date");
+    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call ℹ️ [[2026-09-15 Kickoff call|🗒️]]", P), "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-15 Kickoff call|🗒️]]", "an event's log");
+    const same = "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]";
+    assert.equal(cmd.placed(same, P), same, "already so: unchanged");
 });
 
 test("placed: a ⭕ the line already has is replaced, wherever it was, and several become one", () => {
@@ -100,7 +105,7 @@ test("AddProjectLink is registered as a command, and shares AddTaskNote's menu, 
     const source = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
     assert.match(source, /helper\.pickHome\(this\.label\(lineText\), \[\]\)/, "the same project-or-area menu");
     assert.match(source, /helper\.confirmMove\(note, noteHome, home\)/, "asks before moving a note out of a project or area");
-    assert.match(source, /helper\.moveInto\(note, home\)/);
+    assert.match(source, /helper\.moveInto\(note, home, \{ line \}\)/, "the other lines that link the note follow it; this line is its own");
     for (const method of ["homeOf", "confirmMove", "moveInto", "pickHome", "isHome", "withoutLinks", "projectLinks", "linktextFor", "afterCheckbox", "cancelled"]) {
         assert.equal(typeof context.customJS.AddTaskNote[method], "function", method);
     }
@@ -127,5 +132,5 @@ test("🗒️ (OBS-87), a phone's 🗒 and the 🔗 before it are all a line's n
     assert.equal(cmd.label(ev), "Kickoff call");
     assert.equal(cmd.relinked(ev, "P/logs/2026-09-15 Kickoff call"), "- [<] 1:30pm\tKickoff call [[P/logs/2026-09-15 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]");
     assert.equal(cmd.taskLinkpath("- [<] Printer call [[2026-09-18 Printer call|🗒️]]"), "2026-09-18 Printer call", "a log's line with no time yet");
-    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]]", P), `- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]] ${P}`, "a log not made yet: the ⭕ goes last");
+    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]]", P), `- [<] 1:30pm\tKickoff call ${P} [[2026-09-15 Kickoff call|🗒️]]`, "a log not made yet: the ⭕ goes before its link");
 });

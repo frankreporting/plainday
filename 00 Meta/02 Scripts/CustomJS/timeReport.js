@@ -37,12 +37,13 @@ class TimeReport {
     // that one ending when it starts is quietly nothing. All-day, canceled ([-]) and forwarded ([>])
     // events, and any marker but [<], are never counted.
     //
-    // The project an entry belongs to, first match wins, looking at the task line and then the
-    // lines it's nested under:
-    //   1. a link to a project note: one aliased ⭕ (`[[Orchard Lane Web 2026|⭕]]`) first, then any alias;
+    // The project an entry belongs to, first match wins. Only the links that end a line count
+    // (OBS-90): a link in the text is part of the title, even a link to a project. Looking at the
+    // task line and then the lines it's nested under:
+    //   1. a ⭕ link to a project note (`[[Orchard Lane Web 2026|⭕]]`);
     //   2. the note link's note (🗒️, or 🔗 before OBS-87: a task's note, an event's log): its nearest
-    //      project folder note (Folder/Folder.md tagged #project), or its `area`;
-    //   3. the same for any other linked note (a meeting log, say).
+    //      project folder note (Folder/Folder.md tagged #project), or its `area`. An event whose
+    //      title is wrapped in a link, the way lines were written before OBS-57, has that note.
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
     // sub-project: its hours also count toward the parent. Entries of archived projects (in
     // 90 Archive) are left out of every report.
@@ -110,6 +111,20 @@ class TimeReport {
     // The alias of a line's link to its own note (a task's note, an event's log): 🗒️, or 🔗 from
     // before OBS-87, compared once U+FE0F and spaces are dropped
     static NOTE_ALIAS = /^(?:🗒|🔗)$/u;
+    // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D,
+    // a note's 🗒️ (or 🔗), a project's ⭕ or an area's 🗃️, alone in its alias. A phone may add or
+    // drop the U+FE0F.
+    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|🗒️?|🔗️?|⭕️?|🗃️?)\s*\]\]$/u;
+    // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
+    static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
+    // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
+    // links before it still end the line
+    static BLOCK_ID = /\s\^[A-Za-z0-9-]+$/;
+    // An event line whose title is one link, the way lines were written before OBS-57: `[<] 10:00am⇥
+    // [[2026-09-14 Review|Review]]`, a log's line with no time yet, a canceled or forwarded event,
+    // and the old layout's `10:00am⇥[[Weekly sync#Sep 14|Weekly sync]]` without a bullet. That link
+    // is the event's own note.
+    static WRAPPED_TITLE = new RegExp(String.raw`^(?:\[<\]\s+(?:(?:all day|${TimeReport.TIME})\s+)?|(?:\[.\]\s+)?(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(?:all day|${TimeReport.TIME})\s+)\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$`, "iu");
     static DATE_LINK = /^\d{4}-\d{2}(-\d{2})?$/;
     static SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July",
@@ -242,7 +257,7 @@ class TimeReport {
 
     // Whether an event line's body carries the free mark after its title (its ⭕ links and a 🆓 aside)
     freeEvent(body) {
-        return TimeReport.FREE_MARK.test(body.replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
+        return TimeReport.FREE_MARK.test(body.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
     }
 
     // Whether a task or event line carries 🆓 as a word of its own (links aside), which frees every
@@ -562,26 +577,51 @@ class TimeReport {
         return this.nearestProjectFolder(dir, path, index) ?? this.areaProject(path, index);
     }
 
+    // What a line's links say about where its time goes (OBS-90): { marks: its ⭕ and 🗃️ links,
+    // notes: its 🗒️ (or 🔗) links, title: the link an old event's title is wrapped in, or null },
+    // each { target, alias }. Only the run of links that ends the line counts, stepping over the
+    // free mark and 🆓 among them, and a block ID after them; a link in the text is part of the title.
+    lineLinks(body) {
+        const marks = [], notes = [];
+        let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
+        for (;;) {
+            const link = rest.match(TimeReport.TRAIL_LINK);
+            if (link) {
+                const target = link[1].split(/[#^]/)[0].trim();
+                const symbol = link[2].replace(/[️\s]/g, "");
+                if (/^(?:⭕|🗃)$/u.test(symbol)) marks.unshift({ target, alias: link[2] });
+                else if (this.isNoteAlias(symbol)) notes.unshift({ target, alias: link[2] });
+                rest = rest.slice(0, link.index).trimEnd();
+                continue;
+            }
+            const mark = rest.match(TimeReport.TRAIL_MARK);
+            if (mark && mark.index > 0) { rest = rest.slice(0, mark.index).trimEnd(); continue; }
+            break;
+        }
+        const wrapped = notes.length ? null : rest.trim().match(TimeReport.WRAPPED_TITLE);
+        const title = wrapped ? { target: wrapped[1].split(/[#^]/)[0].trim(), alias: "" } : null;
+        return { marks: marks.filter((l) => l.target), notes: notes.filter((l) => l.target), title: title?.target ? title : null };
+    }
+
     // The project for an entry's context lines, or null
     // With `live`, archived projects are passed over and the search goes on.
     resolve(context, fromPath, index, live = false) {
-        const lines = context.map((c) => this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) })));
-        const isChain = (alias) => this.isNoteAlias(alias);
-        const isMark = (alias) => /^(?:⭕|🗃)$/u.test(alias.replace(/[\uFE0F\s]/g, ""));
+        const lines = context.map((c) => this.lineLinks(c.body));
+        const dest = (l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, fromPath));
         const ok = (p) => p && !(live && this.isArchived(p));
-        // A ⭕ (or 🗃️) says where the line's time goes, ahead of a project merely mentioned in its text
-        for (const mark of [true, false]) {
-            for (const links of lines) {
-                for (const l of links) if (l.dest && isMark(l.alias) === mark && this.counts(l.dest, index) && ok(l.dest)) return l.dest;
+        // A ⭕ (or 🗃️) says where the line's time goes, on the line or on one it's nested under
+        for (const { marks } of lines) {
+            for (const l of marks) {
+                const d = dest(l);
+                if (d && this.counts(d, index) && ok(d)) return d;
             }
         }
-        for (const chain of [true, false]) {
-            for (const links of lines) {
-                for (const l of links) {
-                    if (!l.dest || isChain(l.alias) !== chain) continue;
-                    const project = this.projectOfNote(l.dest, index);
-                    if (ok(project)) return project;
-                }
+        // Then the line's own note: where it's filed
+        for (const { notes, title } of lines) {
+            for (const l of title ? [...notes, title] : notes) {
+                const d = dest(l);
+                const project = d ? this.projectOfNote(d, index) : null;
+                if (ok(project)) return project;
             }
         }
         return null;
@@ -589,20 +629,22 @@ class TimeReport {
 
     // Whether a link's alias marks a line's own note (NOTE_ALIAS)
     isNoteAlias(alias) {
-        return TimeReport.NOTE_ALIAS.test(alias.replace(/[\uFE0F\s]/g, ""));
+        return TimeReport.NOTE_ALIAS.test(alias.replace(/[️\s]/g, ""));
     }
 
-    // A task line that links a project directly and also a 🗒️ task note filed under a different live
-    // project, or an event line whose 🗒️ log is (OBS-57). The line's own link decides where its time
-    // counts (see resolve), so the note's project never sees that time. Checks the first context line
-    // with a live project link, the one resolve uses. { lineProject, note, noteProject, event } or null.
+    // A task line that ends in a ⭕ for a project and also a 🗒️ task note filed under a different
+    // live project, or an event line whose 🗒️ log is (OBS-57). The line's ⭕ decides where its time
+    // counts (see resolve), so the note's project never sees that time: a note moved by hand, say,
+    // until OBS-93 updates its lines. Checks the first context line with a live ⭕, the one resolve
+    // uses. { lineProject, note, noteProject, event } or null.
     conflict(context, fromPath, index) {
         for (const c of context) {
-            const links = this.links(c.body).map((l) => ({ ...l, dest: index.linkDest(l.target, fromPath) }));
-            const direct = links.find((l) => l.dest && this.counts(l.dest, index) && !this.isArchived(l.dest));
+            const { marks, notes } = this.lineLinks(c.body);
+            const withDest = (l) => ({ ...l, dest: TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, fromPath) });
+            const direct = marks.map(withDest).find((l) => l.dest && this.counts(l.dest, index) && !this.isArchived(l.dest));
             if (!direct) continue;
-            for (const l of links) {
-                if (!l.dest || !this.isNoteAlias(l.alias)) continue;
+            for (const l of notes.map(withDest)) {
+                if (!l.dest) continue;
                 const noteProject = this.projectOfNote(l.dest, index);
                 if (noteProject && noteProject !== direct.dest && !this.isArchived(noteProject)) {
                     return { lineProject: direct.dest, note: l.dest, noteProject, event: /^\[<\]/.test(c.body) };

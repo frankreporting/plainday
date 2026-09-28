@@ -5,8 +5,8 @@ class TrailingLinks {
     //     at the end of the line. People, links in the text and old wrapped event titles stay put.
     //   - On screen: the project or area, drawn as its shortest name (faint, no pill), the note,
     //     then the due date at the edge (faint, red once it's passed). A line with a note but no
-    //     project link shows the project the time report counts it toward, in faint italics: a
-    //     name only, not a link (OBS-90 puts the link on the line).
+    //     project link (written before OBS-90 kept the link on the line) shows the project the time
+    //     report counts it toward, in faint italics: a name only, not a link.
     //   - Only the text's last word wraps with the links; the other rows keep their full width.
     //   - Live Preview only. While a link shows its brackets, the line reads as its markdown.
     //   - End and Cmd-→ go to the end of the line, after the note link: by default they'd stop at
@@ -203,6 +203,14 @@ class TrailingLinks {
         return out;
     }
 
+    // A line and the lines it's nested under (context's result) as the time report reads them: each
+    // list item without its bullet, and indented text that isn't a list item left out
+    static reportContext(lines) {
+        return lines
+            .filter((text, i) => i === 0 || /^\s*(?:[-*+]|\d+[.)])\s/.test(text) || !/^\s/.test(text))
+            .map((text) => ({ body: text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim() }));
+    }
+
     // The last of the `count` lines that's nested under line `n` (n itself when none is)
     static subtreeEnd(lineAt, count, n) {
         const base = TrailingLinks.indent(lineAt(n));
@@ -259,7 +267,7 @@ class TrailingLinks {
             const TR = customJS.TimeReport;
             if (!index || !t.links.some((l) => l.kind === "note") || t.links.some((l) => l.kind === "project" || l.kind === "area")) return null;
             try {
-                const context = T.context((n) => doc.line(n).text, line.number).map((body) => ({ body }));
+                const context = T.reportContext(T.context((n) => doc.line(n).text, line.number));
                 const path = TR.resolve(context, sourcePath, index, true);
                 return path ? nameOf(app.vault.getFileByPath(path), path) : null;
             } catch (e) {

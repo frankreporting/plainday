@@ -24,16 +24,8 @@ test("afterCheckbox: the column right after the checkbox and its space, for any 
     assert.equal(add.afterCheckbox("Just text"), 0);
 });
 
-test("taskLink: the selection, then a 🗒️ link to the note, ending the line with no trailing space", () => {
-    assert.equal(add.taskLink("Call the printer", "Call the printer"), "Call the printer [[Call the printer|🗒️]]");
-    assert.equal(add.taskLink("Call the printer", "Call the printer", ""), "Call the printer [[Call the printer|🗒️]]");
-    // The link follows the note's final name, which can differ (the Task template drops dates)
-    assert.equal(add.taskLink("2026-10-01 Call the printer", "Call the printer"), "2026-10-01 Call the printer [[Call the printer|🗒️]]");
-    // or be a path when the name alone is ambiguous
-    assert.equal(add.taskLink("Budget", "Projects/Home/Budget"), "Budget [[Projects/Home/Budget|🗒️]]");
-    // A name selected mid-line: one space keeps the link off the text after it, but not doubled
-    assert.equal(add.taskLink("Budget", "Budget", "for Q4"), "Budget [[Budget|🗒️]] ");
-    assert.equal(add.taskLink("Budget", "Budget", " for Q4"), "Budget [[Budget|🗒️]]");
+test("spacer: a space before text that follows a blank link, none before whitespace or the end", () => {
+    assert.equal(add.spacer("for Q4"), " ");
     assert.equal(add.spacer(""), "");
     assert.equal(add.spacer("\t…"), "");
 });
@@ -90,6 +82,9 @@ test("target: with nothing selected, text after the cursor means use the line's 
     assert.deepEqual(t("- [ ] ", 6), { kind: "task", mode: "blank" }, "an empty task at its end");
     // Dates stay in the name here; noteFor turns them into the due date
     assert.equal(name("\t- [ ] 2026-11-01 Plan the offsite", 10), "2026-11-01 Plan the offsite");
+    // A block ID at the end isn't part of the name
+    assert.equal(name("- [ ] Order toner ^abc123", 8), "Order toner");
+    assert.equal(t("- [<] 2:00pm\tReview ^mtg1", 8).name, "Review");
     // Nothing to use
     for (const mark of ["🗒️", "🗒", "🔗", "🔗\uFE0F"]) assert.ok(t(`- [ ] Call the bank [[Call the bank|${mark}]]`, 8).error, `already linked (${mark})`);
     // With the cursor at the end, too: no second, blank link (fix round 6)
@@ -124,31 +119,88 @@ test("target: on an event line the time is skipped and the title is used", () =>
     }
 });
 
-test("eventLine: the log link goes after the title and its marks, before the ⭕ or 🗃️ links that end the line (OBS-57)", () => {
+test("eventLine: the log link ends the line, after the title, its marks and any ⭕ or 🗃️ links (OBS-57, OBS-90)", () => {
     assert.equal(add.eventLine("- [<] 9:00am\tStandup", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]]");
     assert.equal(add.eventLine("- [<] 9:00am\tStandup   ", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]]");
     assert.equal(add.eventLine("- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]]", "Delivery window", "2026-09-14"),
-        "- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[2026-09-14 Delivery window|🗒️]] [[Hawk Ledger|⭕]] [[Home|🗃️]]");
+        "- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]] [[2026-09-14 Delivery window|🗒️]]");
     assert.equal(add.eventLine("\t- [<] All day\tOffsite [[Hawk Ledger|⭕]]", "Offsite", "2026-09-14"),
-        "\t- [<] All day\tOffsite [[2026-09-14 Offsite|🗒️]] [[Hawk Ledger|⭕]]");
+        "\t- [<] All day\tOffsite [[Hawk Ledger|⭕]] [[2026-09-14 Offsite|🗒️]]");
     // A selected name names the log; the link still goes at the end
     assert.equal(add.eventLine("- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]]", "Weekly sync", "2026-09-14"),
-        "- [<] 1:00pm\tWeekly sync with the studio [[2026-09-14 Weekly sync|🗒️]] [[Hawk Ledger|⭕]]");
+        "- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]] [[2026-09-14 Weekly sync|🗒️]]");
     // A person linked in the title stays in the title
     assert.equal(add.eventLine("- [<] 1:00pm\tLunch with [[Rafe Oakes]]", "Lunch with", "2026-09-14"), "- [<] 1:00pm\tLunch with [[Rafe Oakes]] [[2026-09-14 Lunch with|🗒️]]");
+    // An existing log's link text (a path, when its name isn't unique)
+    assert.equal(add.eventLine("- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]]", "Standup", "2026-09-14", "Projects/Hawk/logs/2026-09-14 Standup"),
+        "- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]] [[Projects/Hawk/logs/2026-09-14 Standup|🗒️]]");
     // Already linked, either way: nothing to add
     assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\tStandup [[2026-09-14 Standup|🔗]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
     assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
 });
 
-test("lineWithLink: task text without its dates, existing links kept, the 🗒️ link last", () => {
+test("withHome: the project or area link goes before the note links that end the line, replacing the ones given (OBS-90)", () => {
+    const H = "[[Hawk Ledger|⭕]]";
+    assert.equal(add.withHome("- [ ] Order toner", H), "- [ ] Order toner [[Hawk Ledger|⭕]]", "no note link: at the end");
+    assert.equal(add.withHome("- [ ] Order toner [[Order toner|🗒️]]", H), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
+    assert.equal(add.withHome("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|🗒️]]", H), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "after a due date");
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "replacing another");
+    assert.equal(add.withHome("- [ ] Order toner [[Order toner|🔗]] [[Tin|⭕]]  ", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]]", "the older order comes out in the new one");
+    assert.equal(add.withHome("- [ ] Sub [[Sub|🗒️]] [[Parent note|🗒️]]", H), "- [ ] Sub [[Hawk Ledger|⭕]] [[Sub|🗒️]] [[Parent note|🗒️]]", "before every note link at the end");
+    assert.equal(add.withHome("- [ ] Read [[Notes|🗒️]] then call", H), "- [ ] Read [[Notes|🗒️]] then call [[Hawk Ledger|⭕]]", "a note link in the text isn't the end");
+    assert.equal(add.withHome("\t- [<] 2:00pm\tReview ℹ️ [[2026-09-14 Review|🗒️]]", "[[Home|🗃️]]"), "\t- [<] 2:00pm\tReview ℹ️ [[Home|🗃️]] [[2026-09-14 Review|🗒️]]", "an event, an area");
+    assert.equal(add.withHome("- [ ] [[Order toner|🗒️]]", H), "- [ ] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
+    // No link: only what's given comes off
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]] ", null), "- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]");
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]", null, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Order toner|🗒️]]");
+    // A 🚩 after the 🗒️ stays where it is; the ⭕ goes before the 🗒️ (OBS-90 review)
+    assert.equal(add.withHome("- [x] Pay it [[Pay it|🗒️]] [[2026-09-14|🚩 9/14]]", H), "- [x] Pay it [[Hawk Ledger|⭕]] [[Pay it|🗒️]] [[2026-09-14|🚩 9/14]]");
+    assert.equal(add.withHome("- [x] Pay it 🆓 [[Pay it|🗒️]]", H), "- [x] Pay it 🆓 [[Hawk Ledger|⭕]] [[Pay it|🗒️]]");
+    // A block ID stays last, where Obsidian reads it
+    assert.equal(add.withHome("- [x] Task [[Task|🗒️]] ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] [[Task|🗒️]] ^abc123");
+    assert.equal(add.withHome("- [x] Task ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] ^abc123");
+    // An event's tab after its time isn't eaten, even with no title before the note link
+    assert.equal(add.withHome("- [<] 9:00am\t[[Task A|🗒️]]", H), "- [<] 9:00am\t [[Hawk Ledger|⭕]] [[Task A|🗒️]]");
+    // homed: what noteFor found decides
+    assert.equal(add.homed("- [ ] A [[Tin|⭕]] [[Other|⭕]]", { homeLink: H, projectLinks: ["[[Tin|⭕]]", "[[Other|⭕]]"] }), "- [ ] A [[Hawk Ledger|⭕]]");
+    assert.equal(add.homed("- [ ] A [[Tin|⭕]]", { homeLink: null, projectLinks: ["[[Tin|⭕]]"] }), "- [ ] A [[Tin|⭕]]", "no home to name: the line's own links stay");
+    assert.equal(add.homed("- [ ] A [[Tin|⭕]]", { homeLink: null, clear: true, projectLinks: ["[[Tin|⭕]]"] }), "- [ ] A", "unless they'd disagree with where the note was left");
+});
+
+test("trailingNote and endWith: the note link in the run that ends a line; a link added at the end goes before a block ID", () => {
+    assert.equal(add.trailingNote("- [ ] A [[P|⭕]] [[Note A|🗒️]]"), "Note A");
+    assert.equal(add.trailingNote("- [ ] A [[Note A#Notes|🔗]] [[2026-09-30|🚩 9/30]] ^x1"), "Note A");
+    assert.equal(add.trailingNote("- [ ] Sub [[Sub|🗒️]] [[Parent|🗒️]]"), "Sub", "the first of several");
+    assert.equal(add.trailingNote("- [ ] Read [[Note A|🗒️]] then call"), null, "not at the end");
+    assert.equal(add.trailingNote("- [ ] A [[P|⭕]]"), null);
+    // Only the ⭕ links that end a line are its own (OBS-90): one in the text is part of the title
+    const own = (line) => JSON.parse(JSON.stringify(add.trailingProjectLinks(line))).map((l) => l.linkpath);
+    assert.deepEqual(own("- [ ] Ask [[Tin|⭕]] about [[Hawk|⭕]] [[Note|🗒️]] ^x1"), ["Hawk"]);
+    assert.deepEqual(own("- [ ] A [[2026-09-30|🚩 9/30]] [[Tin|⭕]] [[Home|🗃️]] [[Note|🗒️]]"), ["Tin", "Home"]);
+    assert.deepEqual(own("- [ ] A [[Tin|⭕ Tin]] [[Note|🗒️]]"), [], "a ⭕ with a name after it isn't one, as the report reads it");
+    assert.equal(add.endWith("- [ ] A [[P|⭕]]  ", "[[A|🗒️]]"), "- [ ] A [[P|⭕]] [[A|🗒️]]");
+    assert.equal(add.endWith("- [ ] A ^x1", "[[A|🗒️]]"), "- [ ] A [[A|🗒️]] ^x1");
+    // With a selection, the name is the selection, and the note link still ends the line (OBS-90 review)
+    const line = "- [ ] Draft wireframes for the homepage [[Tin|⭕]]";
+    assert.equal(add.lineWithLink(line, { from: 6, to: 22 }, { name: "Draft wireframes", linktext: "Draft wireframes", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Tin|⭕]]"] }),
+        "- [ ] Draft wireframes for the homepage [[Hawk Ledger|⭕]] [[Draft wireframes|🗒️]]");
+});
+
+test("lineWithLink: task text without its dates, the note's project in place of the line's ⭕, the 🗒️ link last (OBS-90)", () => {
     const line = "- [ ] 2026-11-01 Plan the offsite [[Hawk Ledger|⭕]]  ";
     const target = add.target(line, 8);
-    assert.equal(add.lineWithLink(line, target, { name: "Plan the offsite", linktext: "Plan the offsite" }),
-        "- [ ] Plan the offsite [[Hawk Ledger|⭕]] [[Plan the offsite|🗒️]]");
+    const kept = { name: "Plan the offsite", linktext: "Plan the offsite", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Hawk Ledger|⭕]]"] };
+    assert.equal(add.lineWithLink(line, target, kept), "- [ ] Plan the offsite [[Hawk Ledger|⭕]] [[Plan the offsite|🗒️]]");
+    const left = { ...kept, homeLink: "[[Tin Works|⭕]]" };
+    assert.equal(add.lineWithLink(line, target, left), "- [ ] Plan the offsite [[Tin Works|⭕]] [[Plan the offsite|🗒️]]", "the note stayed in Tin Works");
     const plain = "\t- [/] Order new toner";
-    assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner" }),
-        "\t- [/] Order new toner [[Order new toner|🗒️]]");
+    assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
+        "\t- [/] Order new toner [[Household|🗃️]] [[Order new toner|🗒️]]", "a line with no ⭕ gets the note's");
+    assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: null, projectLinks: [] }),
+        "\t- [/] Order new toner [[Order new toner|🗒️]]", "a note with no project or area");
+    const date = "- [ ] Pay rent [[2026-10-01|🚩 10/1]]";
+    assert.equal(add.lineWithLink(date, add.target(date, 7), { name: "Pay rent", linktext: "Pay rent", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
+        "- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]] [[Pay rent|🗒️]]", "the 🚩, then the ⭕, then the 🗒️");
 });
 
 test("eventLink: a meeting log named with the day's date, as a 🗒️ note link; blank, it waits for the name", () => {
@@ -199,6 +251,12 @@ test("withoutLinks: takes the project link out and closes the gap, keeping inden
     assert.equal(add.withoutLinks("- [<] 9:00am\tQ3  review [[P|⭕]]", ["[[P|⭕]]"]), "- [<] 9:00am\tQ3  review", "spacing elsewhere on the line is kept");
     const untouched = "- [ ] A  [[P|⭕]] [[A|🔗]]";
     assert.equal(add.withoutLinks(untouched, []), untouched, "nothing to remove: the line isn't touched at all");
+    // Text that touched the link keeps a space from its other side, so a 🆓 stays a word of its own
+    assert.equal(add.withoutLinks("- [x] Do it [[P|⭕]]🆓 [[A|🗒️]]", ["[[P|⭕]]"]), "- [x] Do it 🆓 [[A|🗒️]]");
+    assert.equal(add.withoutLinks("- [x] Do[[P|⭕]]it", ["[[P|⭕]]"]), "- [x] Do it");
+    // but none before punctuation or after an opening bracket
+    assert.equal(add.withoutLinks("- [ ] Call [[P|⭕]], then", ["[[P|⭕]]"]), "- [ ] Call, then");
+    assert.equal(add.withoutLinks("- [ ] Call ([[P|⭕]]) now", ["[[P|⭕]]"]), "- [ ] Call () now");
 });
 
 test("takePresetParent: the parent goes only to the note it was picked for, and only once", () => {
@@ -234,13 +292,6 @@ test("pickParent: skips the menu for the preset note only, and shows it for ever
     assert.equal(await load({})(tp("10 Inbox/X.md"), () => true, "?"), "FROM MENU");
 });
 
-test("noteFor: one link per line: every ⭕ comes off once the note is linked, and a project or area note is never moved", () => {
-    const source = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    assert.match(source, /projectLinks: line\.links,/, "all of the line's ⭕ links are handed back to be removed");
-    assert.ok(!/reconcile\(/.test(source), "no partial rule remains");
-    assert.match(source, /!this\.isHome\(existing\) && !line\.projects\.includes\(noteHome\)/, "a folder note stays put; a note already in the line's project stays put");
-    assert.match(source, /choice = await this\.confirmMove\(existing, noteHome, home\)/, "leaving a project or area asks first");
-});
 
 test("linktextFor: the note's name, or its path only when another note really shares the name", () => {
     const note = { path: "Projects/Freelance/Hawk/Check the numbers.md", basename: "Check the numbers" };
@@ -321,13 +372,19 @@ test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter move
 
 // A stand-in `app` with notes at `paths`, each file carrying its own metadata cache
 const withApp = (paths, extra = {}) => {
+    // Folders know their parents, so a note's project can be found by climbing them
+    const folders = new Map();
+    const folder = (path) => {
+        if (!path) return { path: "/", name: "", parent: null };
+        if (!folders.has(path)) folders.set(path, { path, name: path.split("/").pop(), parent: folder(path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "") });
+        return folders.get(path);
+    };
     const files = paths.map(([path, tags]) => {
         const name = path.split("/").pop();
-        const parentPath = path.slice(0, path.lastIndexOf("/"));
-        return { path, name, basename: name.replace(/\.md$/, ""), extension: "md", parent: { path: parentPath, name: parentPath.split("/").pop() }, cache: { frontmatter: { tags } } };
+        return { path, name, basename: name.replace(/\.md$/, ""), extension: "md", parent: folder(path.slice(0, path.lastIndexOf("/"))), cache: { frontmatter: { tags } } };
     });
     const app = {
-        vault: { getMarkdownFiles: () => files, getAbstractFileByPath: (p) => files.find((f) => f.path === p) ?? null, getAbstractFileByPathInsensitive: (p) => files.find((f) => f.path.toLowerCase() === p.toLowerCase()) ?? null },
+        vault: { getMarkdownFiles: () => files, getFileByPath: (p) => files.find((f) => f.path === p) ?? null, getAbstractFileByPath: (p) => files.find((f) => f.path === p) ?? null, getAbstractFileByPathInsensitive: (p) => files.find((f) => f.path.toLowerCase() === p.toLowerCase()) ?? null },
         metadataCache: { getFileCache: (f) => f.cache ?? null },
         ...extra,
     };
@@ -364,10 +421,10 @@ test("isSameNote: the note itself, its current path, or the path it was just mov
 
 test("a note just moved isn't mistaken for a clash or another note (AddTaskNote's link text, AddProjectLink's check)", () => {
     const addTaskNote = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    assert.match(addTaskNote, /movedFrom = existing\.path;\n\s*if \(choice === "move" && !\(await this\.moveInto\(existing, home\)\)\)/);
+    assert.match(addTaskNote, /const movedFrom = existing\.path;\n\s*if \(!\(await this\.moveInto\(existing, pick\)\)\) return null;/);
     assert.match(addTaskNote, /\.filter\(\(p\) => p !== movedFrom\)/, "the old path isn't counted as a second note of that name");
     const addProjectLink = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
-    assert.match(addProjectLink, /const movedFrom = note\.path;\n\s*if \(!\(await helper\.moveInto\(note, home\)\)\) return;/);
+    assert.match(addProjectLink, /const movedFrom = note\.path;\n\s*if \(!\(await helper\.moveInto\(note, home, \{ line \}\)\)\) return;/);
     assert.match(addProjectLink, /helper\.isSameNote\(this\.taskNoteOf\(before, source\.path\), note, movedFrom\)/);
 });
 
@@ -408,7 +465,7 @@ test("moveInto: a clash is refused before anything is made; a log from the Inbox
     });
     app.vault.createFolder = async (p) => made.push(p);
     const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app, Notice: class { constructor(m) { notices.push(m); } } }));
+        vm.createContext({ app, customJS: {}, Notice: class { constructor(m) { notices.push(m); } } }));
     const helper = new Cls();
     assert.equal(await helper.moveInto(files[2], files[0]), false);
     assert.deepEqual(notices, ["Projects/A already has a note named Order toner, so nothing changed"]);
@@ -417,91 +474,92 @@ test("moveInto: a clash is refused before anything is made; a log from the Inbox
     assert.deepEqual(renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/A/logs/2026-09-18 Printer call.md"]]);
 });
 
-test("invoke on an event line: wherever the cursor is, the log is named from the title and linked before the ⭕; a line already linked is refused", async () => {
-    const source = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    const invoke = async (line, ch = line.length) => {
-        const notices = [];
-        let text = line, cursor = null;
-        const editor = {
-            getSelection: () => "",
-            getCursor: () => ({ line: 0, ch }),
-            getLine: () => text,
-            replaceRange: (s, from, to) => { text = text.slice(0, from.ch) + s + text.slice(to.ch); },
-            setCursor: (c) => { cursor = c; },
-            transaction: ({ replaceSelection, selection }) => { text = text.slice(0, ch) + replaceSelection + text.slice(ch); cursor = selection.from; },
-        };
-        const Cls = vm.runInContext(source + "\n;AddTaskNote", vm.createContext({
-            // The log already exists, so only the line is at stake here (making the log: the next test)
-            app: {
-                workspace: { activeLeaf: { view: { editor } }, getActiveFile: () => ({ basename: "2026-09-14", path: "days/2026-09-14.md" }) },
-                metadataCache: { getFirstLinkpathDest: () => ({ path: "P/logs/2026-09-14 Kickoff call.md" }) },
-            },
-            Notice: class { constructor(message) { notices.push(message); } },
-        }));
-        await new Cls().invoke();
-        return { text, cursor: cursor && { ...cursor }, notices };
+// A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a Log template that
+// records what it's asked to make
+const invokeOn = async (line, { ch = line.length, paths = [], template = true, sel = null } = {}) => {
+    const calls = [];
+    let text = line, cursor = null;
+    const { files, app } = withApp(paths);
+    const editor = {
+        getSelection: () => (sel ? line.slice(sel[0], sel[1]) : ""),
+        getCursor: (which) => ({ line: 0, ch: sel ? (which === "to" ? sel[1] : sel[0]) : ch }),
+        getLine: () => text,
+        replaceRange: (s, from, to) => { calls.push("write line"); text = text.slice(0, from.ch) + s + text.slice(to.ch); },
+        setCursor: (c) => { cursor = c; },
+        transaction: ({ replaceSelection, selection }) => { calls.push("write line"); text = text.slice(0, ch) + replaceSelection + text.slice(ch); cursor = selection.from; },
     };
+    const view = { editor, save: async () => { calls.push("save"); } };
+    const tpl = { path: "00 Meta/01 Templates/Log.md" };
+    Object.assign(app, {
+        workspace: { activeLeaf: { view }, getActiveFile: () => ({ basename: "2026-09-14", path: "days/2026-09-14.md" }) },
+        plugins: { plugins: template ? { "templater-obsidian": { templater: {
+            create_new_note_from_template: async (t, folder, name, open) => { calls.push(`template ${t.path} in ${folder}: ${name} (open: ${open})`); return { path: `${folder}/${name}.md` }; },
+        } } } : {} },
+    });
+    app.vault.createFolder = async (p) => { calls.push(`folder ${p}`); };
+    app.fileManager = { renameFile: async (f, to) => {
+        calls.push(`move ${f.path} to ${to}`);
+        f.path = to;
+        f.parent = files.find((g) => g.path.startsWith(to.slice(0, to.lastIndexOf("/")).replace(/\/logs$/, "")))?.parent ?? f.parent;
+    } };
+    const getFileByPath = app.vault.getFileByPath;
+    app.vault.getFileByPath = (p) => (p === tpl.path ? tpl : getFileByPath(p));
+    app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({
+        app, customJS: {}, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+    }));
+    await new Cls().invoke();
+    return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
+};
+const HAWK = [["Projects/Freelance/Hawk Ledger/Hawk Ledger.md", ["project"]], ["Projects/Freelance/Freelance.md", ["area"]]];
+
+test("invoke on an event line: wherever the cursor is, the log is named from the title and linked at the end, after the ⭕; a line already linked is refused", async () => {
     const ev = "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]";
     for (const ch of [ev.length, 8, 0]) {
-        const named = await invoke(ev, ch);
-        assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[2026-09-14 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]", `cursor at ${ch}`);
+        const named = await invokeOn(ev, { ch, paths: HAWK });
+        assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]", `cursor at ${ch}`);
         assert.deepEqual(named.notices, [], `cursor at ${ch}`);
     }
     // An event with no title has nothing to name its log after, and the line is left alone
-    const untitled = await invoke("- [<] 1:30pm\t");
+    const untitled = await invokeOn("- [<] 1:30pm\t");
     assert.equal(untitled.text, "- [<] 1:30pm\t");
     assert.deepEqual(untitled.notices, ["This event has no title to name its log"]);
     for (const linked of ["- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]]", "- [<] 1:30pm\t[[2026-09-14 Kickoff call|Kickoff call]]  ", "- [<] Printer call [[2026-09-18 Printer call|🔗]] [[Hawk Ledger|⭕]]"]) {
-        const refused = await invoke(linked);
+        const refused = await invokeOn(linked);
         assert.equal(refused.text, linked, linked);
         assert.deepEqual(refused.notices, ["This event already links a log"], linked);
     }
     // The cursor in the title: the log is named from it, and the cursor goes after the checkbox
-    const named = await invoke(ev, 16);
-    assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[2026-09-14 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]");
+    const named = await invokeOn(ev, { ch: 16, paths: HAWK });
+    assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
     assert.deepEqual(named.cursor, { line: 0, ch: 6 });
 });
 
-test("invoke on an event line makes the log right away through the Log template, after saving the line, unless it exists (OBS-57)", async () => {
-    const source = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    const invoke = async (line, { ch = 16, existing = null } = {}) => {
-        const calls = [];
-        let text = line;
-        const editor = {
-            getSelection: () => "",
-            getCursor: () => ({ line: 0, ch }),
-            getLine: () => text,
-            replaceRange: (s, from, to) => { calls.push("write line"); text = text.slice(0, from.ch) + s + text.slice(to.ch); },
-            setCursor: () => {},
-            transaction: ({ replaceSelection }) => { calls.push("write line"); text = text.slice(0, ch) + replaceSelection + text.slice(ch); },
-        };
-        const view = { editor, save: async () => { calls.push("save"); } };
-        const template = { path: "00 Meta/01 Templates/Log.md" };
-        const Cls = vm.runInContext(source + "\n;AddTaskNote", vm.createContext({
-            app: {
-                workspace: { activeLeaf: { view }, getActiveFile: () => ({ basename: "2026-09-14", path: "days/2026-09-14.md" }) },
-                vault: { getFileByPath: (p) => (p === template.path ? template : null) },
-                metadataCache: { getFirstLinkpathDest: (name) => (name === existing ? { path: `P/logs/${name}.md` } : null) },
-                plugins: { plugins: { "templater-obsidian": { templater: {
-                    create_new_note_from_template: async (tpl, folder, name, open) => { calls.push(`template ${tpl.path} in ${folder}: ${name} (open: ${open})`); return { path: `${folder}/${name}.md` }; },
-                } } } },
-            },
-            Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
-        }));
-        await new Cls().invoke();
-        return { text, calls };
-    };
+test("invoke on an event line makes the log right away through the Log template, after saving the line (OBS-57)", async () => {
     const ev = "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]]";
-    const made = await invoke(ev);
-    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]", "the Log template takes the ⭕ off once it has filed the log");
+    const made = await invokeOn(ev, { ch: 16, paths: HAWK });
+    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]", "the ⭕ stays, and the Log template files the log there");
     assert.deepEqual(made.calls, ["write line", "save", "template 00 Meta/01 Templates/Log.md in 10 Inbox: 2026-09-14 Kickoff call (open: false)"]);
-    // A log by that name already: the line links it, and nothing is made
-    assert.deepEqual((await invoke(ev, { existing: "2026-09-14 Kickoff call" })).calls, ["write line"]);
     // The cursor at the end of the line makes it just the same (fix round 2); a line with no title,
     // or one that's refused, makes nothing
-    assert.deepEqual((await invoke(ev, { ch: ev.length })).calls, ["write line", "save", "template 00 Meta/01 Templates/Log.md in 10 Inbox: 2026-09-14 Kickoff call (open: false)"]);
-    assert.ok(!(await invoke("- [<] 1:30pm\t", { ch: "- [<] 1:30pm\t".length })).calls.some((c) => c.startsWith("template")));
-    assert.deepEqual((await invoke("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]]")).calls, ["notice: This event already links a log"]);
+    assert.deepEqual((await invokeOn(ev, { paths: HAWK })).calls, made.calls);
+    assert.ok(!(await invokeOn("- [<] 1:30pm\t")).calls.some((c) => c.startsWith("template")));
+    assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]]")).calls, ["notice: This event already links a log"]);
+});
+
+test("invoke on an event line whose log exists: nothing is made, and the line and the log agree on its project (OBS-90)", async () => {
+    const LOG = "Projects/Freelance/Hawk Ledger/logs/2026-09-14 Kickoff call.md";
+    const paths = [...HAWK, [LOG, ["log"]], ["Projects/Freelance/Tin Works/Tin Works.md", ["project"]], ["10 Inbox/2026-09-14 Printer call.md", ["log"]]];
+    // No ⭕ on the line: it gets the log's project, before the 🗒️
+    const plain = await invokeOn("- [<] 1:30pm\tKickoff call", { paths });
+    assert.equal(plain.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
+    assert.ok(!plain.calls.some((c) => c.startsWith("template") || c === "save"), "the log isn't made again");
+    // The line already names the log's project: kept
+    assert.equal((await invokeOn("- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]", { paths })).text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
+    // A log in the Inbox has no project: the line's ⭕ files it there without asking
+    const inbox = await invokeOn("- [<] 11:00am\tPrinter call [[Tin Works|⭕]]", { paths });
+    assert.equal(inbox.text, "- [<] 11:00am\tPrinter call [[Tin Works|⭕]] [[2026-09-14 Printer call|🗒️]]");
+    assert.ok(inbox.calls.includes("move 10 Inbox/2026-09-14 Printer call.md to Projects/Freelance/Tin Works/logs/2026-09-14 Printer call.md"), inbox.calls.join("\n"));
 });
 
 test("an event time with nothing after it is a line with no title; a title a file can't be named after makes a log name that works (fix round 4)", () => {
@@ -516,5 +574,12 @@ test("an event time with nothing after it is a line with no title; a title a fil
     assert.equal(add.logName("Plain title"), "Plain title");
     // The title on the line stays as the calendar wrote it; only the log's name changes
     assert.equal(add.eventLine("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", "Sync: Q3 plan", "2026-09-14"),
-        "- [<] 1:30pm\tSync: Q3 plan [[2026-09-14 Sync - Q3 plan|🗒️]] [[Hawk Ledger|⭕]]");
+        "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|🗒️]]");
+});
+
+test("invoke with a selection: its spaces stay, so the words around it don't run together; the 🗒️ ends the line (OBS-90 review)", async () => {
+    const paths = [...HAWK, ["Projects/Freelance/Hawk Ledger/Call the printer.md", ["task"]]];
+    const line = "- [ ] Call the printer tomorrow";
+    const out = await invokeOn(line, { sel: [6, "- [ ] Call the printer ".length], paths });
+    assert.equal(out.text, "- [ ] Call the printer tomorrow [[Hawk Ledger|⭕]] [[Call the printer|🗒️]]");
 });

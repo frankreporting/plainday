@@ -12,17 +12,17 @@ class AddProjectLink {
 
     // On a task or event line: pick a project or area from the menu and link it at the end of the
     // line as [[Project|⭕]] or [[Area|🗃️]], the forms the time report and the calendar sync read.
-    // It's for tying a line's time to a project when the task doesn't need a note of its own. Esc
-    // cancels and nothing changes; the cursor ends up right after the checkbox, as after *Add task
+    // Esc cancels and nothing changes; the cursor ends up right after the checkbox, as after *Add task
     // note*.
     //
-    // One link per line says where its time counts: a ⭕ or 🗃️, or a 🗒️ task note filed in its
-    // project (OBS-36). So a ⭕ or 🗃️ the line already has is replaced, and with a 🗒️ task note on the line the
-    // note is moved into the picked project instead, and no ⭕ is added: without asking when the
-    // note has no project or area yet, after a confirm when it's leaving one (its project is
-    // shared by every line that links it). A note already in the picked project needs nothing.
-    // The ⭕ ends the line with no trailing space; on an event line that's where the sync expects
-    // it, after the title, a log link or the ℹ️ mark.
+    // A line and its note agree on where the time counts (OBS-90), so a ⭕ or 🗃️ the line already
+    // has is replaced, and with a 🗒️ note on the line (a task's note, an event's log) the note moves
+    // into the picked project too. When that's in doubt it asks first (confirmMove): the note is
+    // filed in another project or area, or other lines link it and would follow it. Leave it
+    // changes nothing. A note already in the picked project needs only the ⭕; a same-named note
+    // already there is linked instead. The ⭕ goes before the note link, which ends the line, and
+    // otherwise at the end, with no trailing space; on an event line that's where the sync expects
+    // it, after the title and the ℹ️ mark.
     async invoke() {
         const helper = customJS.AddTaskNote;
         const editor = app.workspace.activeLeaf?.view?.editor;
@@ -44,34 +44,43 @@ class AddProjectLink {
             return;
         }
 
-        const link = helper.homeLink(home, helper.linktextFor(home, app.vault.getMarkdownFiles().map((f) => f.path)));
-        const withoutProjects = (text) => helper.withoutLinks(text, helper.projectLinks(text).map((l) => l.raw));
+        const paths = () => app.vault.getMarkdownFiles().map((f) => f.path);
+        const link = helper.homeLink(home, helper.linktextFor(home, paths()));
         const note = this.taskNoteOf(lineText, source.path);
         let before = lineText, linked;
         if (note) {
-            const noteHome = helper.homeOf(note);
-            if (noteHome === home) {
-                linked = withoutProjects(lineText);
-                new Notice(linked === lineText
-                    ? `${note.basename} is already in ${home.basename}`
-                    : `${note.basename} is in ${home.basename}, so the other project link came off`);
+            // Where it's filed, a finished project included
+            const noteHome = helper.filedIn(note);
+            if (noteHome === home || note.parent?.path === helper.folderFor(note, home)) {
+                // Already there, or in the folder the pick files into (a project note that isn't its
+                // folder's own note): only the ⭕
+                linked = this.placed(lineText, link);
+                if (linked === lineText) new Notice(`${note.basename} is already in ${home.basename}`);
+            } else if (customJS.MoveToProject?.kept?.(note.path)) {
+                // The system, the periodic notes and archived work are never moved
+                linked = this.placed(lineText, link);
+                new Notice(`${note.basename} stays where it is, since nothing there is moved; the line links ${home.basename}`);
             } else if (helper.sameNameIn(note, home)) {
                 // The picked home already has a note of that name: point the line at it and leave
                 // this one where it is
                 const twin = helper.sameNameIn(note, home);
-                linked = withoutProjects(this.relinked(lineText, helper.linktextFor(twin, app.vault.getMarkdownFiles().map((f) => f.path))));
+                linked = this.placed(this.relinked(lineText, helper.linktextFor(twin, paths())), link);
                 new Notice(`Linked the ${twin.basename} already in ${home.basename}; the one in ${note.parent?.path || "the vault root"} was left alone`);
             } else {
-                if (noteHome) {
+                if (noteHome || await this.shared(note, source.path, line, editor)) {
                     const choice = await helper.confirmMove(note, noteHome, home);
                     if (!choice) return helper.cancelled();
                     if (choice === "leave") {
-                        new Notice(`${note.basename} stays in ${noteHome.basename}, so nothing changed`);
+                        new Notice(`${note.basename} stays ${noteHome ? `in ${noteHome.basename}` : "where it is"}, so nothing changed`);
+                        return;
+                    }
+                    if (editor.getLine(line) !== lineText) {
+                        new Notice("The line changed while you were asked, so nothing was moved");
                         return;
                     }
                 }
                 const movedFrom = note.path;
-                if (!(await helper.moveInto(note, home))) return;
+                if (!(await helper.moveInto(note, home, { line }))) return;
                 await customJS.SyncArea?.sync?.(note, false);
                 // The move can rewrite the 🗒️ link's text (a path, when the name isn't unique), so
                 // the line is read again, and only the link may differ
@@ -80,8 +89,8 @@ class AddProjectLink {
                     new Notice(`${note.basename} moved, but the line changed, so its ⭕ links were left`);
                     return;
                 }
-                // A project note that isn't a folder note can't hold the note, so the line keeps a ⭕
-                linked = helper.homeOf(note) === home ? withoutProjects(before) : this.placed(before, link);
+                // Also when a project note that isn't a folder note couldn't take the note in
+                linked = this.placed(before, link);
             }
         } else {
             linked = this.placed(lineText, link);
@@ -93,11 +102,27 @@ class AddProjectLink {
         editor.setCursor({ line, ch: helper.afterCheckbox(editor.getLine(line)) });
     }
 
-    // The line with `link` as its one ⭕ or 🗃️, at the end with no trailing space: any it had come off
+    // The line with `link` as its one ⭕ or 🗃️, before the note link that ends it, or at the end
+    // with no trailing space: any it had come off
     placed(lineText, link) {
         const helper = customJS.AddTaskNote;
-        const bare = helper.withoutLinks(lineText, helper.projectLinks(lineText).map((l) => l.raw));
-        return `${bare.trimEnd()} ${link}`;
+        return helper.withHome(lineText, link, helper.projectLinks(lineText).map((l) => l.raw));
+    }
+
+    // Whether a checklist line other than `line` (of the note at `sourcePath`, open in `editor`)
+    // links `note` as its own note: that line's time moves with the note, so it's asked first
+    async shared(note, sourcePath, line, editor) {
+        const helper = customJS.AddTaskNote;
+        const linksIt = (text, from, skip = null) => text.split("\n").some((t, i) => {
+            if (i === skip || !helper.constructor.CHECKBOX.test(t)) return false;
+            const linkpath = this.taskLinkpath(t);
+            return !!linkpath && helper.isSameNote(app.metadataCache.getFirstLinkpathDest(linkpath, from), note);
+        });
+        if (linksIt(editor.getValue(), sourcePath, line)) return true;
+        for (const f of customJS.MoveToProject?.linkingNotes?.(note) ?? []) {
+            if (f.path !== sourcePath && linksIt(await app.vault.cachedRead(f), f.path)) return true;
+        }
+        return false;
     }
 
     // Whether two lines differ at most in their note link's target (the 🗒️, or an event's title link),
@@ -124,12 +149,12 @@ class AddProjectLink {
     }
 
     // The note a line's link points at (a task's 🗒️ note, or an event's log), or null when there's
-    // none, it's broken, or it's a project or area note itself (Schedule links one from a line
-    // forwarded out of an area), which is never moved
+    // none, it's broken, or it's a project or area note itself, finished or not (Schedule links one
+    // from a line forwarded out of an area), which is never moved
     taskNoteOf(lineText, sourcePath) {
         const linkpath = this.taskLinkpath(lineText);
         const note = linkpath ? app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath) : null;
-        return note && !customJS.AddTaskNote.isHome(note) ? note : null;
+        return note && !customJS.AddTaskNote.isHomeNote(note) ? note : null;
     }
 
     // What to call the line in the menu: its text after the checkbox and an event's time, with
