@@ -22,6 +22,7 @@
     "CalendarSync",
     "CalendarSyncRange",
     "TimeReport",
+    "Invoice",
     "ToggleTimeEntry",
     "UpdateObsidianPM"
   ],

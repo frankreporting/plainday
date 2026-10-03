@@ -1,6 +1,6 @@
 # Obsidian PM
 
-An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, meeting logs, calendar events and time tracking with billing reports, built from Templater templates and CustomJS scripts.
+An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, meeting logs, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and CustomJS scripts.
 
 This repository **is** a vault: the system in `00 Meta/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference, not a plugin: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
 
@@ -20,7 +20,7 @@ This README covers trying it and installing it. **[The manual](<00 Meta/Manual.m
 6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *JumpToDate* `⌘J`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
-Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
+Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `00 Meta/02 Scripts/Style Settings/pm-invoice.css`, copied and turned on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
 
 The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
 
@@ -42,9 +42,12 @@ Projects/
     Freelance.md
     Kestrel Outfitters 2026/       a project: folder + folder note tagged #project
       Kestrel Outfitters 2026.md
+      Kestrel Outfitters 2026 timesheet.md   every entry, with its invoice (the time report writes it)
       Draft homepage wireframes.md a task note (#task)
       logs/                        meeting logs for the project
         2026-09-14 Homepage review with Imogen.md
+      invoices/                    the project's invoices
+        1001-KES.md
       Kestrel Fall Catalog/        a sub-project: a project folder inside a project
     Pinecrest Library Brochure/
   Household/                       an area with only task notes, and time of its own
@@ -138,7 +141,8 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | ConvertToProject | | Turns the selection into a new project folder and note |
 | CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
-| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes |
+| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note |
+| Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick; on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
 | UpdateObsidianPM | | Installs this repository's system files into your vault from a local clone (see below) |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
 

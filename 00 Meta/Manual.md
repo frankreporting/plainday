@@ -34,8 +34,10 @@ Projects/
     Freelance.md
     Kestrel Outfitters 2026/     a project: folder + folder note tagged #project
       Kestrel Outfitters 2026.md
+      Kestrel Outfitters 2026 timesheet.md   every entry, with its invoice (the time report writes it)
       Draft homepage wireframes.md   a task note (#task)
       logs/                      the project's meeting logs
+      invoices/                  the project's invoices (see Invoices)
       Kestrel Fall Catalog/      a sub-project: a project folder inside a project
   Household/                     an area with only task notes
 30 Reference/
@@ -80,7 +82,8 @@ Area and project names are yours; the top-level folders and `36 Planner` are wha
 
 - **🗃️ Areas** are folders inside `Projects`, each with a folder note of the same name tagged `#area` (`Projects/Freelance/Freelance.md`). They group projects, and can hold notes that belong to the area but to no one project, and time logged to the area itself (see *The time report*).
 - **⭕ Projects** are folders inside an area, or inside another project (a sub-project), each with a folder note tagged `#project`. They hold every note and task note for that project.
-- A project note's properties come from the Project template: `id`, `aliases`, `icon`, `color`, `tags`, `area`, `start`, `due`, `who`, `client`, `rate` and `rate_type`. `client`, `rate` and `rate_type` start empty, to be filled in rather than assumed. Two optional properties cap the work: `max_hours`, or `contract_max` (an amount, divided by the rate).
+- A project note's properties come from the Project template: `id`, `aliases`, `icon`, `color`, `tags`, `area`, `start`, `due`, `who`, `client`, `rate`, `rate_type`, `include_subprojects` and `billed_through`. `client`, `rate` and `rate_type` start empty, to be filled in rather than assumed. Two optional properties cap the work: `max_hours`, or `contract_max` (an amount, divided by the rate).
+- **For invoices** (see *Invoices*): `include_subprojects` (a checkbox, off by default) puts the sub-projects' time on the project's timesheet and invoices; `billed_through` (a date) says the project's time up to it was billed outside Obsidian. Three optional ones print on its invoices when set: `client_project_id` (as *Project ID*), `requested_by` and `terms`.
 - **Task notes** are notes tagged `#task` that give a task room for notes and sub-tasks. The task's line in a daily note always links its task note (see *Links at the end of a line*).
 - **`area`:** every note inside a project or area has an `area` property linking the nearest folder note above it. Moving notes or folders keeps it current (see *SyncArea*), and *MoveToProject* moves a note, a log or a whole project into another project or area.
 - **Meeting logs** keep their details as properties: `area`, `date`, `time`, `endTime`, `who`, `topic`, `series`, and sometimes `absent`, `guest`, `project` or `related`.
@@ -186,7 +189,8 @@ The **TimeReport** command writes summaries of the time logged in daily notes. O
 
 | Note | What it shows |
 | --- | --- |
-| Each project or area note with entries | Under `## Time tracking`: the summary (Entries, Billable, 🆓, Total, Exact, Max Hrs, Rate, Earned). With no sub-project time that's one row; otherwise a Project column with a row for the project's own time, one per sub-project, and a **Total** row that carries the project's Max Hrs. Then a week-by-week table of the time logged to the project directly (total first, then each week newest first, each week linking its weekly note), and Problems |
+| Each project or area note with entries | Under `## Time tracking`: the summary (Entries, Billable, 🆓, Total, Exact, Max Hrs, Rate, Earned). With no sub-project time that's one row; otherwise a Project column with a row for the project's own time, one per sub-project, and a **Total** row that carries the project's Max Hrs. Then a week-by-week table of the time logged to the project directly (total first, then each week newest first, each week linking its weekly note), a line linking its timesheet note, and Problems |
+| Each project or area's timesheet note | Every entry, in two tables: **Billable time** and **🆓 time** (see *Timesheets*). The note sits beside the project's note, named after it (`Kestrel Outfitters 2026 timesheet`); on the desktop, it's made when the project first has time |
 | Each weekly and monthly note for a period with entries | Under `## Time tracking`, each table under its own H3: **Totals**, the period's summary by project with an **All** row. A monthly note adds **By Week**: hours by week, a column per Sunday–Saturday week that overlaps the month, each header linking its weekly note (a straddling week counts only that month's days). A weekly note adds **By Day**: a row per project, a column per day (`Sun 9/13` … `Sat 9/19`, each linking its daily note). Then the period's **Problems**. On the desktop, missing weekly and monthly notes are created first; a phone only refreshes notes that exist |
 | Each yearly note | Under `## Time tracking`: an **Earned** table and an **Hours** table (billable + 🆓), each with a row per project (non-billable ones and Unassigned too), a column per month linking its monthly note, the year's total and an **All** row; then Problems |
 
@@ -194,9 +198,9 @@ Weeks run Sunday to Saturday, the same weeks Notebook Navigator names `2026w38`.
 
 - **The block:** each report sits between `%% time:start %%` and `%% time:end %%`. A run replaces only that block, and only when the numbers changed; the *Updated* line says when they last did. Text outside the block (an `## Invoices` section, say) and folds stay. `## Time tracking` stays at the end of the note, with a blank line above it, and is added back if it goes missing; so tasks can go at the top of weekly, monthly and yearly notes, but nothing goes below the report.
 - **At startup** it waits until Obsidian has finished indexing the vault, and writes nothing if it can't find any project notes.
-- **No prose:** the reports hold an *Updated* line, the tables and Problems. Entry-by-entry detail belongs on invoices.
+- **No prose:** the reports hold an *Updated* line, the tables and Problems. Entry-by-entry detail is in each project's timesheet note.
 - **Links** in the reports read `[[Project|⭕ Project]]`, or `[[Area|🗃️ Area]]` for an area.
-- **Columns:** Entries, Billable, 🆓, Total, Exact, **Max Hrs** (the project's `max_hours`, or `contract_max` ÷ its hourly rate), **Rate** (from `rate` and `rate_type`: `$95/hr`, `$1,200 flat`, `non-billable`…) and **Earned** (billable hours × an hourly rate). A sub-project with no `rate` or `rate_type` of its own uses its parent's: the demo's Kestrel Fall Catalog bills at Kestrel Outfitters 2026's rate. `rate_type: non-billable` keeps a project's hours out of Billable as well as Earned.
+- **Columns:** Entries, Billable, 🆓, Total, Exact, **Max Hrs** (the project's `max_hours`, or `contract_max` ÷ its hourly rate), **Rate** (from `rate` and `rate_type`: `$95/hr`, `$1,200 flat`, `non-billable`…) and **Earned** (billable hours × an hourly rate, priced a day at a time, as an invoice bills them; at a whole-dollar rate, Earned, the timesheets and invoices agree to the cent). A sub-project with no `rate` or `rate_type` of its own uses its parent's: the demo's Kestrel Fall Catalog bills at Kestrel Outfitters 2026's rate. `rate_type: non-billable` keeps a project's hours out of Billable as well as Earned.
 - **Only past work counts:** an entry that hasn't ended yet (times filled in ahead under a synced event, say) is left out until it has.
 - **Rows add up:** in the tables that list projects (weekly, monthly, yearly), each row counts only that project's own entries, so the rows add up to **All**; a parent project gets a row only when time was logged to it directly. A project's own note totals it with its sub-projects.
 - **Which project an entry belongs to:** only the links that end a line count (see *Links at the end of a line*). First match wins, checking the task line and then each line it's nested under: (1) a `⭕` or `🗃️` link to a project or area note, e.g. `[[Kestrel Outfitters 2026|⭕]]`; (2) the nearest project or area folder, or the `area`, of the line's 🗒️ note (a task note, or an event's meeting log; an older event whose title is wrapped in its log link has that log). A link in the text is part of the title, even a link to a project. Anything else is *Unassigned*.
@@ -207,6 +211,20 @@ Weeks run Sunday to Saturday, the same weeks Notebook Navigator names `2026w38`.
 - **Daily notes are only read.**
 
 **Problems** lists what the report couldn't count cleanly: a task whose ⭕ project differs from the project its 🗒️ task note is filed under, or an event whose ⭕ differs from its log's project (listed on both project notes; a note moved by hand leaves its lines like that), running clocks, ends before starts, overlapping entries (on any day, even across midnight), list lines that look like time ranges but aren't `- h:mmam - h:mmpm` bullets, entries not under a task or event, 🆓 after other text on an entry or on both a line and an entry under it, busy events with no end line, entries or events of 12 hours or more, unclosed code blocks or comments, and entries with no project. Problems about a project itself (such as a `rate` that isn't a positive number, an hourly project with no `rate`, no `rate_type`, two projects each inside the other, a ⭕ and 🗒️ that disagree) are listed on the project's note, and on every weekly, monthly and yearly note whose period has time on that project or on a sub-project of it, so a period's report says why its hours count the way they do. There a ⭕ and 🗒️ disagreement is listed once, under the project the time counts on, with that period's entries. Quoted lines stop at 80 characters. Malformed and running entries are listed but not counted. Code blocks and `%%` / `<!-- -->` comments are skipped. The demo has one of each kind on purpose: the 9/16 note has a mistyped entry (`2:30 - 3:45pm`), and Block Party Poster, a volunteer project whose `rate_type` was never filled in, is listed on its own note and on `2026w38`, `2026-09` and `2026`.
+
+A project's own note also lists what's wrong with its invoices (see *Invoices*), and only there: a billed entry changed since its invoice was sent or paid (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`), an entry on two invoices, an invoice whose Billed entries can't be read, and a `billed_through` that isn't a date. The demo's Kestrel Outfitters 2026 shows the first.
+
+#### Timesheets
+
+- **Where:** each project or area with time gets a timesheet note beside its note, tagged `timesheet`, with the project as its `area`. The time report writes it; don't type in it. It's a note of its own because a long table costs every keystroke typed in the note it's in, even off screen.
+- **Which entries:** every entry of the project that has ended; with the project's `include_subprojects` on, its sub-projects' too, in a Project column.
+- **Two tables:** **Billable time** holds what can be invoiced, and **🆓 time** everything that never is. Each starts with a bold **Total**, then a bold row per day, newest first, adding up the day's hours and amount, then the day's entries in time order.
+- **Columns:** Date, Time, Hours (rounded as billed), Amount (billable, hourly projects only), Task, Notes (the text after the entry's colon), and in Billable time, **Invoice** and **Paid**.
+  - Invoice: the invoice that billed the entry (`draft` after a draft's), ⚠️ and the invoice when the entry changed after it was billed, `through 9/2` when `billed_through` covers it, blank when it isn't billed yet.
+  - Paid: ✅ and the date its invoice was paid.
+- **🆓 as written:** in 🆓 time, a 🆓 on the task line stays in Task and one on the entry stays at the start of Notes, so each row says why it isn't billed.
+- **Priced as billed:** a billed entry shows the rate its invoice billed it at, even if the project's rate changed since (Earned, on the project's note, uses today's rate).
+- **⚠️** also marks a billed entry moved or retimed since: the Invoice command holds it back.
 
 ### Links at the end of a line
 
@@ -350,10 +368,69 @@ Obsidian saves folds separately on each device, and forgets a note's folds when 
 - Don't check off, forward, move or restyle a `[<]` event. Events are moved in the calendar app, not in Obsidian. The calendar sync is the one exception: it moves and removes the event lines it wrote, forwards events and marks canceled ones `[-]`, as *Calendar sync* describes.
 - Don't edit `calendar-sync.json` or `calendar-events.json` in `00 Meta/02 Scripts/Calendar/`; only the calendar sync writes them.
 - Don't add or remove time entries: they're the time log, and they change how Schedule treats a task. (The calendar sync writing and removing the end lines of its own event lines is the exception.)
+- Don't edit an invoice's Billed entries, or the body of one that's sent or paid; don't write in a timesheet note (the time report rewrites it). Change billing through the *Invoice* command.
 - To move a task to another day, follow *What Schedule does to a line*. Don't invent other forms.
 - Don't add `id` or `tags` to daily or monthly notes.
 - When editing daily notes from outside Obsidian while it's open, run `obsidian command id=customjs:invoke-SnapshotDailyNotes` before and `obsidian command id=customjs:invoke-RefoldDailyNotes` after, so open notes keep their folds.
 - Older daily notes may use an earlier layout (`## Meetings` and `## To Do` headings). Leave them as they are; don't convert them.
+
+## Invoices
+
+The **Invoice** command bills a project's time as an invoice note, and moves the invoice along from draft to paid. The note is the invoice: Obsidian's *Export to PDF* prints it laid out like an invoice, and without the system it's still readable as one.
+
+### Making one
+
+Run *Invoice* on a project note (anywhere else, it asks which project has time to bill).
+
+1. **Bill through:** a date in words, starting at `today`.
+2. **What it would bill:** the project's ended, billable time on no invoice yet, through that date, for a project billed by the hour (a `rate`, with `rate_type` `hourly` or empty, its own or its parent's). With `include_subprojects` on, its sub-projects' time too.
+3. **The confirmation** shows:
+   - **Fix first?** the Problems in that time (running clocks first), and billed entries that changed since their invoice;
+   - **Held back:** entries it won't bill, and why (below);
+   - **Not billed by the hour:** sub-projects left out;
+   - **To bill:** the dates, entries, hours and total, and a warning when it takes the project past its `max_hours` or `contract_max`.
+   *Create draft* (or *Create anyway* when there's something to fix) writes it; Cancel doesn't.
+4. **The draft** goes into the project's `invoices/` folder, named with its number and the client's code: `1001-KES`. Numbers count up across the vault; the very first one asks for its number.
+
+It needs your details first: the first run makes `00 Meta/Invoice Settings.md` to fill in (`name`, `address` a line per item, `terms`, `payment_note`). That note is yours: git ignores it, and *UpdateObsidianPM* leaves it alone. The client is the note the project's `client` links to (else its parent's `client`): its `code` (asked for once, and saved there), `billing_name` (else the note's name) and `address`.
+
+### The note
+
+- **Properties:** `status` (draft, sent, paid or canceled), `number`, `client`, `project`, `invoice_date`, `period_start`, `period_end`, `hours`, `total`, `sent`, `paid`; tagged `invoice`, with `cssclasses: pm-invoice`. The *Invoices* base (`00 Meta/04 Bases/Invoices.base`) lists every invoice.
+- **What prints:** your name and address and the date; the client's; Project ID, Requested by and Terms when set; Total hours and Total due; then **Billable hours**, a line per date (and per rate, when sub-projects bill at different ones), like `9/14 — Homepage review with Imogen, Draft homepage wireframes`, and the payment note. Nothing printed is a link. In a draft, edit a line's description as you like.
+- **Billed entries:** a folded callout at the end, which doesn't print: the invoice's own copy of every entry it bills (date, start, end, minutes, hours, rate, project, task, note). It's what stops an entry being billed twice and what shows when one changes. Don't edit it: an invoice whose Billed entries don't read, or don't add up to its `hours` and `total`, stops the project's invoicing until it's fixed.
+- Your details and the client's are copied in when the invoice is made, so a sent invoice never changes when they do.
+
+### Moving it along
+
+Run *Invoice* on the invoice note for what fits its status:
+
+| Status | Choices |
+|---|---|
+| draft | **Rebuild from the daily notes** (through its `period_end`, keeping the descriptions you changed) · **Mark sent** |
+| sent | **Check for changes** · **Mark paid** · **Cancel invoice** |
+| paid | **Check for changes** |
+
+- **Mark sent** and **Mark paid** ask for the date, and set it with the status. *Mark sent* on a draft that no longer matches the daily notes offers to rebuild it first.
+- **Cancel invoice** marks it canceled: its entries are unbilled again, for the next invoice.
+- **Check for changes** writes what changed, and entries logged in its period since, into a callout at the top, which doesn't print. The time report lists the billing changes of sent and paid invoices on the project's note.
+- **A draft you don't want:** delete its note.
+- The timesheets update right away on the desktop; a status typed by hand shows at the next report run.
+
+### What's billed, and what changed
+
+- **One place:** only invoices record billing. An entry is billed when it's in the Billed entries of an invoice that isn't canceled (drafts count), matched by its day, start and end. Nothing is written into daily notes.
+- **Held back:** an entry the invoice won't bill, because it:
+  - overlaps a billed entry without matching it (a billed entry you extended: split the new time into an entry of its own to bill it);
+  - has a billed entry's times on another project;
+  - is a billed entry moved to another day (the only entry with its task and times within three days), or retimed on the same day (its task's only entry that day);
+  - repeats another entry at the same times.
+- **Changed since invoiced:** a billed entry whose times changed, that moved or is gone, that's 🆓 now or on another project now. Wording changes are shown but aren't billing changes. Entries logged in an invoice's period after it was made are listed too; they go on the next invoice.
+- **`billed_through`:** time billed before you used this (another tool's invoices): set the project's `billed_through` to the last day billed, and its time up to then is never invoiced. A parent's date covers its sub-projects unless they set their own.
+
+### The PDF
+
+Copy `00 Meta/02 Scripts/Style Settings/pm-invoice.css` into `.obsidian/snippets/` and turn it on (Appearance → CSS snippets). Then *Export to PDF* on the invoice prints it without the properties, the Billed entries or the check callout, with any link as plain text. To be paid through a banking app that can't import invoices, attach the PDF to an invoice made there.
 
 ## Commands
 
@@ -459,7 +536,11 @@ Turns the selected text into a project: a note of that name from the Project tem
 
 ### TimeReport
 
-Refreshes every time report where the numbers changed, in the note you're on too. See *The time report*.
+Refreshes every time report where the numbers changed, in the note you're on too, and each project's timesheet note. See *The time report*.
+
+### Invoice
+
+On a project note, makes a draft invoice from its unbilled time through a date you pick; on an invoice note, rebuilds it, checks it for changes, or marks it sent, paid or canceled. See *Invoices*.
 
 ### SnapshotDailyNotes and RefoldDailyNotes
 

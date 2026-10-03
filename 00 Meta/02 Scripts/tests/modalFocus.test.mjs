@@ -34,6 +34,8 @@ test("each prompt focuses its control from onOpen, a frame later", () => {
         ["plan.js", "dropdown.selectEl.focus()"],
         ["calendarSyncRange.js", "dropdown.selectEl.focus()"],
         ["addTaskNote.js", "move.buttonEl.focus()"],
+        ["invoice.js", "input.inputEl.focus()"],        // Invoice: the client code and first number
+        ["invoice.js", "buttonEl.focus())"],           // Invoice: its confirmation and questions
     ]) {
         // The focus that opens the prompt; a later one, after a click, may focus the same control
         const lines = read(f).split("\n").filter((l) => l.includes(control));

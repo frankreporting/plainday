@@ -10,7 +10,10 @@
 //
 // What it reproduces from the app-facing code at the bottom of timeReport.js:
 //   - readDailyNotes: notes named YYYY-MM-DD in the daily notes folder whose text has a time in it;
-//   - projectTargets plus every live project or area note that already has a block (writeProjectNotes);
+//   - readInvoices: notes whose frontmatter tags include `invoice`, attached with attachBilling (OBS-5);
+//   - projectTargets plus every live project or area note that already has a block (writeProjectNotes),
+//     each with its timesheet note (writeTimesheet: found by its `timesheet` tag and `area`, else made
+//     beside the project note when it has entries, with SHEET_ID as its id);
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
 //   - writeBlock's plan: a blank line above "## Time tracking", then placeBlock unless sameBlock;
@@ -36,6 +39,8 @@ export const PLANNER = "30 Reference/36 Planner";
 export const DAYS = `${PLANNER}/days`;
 export const FOLDERS = { week: `${PLANNER}/weeks`, month: `${PLANNER}/months`, year: `${PLANNER}/years` };
 export const STAMP = "2026-09-16 9:00pm";
+// The id a timesheet note the demo's report run makes gets (the app stamps the time it's made)
+export const SHEET_ID = "2026091621000000";
 // Only these folders hold demo notes (00 Meta is the system; its files still count for link names)
 export const NOTE_FOLDERS = ["10 Inbox/", "Projects/", "30 Reference/", "90 Archive/"];
 
@@ -43,6 +48,13 @@ export function loadTimeReport(root = ROOT) {
     const code = fs.readFileSync(path.join(root, "00 Meta/02 Scripts/CustomJS/timeReport.js"), "utf8");
     const TimeReport = vm.runInContext(code + "\n;TimeReport", vm.createContext({}));
     return new TimeReport();
+}
+
+// Billing, which reads the invoice notes for the project timesheets (OBS-5)
+export function loadBilling(root = ROOT) {
+    const code = fs.readFileSync(path.join(root, "00 Meta/02 Scripts/CustomJS/billing.js"), "utf8");
+    const Billing = vm.runInContext(code + "\n;Billing", vm.createContext({}));
+    return new Billing();
 }
 
 // Every file in the vault, as vault-relative paths; dot folders (.obsidian, .git) are skipped
@@ -131,6 +143,18 @@ export function dailyNotes(vault) {
     return out;
 }
 
+// readInvoices: every note tagged `invoice` in its frontmatter, and any note in an invoices/ folder that
+// still has its Billed entries (flagged untagged), as [{ path, props, text, tagged }]
+export function invoiceNotes(vault) {
+    const out = [];
+    for (const [p, { text, fm }] of vault.notes) {
+        const tagged = [].concat(fm.tags ?? []).some((t) => String(t).replace(/^#/, "").toLowerCase() === "invoice");
+        const inFolder = p.split("/").at(-2) === "invoices" && /\[!pm-billed\]/i.test(text);
+        if (tagged || inFolder) out.push({ path: p, props: fm, text, tagged });
+    }
+    return out;
+}
+
 // Link helpers the app builds from the vault: project links and weekly/monthly link targets
 export function linkers(tr, vault, index = makeIndex(tr, vault)) {
     const count = new Map();
@@ -161,9 +185,9 @@ export function planBlock(tr, content, block) {
 // Everything a TimeReport run would do to the vault:
 // { model, index, targets: { project, week, month, year }, blocks: Map(path → block),
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
-export function planReports(tr, vault, { stamp = STAMP } = {}) {
+export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
     const index = makeIndex(tr, vault);
-    const model = tr.build(dailyNotes(vault), index);
+    const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault), index, billing);
     const { link, linkTarget } = linkers(tr, vault, index);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();
@@ -178,15 +202,35 @@ export function planReports(tr, vault, { stamp = STAMP } = {}) {
         if (r.content !== before) changes.push({ path: p, before, after: r.content });
     };
 
-    // writeProjectNotes
+    // writeProjectNotes, and each project's timesheet note (writeTimesheet)
     const projects = tr.projectTargets(model);
     for (const p of vault.notes.keys()) {
         if (!projects.has(p) && !tr.isArchived(p) && tr.counts(p, index) && hasBlock(p)) projects.add(p);
     }
+    const sheets = new Map();
+    for (const [p, { fm }] of vault.notes) {
+        if (![].concat(fm.tags ?? []).includes("timesheet")) continue;
+        const target = String(fm.area ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+        const project = target ? index.linkDest(target, p) : null;
+        if (project && !sheets.has(project)) sheets.set(project, p);
+    }
+    targets.sheet = [];
     for (const p of projects) {
         if (!vault.notes.has(p) || tr.isArchived(p)) continue;
         targets.project.push(p);
-        write(p, tr.render(model, { kind: "project", path: p, linkTarget }, stamp, link));
+        const sheetPath = sheets.get(p) ?? tr.sheetPath(p);
+        const block = tr.render(model, { kind: "timesheet", path: p }, stamp, link);
+        let sheet = null;
+        // A note with the timesheet's name that isn't tagged `timesheet` is left alone
+        const mine = sheets.has(p) || !vault.notes.has(sheetPath);
+        if (mine && (vault.notes.has(sheetPath) || tr.sheetHasEntries(model, p))) {
+            const fm = vault.notes.get(p).fm;
+            const area = `[[${basename(p)}|${[].concat(fm.aliases ?? [])[0] || basename(p)}]]`;
+            write(sheetPath, block, tr.sheetNote(SHEET_ID, area, block));
+            targets.sheet.push(sheetPath);
+            sheet = basename(sheetPath);
+        }
+        write(p, tr.render(model, { kind: "project", path: p, linkTarget, sheet }, stamp, link));
     }
 
     // writePeriodNotes (with create, as on the desktop)

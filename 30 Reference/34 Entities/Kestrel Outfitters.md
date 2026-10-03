@@ -7,6 +7,10 @@ email: hello@kestrel-outfitters.example
 phone: 555-0100
 website: https://kestrel-outfitters.example
 twitter: 
+code: KES
+address:
+- 40 Trailhead Road
+- Pinecrest, ST 00000
 ---
 Outdoor gear shop with two stores and a small online shop.
 

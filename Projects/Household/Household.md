@@ -21,6 +21,8 @@ The house, the car and paperwork. No projects, just the odd task note, and time 
 | **Total** | **1** |  | **0.50** | **0.50** | **0.50** |  |
 | [[2026w38\|9/13-9/19]] | 1 |  | 0.50 | 0.50 | 0.50 |  |
 
+[[Household timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
+
 ### Problems
 
 None.

@@ -37,6 +37,8 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 | **Total** | **1** | **1.00** |  | **1.00** | **1.00** |  |
 | [[2026w38\|9/13-9/19]] | 1 | 1.00 |  | 1.00 | 1.00 |  |
 
+[[Block Party Poster timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
+
 ### Problems
 
 - [[Block Party Poster|⭕ Block Party Poster]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)

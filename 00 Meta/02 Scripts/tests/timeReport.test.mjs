@@ -14,6 +14,11 @@ const TimeReport = vm.runInContext(
     vm.createContext({}),
 );
 const tr = new TimeReport();
+const Billing = vm.runInContext(
+    fs.readFileSync(new URL("../CustomJS/billing.js", here), "utf8") + "\n;Billing",
+    vm.createContext({}),
+);
+const billing = new Billing();
 // Objects made inside the vm context have that context's prototypes; compare as plain data
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
@@ -769,14 +774,15 @@ const MONEY_INDEX = tr.makeIndex([
     { path: "20 Projects/Freelance/Bramble/Bramble.md", tags: ["project"], props: { rate: 640, rate_type: "flat", max_hours: 36 } },
     { path: KESTREL, tags: ["project"], props: { rate: 75, rate_type: "hourly" } },
 ]);
-const SMALL = tr.build([
+const SMALL_NOTES = [
     note("2026-09-01", [
         "- [x] Charts [[Orchard Lane Web 2026|⭕]]", "\t- 9:00am - 9:50am", "\t- 1:00pm - 1:10pm: 🆓 fix | pipe",
         "- [x] Contract [[Orchard Lane 2026|⭕]]", "\t- 2:00pm - 3:00pm",
         "- [x] Rent", "\t- 4:00pm - 4:20pm", "\t- 5:00pm - ",
     ].join("\n")),
     note("2026-10-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am\n- [x] Build [[Pinecone Studio|⭕]]\n\t- 1:00pm - 3:07pm\n- [x] Bramble [[Bramble|⭕]]\n\t- 4:00pm - 5:00pm\n- [x] Old [[Kestrel Newsletter|⭕]]\n\t- 6:00pm - 7:00pm"),
-], MONEY_INDEX);
+];
+const SMALL = tr.build(SMALL_NOTES, MONEY_INDEX);
 
 test("render month: summary by project with Max Hrs, Rate, Earned and a total; that month's Problems", () => {
     const block = tr.render(SMALL, { kind: "period", unit: "month", key: "2026-09" }, "2026-09-13 7:00pm");
@@ -1815,7 +1821,8 @@ test("OBS-34: a task line's ⭕ project and its 🔗 task note's project disagre
     const tin = tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s");
     assert.ok(tin.includes("- [[Tin|⭕ Tin]] has time (2 entries) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk|⭕ Hawk]]; move the note here, or change the line's project link"), tin);
     assert.ok(tin.includes("- [[Tin|⭕ Tin]] has time (1 entry) from a task line whose task note [[Elsewhere/Filed by area|Filed by area]] is filed under [[Hawk|⭕ Hawk]]"), tin);
-    assert.ok(!tin.includes("Draft the scope") && !tin.includes("Loose end"));
+    const tinProblems = tin.slice(tin.indexOf("### Problems"), tin.indexOf("### Billable time"));
+    assert.ok(!tinProblems.includes("Draft the scope") && !tinProblems.includes("Loose end"));
     assert.ok(!tin.includes("⭕ link"), "the message says project link, not ⭕ link");
 
     // Hawk has no time of its own, but its note still gets a report, so the problem is seen there
@@ -1959,4 +1966,251 @@ test("OBS-57, OBS-87: an event whose ⭕ and 🗒️ log disagree is a problem w
     assert.ok(tin.includes("- [[Tin|⭕ Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk|⭕ Hawk]]"), tin);
     const hawk = tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s");
     assert.ok(hawk.includes("- [[Hawk|⭕ Hawk]] has a log, [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]], whose event line links [[Tin|⭕ Tin]], so its time (1 entry) counts there; move the log, or change the line's project link"), hawk);
+});
+
+// ------------------------------------------------------------------ timesheets and invoices (OBS-5)
+
+const section = (block, heading) => {
+    const lines = block.split("\n");
+    const at = lines.indexOf(heading);
+    if (at === -1) return null;
+    const end = lines.findIndex((l, i) => i > at && (l.startsWith("### ") || l === "%% time:end %%"));
+    return lines.slice(at + 2, end).filter((l) => l !== "");
+};
+
+test("entries keep the 🆓 as written, for the timesheet's 🆓 time", () => {
+    const { entries } = tr.parseNote("- [x] Redo it 🆓 [[P|⭕]]\n\t- 9:00am - 9:30am\n- [x] Fix [[P|⭕]]\n\t- 10:00am - 10:20am: 🆓 my typo", "2026-09-01");
+    assert.deepEqual(plain(entries.map((e) => [e.task, e.taskWritten, e.note, e.noteWritten])), [
+        ["Redo it", "Redo it 🆓", "", ""],
+        ["Fix", "Fix", "my typo", "🆓 my typo"],
+    ]);
+    const m = tr.build([note("2026-09-01", "- [<] 4:00pm\tCall [[Orchard Lane 2026|⭕]]\n\t- 4:30pm: 🆓 not billing")], INDEX);
+    assert.deepEqual(plain(m.entries.map((e) => [e.task, e.note, e.noteWritten])), [["Call", "not billing", "🆓 not billing"]]);
+});
+
+test("render timesheet: Billable time and 🆓 time, a Total and a bold row per day, newest first", () => {
+    const block = tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s");
+    const heads = block.split("\n").filter((l) => l.startsWith("### "));
+    assert.deepEqual(heads, ["### Billable time", "### 🆓 time"]);
+    assert.ok(block.includes("Every entry of [[Orchard Lane Web 2026|⭕ Orchard Lane Web 2026]], newest day first."));
+    assert.deepEqual(section(block, "### Billable time"), [
+        "| Date | Time | Hours | Amount | Task | Notes | Invoice | Paid |",
+        "| --- | --- | --: | --: | --- | --- | --- | --- |",
+        "| **Total** |  | **2.00** | **$160.00** |  |  |  |  |",
+        "| **[[2026-10-01\\|Thu 10/1]]** |  | **1.00** | **$80.00** |  |  |  |  |",
+        "|  | 9:00am - 10:00am | 1.00 | $80.00 | Charts |  |  |  |",
+        "| **[[2026-09-01\\|Tue 9/1]]** |  | **1.00** | **$80.00** |  |  |  |  |",
+        "|  | 9:00am - 9:50am | 1.00 | $80.00 | Charts |  |  |  |",
+    ]);
+    // 🆓 time: no money columns, and the 🆓 as written; its Total is the summary's 🆓
+    assert.deepEqual(section(block, "### 🆓 time"), [
+        "| Date | Time | Hours | Task | Notes |",
+        "| --- | --- | --: | --- | --- |",
+        "| **Total** |  | **0.25** |  |  |",
+        "| **[[2026-09-01\\|Tue 9/1]]** |  | **0.25** |  |  |",
+        "|  | 1:00pm - 1:10pm | 0.25 | Charts | 🆓 fix \\| pipe |",
+    ]);
+    assert.ok(tr.render(SMALL, { kind: "project", path: ORCHARD_WEB }, "s").includes("| 3 | 2.00 | 0.25 | 2.25 | 2.00 |  | $80/hr | $160.00 |"), "the summary agrees");
+    assert.ok(block.endsWith("🆓 fix \\| pipe |\n%% time:end %%"));
+});
+
+test("render project: include_subprojects adds a Project column and the sub-projects' entries", () => {
+    const idx = tr.makeIndex([
+        { path: ORCHARD, tags: ["project"], props: { rate: "80", rate_type: "hourly", contract_max: 9600, include_subprojects: true } },
+        { path: ORCHARD_WEB, tags: ["project"] },
+    ]);
+    const m = tr.attachBilling(tr.build(SMALL_NOTES, idx), [], idx, billing);
+    const sheet = section(tr.render(m, { kind: "timesheet", path: ORCHARD }, "s"), "### Billable time");
+    assert.equal(sheet[0], "| Date | Time | Project | Hours | Amount | Task | Notes | Invoice | Paid |");
+    assert.equal(sheet[2], "| **Total** |  |  | **3.00** | **$240.00** |  |  |  |  |", "the summary's Total row: 3.00 billable, $240");
+    assert.ok(sheet.includes("|  | 2:00pm - 3:00pm | [[Orchard Lane 2026\\|⭕ Orchard Lane 2026]] | 1.00 | $80.00 | Contract |  |  |  |"));
+    assert.ok(sheet.includes("|  | 9:00am - 9:50am | [[Orchard Lane Web 2026\\|⭕ Orchard Lane Web 2026]] | 1.00 | $80.00 | Charts |  |  |  |"));
+    // Off: the project's own entries only
+    const own = section(tr.render(SMALL, { kind: "timesheet", path: ORCHARD }, "s"), "### Billable time");
+    assert.deepEqual(own.slice(2), [
+        "| **Total** |  | **1.00** | **$80.00** |  |  |  |  |",
+        "| **[[2026-09-01\\|Tue 9/1]]** |  | **1.00** | **$80.00** |  |  |  |  |",
+        "|  | 2:00pm - 3:00pm | 1.00 | $80.00 | Contract |  |  |  |",
+    ]);
+});
+
+test("render project: a timesheet with nothing hourly has no money columns", () => {
+    const sheet = section(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Bramble/Bramble.md" }, "s"), "### Billable time");
+    assert.deepEqual(sheet.slice(0, 3), ["| Date | Time | Hours | Task | Notes |", "| --- | --- | --: | --- | --- |", "| **Total** |  | **1.00** |  |  |"]);
+});
+
+// Invoices for Orchard Lane Web 2026, as the Invoice command writes their Billed entries
+const ORC = "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/invoices";
+const orcInvoice = (number, status, rows, props = {}) => ({
+    path: `${ORC}/${number}.md`,
+    props: { status, number, project: "[[Orchard Lane Web 2026]]", period_start: "2026-09-01", period_end: "2026-09-02", ...props },
+    text: billing.billedLines(rows.map(([date, start, end]) => ({ date, start: tr.minutes(start), end: tr.minutes(end), minutes: tr.minutes(end) - tr.minutes(start),
+        billed: tr.rounded(tr.minutes(end) - tr.minutes(start)), cents: 8000, project: ORCHARD_WEB, task: "Charts", note: "" })), tr, (p) => tr.basename(p)).join("\n"),
+});
+const ORC_NOTES = [
+    note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am\n\t- 11:00am - 11:30am\n\t- 1:00pm - 2:45pm"),
+    note("2026-09-02", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 3:00pm - 3:30pm"),
+    note("2026-09-03", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am"),
+];
+const orcIndex = (web = {}) => tr.makeIndex([
+    { path: ORCHARD, tags: ["project"], props: { rate: "80", rate_type: "hourly" } },
+    { path: ORCHARD_WEB, tags: ["project"], props: web },
+]);
+
+test("timesheet: each billable entry's invoice and whether it's paid", () => {
+    const idx = orcIndex({ billed_through: "2026-09-02" });
+    const invoices = [
+        orcInvoice("1001-ORC", "paid", [["2026-09-01", "9:00am", "9:50am"], ["2026-09-01", "1:00pm", "2:30pm"]], { paid: "2026-09-15", sent: "2026-09-04" }),
+        orcInvoice("1002-ORC", "draft", [["2026-09-01", "11:00am", "11:30am"]]),
+    ];
+    const m = tr.attachBilling(tr.build(ORC_NOTES, idx), invoices, idx, billing);
+    const block = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
+    const cells = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").filter((l) => l.startsWith("|  |")).map((l) => {
+        const c = l.split(" | ");
+        return [c[1], c.at(-2), c.at(-1).replace(/ \|$/, "")];
+    });
+    assert.deepEqual(cells, [
+        ["9:00am - 10:00am", "", ""],
+        ["3:00pm - 3:30pm", "through 9/2", ""],
+        ["9:00am - 9:50am", "[[1001-ORC]]", "✅ 9/15"],
+        ["11:00am - 11:30am", "[[1002-ORC]] draft", ""],
+        ["1:00pm - 2:45pm", "⚠️ [[1001-ORC]]", "✅ 9/15"],
+    ]);
+    // Under Problems on the project's note; not on the month's
+    assert.ok(block.includes("- [[1001-ORC]] (paid 9/15): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm"), block);
+    assert.ok(!tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s").includes("1001-ORC"));
+    // A draft that changed isn't a Problem: it's rebuilt
+    const draftOnly = tr.attachBilling(tr.build(ORC_NOTES, idx), [orcInvoice("1003-ORC", "draft", [["2026-09-01", "1:00pm", "2:30pm"]])], idx, billing);
+    assert.ok(!tr.render(draftOnly, { kind: "project", path: ORCHARD_WEB }, "s").includes("was billed"));
+});
+
+test("invoice Problems: an entry on two invoices, a billed_through that isn't a date", () => {
+    const idx = orcIndex({ billed_through: "soon" });
+    const invoices = [
+        orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { sent: "2026-09-04" }),
+        orcInvoice("1002-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { sent: "2026-09-05" }),
+    ];
+    const m = tr.attachBilling(tr.build(ORC_NOTES, idx), invoices, idx, billing);
+    const block = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
+    assert.ok(block.includes("- [[2026-09-01|9/1/26]] 9:00am - 9:50am is billed on both [[1001-ORC]] and [[1002-ORC]]"), block);
+    assert.ok(block.includes("- [[Orchard Lane Web 2026|⭕ Orchard Lane Web 2026]] has a `billed_through` that isn't a date (soon), so it can't be invoiced until it's fixed"), block);
+    assert.ok(!tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s").includes("billed_through"));
+});
+
+test("review: Earned, the timesheet and an invoice agree to the cent at a rate that isn't whole quarter-dollars", () => {
+    const idx = orcIndex({ rate: 62.5, rate_type: "hourly" });
+    const notes = [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:15am"), note("2026-09-02", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:15am")];
+    const m = tr.attachBilling(tr.build(notes, idx), [], idx, billing);
+    const block = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
+    const sheetBlock = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
+    // 15 minutes at $62.50 is $15.625 a day: $15.63 each day, as each day's invoice row bills it
+    const sheet = section(sheetBlock, "### Billable time");
+    assert.equal(sheet[2], "| **Total** |  | **0.50** | **$31.26** |  |  |  |  |");
+    assert.ok(sheet.includes("| **[[2026-09-02\\|Wed 9/2]]** |  | **0.25** | **$15.63** |  |  |  |  |"));
+    assert.ok(block.includes("| 2 | 0.50 |  | 0.50 | 0.50 |  | $62.50/hr | $31.26 |"), "Earned is priced the same way");
+    const rows = billing.snapshot(m.entries, m, tr);
+    assert.equal(billing.rows(rows).reduce((s, r) => s + r.amount, 0), 3126, "and so is the invoice");
+});
+
+test("review: a billed entry keeps the rate it was billed at in the timesheet", () => {
+    const idx = orcIndex({ rate: 100, rate_type: "hourly" });
+    const m0 = tr.build([note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am")], idx);
+    // Billed at $80 an hour; the project's rate is $100 now
+    const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "10:00am"]], { sent: "2026-09-04" });
+    const m = tr.attachBilling(m0, [inv], idx, billing);
+    const sheet = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time");
+    assert.ok(sheet.includes("|  | 9:00am - 10:00am | 1.00 | $80.00 | Charts |  | [[1001-ORC]] |  |"), sheet.join("\n"));
+    assert.equal(sheet[2], "| **Total** |  | **1.00** | **$80.00** |  |  |  |  |");
+});
+
+test("review: an invoice whose Billed entries can't be read is a Problem on its project's note", () => {
+    const idx = orcIndex();
+    const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]]);
+    inv.text = inv.text.replace("| 9:00am |", "| 09:00 |");
+    const m = tr.attachBilling(tr.build(ORC_NOTES, idx), [inv], idx, billing);
+    assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] has a Billed entries row that doesn't read, so this project can't be invoiced until it's fixed"));
+    // Twice on one invoice
+    const dup = orcInvoice("1002-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"], ["2026-09-01", "9:00am", "9:50am"]]);
+    const m2 = tr.attachBilling(tr.build(ORC_NOTES, idx), [dup], idx, billing);
+    assert.ok(tr.render(m2, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[2026-09-01|9/1/26]] 9:00am - 9:50am is on [[1002-ORC]] twice"));
+});
+
+test("review: invoices are read in number order, whatever order the vault lists them", () => {
+    const idx = orcIndex();
+    const a = orcInvoice("1002-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { sent: "2026-09-05" });
+    const b = orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { sent: "2026-09-04" });
+    const render = (list) => tr.render(tr.attachBilling(tr.build(ORC_NOTES, idx), list, idx, billing), { kind: "project", path: ORCHARD_WEB }, "s");
+    const one = render([a, b]);
+    assert.equal(one, render([b, a]));
+    assert.ok(one.includes("is billed on both [[1001-ORC]] and [[1002-ORC]]"));
+});
+
+test("review: a #tag or HTML in a task or note shows as text in the timesheet", () => {
+    const idx = orcIndex();
+    const m = tr.attachBilling(tr.build([note("2026-09-01", "- [x] Plan #project work [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am: see <b>this</b> #area")], idx), [], idx, billing);
+    const row = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").find((l) => l.startsWith("|  |"));
+    assert.equal(row, "|  | 9:00am - 9:50am | 1.00 | $80.00 | Plan \\#project work | see &lt;b>this&lt;/b> \\#area |  |  |");
+});
+
+test("render project: a line links its timesheet note when it has one", () => {
+    const withSheet = tr.render(SMALL, { kind: "project", path: ORCHARD_WEB, sheet: "Orchard Lane Web 2026 timesheet" }, "s");
+    assert.ok(withSheet.includes("\n[[Orchard Lane Web 2026 timesheet|Timesheet]]: every entry, with its invoice and whether it's paid\n\n### Problems"));
+    assert.ok(!tr.render(SMALL, { kind: "project", path: ORCHARD_WEB }, "s").includes("Timesheet]]"));
+    assert.equal(tr.sheetPath(ORCHARD_WEB), "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Orchard Lane Web 2026 timesheet.md");
+    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\narea: "[[A|⭕.A]]"\n---\n\n## Time tracking\n\nB\n');
+    assert.match(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Nobody/Nobody.md" }, "s"), /No time entries\.\n%% time:end %%$/);
+});
+
+test("final review: the timesheet marks a billed entry moved to another day ⚠️, as Invoice holds it back", () => {
+    const idx = orcIndex();
+    const inv = orcInvoice("1001-ORC", "sent", [["2026-09-02", "3:00pm", "3:30pm"]], { sent: "2026-09-04" });
+    const moved = [ORC_NOTES[0], note("2026-09-02", "- [x] Other [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:15am"), note("2026-09-03", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 3:00pm - 3:30pm")];
+    const m = tr.attachBilling(tr.build(moved, idx), [inv], idx, billing);
+    const row = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").find((l) => l.includes("3:00pm - 3:30pm"));
+    assert.match(row, /\| ⚠️ \[\[1001-ORC\]\] \|  \|$/);
+    assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] (sent 9/4): [[2026-09-02|9/2/26]] 3:00pm - 3:30pm was billed, now on [[2026-09-03|9/3/26]]"));
+});
+
+// writeTimesheet against a stub of the little of `app` it uses
+const sheetHarness = ({ files = {}, desktop = true, remembered = [], createFails = false } = {}) => {
+    const created = [], writes = [];
+    const file = (path) => ({ path, basename: path.split("/").pop().replace(/\.md$/, "") });
+    const context = {
+        customJS: { obsidian: { Platform: { isDesktop: desktop } } },
+        window: { moment: () => ({ format: () => "2026092812000000" }) },
+        console: { ...console, warn: () => {}, error: () => {} },
+        app: {
+            vault: {
+                getFileByPath: (p) => (files[p] || created.includes(p) || p === ORCHARD_WEB ? file(p) : null),
+                create: async (p) => { if (createFails) throw new Error("clash"); created.push(p); return file(p); },
+            },
+            metadataCache: { getFileCache: () => ({ frontmatter: { aliases: ["⭕.Freelance.Orchard Lane 2026.Orchard Lane Web 2026"] } }), fileToLinktext: (f) => f.basename },
+            loadLocalStorage: () => remembered, saveLocalStorage: () => {},
+        },
+    };
+    const Loaded = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const report = new Loaded();
+    report.writeBlock = async (f) => { writes.push(f.path); return { wrote: true }; };
+    return { report, created, writes };
+};
+const SHEET = "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Orchard Lane Web 2026 timesheet.md";
+
+test("final review: writeTimesheet makes, refreshes, or leaves a timesheet alone", async () => {
+    const run = async (opts, sheets = new Map()) => {
+        const h = sheetHarness(opts);
+        const broken = [], made = [];
+        const link = await h.report.writeTimesheet(SMALL, ORCHARD_WEB, sheets, new Set(opts.remembered ?? []), "s", (p) => p, broken, made);
+        return { link, broken, made, created: h.created, writes: h.writes };
+    };
+    // None yet, on the desktop: made, announced, linked
+    assert.deepEqual(plain(await run({})), { link: "Orchard Lane Web 2026 timesheet", broken: [], made: ["Orchard Lane Web 2026 timesheet"], created: [SHEET], writes: [] });
+    // Its own, tagged: refreshed
+    assert.deepEqual(plain(await run({ files: { [SHEET]: true } }, new Map([[ORCHARD_WEB, SHEET]]))), { link: "Orchard Lane Web 2026 timesheet", broken: [], made: [], created: [], writes: [SHEET] });
+    // A note of yours with its name, not tagged: left alone, and not linked
+    assert.deepEqual(plain(await run({ files: { [SHEET]: true } })), { link: null, broken: [], made: [], created: [], writes: [] });
+    // Deleted after this device made it, or on a phone: not made again
+    assert.equal((await run({ remembered: [SHEET] })).link, null);
+    assert.equal((await run({ desktop: false })).link, null);
+    // Making it fails: said, by its own name, and the project's report still goes ahead
+    assert.deepEqual(plain(await run({ createFails: true })), { link: null, broken: ["Orchard Lane Web 2026 timesheet"], made: [], created: [], writes: [] });
 });

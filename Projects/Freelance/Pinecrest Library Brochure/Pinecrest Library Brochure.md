@@ -39,6 +39,8 @@ A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee
 | [[2026w37\|9/6-9/12]] | 1 | 1.50 |  | 1.50 | 1.33 |  |
 | [[2026w36\|8/30-9/5]] | 2 | 2.25 |  | 2.25 | 2.25 |  |
 
+[[Pinecrest Library Brochure timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
+
 ### Problems
 
 - [[2026-09-16|9/16/26]] line 12: `- 2:30 - 3:45pm` doesn't match `h:mmam - h:mmpm`, so it isn't counted

@@ -36,6 +36,8 @@ Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|
 | **Total** | **4** | **3.50** |  | **3.50** | **3.17** | **$332.50** |
 | [[2026w38\|9/13-9/19]] | 4 | 3.50 |  | 3.50 | 3.17 | $332.50 |
 
+[[Kestrel Fall Catalog timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
+
 ### Problems
 
 None.

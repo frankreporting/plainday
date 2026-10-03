@@ -1,0 +1,77 @@
+/* Obsidian PM: the invoice note's layout (OBS-5).
+   Copy this file into your vault's .obsidian/snippets/ and turn it on under Appearance → CSS snippets.
+   It applies only to notes with `cssclasses: pm-invoice`, as the Invoice command writes them, and lays
+   them out like a printed invoice: your details and the date, then who it's billed to beside the
+   totals, then the Billable hours table. Export to PDF prints it without the properties, the Billed
+   entries or the check block, and with any link as plain text. */
+
+.pm-invoice .pm-invoice-parties {
+    display: flex;
+    justify-content: space-between;
+    gap: 2em;
+    padding: 1.2em 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.pm-invoice .pm-invoice-party {
+    flex: 1 1 55%;
+}
+
+.pm-invoice .pm-invoice-facts {
+    flex: 1 1 45%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(7em, 1fr));
+    gap: 0.6em 2em;
+    align-content: start;
+}
+
+.pm-invoice .pm-invoice-parties p {
+    margin: 0 0 0.3em;
+}
+
+.pm-invoice .pm-invoice-label {
+    color: var(--text-muted);
+    font-size: 0.85em;
+}
+
+.pm-invoice .pm-invoice-name {
+    font-size: 1.3em;
+    font-weight: 600;
+}
+
+.pm-invoice .pm-invoice-facts strong {
+    font-size: 1.3em;
+}
+
+.pm-invoice table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.pm-invoice th {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.85em;
+}
+
+.pm-invoice th,
+.pm-invoice td {
+    border: none;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 0.45em 0.3em;
+}
+
+@media print {
+    .pm-invoice .metadata-container,
+    .pm-invoice .inline-title,
+    .pm-invoice .callout[data-callout="pm-billed"],
+    .pm-invoice .callout[data-callout="pm-invoice-check"] {
+        display: none !important;
+    }
+
+    .pm-invoice a,
+    .pm-invoice .internal-link {
+        color: inherit !important;
+        text-decoration: none !important;
+    }
+}

@@ -10,7 +10,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import vm from "node:vm";
-import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
+import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, loadBilling, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
 import { convert } from "./demo/addProjectLinks.mjs";
 
 // Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
@@ -28,6 +28,8 @@ const dirname = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
 const demoNotes = [...vault.notes.keys()].filter((p) => p === "Welcome.md" || NOTE_FOLDERS.some((f) => p.startsWith(f)));
 const PROBLEM_NOTE = `${DAYS}/2026-09-16.md`;
 const PROBLEM_PROJECT = "Projects/Personal/Block Party Poster/Block Party Poster.md";
+const KESTREL_PROJECT = "Projects/Freelance/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md";
+const DEMO_INVOICE = "Projects/Freelance/Kestrel Outfitters 2026/invoices/1001-KES.md";
 
 // ------------------------------------------------------------------ time reports
 
@@ -74,8 +76,12 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     const { fm, text } = vault.notes.get(PROBLEM_PROJECT);
     assert.equal(fm.rate_type, null);
     assert.match(text, /Deliberate mistake for the demo/, "the example is labeled in the note");
-    assert.deepEqual(plain(model.projectProblems).map((p) => [p.project, p.message]),
+    assert.deepEqual(plain(model.projectProblems.filter((p) => !p.invoice)).map((p) => [p.project, p.message]),
         [[PROBLEM_PROJECT, "has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)"]]);
+    // And one invoice Problem (OBS-5): an entry billed on the paid 1001-KES, edited afterward, labeled in its note
+    assert.deepEqual(plain(model.projectProblems.filter((p) => p.invoice).map((p) => [p.project, p.invoice.name, p.change.kind, p.change.row.date])),
+        [[KESTREL_PROJECT, "1001-KES", "times", "2026-09-11"]]);
+    assert.match(vault.notes.get(`${DAYS}/2026-09-11.md`).text, /Deliberate change for the demo: invoice \[\[1001-KES\]\] billed this entry as 1:00pm - 2:30pm/);
     assert.deepEqual(plain(model.entries.filter((e) => e.project === PROBLEM_PROJECT).map((e) => [e.date, e.minutes, e.billable])), [["2026-09-17", 60, true]]);
     // The only Unassigned time is the busy events with no project: they count from their end lines (OBS-24)
     assert.deepEqual(plain(model.entries.filter((e) => !e.project).map((e) => [e.date, e.task, e.minutes])), [
@@ -84,15 +90,17 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     // Rendered: the mistyped entry under the brochure project, the rate_type under the poster project,
     // both under the week, month and year of 9/16 and 9/17, plus the count of Unassigned entries in
     // every period with a busy event that has no project; None. everywhere else
-    const flagged = [...plan.blocks].filter(([, b]) => !/### Problems\n\nNone\.\n/.test(b)).map(([p]) => p).sort();
+    // Timesheet notes have no Problems of their own: their projects' notes do
+    const reports = [...plan.blocks].filter(([p]) => !plan.targets.sheet.includes(p));
+    const flagged = reports.filter(([, b]) => !/### Problems\n\nNone\.\n/.test(b)).map(([p]) => p).sort();
     assert.deepEqual(flagged, [
         `${FOLDERS.month}/2026-08.md`, `${FOLDERS.month}/2026-09.md`,
         `${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
-        "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", PROBLEM_PROJECT,
+        "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", PROBLEM_PROJECT, KESTREL_PROJECT,
     ].sort());
     // The poster's Problem is on its own note and on the week, month and year of its hour, and nowhere else
     const said = "- [[Block Party Poster|⭕ Block Party Poster]] has no `rate_type`";
-    for (const [p, b] of plan.blocks) {
+    for (const [p, b] of reports) {
         const listed = [PROBLEM_PROJECT, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.month}/2026-09.md`, `${FOLDERS.year}/2026.md`].includes(p);
         assert.equal(b.split("### Problems")[1].split("\n").some((l) => l.startsWith(said)), listed, p);
     }
@@ -222,7 +230,8 @@ test("demo vault: 🗒️, ⭕, meeting log and property links all resolve", () 
         const { text, fm } = vault.notes.get(p);
         // Links in the note's text, outside the report block (whose day and month headers may point at notes that don't exist, as in the app)
         const body = text.replace(/%% time:start %%[\s\S]*?%% time:end %%/g, "");
-        for (const m of body.matchAll(/!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g)) {
+        // A link in a table escapes its | (`[[2026-09-11\\|9/11/26]]`), so the target stops at a backslash too
+        for (const m of body.matchAll(/!?\[\[([^\]|#\\]+)(?:#[^\]|]*)?(?:\\?\|([^\]]*))?\]\]/g)) {
             const target = m[1].trim();
             if (isPeriod(target)) continue;
             checked++;
@@ -276,4 +285,52 @@ test("demo vault: daily notes carry only their M/D/YY dddd alias", () => {
         const want = `${m}/${d}/${String(y).slice(2)} ${DAY_NAMES[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}`;
         assert.deepEqual(vault.notes.get(p).fm, { aliases: want }, p);
     }
+});
+
+// ------------------------------------------------------------------ invoices (OBS-5)
+
+test("demo vault: the paid Kestrel invoice adds up, and is what Invoice would bill from these notes", () => {
+    const billing = loadBilling();
+    const { text, fm } = vault.notes.get(DEMO_INVOICE);
+    const invoice = billing.readInvoice({ path: DEMO_INVOICE, props: fm, text }, tr, plan.index);
+    assert.equal(invoice.problem, null, "its Billed entries read, and add up to its hours and total");
+    assert.equal(invoice.status, "paid");
+    assert.equal(invoice.project, KESTREL_PROJECT);
+    // Its Billable hours table is its Billed entries, a line per date
+    const lines = text.split("\n").filter((l) => /^\| \d{1,2}\/\d{1,2} — /.test(l)).map((l) => billing.cells(l).slice(1));
+    assert.deepEqual(plain(lines), plain(billing.rows(invoice.rows).map((r) => [tr.hours(r.minutes), tr.money(r.cents), tr.money(r.amount)])));
+    // The real parser, on the demo's notes, bills the same entries through 9/11, except the one edited since
+    const ledger = billing.ledger(plan.model.billing.invoices, { except: DEMO_INVOICE });
+    const sel = billing.select(plan.model, tr, plan.index, { project: KESTREL_PROJECT, through: "2026-09-11", ledger });
+    const now = sel.entries.map((e) => billing.key(e));
+    const billed = invoice.rows.map((r) => billing.key(r));
+    assert.deepEqual(plain(now.filter((k) => !billed.includes(k))), ["2026-09-11 780 885"]);
+    assert.deepEqual(plain(billed.filter((k) => !now.includes(k))), ["2026-09-11 780 870"]);
+    // With the invoice in the ledger, that entry is held back, never billed again
+    const next = billing.select(plan.model, tr, plan.index, { project: KESTREL_PROJECT, through: "2026-09-11", ledger: plan.model.billing.ledger });
+    assert.deepEqual(plain(next.entries), []);
+    assert.deepEqual(plain(next.heldBack.map((h) => [billing.key(h.entry), h.invoice.name])), [["2026-09-11 780 885", "1001-KES"]]);
+    // Nothing printed links anywhere
+    assert.ok(!text.slice(text.indexOf("# Invoice No."), text.indexOf("> [!pm-billed]")).includes("[["));
+});
+
+test("demo vault: each project with time has its timesheet note beside it, linked from the project", () => {
+    assert.ok(plan.targets.sheet.length >= 5);
+    for (const sheet of plan.targets.sheet) {
+        const { fm } = vault.notes.get(sheet);
+        assert.deepEqual([].concat(fm.tags ?? []), ["timesheet"], sheet);
+        const project = plan.index.linkDest(linkTarget(fm.area), sheet);
+        assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|Timesheet]]`), `${project} links ${sheet}`);
+    }
+});
+
+test("demo vault: the Project template and the Invoices base carry the invoice properties", () => {
+    const template = fs.readFileSync(new URL("../../01 Templates/Project.md", import.meta.url), "utf8");
+    const at = (l) => template.indexOf(l);
+    assert.ok(at('tR += "rate_type: \\n";') < at('tR += "include_subprojects: false\\n";'));
+    assert.ok(at('tR += "include_subprojects: false\\n";') < at('tR += "billed_through: \\n";'));
+    assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
+    const base = fs.readFileSync(new URL("../../04 Bases/Invoices.base", import.meta.url), "utf8");
+    assert.match(base, /file\.tags\.contains\("invoice"\)/);
+    for (const p of ["status", "client", "project", "hours", "total", "sent", "paid"]) assert.match(base, new RegExp(`- ${p}\\n`), p);
 });

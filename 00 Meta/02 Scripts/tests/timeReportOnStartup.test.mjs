@@ -40,7 +40,7 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 
 test("refreshes at once when TimeReport and Schedule are registered", async () => {
     const calls = [];
-    const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, TimeReport: timeReport(calls) });
+    const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TimeReport: timeReport(calls) });
     await new TimeReportOnStartup().invoke();
     assert.deepEqual(plain(calls), [{ quiet: true }]);
     assert.deepEqual(warnings, []);
@@ -49,14 +49,14 @@ test("refreshes at once when TimeReport and Schedule are registered", async () =
 test("OBS-41: a run that wakes up mid-reload waits for the classes CustomJS is registering again", async () => {
     const oldCalls = [], newCalls = [];
     const hold = {};
-    const { context, TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, TimeReport: timeReport(oldCalls) }, { hold });
+    const { context, TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TimeReport: timeReport(oldCalls) }, { hold });
     // Every class is there when the run starts; it then waits for the metadata cache
     const run = new TimeReportOnStartup().invoke();
     await new Promise((r) => setImmediate(r));
     // A script is saved: CustomJS starts `customJS` over and registers the classes one file at a time
     context.customJS = bare();
     hold.release();
-    after(50, () => { context.customJS.Schedule = {}; });
+    after(50, () => { context.customJS.Schedule = {}; context.customJS.Billing = {}; });
     after(100, () => { context.customJS.TimeReport = timeReport(newCalls); });
     await run;
     assert.deepEqual(oldCalls, []);
@@ -66,10 +66,18 @@ test("OBS-41: a run that wakes up mid-reload waits for the classes CustomJS is r
 
 test("OBS-41: skips with a warning when a class doesn't come back in time", async () => {
     const calls = [];
-    const { TimeReportOnStartup, warnings } = load({ ...bare(), TimeReport: timeReport(calls) });
+    const { TimeReportOnStartup, warnings } = load({ ...bare(), Billing: {}, TimeReport: timeReport(calls) });
     await new TimeReportOnStartup().invoke();
     assert.deepEqual(calls, []);
     assert.equal(warnings.length, 1, warnings.join("\n"));
     assert.match(warnings[0], /customJS\.Schedule isn't registered/);
     assert.match(warnings[0], /skipped/);
+});
+
+test("OBS-5: waits for Billing too, which the project timesheets need", async () => {
+    const calls = [];
+    const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, TimeReport: timeReport(calls) });
+    await new TimeReportOnStartup().invoke();
+    assert.deepEqual(calls, []);
+    assert.match(warnings[0], /customJS\.Billing isn't registered/);
 });

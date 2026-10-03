@@ -3,7 +3,10 @@ class TimeReport {
     // (TimeReportOnStartup), and as the command "CustomJS: TimeReport". It writes only to these
     // notes, whatever note is open, under "## Time tracking":
     //   - each project note with entries (or with a block already): a summary row for the project and
-    //     its sub-projects, then a week-by-week breakdown (total first, newest week next), and Problems;
+    //     its sub-projects, then a week-by-week breakdown (total first, newest week next), a link to its
+    //     timesheet note, and Problems (which also say what changed since an invoice, OBS-5);
+    //   - each project's timesheet note, beside its note: every entry, as Billable time and 🆓 time,
+    //     with the invoice that billed it (OBS-5);
     //   - each weekly and monthly note in 36 Planner (weeks/, months/, from Notebook Navigator's
     //     patterns) for a period with entries: that period's summary by project with a total, then
     //     hours by day (weekly) or by week (monthly), and its Problems;
@@ -12,8 +15,8 @@ class TimeReport {
     // On the desktop, missing periodic notes are created first. Weeks run Sunday to Saturday, the
     // same weeks Notebook Navigator names gggg[w]ww.
     // Each report sits between %% time:start %% and %% time:end %%; running it again replaces only
-    // that block, and only when the numbers changed (the "Updated" line says when they last did). Summaries only:
-    // entry-by-entry detail belongs on invoices (OBS-5). Projects in 90 Archive are left out.
+    // that block, and only when the numbers changed (the "Updated" line says when they last did). Summaries
+    // only, except the timesheet notes, which hold entry-by-entry detail. Projects in 90 Archive are left out.
     //
     // A time entry is a bullet one level under a task or event: `- 9:01am - 9:40am`, optionally
     // `: note`. 🆓 at the start of the note doesn't bill it (`- 5:00pm - 5:30pm: 🆓 not billing`);
@@ -74,6 +77,8 @@ class TimeReport {
     static ARCHIVE = "90 Archive/";
     static QUOTE_MAX = 80;
     static CREATED_KEY = "time-report-created-notes";
+    // A project's timesheet note sits beside it, named after it: "Kestrel Outfitters 2026 timesheet"
+    static SHEET = " timesheet";
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
 
@@ -344,6 +349,7 @@ class TimeReport {
                         under.endBare = bare;
                         under.endFree = /^🆓/u.test(note);
                         under.endNote = under.endFree ? note.replace(/^🆓\uFE0F?\s*/u, "") : note;
+                        under.endNoteWritten = note;
                         under.endStray = !under.endFree && note.includes("🆓");
                     }
                     continue;
@@ -430,6 +436,9 @@ class TimeReport {
                 date, line: i + 1, start, end, minutes: end - start, crossesMidnight, free,
                 note: free ? note.replace(/^🆓\uFE0F?\s*/u, "") : note,
                 task: anchored ? this.taskText(context[0].body) : "",
+                // As written, 🆓 and all, for the timesheet's 🆓 time
+                taskWritten: anchored ? this.taskText(context[0].body, { keepFree: true }) : "",
+                noteWritten: note,
                 context: ctx,
             };
             entries.push(entry);
@@ -484,22 +493,23 @@ class TimeReport {
             date: ev.date, line: ev.line, path: ev.path, project: ev.project, start: ev.start, end: ev.end, minutes: ev.minutes,
             crossesMidnight: !!ev.crossesMidnight, free: ev.endFree || ev.lineFree, note: ev.endNote,
             task: this.taskText(ev.context[0].body), context: ev.context, startText: ev.startText, endText: ev.endText, text: ev.text,
+            taskWritten: this.taskText(ev.context[0].body, { keepFree: true }), noteWritten: ev.endNoteWritten ?? ev.endNote,
         };
     }
 
     // A task or event line as plain text for a table: no checkbox, event time, symbol links or
-    // date breadcrumbs; other links show their alias
-    taskText(body) {
-        return body
+    // date breadcrumbs; other links show their alias. With `keepFree`, a 🆓 on the line stays, for the
+    // timesheet's 🆓 time, where it says why the time isn't billed (OBS-5).
+    taskText(body, { keepFree = false } = {}) {
+        const text = body
             .replace(/^\[.\]\s*/, "")
             .replace(/^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s*/, "")
             .replace(TimeReport.OLD_EVENT, "")
             .replace(/^all day\b/i, "")
             .replace(TimeReport.SYMBOL_LINK, "")
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
-            .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1")
-            .replace(TimeReport.FREE_WORDS, "")
-            .replace(TimeReport.EMPTY_BRACKETS, "")
+            .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1");
+        return (keepFree ? text : text.replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, ""))
             .replace(/\s+/g, " ")
             .trim()
             .replace(TimeReport.FREE_MARK, "")
@@ -871,6 +881,46 @@ class TimeReport {
         return { entries: counted, problems, parent, projectProblems, money, events };
     }
 
+    // Invoice notes (OBS-5): read them, keep what they billed on the model for the timesheets, and
+    // list on the project's own note (never on weekly, monthly or yearly notes) a sent or paid invoice
+    // whose billed entries changed since, an entry on two invoices, and a billed_through that isn't a
+    // date. `notes` are [{ path, props, text }]; `billing` is a Billing.
+    attachBilling(model, notes, index, billing) {
+        // In number order, then path, so the first invoice to bill an entry is always the same one,
+        // whatever order the vault lists its files in
+        const invoices = notes.map((n) => billing.readInvoice(n, this, index))
+            .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.path.localeCompare(b.path));
+        const ledger = billing.ledger(invoices);
+        // Billed entries moved or retimed since, which look unbilled: the timesheets mark them ⚠️, as the
+        // Invoice command holds them back
+        const { held, byInvoice } = billing.holds(model, this, index, ledger);
+        model.billing = { billing, invoices, ledger, index, held };
+        for (const invoice of invoices) {
+            if (invoice.status === "canceled" || !invoice.project || this.isArchived(invoice.path) || this.isArchived(invoice.project)) continue;
+            // A table that can't be read would let its entries look unbilled; the Invoice command refuses
+            // to invoice the project until it's fixed, and says so here
+            if (invoice.problem) {
+                model.projectProblems.push({ project: invoice.project, only: "project", invoice, problem: invoice.problem });
+                continue;
+            }
+            if (!["sent", "paid"].includes(invoice.status)) continue;
+            for (const change of byInvoice.get(invoice) ?? []) {
+                if (change.kind !== "wording") model.projectProblems.push({ project: invoice.project, only: "project", invoice, change });
+            }
+        }
+        for (const twice of ledger.twice) {
+            const project = twice.invoices[1].project ?? twice.invoices[0].project;
+            if (project) model.projectProblems.push({ project, only: "project", twice });
+        }
+        for (const p of model.parent.keys()) {
+            const b = billing.billedThrough(p, this, index);
+            if (b.bad && b.from === p) {
+                model.projectProblems.push({ project: p, only: "project", message: `has a \`billed_through\` that isn't a date (${b.bad.slice(0, 20)}), so it can't be invoiced until it's fixed` });
+            }
+        }
+        return model;
+    }
+
     // A project and every project below it
     subtree(root, parent) {
         const out = new Set([root]);
@@ -908,6 +958,8 @@ class TimeReport {
         const mine = new Set(entries);
         const projectProblems = [];
         for (const p of model.projectProblems) {
+            // An invoice's changes, and billing settings, are for the project's own note (OBS-5)
+            if (p.only === "project") continue;
             if (p.conflict) {
                 // Said once, by the project the time counts on, with the period's own entries
                 const count = p.conflict.side === "line" ? p.conflict.entries.filter((e) => mine.has(e)).length : 0;
@@ -972,6 +1024,24 @@ class TimeReport {
         return "";
     }
 
+    // Where a project's timesheet note goes when it has none yet: beside the project's note
+    sheetPath(project) {
+        const dir = this.dirname(project);
+        return `${dir ? `${dir}/` : ""}${this.basename(project)}${TimeReport.SHEET}.md`;
+    }
+
+    // The whole of a new timesheet note: an id, the timesheet tag and its project as `area`, then its report
+    sheetNote(id, area, block) {
+        return `---\nid: ${id}\ntags:\n  - timesheet\narea: ${JSON.stringify(area)}\n---\n\n${TimeReport.HEADING}\n\n${block}\n`;
+    }
+
+    // Whether a project's timesheet has entries to show
+    sheetHasEntries(model, project) {
+        const b = model.billing;
+        const on = b ? b.billing.scope(project, model, this, b.index) : new Set([project]);
+        return model.entries.some((e) => on.has(e.project));
+    }
+
     // ---------------------------------------------------------------- rendering
 
     // Each entry up to the next ROUND_TO minutes, as invoices are billed (decided 2026-09-14)
@@ -1012,7 +1082,7 @@ class TimeReport {
     // Billable or not was decided in `build`; `money` is only needed for Earned.
     totals(entries, money = new Map()) {
         const t = { count: 0, exact: 0, billable: 0, free: 0, cents: 0, rated: false };
-        const minutesByRate = new Map();    // hourly rate in cents → billable minutes
+        const minutesByRate = new Map();    // "date cents" (a day and an hourly rate in cents) → billable minutes
         for (const e of entries) {
             t.count++;
             t.exact += e.minutes;
@@ -1021,12 +1091,13 @@ class TimeReport {
             const rate = money.get(e.project)?.rate;
             if (rate && e.billable) {
                 t.rated = true;
-                const cents = Math.round(rate * 100);
-                minutesByRate.set(cents, (minutesByRate.get(cents) ?? 0) + minutes);
+                const key = `${e.date} ${Math.round(rate * 100)}`;
+                minutesByRate.set(key, (minutesByRate.get(key) ?? 0) + minutes);
             }
         }
-        // Hours × rate per rate, as an invoice would bill them, so no per-entry cent drift
-        for (const [cents, minutes] of minutesByRate) t.cents += Math.round(minutes * cents / 60);
+        // Hours × rate per day and rate, as an invoice bills them (a row per date and rate, OBS-5): at a
+        // whole-dollar rate every quarter hour is whole cents, and Earned, a timesheet and its invoices agree
+        for (const [key, minutes] of minutesByRate) t.cents += Math.round(minutes * Number(key.split(" ")[1]) / 60);
         return t;
     }
 
@@ -1221,6 +1292,10 @@ class TimeReport {
             out.push(`- [[${p.date}|${this.shortDate(p.date)}]] line ${p.line}: \`${quote(p.text)}\` ${p.message}`);
         }
         for (const p of projectProblems) {
+            if (p.invoice || p.twice) {
+                out.push(this.invoiceProblem(p, link));
+                continue;
+            }
             if (p.conflict) {
                 const { side, note, other, event, count } = p.conflict;
                 const n = `${count} ${count === 1 ? "entry" : "entries"}`;
@@ -1237,6 +1312,114 @@ class TimeReport {
         const noProject = entries.filter((e) => !e.project).length;
         if (noProject) out.push(`- ${noProject} ${noProject === 1 ? "entry has" : "entries have"} no project (see Unassigned)`);
         return out.length ? out : ["None."];
+    }
+
+    // A billed entry that changed since its invoice was sent or paid, or an entry on two invoices (OBS-5)
+    invoiceProblem(p, link) {
+        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const when = (r) => `[[${r.date}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
+        if (p.twice) {
+            const [a, b] = p.twice.invoices;
+            return a === b ? `- ${when(p.twice.row)} is on [[${a.name}]] twice`
+                : `- ${when(p.twice.row)} is billed on both [[${a.name}]] and [[${b.name}]]`;
+        }
+        if (p.problem) return `- [[${p.invoice.name}]] ${p.problem}, so this project can't be invoiced until it's fixed`;
+        const { invoice, change: c } = p;
+        const on = invoice.status === "paid" ? invoice.paid : invoice.sent;
+        const now = c.kind === "times" ? `now ${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)}`
+            : c.kind === "moved" ? `now on [[${c.entry.date}|${this.shortDate(c.entry.date)}]]`
+            : c.kind === "free" ? "now 🆓"
+            : c.kind === "unassigned" ? "now on no project"
+            : c.kind === "project" ? `now on ${link(c.entry.project)}`
+            : "gone from its daily note";
+        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${when(c.row)} was billed, ${now}`;
+    }
+
+    // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
+    // or note shown as text, so it can't tag the note the table is in (a #project would make it a
+    // project) or draw anything. Billing.tableText does the same for invoices.
+    tableText(text) {
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)\|/g, "\\|")
+            .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
+    }
+
+    // A project note's timesheets (OBS-5): every entry of the project, and of the projects below it
+    // when its include_subprojects checkbox is on, split into Billable time and 🆓 time. Each table has
+    // a Total row, then a bold row per day, newest first, adding up the day's hours and amount, then the
+    // day's entries in time order. Billable time adds Amount, Invoice and Paid when anything in it bills
+    // by the hour; 🆓 time shows the 🆓 as written (on the task line, or at the start of the note), so
+    // each row says why it isn't billed.
+    timesheetLines(model, scope, link) {
+        const b = model.billing;
+        const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
+        const entries = model.entries.filter((e) => on.has(e.project));
+        const project = new Set(entries.map((e) => e.project)).size > 1;
+        const billable = entries.filter((e) => e.billable), free = entries.filter((e) => !e.billable);
+        const out = [];
+        if (billable.length) out.push("### Billable time", "", ...this.sheet(model, billable, { money: true, project, link }), "");
+        if (free.length) out.push("### 🆓 time", "", ...this.sheet(model, free, { money: false, project, link, written: true }), "");
+        return out;
+    }
+
+    // One timesheet table
+    sheet(model, entries, { money, project, link, written = false }) {
+        const b = model.billing;
+        const rate = (e) => { const m = model.money.get(e.project); return m?.type === "hourly" && m.rate ? Math.round(m.rate * 100) : null; };
+        const cash = money && entries.some((e) => rate(e) !== null);
+        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const through = new Map();
+        const standing = (e) => {
+            if (!b || rate(e) === null) return { kind: "open" };
+            if (!through.has(e.project)) through.set(e.project, b.billing.billedThrough(e.project, this, b.index).date);
+            const s = b.billing.standing(e, b.ledger, through.get(e.project));
+            const h = s.kind === "open" && b.held?.get(e);
+            return h ? { kind: "changed", ...h } : s;
+        };
+        // A billed entry is priced as its invoice billed it; everything else at today's rate
+        const centsOf = (e) => { const s = standing(e); return s.kind === "billed" ? s.row.cents : rate(e); };
+        const amount = (list) => {
+            const byRate = new Map();
+            for (const e of list) {
+                const c = centsOf(e);
+                if (c !== null) byRate.set(c, (byRate.get(c) ?? 0) + this.rounded(e.minutes));
+            }
+            let cents = 0;
+            for (const [c, m] of byRate) cents += Math.round((m * c) / 60);
+            return cents;
+        };
+        const billingCells = (e) => {
+            const s = standing(e);
+            if (s.kind === "before") return [`through ${md(s.through)}`, ""];
+            if (s.kind === "open") return ["", ""];
+            const inv = s.invoice;
+            const name = `[[${inv.name}]]`;
+            return [s.kind === "changed" ? `⚠️ ${name}` : `${name}${inv.status === "draft" ? " draft" : ""}`,
+                inv.status === "paid" ? `✅${inv.paid ? ` ${md(inv.paid)}` : ""}` : ""];
+        };
+        const head = ["Date", "Time", ...(project ? ["Project"] : []), "Hours", ...(cash ? ["Amount"] : []), "Task", "Notes", ...(cash ? ["Invoice", "Paid"] : [])];
+        const row = (cells) => `| ${cells.join(" | ")} |`;
+        const bold = (v) => (v === "" ? "" : `**${v}**`);
+        const sum = (label, minutes, cents) => row([bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)),
+            ...(cash ? [cents ? bold(this.money(cents)) : ""] : []), "", "", ...(cash ? ["", ""] : [])]);
+        const days = [...new Set(entries.map((e) => e.date))].sort().reverse().map((d) => {
+            const list = entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end);
+            return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0), cents: amount(list) };
+        });
+        // The Total adds up the day rows, as the invoices that bill them do
+        const out = [row(head), row(head.map((h) => (h === "Hours" || h === "Amount" ? "--:" : "---"))),
+            sum("Total", days.reduce((m, x) => m + x.minutes, 0), days.reduce((c, x) => c + x.cents, 0))];
+        for (const { d, list, minutes, cents } of days) {
+            out.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes, cents));
+            for (const e of list) {
+                const c = centsOf(e);
+                const hours = this.rounded(e.minutes);
+                out.push(row(["", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
+                    this.hours(hours), ...(cash ? [c === null ? "" : this.money(Math.round((hours * c) / 60))] : []),
+                    this.tableText(written ? e.taskWritten ?? e.task : e.task), this.tableText(written ? e.noteWritten ?? e.note : e.note),
+                    ...(cash ? billingCells(e) : [])]));
+            }
+        }
+        return out;
     }
 
     // The block, markers included, for { kind: "project", path } or { kind: "period", unit, key };
@@ -1258,10 +1441,16 @@ class TimeReport {
             if (scope.unit === "week" && mine.entries.length) out.push("### By Day", "", ...this.weekDaysTable(model, mine.entries, scope, link), "");
             if (scope.unit === "month" && mine.entries.length) out.push("### By Week", "", ...this.monthWeeksTable(model, mine.entries, scope, link), "");
             out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
-        } else {
+        } else if (scope.kind !== "timesheet") {
             const mine = this.inScope(model, scope);
             out.push(...this.projectTables(model, mine.entries, scope, link), "");
+            if (scope.sheet) out.push(`[[${scope.sheet}|Timesheet]]: every entry, with its invoice and whether it's paid`, "");
             out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
+        } else {
+            // Its own note, not the project's: a long table in a note costs every keystroke typed in it
+            // (OBS-5 measured about 0.05 ms a row), and nobody types in a timesheet
+            const sheets = this.timesheetLines(model, scope, link);
+            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...(sheets.length ? sheets.slice(0, -1) : ["No time entries."]));
         }
         // Nothing between the markers may open a comment or look like a marker, or the next run can't find the block
         const body = out.slice(1).map((l) => this.defuse(l));
@@ -1624,12 +1813,20 @@ class TimeReport {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
         // A script saved while this runs makes CustomJS start `customJS` over and register the classes
-        // again one file at a time, so keep the Schedule this run began with instead of looking it up
-        // on the global part-way through (OBS-41)
+        // again one file at a time, so keep the Schedule and Billing this run began with instead of
+        // looking them up on the global part-way through (OBS-41)
         this.schedule = customJS.Schedule;
+        const billing = customJS.Billing;
         const working = quiet ? null : new Notice("Building the time report…", 0);
 
         try {
+            // Billing reads the invoice notes for the timesheets (OBS-5); without it they'd show every
+            // billed entry as unbilled, so nothing is written until CustomJS has it registered
+            if (!billing) {
+                console.warn("TimeReport: customJS.Billing isn't registered (CustomJS still reloading?); nothing written");
+                if (!quiet) new Notice("Time report: the Billing script isn't loaded; try again in a moment");
+                return;
+            }
             const index = this.appIndex();
             // No project or area notes at all means the metadata cache isn't ready; writing now would
             // put every entry under Unassigned
@@ -1638,6 +1835,7 @@ class TimeReport {
                 if (!quiet) new Notice("Time report: no project notes found yet; try again in a moment");
                 return;
             }
+            const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
             const stamp = window.moment().format("YYYY-MM-DD h:mma");
             // Project links, aliased "⭕ Name", and area links "🗃️ Name" (tables escape the | themselves)
             const link = (p) => {
@@ -1645,13 +1843,16 @@ class TimeReport {
                 const target = f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p);
                 return `[[${target}|${this.linkMark(p, index)} ${this.basename(p)}]]`;
             };
-            const clock = window.moment();
-            const model = this.build(await this.readDailyNotes(), index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
             const done = [], trouble = [];
             const linkTarget = this.periodLinkTarget(this.periodFolders());
 
-            const { updated, broken } = await this.writeProjectNotes(model, index, stamp, link, linkTarget);
+            const { updated, broken, created: sheetsMade } = await this.writeProjectNotes(model, index, stamp, link, linkTarget);
             if (updated) done.push(`${updated} project note${updated === 1 ? "" : "s"}`);
+            if (sheetsMade.length) {
+                done.push(`${sheetsMade.length} timesheet note${sheetsMade.length === 1 ? "" : "s"} created`);
+                // New notes are news even at startup
+                if (quiet) new Notice(`Time report created ${sheetsMade.length} timesheet note${sheetsMade.length === 1 ? "" : "s"}: ${sheetsMade.join(", ")}`);
+            }
             // Only the desktop creates missing periodic notes, so two devices never create the same one
             const periods = await this.writePeriodNotes(model, stamp, link, { create: customJS.obsidian.Platform.isDesktop });
             if (periods.created.length) {
@@ -1673,6 +1874,52 @@ class TimeReport {
             working?.hide();
             window.timeReportRunning = false;
         }
+    }
+
+    // The model as a report run sees it now: every daily note read, entries that haven't ended left
+    // out, and the invoice notes attached (OBS-5). The Invoice command builds on the same one, so an
+    // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
+    // when it started (refresh, OBS-41) passes them in.
+    async currentModel({ index = this.appIndex(), schedule = customJS.Schedule, billing = customJS.Billing } = {}) {
+        const clock = window.moment();
+        const model = this.build(await this.readDailyNotes(schedule), index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
+        this.attachBilling(model, await this.readInvoices(), index, billing);
+        return { model, index };
+    }
+
+    // Every invoice note, anywhere in the vault, 90 Archive included: an archived project's invoices
+    // still say what's been billed. An invoice is tagged `invoice` in its frontmatter, as the Invoice
+    // command writes it; an inline #invoice (a daily note mentioning one) doesn't make a note one.
+    // [{ path, props, text }]
+    async readInvoices() {
+        // A note in an invoices/ folder that still has its Billed entries counts too, flagged, so an
+        // invoice whose tag or frontmatter got lost can't let its entries be billed again
+        const out = [];
+        for (const f of app.vault.getMarkdownFiles()) {
+            const cache = app.metadataCache.getFileCache(f);
+            const tagged = !!cache?.frontmatter && this.tagsOf({ frontmatter: cache.frontmatter }).includes("invoice");
+            if (!tagged && f.parent?.name !== "invoices") continue;
+            // Its properties come from the same text as its Billed entries: the metadata cache can lag
+            // a status just changed (Mark paid, then the refresh it runs)
+            const text = await this.textOf(f);
+            if (!tagged && !/\[!pm-billed\]/i.test(text)) continue;
+            const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
+            const info = getFrontMatterInfo(text);
+            let props = cache?.frontmatter ?? {}, error = null;
+            try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { error = e.message; }
+            out.push({ path: f.path, props, text, tagged: tagged && !error, error });
+        }
+        return out;
+    }
+
+    // A note's tags from its cache, frontmatter and inline, lowercased, without the #
+    tagsOf(cache) {
+        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
+        return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
+            .filter(Boolean)
+            .map((t) => String(t).replace(/^#/, ""))
+            .concat((cache.tags ?? []).map((t) => t.tag.slice(1)))
+            .map((t) => t.toLowerCase());
     }
 
     // weeks/months/years folders: Notebook Navigator's periodic notes folder plus the folder part of
@@ -1794,19 +2041,14 @@ class TimeReport {
         };
         const tagged = (path, tag) => {
             const c = cacheOf(path);
-            if (!c) return false;
-            const raw = c.frontmatter?.tags ?? c.frontmatter?.tag ?? [];
-            return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
-                .filter(Boolean)
-                .map((t) => String(t).replace(/^#/, ""))
-                .concat((c.tags ?? []).map((t) => t.tag.slice(1)))
-                .some((t) => t.toLowerCase() === tag);
+            return !!c && this.tagsOf(c).includes(tag);
         };
         return {
             exists: (path) => !!app.vault.getFileByPath(path),
             // Exact #project or #area, in frontmatter or inline (same rule as pickParent and SyncArea)
             isProject: (path) => tagged(path, "project"),
             isArea: (path) => tagged(path, "area"),
+            isInvoice: (path) => tagged(path, "invoice"),
             area: (path) => {
                 const fm = cacheOf(path)?.frontmatter ?? {};
                 const key = Object.keys(fm).find((k) => k.toLowerCase() === "area");
@@ -1824,11 +2066,11 @@ class TimeReport {
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
-    async readDailyNotes() {
-        const { format } = this.schedule.dailyOpts();
+    async readDailyNotes(schedule = this.schedule) {
+        const { format } = schedule.dailyOpts();
         const notes = [];
         for (const f of app.vault.getMarkdownFiles()) {
-            if (!this.schedule.isDailyNote(f)) continue;
+            if (!schedule.isDailyNote(f)) continue;
             const text = await this.textOf(f);
             if (!/\d[:.]\d\d|\d\s*[ap]\.?m/i.test(text)) continue;
             notes.push({ date: window.moment(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });
@@ -1861,11 +2103,15 @@ class TimeReport {
         }
         let updated = 0;
         const broken = [];
+        const sheets = this.timesheetNotes(index);
+        const remembered = new Set(app.loadLocalStorage(TimeReport.CREATED_KEY) ?? []);
+        const created = [];
         for (const path of targets) {
             const file = app.vault.getFileByPath(path);
             if (!file || this.isArchived(path)) continue;
+            const sheet = await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created);
             try {
-                const block = this.render(model, { kind: "project", path, linkTarget }, stamp, link);
+                const block = this.render(model, { kind: "project", path, linkTarget, sheet }, stamp, link);
                 const r = await this.writeBlock(file, block, { onlyIfChanged: true });
                 if (r.error) broken.push(file.basename);
                 else if (r.wrote) updated++;
@@ -1874,7 +2120,56 @@ class TimeReport {
                 broken.push(file.basename);
             }
         }
-        return { updated, broken };
+        return { updated, broken, created };
+    }
+
+    // Every timesheet note (tagged `timesheet`), by the project its `area` links: Map(project → path).
+    // Found this way, a timesheet stays its project's when either is renamed.
+    timesheetNotes(index) {
+        const out = new Map();
+        for (const f of app.vault.getMarkdownFiles()) {
+            const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+            if (!fm || !this.tagsOf({ frontmatter: fm }).includes("timesheet")) continue;
+            const target = String(index.area(f.path) ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+            const project = target ? index.linkDest(target, f.path) : null;
+            if (project && !out.has(project)) out.set(project, f.path);
+        }
+        return out;
+    }
+
+    // Writes a project's timesheet note (OBS-5): refreshed where it exists, and made on the desktop
+    // when the project has entries and none yet (unless this device made one before: you deleted it,
+    // so it stays deleted). Returns the link text for the project note to link it, or null.
+    // A note of yours that happens to have the timesheet's name, and isn't tagged `timesheet`, is left
+    // alone. `created` collects the names of notes made, for the notice.
+    async writeTimesheet(model, project, sheets, remembered, stamp, link, broken, created) {
+        const tagged = sheets.get(project);
+        const path = tagged ?? this.sheetPath(project);
+        let file = app.vault.getFileByPath(path);
+        try {
+            const block = this.render(model, { kind: "timesheet", path: project }, stamp, link);
+            if (file && !tagged) {
+                console.warn(`TimeReport: ${path} isn't tagged timesheet, so it's left alone and ${this.basename(project)} gets no timesheet`);
+                return null;
+            }
+            if (!file) {
+                if (!customJS.obsidian.Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
+                const projectFile = app.vault.getFileByPath(project);
+                const alias = [].concat(app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases ?? [])[0] || projectFile.basename;
+                file = await app.vault.create(path, this.sheetNote(window.moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, block));
+                remembered.add(path);
+                app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
+                created.push(file.basename);
+            } else {
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true });
+                if (r.error) broken.push(file.basename);
+            }
+            return app.metadataCache.fileToLinktext(file, project, true);
+        } catch (e) {
+            console.error(`TimeReport: couldn't write ${path}`, e);
+            broken.push(this.basename(path));
+            return file ? app.metadataCache.fileToLinktext(file, project, true) : null;
+        }
     }
 
     // Writes through an open editor when there is one (the editor keeps its own folds), else

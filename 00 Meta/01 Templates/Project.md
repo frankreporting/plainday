@@ -57,6 +57,8 @@ tR += "who: \n";
 tR += "client: \n";
 tR += "rate: \n";
 tR += "rate_type: \n";
+tR += "include_subprojects: false\n";
+tR += "billed_through: \n";
 tR += "---\n";
 tp.file.cursor(0);
 tp.user.showNewNote(tp);
