@@ -27,9 +27,11 @@ The folder layout follows the Johnny Decimal idea, with every configuration file
 00 Meta/                         the system: templates, scripts, bases, this manual
   01 Templates/
   02 Scripts/                    CustomJS, Templater, Calendar, tests
-  04 Bases/
+  04 Bases/                      Bases views (and the Invoices base, in a vault with no invoice folder)
+  Invoice Settings.md            your details for invoices, and where they go (see Invoices)
 10 Inbox/                        new notes that haven't been filed
 Projects/
+  Projects.base                  the active projects, opened as a file
   Freelance/                     an area: folder + folder note tagged #area
     Freelance.md
     Kestrel Outfitters 2026/     a project: folder + folder note tagged #project
@@ -37,7 +39,6 @@ Projects/
       Kestrel Outfitters 2026 timesheet.md   every entry, with its invoice (the time report writes it)
       Draft homepage wireframes.md   a task note (#task)
       logs/                      the project's meeting logs
-      invoices/                  the project's invoices (see Invoices)
       Kestrel Fall Catalog/      a sub-project: a project folder inside a project
   Household/                     an area with only task notes
 30 Reference/
@@ -47,6 +48,7 @@ Projects/
   35 People/
   36 Planner/
     days/ weeks/ months/ years/  the periodic notes
+  38 Invoices/                   every invoice, with the Invoices base beside them (see Invoices)
   Sources/
 90 Archive/                      finished projects, moved here whole
 ```
@@ -390,13 +392,25 @@ Run *Invoice* on a project note (anywhere else, it asks which project has time t
    - **Not billed by the hour:** sub-projects left out;
    - **To bill:** the dates, entries, hours and total, and a warning when it takes the project past its `max_hours` or `contract_max`.
    *Create draft* (or *Create anyway* when there's something to fix) writes it; Cancel doesn't.
-4. **The draft** goes into the project's `invoices/` folder, named with its number and the client's code: `1001-KES`. Numbers count up across the vault; the very first one asks for its number.
+4. **The draft** goes into the invoice folder (below), named with its number and the client's code: `1001-KES`. Its number is one past the highest ever given in the vault, so a number is never used twice, even after its note is deleted.
 
-It needs your details first: the first run makes `00 Meta/Invoice Settings.md` to fill in (`name`, `address` a line per item, `terms`, `payment_note`). That note is yours: git ignores it, and *UpdateObsidianPM* leaves it alone. The client is the note the project's `client` links to (else its parent's `client`): its `code` (asked for once, and saved there), `billing_name` (else the note's name) and `address`.
+It needs your details first: the first run makes `00 Meta/Invoice Settings.md` to fill in (`name`, `address` a line per item, `terms`, `payment_note`, `folder`, `last_number`). That note is yours: *UpdateObsidianPM* never installs or changes it. The demo has its own, with invented details. The client is the note the project's `client` links to (else its parent's `client`): its `code` (asked for once, and saved there), `billing_name` (else the note's name) and `address`.
+
+- **`last_number`:** the highest invoice number given so far, up to 999999. A new invoice takes one more than it, or than the highest invoice note's number if that's higher, and raises it to its own number once the note is made. A new settings note starts at `1000`, so the first invoice is `1001`; set it once to continue the numbers you used before. An older settings note without it, in a vault with no invoices yet, is opened for you to set it.
+- **`folder`:** where every new invoice goes, like `Business/Invoices`. Left blank, each goes into its project's `invoices/` folder, and only a project's own folder note can be invoiced. It can't be inside `00 Meta` or `90 Archive`.
+
+### Where invoices live
+
+One folder for every invoice is the better choice: invoices are business records, and a project's folder moves when it's archived. The demo keeps its invoices, and the base, in `30 Reference/38 Invoices/`.
+
+- **A base leaves out excluded files.** With `90 Archive` excluded (Settings → Files and links → Excluded files), an archived project's `invoices/` drop out of the *Invoices* base, and the record of what you've invoiced goes incomplete. So pick a `folder` that's never excluded and never archived, outside `Projects/`.
+- **Billing doesn't care where an invoice is.** Invoices are found by their `invoice` tag anywhere in the vault, `90 Archive` included, and each knows its project from its `project` link. So nothing is billed twice, numbering continues, and *Mark paid* works wherever the note sits.
+- **Moving your invoices into the folder** by hand, once `folder` is set, breaks nothing.
+- **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. *UpdateObsidianPM* puts it there, and moves it when `folder` changes. Until you set `folder`, it stays in `00 Meta/04 Bases/`. See *UpdateObsidianPM* for how its updates arrive.
 
 ### The note
 
-- **Properties:** `status` (draft, sent, paid or canceled), `number`, `client`, `project`, `invoice_date`, `period_start`, `period_end`, `hours`, `total`, `sent`, `paid`; tagged `invoice`, with `cssclasses: pm-invoice`. The *Invoices* base (`00 Meta/04 Bases/Invoices.base`) lists every invoice.
+- **Properties:** `status` (draft, sent, paid or canceled), `number`, `client`, `project`, `invoice_date`, `period_start`, `period_end`, `hours`, `total`, `sent`, `paid`; tagged `invoice`, with `cssclasses: pm-invoice`. The *Invoices* base (`Invoices.base`, beside the invoices) lists every invoice.
 - **What prints:** your name and address and the date; the client's; Project ID, Requested by and Terms when set; Total hours and Total due; then **Billable hours**, a line per date (and per rate, when sub-projects bill at different ones), like `9/14 — Homepage review with Imogen, Draft homepage wireframes`, and the payment note. Nothing printed is a link. In a draft, edit a line's description as you like.
 - **Billed entries:** a folded callout at the end, which doesn't print: the invoice's own copy of every entry it bills (date, start, end, minutes, hours, rate, project, task, note). It's what stops an entry being billed twice and what shows when one changes. Don't edit it: an invoice whose Billed entries don't read, or don't add up to its `hours` and `total`, stops the project's invoicing until it's fixed.
 - Your details and the client's are copied in when the invoice is made, so a sent invoice never changes when they do.
@@ -414,7 +428,7 @@ Run *Invoice* on the invoice note for what fits its status:
 - **Mark sent** and **Mark paid** ask for the date, and set it with the status. *Mark sent* on a draft that no longer matches the daily notes offers to rebuild it first.
 - **Cancel invoice** marks it canceled: its entries are unbilled again, for the next invoice.
 - **Check for changes** writes what changed, and entries logged in its period since, into a callout at the top, which doesn't print. The time report lists the billing changes of sent and paid invoices on the project's note.
-- **A draft you don't want:** delete its note.
+- **A draft you don't want:** delete its note. Its number isn't given again, so the numbers skip it.
 - The timesheets update right away on the desktop; a status typed by hand shows at the next report run.
 
 ### What's billed, and what changed
@@ -548,7 +562,14 @@ Record the folds of every open daily note before an outside edit, and restore th
 
 ### UpdateObsidianPM
 
-Installs the system from a local clone of the repository into the vault it runs in. See the README.
+Installs the system from a local clone of the repository into the vault it runs in. See the README. It also puts the two bases where they open as files:
+
+- **`Projects/Projects.base`**, the active projects, beside them.
+- **`Invoices.base`** beside the invoices, in the `folder` Invoice Settings names (see *Where invoices live*), else in `00 Meta/04 Bases/`. When `folder` changes, the next update moves it there as it is, with any sorting or filters you added. While Invoice Settings can't be read (its properties don't parse, or `folder` isn't a folder), the base stays where it is and the update says why.
+
+**A base saves your view changes into its file:** sorting, filters, column widths. So once you've used a base, an update sees it as changed by you and leaves it alone: it's listed under *Changed in this vault*. To take a new version from the repository, turn on *Take the repository's version* in the update's dialog; your copy of a file outside `00 Meta` goes to the vault's trash first, so you can copy a view back from it.
+
+**Upgrading from before the bases moved:** the version of this command already in your vault doesn't know the new places, and would list the demo's `Invoice Settings.md` as a change to yours. So first copy the new `00 Meta/02 Scripts/CustomJS/updateObsidianPM.js` from your clone into the vault, as when you installed it, and reload CustomJS (or the vault). Then one update puts both bases in place. If the old version runs first anyway, leave *Take the repository's version* off: it would replace your Invoice Settings with the demo's. Run the update again once CustomJS has reloaded. If you had changed the Projects base and the old version kept your copy in `00 Meta/04 Bases/`, copy any view you want from it into the new one, then delete it.
 
 ### Startup scripts
 

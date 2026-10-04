@@ -143,13 +143,15 @@ export function dailyNotes(vault) {
     return out;
 }
 
-// readInvoices: every note tagged `invoice` in its frontmatter, and any note in an invoices/ folder that
-// still has its Billed entries (flagged untagged), as [{ path, props, text, tagged }]
-export function invoiceNotes(vault) {
+// readInvoices: every note tagged `invoice` in its frontmatter, and any note where invoices are filed
+// (an invoices/ folder, or the demo Invoice Settings' `folder`) that still has its Billed entries
+// (flagged untagged), as [{ path, props, text, tagged }]
+export function invoiceNotes(vault, billing) {
+    const folder = billing.folderOf(vault.notes.get("00 Meta/Invoice Settings.md")?.fm.folder).folder;
     const out = [];
     for (const [p, { text, fm }] of vault.notes) {
         const tagged = [].concat(fm.tags ?? []).some((t) => String(t).replace(/^#/, "").toLowerCase() === "invoice");
-        const inFolder = p.split("/").at(-2) === "invoices" && /\[!pm-billed\]/i.test(text);
+        const inFolder = billing.inInvoiceFolder(p, folder) && billing.hasBilled(text);
         if (tagged || inFolder) out.push({ path: p, props: fm, text, tagged });
     }
     return out;
@@ -187,7 +189,7 @@ export function planBlock(tr, content, block) {
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
 export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
     const index = makeIndex(tr, vault);
-    const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault), index, billing);
+    const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault, billing), index, billing);
     const { link, linkTarget } = linkers(tr, vault, index);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();

@@ -161,6 +161,70 @@ test("nextNumber: one past the highest, canceled included; null for the very fir
     assert.equal(billing.nextNumber([{ number: "2117-DUN" }, { number: "1002-HBR" }, { number: "abc" }]), 2118);
 });
 
+test("nextNumber: last_number is a floor, so a deleted invoice's number is never used again (OBS-112)", () => {
+    const notes = [{ number: "1002-HBR" }, { number: "1003-KES" }];
+    // 1004 was made and its note deleted: the mark remembers it
+    assert.equal(billing.nextNumber(notes, 1004), 1005);
+    // a mark below the notes changes nothing
+    assert.equal(billing.nextNumber(notes, 1000), 1004);
+    // no invoices yet: the mark says where to start
+    assert.equal(billing.nextNumber([], 1033), 1034);
+    assert.equal(billing.nextNumber([], 0), 1);
+    // no mark, no invoices: the very first
+    assert.equal(billing.nextNumber([], null), null);
+});
+
+// ------------------------------------------------------------------ where invoices are filed (OBS-112)
+
+test("folderOf: a folder setting as a vault path; blank is none; anything else is an error", () => {
+    for (const [raw, want] of [
+        ["30 Reference/Invoices", "30 Reference/Invoices"],
+        ["  /30 Reference//Invoices/ ", "30 Reference/Invoices"],
+        ["Invoices", "Invoices"],
+        ["", ""], ["  ", ""], ["/", ""], [null, ""], [undefined, ""],
+    ]) {
+        assert.deepEqual(plain(billing.folderOf(raw)), { folder: want, error: null }, String(raw));
+    }
+    for (const raw of ["../Invoices", "a/../../b", "./Invoices", ".obsidian", "a/.trash", "a/ /b", "C:\\Invoices", "a\\b",
+        "[[Invoices]]", "Invoices#1", "a|b", "Business /Invoices", "Business/ Invoices", "a\nb", "a\tb", 2026, ["a"], { a: 1 }, true]) {
+        const r = billing.folderOf(raw);
+        assert.equal(r.folder, "", String(raw));
+        assert.match(r.error, /isn't a folder in the vault/, String(raw));
+    }
+    // the system's folder and the archive are often excluded, where a base can't list them
+    for (const raw of ["00 Meta/Invoices", "00 meta", "90 Archive/Invoices"]) {
+        assert.match(billing.folderOf(raw).error, /is inside (00 Meta|00 meta|90 Archive), where invoices don't belong/, raw);
+    }
+    assert.equal(billing.folderOf("Business/00 Meta/Invoices").error, null, "only at the top");
+});
+
+test("hasBilled: a line that opens the Billed entries callout, not the words anywhere", () => {
+    assert.equal(billing.hasBilled("# 1001-HBR\n\n> [!pm-billed]- Billed entries\n> | Date |"), true);
+    assert.equal(billing.hasBilled(">   [!PM-BILLED] Billed"), true);
+    assert.equal(billing.hasBilled("How invoices work: the `[!pm-billed]` callout at the end."), false);
+    assert.equal(billing.hasBilled(""), false);
+});
+
+test("inInvoiceFolder: a folder named invoices in any case, or anywhere under the setting", () => {
+    const yes = [
+        ["Projects/Work/Harbor Web/invoices/1001-HBR.md", ""],
+        ["Projects/Work/Harbor Web/Invoices/1001-HBR.md", ""],
+        ["30 Reference/Invoices/1001-HBR.md", "30 Reference/Invoices"],
+        ["30 Reference/Invoices/2026/1001-HBR.md", "30 Reference/Invoices"],
+        ["30 reference/INVOICES/1001-HBR.md", "30 Reference/Invoices"],
+    ];
+    const no = [
+        ["Projects/Work/Harbor Web/1001-HBR.md", ""],
+        ["Projects/Work/invoices-old/1001-HBR.md", ""],
+        ["Projects/Work/invoices/old/1001-HBR.md", ""],
+        ["30 Reference/Invoices archive/1001-HBR.md", "30 Reference/Invoices"],
+        ["30 Reference/Invoices.md", "30 Reference/Invoices"],
+        ["invoices.md", ""],
+    ];
+    for (const [path, folder] of yes) assert.equal(billing.inInvoiceFolder(path, folder), true, path);
+    for (const [path, folder] of no) assert.equal(billing.inInvoiceFolder(path, folder), false, path);
+});
+
 // ------------------------------------------------------------------ where an entry stands
 
 test("standing: billed, changed (overlapping a billed row), before billed_through, open", () => {

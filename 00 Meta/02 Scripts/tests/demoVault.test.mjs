@@ -29,7 +29,29 @@ const demoNotes = [...vault.notes.keys()].filter((p) => p === "Welcome.md" || NO
 const PROBLEM_NOTE = `${DAYS}/2026-09-16.md`;
 const PROBLEM_PROJECT = "Projects/Personal/Block Party Poster/Block Party Poster.md";
 const KESTREL_PROJECT = "Projects/Freelance/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md";
-const DEMO_INVOICE = "Projects/Freelance/Kestrel Outfitters 2026/invoices/1001-KES.md";
+const DEMO_INVOICE = "30 Reference/38 Invoices/1001-KES.md";
+
+// ------------------------------------------------------------------ where the bases and invoices are (OBS-112)
+
+test("demo vault: invoices and their base in the folder Invoice Settings names; the Projects base beside the projects", () => {
+    const billing = loadBilling();
+    const settings = vault.notes.get("00 Meta/Invoice Settings.md");
+    assert.ok(settings, "the demo's own settings note, with invented details");
+    const folder = billing.folderOf(settings.fm.folder).folder;
+    assert.equal(folder, "30 Reference/38 Invoices");
+    assert.ok(vault.files.includes(`${folder}/Invoices.base`), "the Invoices base beside the invoices");
+    const invoices = [...vault.notes].filter(([, { fm }]) => [].concat(fm.tags ?? []).includes("invoice")).map(([p]) => p);
+    assert.ok(invoices.length > 0);
+    for (const p of invoices) assert.equal(dirname(p), folder, p);
+    // last_number is where the numbers stand
+    assert.equal(billing.nextNumber(invoices.map((p) => ({ number: vault.notes.get(p).fm.number })), settings.fm.last_number),
+        settings.fm.last_number + 1);
+    assert.ok(vault.files.includes("Projects/Projects.base"));
+    // one copy of each base
+    for (const name of ["Invoices.base", "Projects.base"]) {
+        assert.equal(vault.files.filter((p) => p.endsWith(`/${name}`)).length, 1, name);
+    }
+});
 
 // ------------------------------------------------------------------ time reports
 
@@ -330,7 +352,7 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     assert.ok(at('tR += "rate_type: \\n";') < at('tR += "include_subprojects: false\\n";'));
     assert.ok(at('tR += "include_subprojects: false\\n";') < at('tR += "billed_through: \\n";'));
     assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
-    const base = fs.readFileSync(new URL("../../04 Bases/Invoices.base", import.meta.url), "utf8");
+    const base = fs.readFileSync(new URL("../../../30 Reference/38 Invoices/Invoices.base", import.meta.url), "utf8");
     assert.match(base, /file\.tags\.contains\("invoice"\)/);
     for (const p of ["status", "client", "project", "hours", "total", "sent", "paid"]) assert.match(base, new RegExp(`- ${p}\\n`), p);
 });

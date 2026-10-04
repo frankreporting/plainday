@@ -1,6 +1,6 @@
 class TimeReportOnStartup {
     // Startup script, desktop only: refreshes the time reports (see TimeReport) once Obsidian has
-    // loaded and finished indexing the vault, so Projects.md and the project notes are current after
+    // loaded and finished indexing the vault, so the project notes and timesheets are current after
     // every launch. To see fresh numbers after logging time, reload Obsidian, or run
     // "CustomJS: TimeReport". The phone doesn't run it: it gets the updated notes through Sync, so
     // two devices never rewrite the same blocks. Nothing is written when the numbers haven't changed.

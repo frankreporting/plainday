@@ -164,10 +164,27 @@ test("split: the frontmatter and the body", () => {
 // ------------------------------------------------------------------ settings, clients, numbers
 
 test("readSettings: a name makes it usable; an address as a list or lines", () => {
-    assert.equal(inv.readSettings({ name: "" }).ok, false);
-    assert.deepEqual(plain(inv.readSettings({ name: " Juniper Hale ", address: "418 Larkspur Lane\nMaple Falls, ST 00000", terms: "Net 15", payment_note: "Thanks" })),
-        { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 15", paymentNote: "Thanks", ok: true });
-    assert.deepEqual(plain(inv.readSettings({ name: "J", address: ["a", "", " b "] }).address), ["a", "b"]);
+    assert.equal(inv.readSettings({ name: "" }, billing).ok, false);
+    assert.deepEqual(plain(inv.readSettings({ name: " Juniper Hale ", address: "418 Larkspur Lane\nMaple Falls, ST 00000", terms: "Net 15", payment_note: "Thanks" }, billing)),
+        { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 15", paymentNote: "Thanks", folder: "", lastNumber: null, problem: null, ok: true });
+    assert.deepEqual(plain(inv.readSettings({ name: "J", address: ["a", "", " b "] }, billing).address), ["a", "b"]);
+});
+
+test("readSettings: `folder` and `last_number` (OBS-112), and what's wrong with them", () => {
+    const s = (props) => inv.readSettings({ name: "J", ...props }, billing);
+    assert.equal(s({ folder: " /30 Reference/Invoices/ " }).folder, "30 Reference/Invoices");
+    for (const [raw, want] of [[1033, 1033], ["1033", 1033], [" 1033 ", 1033], [0, 0], ["", null], ["  ", null], [null, null], [undefined, null]]) {
+        assert.equal(s({ last_number: raw }).lastNumber, want, String(raw));
+        assert.equal(s({ last_number: raw }).problem, null, String(raw));
+    }
+    assert.equal(s({ last_number: 999999 }).lastNumber, 999999);
+    for (const raw of [1033.5, -1, "abc", "1,033", "1033-KES", true, [1033], 1000000, "1e5", 1e21]) {
+        assert.equal(s({ last_number: raw }).lastNumber, null, String(raw));
+        assert.match(s({ last_number: raw }).problem, /`last_number` isn't a whole number from 0 to 999999/, String(raw));
+        assert.equal(s({ last_number: raw }).ok, true, "a bad number doesn't stop a rebuild");
+    }
+    assert.match(s({ folder: "../Invoices" }).problem, /^`folder` isn't a folder in the vault/);
+    assert.equal(s({ folder: "../Invoices" }).folder, "");
 });
 
 test("readClient: the project's client, else its parent's; the code upper-cased; errors say what to do", () => {
@@ -187,7 +204,9 @@ test("suggestCode and nameFor", () => {
 
 test("settingsText: blanks to fill in, and a body so Templater leaves it be", () => {
     const text = inv.settingsText("2026092810000000");
-    assert.match(text, /^---\nid: 2026092810000000\ntags:\nname:\naddress:\nterms: Net 30\npayment_note:\n---\nYour details for invoices\./);
+    assert.match(text, /^---\nid: 2026092810000000\ntags:\nname:\naddress:\nterms: Net 30\npayment_note:\nfolder:\nlast_number: 1000\n---\nYour details for invoices\./);
+    assert.match(text, /`folder`/);
+    assert.match(text, /`last_number`/);
     assert.ok(!/invoice\n/.test(text.split("---")[1]), "the settings note isn't tagged invoice");
 });
 

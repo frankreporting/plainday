@@ -1883,7 +1883,7 @@ class TimeReport {
     async currentModel({ index = this.appIndex(), schedule = customJS.Schedule, billing = customJS.Billing } = {}) {
         const clock = window.moment();
         const model = this.build(await this.readDailyNotes(schedule), index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
-        this.attachBilling(model, await this.readInvoices(), index, billing);
+        this.attachBilling(model, await this.readInvoices(billing), index, billing);
         return { model, index };
     }
 
@@ -1891,18 +1891,20 @@ class TimeReport {
     // still say what's been billed. An invoice is tagged `invoice` in its frontmatter, as the Invoice
     // command writes it; an inline #invoice (a daily note mentioning one) doesn't make a note one.
     // [{ path, props, text }]
-    async readInvoices() {
-        // A note in an invoices/ folder that still has its Billed entries counts too, flagged, so an
-        // invoice whose tag or frontmatter got lost can't let its entries be billed again
+    async readInvoices(billing = customJS.Billing) {
+        // A note where invoices are filed (an invoices/ folder, or Invoice Settings' `folder`) that still
+        // has its Billed entries counts too, flagged, so an invoice whose tag or frontmatter got lost
+        // can't let its entries be billed again
+        const folder = this.invoiceFolder(billing);
         const out = [];
         for (const f of app.vault.getMarkdownFiles()) {
             const cache = app.metadataCache.getFileCache(f);
             const tagged = !!cache?.frontmatter && this.tagsOf({ frontmatter: cache.frontmatter }).includes("invoice");
-            if (!tagged && f.parent?.name !== "invoices") continue;
+            if (!tagged && !billing.inInvoiceFolder(f.path, folder)) continue;
             // Its properties come from the same text as its Billed entries: the metadata cache can lag
             // a status just changed (Mark paid, then the refresh it runs)
             const text = await this.textOf(f);
-            if (!tagged && !/\[!pm-billed\]/i.test(text)) continue;
+            if (!tagged && !billing.hasBilled(text)) continue;
             const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
             const info = getFrontMatterInfo(text);
             let props = cache?.frontmatter ?? {}, error = null;
@@ -1910,6 +1912,13 @@ class TimeReport {
             out.push({ path: f.path, props, text, tagged: tagged && !error, error });
         }
         return out;
+    }
+
+    // Invoice Settings' `folder` (OBS-112), or "" when it isn't set or isn't a folder
+    invoiceFolder(billing) {
+        const settings = customJS.Invoice?.constructor.SETTINGS;
+        const file = settings ? app.vault.getFileByPath(settings) : null;
+        return billing.folderOf(file ? app.metadataCache.getFileCache(file)?.frontmatter?.folder : null).folder;
     }
 
     // A note's tags from its cache, frontmatter and inline, lowercased, without the #

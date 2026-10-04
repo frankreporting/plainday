@@ -23,9 +23,6 @@
 /00 Meta/02 Scripts/Calendar/calendar-events.json
 /00 Meta/02 Scripts/Calendar/calendar-sync.json
 
-# The Invoice command's note of your own details (name, address, terms)
-/00 Meta/Invoice Settings.md
-
 # Written by the Update Obsidian PM command in a vault that installed the system: where the
 # clone is, and what it installed
 /00 Meta/02 Scripts/update-source

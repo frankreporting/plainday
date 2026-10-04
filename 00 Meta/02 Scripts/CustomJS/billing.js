@@ -123,7 +123,7 @@ class Billing {
     // any other word still bills. `project` is the path its `project` links to, else the project its
     // folder is in; each row's `projectPath` is where its project link points. `problem` says why the
     // invoice can't be trusted, or is null: its frontmatter doesn't read (`error`), it's lost its
-    // `invoice` tag (`tagged` false: found by its Billed entries in an invoices/ folder), no table, a
+    // `invoice` tag (`tagged` false: found by its Billed entries where invoices are filed), no table, a
     // row that doesn't read, no column names, no rows, or rows that don't add up to its `hours` and
     // `total`. Its rows still count as billed either way.
     readInvoice({ path, props = {}, text = "", tagged = true, error = null }, tr, index) {
@@ -179,10 +179,49 @@ class Billing {
     }
 
     // The next invoice number: one past the highest `1001-HBR`-style number (whatever follows the
-    // dash), canceled ones included, or null for the very first
-    nextNumber(invoices) {
+    // dash), canceled ones included, or past `last` (Invoice Settings' `last_number`) when that's
+    // higher, so a deleted invoice's number is never used again. Null for the very first, with no `last`.
+    nextNumber(invoices, last = null) {
         const n = invoices.map((i) => String(i.number).match(/^(\d+)-(?!\d{2}-\d{2}$)/)?.[1]).filter(Boolean).map(Number);
+        if (Number.isInteger(last) && last >= 0) n.push(last);
         return n.length ? Math.max(...n) + 1 : null;
+    }
+
+    // ---------------------------------------------------------------- where invoices are filed (OBS-112)
+
+    // Invoice Settings' `folder` as a vault path: { folder, error }, with "" for none. Outer and
+    // doubled slashes go. A part that's blank, `.`, `..`, starts with a dot or has spaces around it,
+    // a character a link or a file name can't hold, a value that isn't one line of text, or a folder
+    // inside `00 Meta` or `90 Archive` is an error, so an invoice (or the Invoices base, which
+    // UpdateObsidianPM places the same way) never lands outside the vault, in a hidden folder, or
+    // where a base can't list it.
+    folderOf(raw) {
+        if (raw === undefined || raw === null) return { folder: "", error: null };
+        const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
+        const bad = { folder: "", error: `isn't a folder in the vault (${shown})` };
+        if (typeof raw !== "string" || /[\u0000-\u001f\u007f]/.test(raw)) return bad;
+        const folder = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
+        if (!folder) return { folder: "", error: null };
+        const parts = folder.split("/");
+        if (/[\\:*?"<>|[\]#^]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
+        // The system's folder and the archive are often excluded, and a base doesn't list what's excluded
+        if (["00 meta", "90 archive"].includes(parts[0].toLowerCase())) return { folder: "", error: `is inside ${parts[0]}, where invoices don't belong (${shown})` };
+        return { folder, error: null };
+    }
+
+    // Whether a note has a Billed entries callout: a line that opens one, as readBilled reads it, not
+    // the words anywhere (a note about invoices that mentions the callout isn't one)
+    hasBilled(text) {
+        return new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "im").test(String(text ?? ""));
+    }
+
+    // Where invoices are filed: a note in a folder named `invoices`, in any case, or anywhere under
+    // `folder` (whole folder names, any case). TimeReport counts an untagged note there as an
+    // invoice when it still has its Billed entries.
+    inInvoiceFolder(path, folder = "") {
+        const parts = String(path).split("/");
+        if (parts.length > 1 && parts.at(-2).toLowerCase() === "invoices") return true;
+        return !!folder && String(path).toLowerCase().startsWith(`${folder.toLowerCase()}/`);
     }
 
     // ---------------------------------------------------------------- entries

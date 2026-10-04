@@ -22,11 +22,12 @@ const TEMPLATE = "00 Meta/01 Templates/Task.md";
 const SETTINGS = ".obsidian/plugins/customjs/data.json";
 
 test("installs: the system, never notes, never the demo's own test files", () => {
-    for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "00 Meta/04 Bases/Projects.base",
+    for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "30 Reference/38 Invoices/Invoices.base", "Projects/Projects.base",
         ".obsidian/daily-notes.json", ".obsidian/plugins/templater-obsidian/data.json"]) {
         assert.equal(up.installs(path), true, path);
     }
-    for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "30 Reference/36 Planner/days/2026-09-16.md",
+    for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "Projects/Projects.md", "Projects/Freelance/Projects.base", "30 Reference/36 Planner/days/2026-09-16.md",
+        "00 Meta/Invoice Settings.md", "30 Reference/38 Invoices/1001-KES.md",
         "90 Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "10 Inbox/Desk lamp for the studio.md",
         ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json",
         "00 Meta/02 Scripts/tests/demoVault.test.mjs", "00 Meta/02 Scripts/tests/demo/renderReports.mjs",
@@ -80,12 +81,127 @@ test("plan: notes are never in any list, whatever the repository holds", () => {
     for (const list of [plan.update, plan.local, plan.remove, plan.keep, plan.same]) assert.deepEqual(plain(list), []);
 });
 
+// ------------------------------------------------------------------ the Invoices base beside the invoices (OBS-112)
+
+// The base as the repository keeps it (beside the demo's invoices), and its place in a vault with no
+// invoice folder (where every version before OBS-112 put it)
+const SRC = "30 Reference/38 Invoices/Invoices.base";
+const BASE = "00 Meta/04 Bases/Invoices.base";
+const PLACED = "Business/Invoices/Invoices.base";
+
+test("folderOf: reads Invoice Settings' `folder` exactly as Billing does", () => {
+    const Billing = vm.runInContext(fs.readFileSync(new URL("../CustomJS/billing.js", here), "utf8") + "\n;Billing", vm.createContext({}));
+    const billing = new Billing();
+    for (const raw of ["Business/Invoices", " /a//b/ ", "Business /Invoices", "a\nb", "00 Meta/x", "90 archive", "x/00 Meta", "", "  ", "/", null, undefined, "../x", "a/../b", ".obsidian", "a/.trash",
+        "a/ /b", "C:\\x", "a\\b", "[[x]]", "x#1", "a|b", 2026, ["a"], { a: 1 }, true, "Business/Invoices 2026"]) {
+        assert.deepEqual(plain(up.folderOf(raw)), plain(billing.folderOf(raw)), String(raw));
+    }
+});
+
+test("placed: the Invoices base goes in the invoice folder, else in 00 Meta/04 Bases; everything else where it is", () => {
+    const source = map({ [SCRIPT]: "a", [SRC]: "b", "Projects/Projects.base": "c" });
+    const none = up.placed(source);
+    assert.deepEqual(plain([...none.files]), [[SCRIPT, "a"], [BASE, "b"], ["Projects/Projects.base", "c"]]);
+    assert.deepEqual(plain([...none.origin]), [[BASE, SRC]]);
+    const there = up.placed(source, { invoiceFolder: "Business/Invoices" });
+    assert.deepEqual(plain([...there.files]), [[SCRIPT, "a"], [PLACED, "b"], ["Projects/Projects.base", "c"]]);
+    assert.deepEqual(plain([...there.origin]), [[PLACED, SRC]]);
+    // the demo's own folder: where the repository keeps it already
+    const same = up.placed(source, { invoiceFolder: "30 Reference/38 Invoices" });
+    assert.deepEqual(plain([...same.files.keys()]), [SCRIPT, SRC, "Projects/Projects.base"]);
+    assert.equal(same.origin.size, 0);
+    // a folder that puts it onto another installed file, in any case, sends it to 00 Meta/04 Bases
+    for (const invoiceFolder of ["Projects", "PROJECTS"]) {
+        const clash = up.placed(map({ [SRC]: "b", "Projects/Invoices.base": "x" }), { invoiceFolder });
+        assert.deepEqual(plain([...clash.files.keys()]), [BASE, "Projects/Invoices.base"], invoiceFolder);
+    }
+    // held, it's left out
+    assert.deepEqual(plain([...up.placed(source, { invoiceFolder: "Business/Invoices", hold: true }).files.keys()]), [SCRIPT, "Projects/Projects.base"]);
+});
+
+test("plan: an old copy in 00 Meta/04 Bases that an older update stopped recording still moves", () => {
+    // the command before OBS-112 drops the record of a base it kept because you'd sorted it
+    const { files, origin } = up.placed(map({ [SRC]: "base" }), { invoiceFolder: "Business/Invoices" });
+    const plan = up.plan(files, map({ [BASE]: "sorted" }), new Map(), origin);
+    assert.deepEqual(plain([plan.move, plan.local, plan.add]), [[{ from: BASE, to: PLACED }], [PLACED], []]);
+    // with no invoice folder it's already home
+    const home = up.placed(map({ [SRC]: "base" }));
+    const there = up.plan(home.files, map({ [BASE]: "sorted" }), new Map(), home.origin);
+    assert.deepEqual(plain([there.move, there.local]), [[], [BASE]]);
+});
+
+test("plan: a base set to go elsewhere moves there as it is, then updates like any installed file", () => {
+    const { files, origin } = up.placed(map({ [SCRIPT]: "new", [SRC]: "base" }), { invoiceFolder: "Business/Invoices" });
+    const move = [{ from: BASE, to: PLACED }];
+    // never changed: it moves, and it's what the repository has, so nothing else
+    const plain1 = up.plan(files, map({ [SCRIPT]: "new", [BASE]: "base" }), map({ [SCRIPT]: "new", [BASE]: "base" }), origin);
+    assert.deepEqual(plain([plain1.move, plain1.same]), [move, [SCRIPT, PLACED]]);
+    assert.deepEqual(plain([plain1.add, plain1.update, plain1.local, plain1.remove, plain1.keep]), [[], [], [], [], []]);
+    // an old version: it moves, then updates
+    const old = up.plan(files, map({ [SCRIPT]: "new", [BASE]: "base v0" }), map({ [SCRIPT]: "new", [BASE]: "base v0" }), origin);
+    assert.deepEqual(plain([old.move, old.update]), [move, [PLACED]]);
+    // one you sorted or filtered (a base saves that into its file): it moves with your changes, and stays yours
+    const edited = up.plan(files, map({ [SCRIPT]: "new", [BASE]: "sorted" }), map({ [SCRIPT]: "new", [BASE]: "base" }), origin);
+    assert.deepEqual(plain([edited.move, edited.local, edited.keep, edited.add]), [move, [PLACED], [], []]);
+    // a base of your own already at that place is never quietly overwritten, and the installed copy stays put
+    const yours = up.plan(files, map({ [SCRIPT]: "new", [BASE]: "base", [PLACED]: "mine" }), map({ [SCRIPT]: "new", [BASE]: "base" }), origin);
+    assert.deepEqual(plain([yours.move, yours.local, yours.remove]), [[], [PLACED], [BASE]]);
+    // nothing installed before: it's new there
+    const first = up.plan(files, map({ [SCRIPT]: "new" }), map({ [SCRIPT]: "new" }), origin);
+    assert.deepEqual(plain([first.move, first.add]), [[], [PLACED]]);
+    // once placed, it updates there
+    const later = up.placed(map({ [SCRIPT]: "new", [SRC]: "base v2" }), { invoiceFolder: "Business/Invoices" });
+    const update = up.plan(later.files, map({ [SCRIPT]: "new", [PLACED]: "base" }), map({ [SCRIPT]: "new", [PLACED]: "base" }), later.origin);
+    assert.deepEqual(plain([update.update, update.add, update.remove, update.move]), [[PLACED], [], [], []]);
+});
+
+test("plan: a changed `folder` moves the base again, and a cleared one moves it back to 00 Meta", () => {
+    const installed = map({ [PLACED]: "base" });
+    const next = up.placed(map({ [SRC]: "base" }), { invoiceFolder: "Records/Invoices" });
+    const moved = up.plan(next.files, installed, installed, next.origin);
+    assert.deepEqual(plain([moved.move, moved.add, moved.remove]), [[{ from: PLACED, to: "Records/Invoices/Invoices.base" }], [], []]);
+    const cleared = up.placed(map({ [SRC]: "base" }));
+    const back = up.plan(cleared.files, installed, installed, cleared.origin);
+    assert.deepEqual(plain([back.move, back.add, back.remove]), [[{ from: PLACED, to: BASE }], [], []]);
+});
+
+test("plan: a folder renamed only in case is the same folder, so the base is never removed from under itself", () => {
+    // `folder` was Business/Invoices; the folder is renamed to Business/invoices and the setting follows.
+    // On a Mac the old path still finds the same file.
+    const now = up.placed(map({ [SRC]: "base" }), { invoiceFolder: "Business/invoices" });
+    const at = "Business/invoices/Invoices.base";
+    const plan = up.plan(now.files, map({ [at]: "base", [PLACED]: "base" }), map({ [PLACED]: "base" }), now.origin);
+    assert.deepEqual(plain([plan.same, plan.remove, plan.keep, plan.move]), [[at], [], [], []]);
+    // and the manifest takes the new spelling
+    const after = up.manifestAfter(now.files, map({ [PLACED]: "base" }), up.steps(plan));
+    assert.deepEqual(plain([...after]), [[at, "base"]]);
+});
+
+test("plan: a place outside what's installed counts only for the file placed there", () => {
+    // without its origin, a path outside 00 Meta is a note's path, and never planned
+    assert.deepEqual(plain(up.plan(map({ [PLACED]: "base" }), new Map()).add), []);
+    assert.deepEqual(plain(up.plan(map({ [PLACED]: "base" }), new Map(), new Map(), map({ [PLACED]: SRC })).add), [PLACED]);
+    // and an origin can't smuggle in a note
+    assert.deepEqual(plain(up.plan(map({ "Welcome.md": "x" }), new Map(), new Map(), map({ "Welcome.md": "Welcome.md" })).add), []);
+});
+
+test("summary: says where the Invoices base goes, and what moves", () => {
+    const plan = { add: [], update: [PLACED], local: [], remove: [], keep: [], same: [], move: [{ from: BASE, to: PLACED }] };
+    const text = up.summary(plan, { invoiceFolder: "Business/Invoices" });
+    assert.ok(text.includes("The Invoices base goes in `Business/Invoices`, the `folder` in Invoice Settings."), text);
+    assert.ok(text.includes(`**Moved: 1** (to where it belongs now, as it is)\n- ${BASE} → ${PLACED}`), text);
+    assert.ok(!up.summary(plan).includes("goes in"));
+    assert.match(up.summary({ ...plan, move: [], update: [] }, { held: true }), /The Invoices base is left as it is this time/);
+    // a move alone is something to do
+    assert.doesNotMatch(up.summary({ ...plan, update: [] }), /Already up to date/);
+});
+
 test("steps: what gets copied and deleted follows the answers", () => {
-    const plan = { add: ["a"], update: ["b"], local: ["c"], remove: ["d"], keep: ["e"], same: ["f"] };
-    assert.deepEqual(plain(up.steps(plan)), { copy: ["a", "b"], delete: ["d"] });
+    const plan = { add: ["a"], update: ["b"], local: ["c"], remove: ["d"], keep: ["e"], same: ["f"], move: [{ from: "g", to: "h" }] };
+    assert.deepEqual(plain(up.steps(plan)), { move: [{ from: "g", to: "h" }], copy: ["a", "b"], delete: ["d"], same: ["f"] });
     // removing is the default, so asking only to overwrite still removes
-    assert.deepEqual(plain(up.steps(plan, { overwriteLocal: true })), { copy: ["a", "b", "c"], delete: ["d"] });
-    assert.deepEqual(plain(up.steps(plan, { remove: false })), { copy: ["a", "b"], delete: [] });
+    assert.deepEqual(plain(up.steps(plan, { overwriteLocal: true })).copy, ["a", "b", "c"]);
+    assert.deepEqual(plain(up.steps(plan, { remove: false })).delete, []);
 });
 
 test("manifestAfter: records what's installed now, and forgets what the repository dropped", () => {
@@ -96,6 +212,25 @@ test("manifestAfter: records what's installed now, and forgets what the reposito
     // a file left alone because it was changed here is dropped from the manifest too, since the
     // repository no longer has it: the next run sees it as the vault's own file
     assert.equal(after.has("00 Meta/kept.md"), false);
+});
+
+test("manifestAfter: a file already up to date is recorded, so a later update reaches it (OBS-112)", () => {
+    // put there by hand, or matching by chance: it was never recorded
+    const source = map({ [SCRIPT]: "v1" });
+    const after = up.manifestAfter(source, new Map(), up.steps(up.plan(source, map({ [SCRIPT]: "v1" }), new Map())));
+    assert.deepEqual(plain([...after]), [[SCRIPT, "v1"]]);
+    // so when the repository moves on, it's an update, not a change of yours
+    const next = up.plan(map({ [SCRIPT]: "v2" }), map({ [SCRIPT]: "v1" }), after);
+    assert.deepEqual(plain(next.update), [SCRIPT]);
+});
+
+test("manifestAfter: a moved file takes its record along; an edit of yours is still yours", () => {
+    const source = map({ [PLACED]: "v2" });
+    const steps = { move: [{ from: BASE, to: PLACED }], copy: [], delete: [], same: [] };
+    const after = up.manifestAfter(source, map({ [BASE]: "v1" }), steps);
+    assert.deepEqual(plain([...after]), [[PLACED, "v1"]]);
+    // moved and updated: the repository's version
+    assert.deepEqual(plain([...up.manifestAfter(source, map({ [BASE]: "v1" }), { ...steps, copy: [PLACED] })]), [[PLACED, "v2"]]);
 });
 
 test("summary: the decisions come first, and an up-to-date vault says so", () => {
@@ -155,4 +290,5 @@ test("done: what to say afterwards", () => {
     assert.equal(up.done({ copy: ["a", "b"], delete: ["c"] }, "abc1234"), "2 files copied, 1 removed (abc1234)");
     assert.equal(up.done({ copy: ["a"], delete: [] }), "1 file copied");
     assert.equal(up.done({ copy: [], delete: [] }), "Nothing to do");
+    assert.equal(up.done({ move: [{ from: "a", to: "b" }], copy: ["b"], delete: [] }), "1 moved, 1 file copied");
 });

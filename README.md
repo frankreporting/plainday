@@ -20,7 +20,7 @@ This README covers trying it and installing it. **[The manual](<00 Meta/Manual.m
 6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *JumpToDate* `⌘J`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
-Optional: the **Kanban** view in `00 Meta/04 Bases/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `00 Meta/02 Scripts/Style Settings/pm-invoice.css`, copied and turned on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
+Optional: the **Kanban** view in `Projects/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `00 Meta/02 Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `00 Meta/02 Scripts/Style Settings/pm-invoice.css`, copied and turned on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
 
 The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
 
@@ -34,10 +34,10 @@ The sample notes use this layout. Area and project names are yours to choose; on
 00 Meta/                           the system
   01 Templates/                    Templater templates
   02 Scripts/                      CustomJS, Templater user scripts, Calendar, tests
-  04 Bases/                        Bases views
+  04 Bases/                        Bases views (and the Invoices base, in a vault with no invoice folder)
 10 Inbox/                          new notes that haven't been filed
 Projects/
-  Projects.md                      list of active projects (Bases)
+  Projects.base                    the active projects, opened as a file (Bases)
   Freelance/                       an area: folder + folder note tagged #area
     Freelance.md
     Kestrel Outfitters 2026/       a project: folder + folder note tagged #project
@@ -46,8 +46,6 @@ Projects/
       Draft homepage wireframes.md a task note (#task)
       logs/                        meeting logs for the project
         2026-09-14 Homepage review with Imogen.md
-      invoices/                    the project's invoices
-        1001-KES.md
       Kestrel Fall Catalog/        a sub-project: a project folder inside a project
     Pinecrest Library Brochure/
   Household/                       an area with only task notes, and time of its own
@@ -61,6 +59,8 @@ Projects/
   35 People/                       people (@)
   36 Planner/
     days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
+  38 Invoices/                     every invoice, with the Invoices base beside them (Invoice Settings' `folder`)
+    1001-KES.md
   37 Journal/
   Sources/                         source notes (¶)
 90 Archive/                        finished projects, moved here whole; excluded from search and reports
@@ -196,7 +196,7 @@ Instead, clone this repository somewhere outside your vault, and install the sys
 2. Run **CustomJS: UpdateObsidianPM** from the command palette. It asks where your clone is the first time.
 3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
 
-What it installs: everything the repository has under `00 Meta/` (the manual included), plus `README.md`, `CLAUDE.md` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
+What it installs: everything the repository has under `00 Meta/` (the manual included), plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `00 Meta/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `00 Meta/02 Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 

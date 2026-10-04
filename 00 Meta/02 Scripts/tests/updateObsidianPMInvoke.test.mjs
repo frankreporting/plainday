@@ -44,7 +44,7 @@ function makeSource(dir) {
 
 // Obsidian, as much of it as the command uses. `answers` decides what the modals return.
 function stubs(vaultDir, answers = {}) {
-    const notices = [], trashed = [];
+    const notices = [], trashed = [], moved = [];
     const rel = (p) => path.join(vaultDir, p);
     const app = {
         isMobile: false,
@@ -56,8 +56,12 @@ function stubs(vaultDir, answers = {}) {
                 write: async (p, text) => { write(vaultDir, p, text); },
             },
             getAbstractFileByPath: (p) => (fs.existsSync(rel(p)) ? { path: p } : null),
+            createFolder: async (p) => { fs.mkdirSync(rel(p)); },
         },
-        fileManager: { trashFile: async (f) => { trashed.push(f.path); fs.rmSync(rel(f.path), { force: true }); } },
+        fileManager: {
+            trashFile: async (f) => { trashed.push(f.path); fs.rmSync(rel(f.path), { force: true }); },
+            renameFile: async (f, to) => { moved.push([f.path, to]); fs.renameSync(rel(f.path), rel(to)); },
+        },
         plugins: { disablePlugin: async () => {}, enablePlugin: async () => {} },
     };
     const context = {
@@ -66,10 +70,23 @@ function stubs(vaultDir, answers = {}) {
         process,
         console,
         window: { moment: () => ({ format: () => "2026-09-17 12:00" }) },
-        customJS: { obsidian: { Notice: class { constructor(m) { notices.push(String(m)); } } } },
+        customJS: { obsidian: {
+            Notice: class { constructor(m) { notices.push(String(m)); } },
+            // Enough of Obsidian's YAML for a settings note: `key: value` lines, and a line that
+            // isn't one doesn't read
+            getFrontMatterInfo: (text) => {
+                const m = String(text).match(/^---\n([\s\S]*?)\n---/);
+                return { exists: !!m, frontmatter: m ? m[1] : "" };
+            },
+            parseYaml: (yaml) => Object.fromEntries(yaml.split("\n").filter(Boolean).map((line) => {
+                const m = line.match(/^([\w-]+):\s*(.*)$/);
+                if (!m) throw new Error(`can't read ${line}`);
+                return [m[1], m[2] === "" ? null : m[2].replace(/^"(.*)"$/, "$1")];
+            })),
+        } },
     };
     context.globalThis = context;
-    return { context, notices, trashed, answers };
+    return { context, notices, trashed, moved, answers };
 }
 
 // Loads the class in that context and replaces the three modal methods with the test's answers
@@ -406,4 +423,174 @@ test("invoke: a removal that fails still records the copies that landed", async 
     assert.doesNotMatch(f.answers.sawSummary, /Changed in this vault/);
     assert.match(f.answers.sawSummary, /\*\*Removed: 1\*\*/);
     assert.equal(exists(f.vault, "README.md"), false);
+});
+
+// ------------------------------------------------------------------ the bases (OBS-112)
+
+// The base as the repository keeps it, beside the demo's invoices, and where a vault gets it with no
+// invoice folder
+const SRC = "30 Reference/38 Invoices/Invoices.base";
+const BASE = "00 Meta/04 Bases/Invoices.base";
+const settingsNote = (folder) => `---\nname: Juniper Hale\nfolder: ${folder}\nlast_number: 1000\n---\nYour details for invoices.\n`;
+
+// The clone gains both bases, the demo's invoice and the demo's settings note
+function withBases(f) {
+    write(f.source, SRC, "invoices base\n");
+    write(f.source, "Projects/Projects.base", "projects base\n");
+    write(f.source, "30 Reference/38 Invoices/1001-KES.md", "demo invoice\n");
+    write(f.source, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/38 Invoices"));
+    execFileSync("git", ["-C", f.source, "add", "-A"], { stdio: "pipe" });
+    execFileSync("git", ["-C", f.source, "commit", "-qm", "bases"], { stdio: "pipe" });
+}
+
+test("invoke: the Projects base goes in Projects, and the Invoices base in 00 Meta until a folder is set", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    await f.up.invoke();
+    assert.equal(read(f.vault, "Projects/Projects.base"), "projects base\n");
+    assert.equal(read(f.vault, BASE), "invoices base\n");
+    assert.doesNotMatch(f.answers.sawSummary, /goes in/);
+    // the demo's invoice, its settings and its folder never reach a vault
+    for (const p of ["00 Meta/Invoice Settings.md", "30 Reference/38 Invoices/1001-KES.md", SRC]) assert.equal(exists(f.vault, p), false, p);
+    assert.doesNotMatch(f.answers.sawSummary, /Invoice Settings\.md|1001-KES/);
+});
+
+test("invoke: your own Invoice Settings are never listed or touched, whatever the demo's say", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    write(f.vault, "00 Meta/Invoice Settings.md", "---\nname: Someone Else\n---\n");
+    withBases(f);
+    await f.up.invoke();
+    assert.equal(read(f.vault, "00 Meta/Invoice Settings.md"), "---\nname: Someone Else\n---\n");
+    assert.doesNotMatch(f.answers.sawSummary, /Invoice Settings\.md/);
+    const manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.equal("00 Meta/Invoice Settings.md" in manifest.files, false);
+});
+
+test("invoke: a vault that keeps its invoices where the demo does gets the base there, moved from 00 Meta", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    await f.up.invoke();
+    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/38 Invoices"));
+    await f.up.invoke();
+    assert.equal(read(f.vault, SRC), "invoices base\n");
+    assert.equal(exists(f.vault, BASE), false);
+    assert.deepEqual(f.moved, [[BASE, SRC]]);
+});
+
+test("invoke: setting `folder` moves the Invoices base there as it is, spelled as the vault spells it, and it updates there", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    await f.up.invoke();
+
+    // the folder exists already, in another case; the settings name it with a trailing slash
+    fs.mkdirSync(path.join(f.vault, "Business/Invoices"), { recursive: true });
+    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("business/invoices/"));
+    await f.up.invoke();
+    const placed = "Business/Invoices/Invoices.base";
+    assert.equal(read(f.vault, placed), "invoices base\n");
+    assert.equal(exists(f.vault, BASE), false);
+    assert.deepEqual(f.moved, [[BASE, placed]], "moved through Obsidian, so links follow");
+    assert.deepEqual(f.trashed, [], "nothing trashed");
+    assert.match(f.answers.sawSummary, /The Invoices base goes in `Business\/Invoices`/);
+    assert.match(f.answers.sawSummary, /\*\*Moved: 1\*\*/);
+    let manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.equal(manifest.files[placed] !== undefined, true);
+    assert.equal(BASE in manifest.files, false);
+
+    // the repository changes the base: the copy beside the invoices takes it
+    write(f.source, SRC, "invoices base v2\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "base v2"], { stdio: "pipe" });
+    await f.up.invoke();
+    assert.equal(read(f.vault, placed), "invoices base v2\n");
+    assert.match(f.answers.sawSummary, /\*\*Updated: 1\*\*/);
+    assert.equal(exists(f.vault, BASE), false, "never in two places");
+
+    // sorting in the base writes into its file: from then on it's yours, and an update leaves it alone
+    write(f.vault, placed, "sorted by status\n");
+    write(f.source, SRC, "invoices base v3\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "base v3"], { stdio: "pipe" });
+    await f.up.invoke();
+    assert.equal(read(f.vault, placed), "sorted by status\n");
+    assert.match(f.answers.sawSummary, /Changed in this vault, would be overwritten: 1\*\*\n- Business\/Invoices\/Invoices\.base/);
+    manifest = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json"));
+    assert.equal(manifest.files[placed] !== undefined, true);
+
+    // taking the repository's version puts yours in the trash first
+    f.answers.confirm = { overwriteLocal: true, remove: true };
+    await f.up.invoke();
+    assert.equal(read(f.vault, placed), "invoices base v3\n");
+    assert.deepEqual(f.trashed, [placed]);
+});
+
+test("invoke: a base you sorted before `folder` was set moves with your sort, and stays yours", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    await f.up.invoke();
+    write(f.vault, BASE, "sorted by status\n");
+    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("Business/Invoices"));
+    await f.up.invoke();
+    const placed = "Business/Invoices/Invoices.base";
+    assert.equal(read(f.vault, placed), "sorted by status\n", "your sort came along");
+    assert.equal(exists(f.vault, BASE), false, "no copy left behind in 00 Meta");
+    assert.match(f.answers.sawSummary, /Changed in this vault, would be overwritten: 1\*\*\n- Business\/Invoices\/Invoices\.base/);
+    // and the next run still knows it's yours, not something new
+    await f.up.invoke();
+    assert.match(f.answers.sawSummary, /Changed in this vault, would be overwritten: 1/);
+    assert.doesNotMatch(f.answers.sawSummary, /\*\*New/);
+});
+
+test("invoke: settings that don't read, or a `folder` that isn't one, leave the base where it is", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("Business/Invoices"));
+    await f.up.invoke();
+    const placed = "Business/Invoices/Invoices.base";
+    assert.equal(read(f.vault, placed), "invoices base\n");
+    const before = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json")).files;
+
+    for (const [settings, why] of [
+        ["---\nname: Juniper Hale\nnot yaml at all\n---\n", /properties don't read/],
+        [settingsNote("../outside"), /`folder` in Invoice Settings isn't a folder in the vault \(\.\.\/outside\)/],
+        [settingsNote("README.md/Invoices"), /goes through README\.md, which is a file/],
+    ]) {
+        write(f.vault, "00 Meta/Invoice Settings.md", settings);
+        write(f.source, "00 Meta/02 Scripts/CustomJS/timeReport.js", `report ${Math.random()}\n`);
+        execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
+        f.notices.length = 0;
+        await f.up.invoke();
+        assert.ok(f.notices.some((n) => why.test(n) && /left where it is/.test(n)), f.notices.join("\n"));
+        assert.equal(read(f.vault, placed), "invoices base\n", "still where it was");
+        assert.equal(exists(f.vault, BASE), false, "and not back in 00 Meta");
+        assert.equal(exists(f.base, "outside/Invoices.base"), false);
+        assert.deepEqual(f.trashed, []);
+        assert.match(f.answers.sawSummary, /The Invoices base is left as it is this time/);
+        const files = JSON.parse(read(f.vault, "00 Meta/02 Scripts/update-manifest.json")).files;
+        assert.equal(files[placed], before[placed], "its record kept");
+    }
+});
+
+test("invoke: a file already in place is recorded, even when there's nothing to copy", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    await f.up.invoke();
+    // a Projects base put in place by hand on another install, matching the repository
+    const manifestPath = "00 Meta/02 Scripts/update-manifest.json";
+    const m = JSON.parse(read(f.vault, manifestPath));
+    delete m.files["Projects/Projects.base"];
+    write(f.vault, manifestPath, JSON.stringify(m));
+    await f.up.invoke();
+    assert.match(f.notices.at(-1), /up to date/);
+    assert.equal("Projects/Projects.base" in JSON.parse(read(f.vault, manifestPath)).files, true);
+    // so the repository's next version updates it
+    write(f.source, "Projects/Projects.base", "projects base v2\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "projects v2"], { stdio: "pipe" });
+    await f.up.invoke();
+    assert.equal(read(f.vault, "Projects/Projects.base"), "projects base v2\n");
 });

@@ -1,22 +1,27 @@
 class Invoice {
     // Command "Invoice" (OBS-5): makes an invoice note from the time logged in daily notes, and moves
     // one along once it's made. Run on a project note (or pick a project), it asks "Bill through" a
-    // date, shows what it would bill and what needs fixing first, and writes a draft into the
-    // project's invoices/ folder. Run on an invoice note, it offers what fits the invoice's status:
-    // Rebuild or Mark sent for a draft, Check for changes, Mark paid or Cancel invoice once it's sent.
+    // date, shows what it would bill and what needs fixing first, and writes a draft into the folder
+    // Invoice Settings names (`folder`, OBS-112), else into the project's invoices/ folder. Its number
+    // is one past the highest ever given (`last_number` there, or the highest invoice note's number),
+    // so a deleted invoice's number is never used again. Run on an invoice note, it offers what fits
+    // the invoice's status: Rebuild or Mark sent for a draft, Check for changes, Mark paid or Cancel
+    // invoice once it's sent.
     //
     // The note is the invoice: its properties say what the Invoices base lists, its body is what
     // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
-    // (Billing reads and writes it). Your details come from 00 Meta/Invoice Settings.md, which git
-    // ignores; the client's code, billing name and address from the note the project's `client`
+    // (Billing reads and writes it). Your details come from 00 Meta/Invoice Settings.md, which updates
+    // leave alone; the client's code, billing name and address from the note the project's `client`
     // links to. They're copied in when the invoice is made, so a sent invoice never changes.
     //
-    // Only the invoice note (and, once, the client's `code` and the settings note) is written. Daily
+    // Only the invoice note (and the client's `code` once, and the settings note) is written. Daily
     // notes are only read. The pure methods come first, tested with vm; everything that touches `app`
     // is at the bottom.
     static SETTINGS = "00 Meta/Invoice Settings.md";
     static FOLDER = "invoices";
+    // The highest `last_number`: invoice numbers have at most six digits
+    static MAX_NUMBER = 999999;
     static CHECK = "pm-invoice-check";
     static CHECK_START = "%% invoice-check:start %%";
     static CHECK_END = "%% invoice-check:end %%";
@@ -48,11 +53,26 @@ class Invoice {
         return [].concat(value ?? []).flatMap((v) => String(v ?? "").split(/\r?\n/)).map((v) => v.trim()).filter(Boolean);
     }
 
-    // Your details, from the settings note's properties. `ok` once there's at least a name.
-    readSettings(props = {}) {
+    // Your details, from the settings note's properties. `ok` once there's at least a name. `folder` is
+    // where new invoices go ("" for the project's own invoices/ folder) and `lastNumber` the highest
+    // number ever given (null when blank), from `folder` and `last_number` (OBS-112); `problem` says
+    // what's wrong with either, which stops a new invoice but not a rebuild.
+    readSettings(props = {}, billing) {
         const text = (v) => String(v ?? "").trim();
         const name = text(props.name);
-        return { name, address: this.list(props.address), terms: text(props.terms), paymentNote: text(props.payment_note), ok: !!name };
+        const folder = billing.folderOf(props.folder);
+        const last = this.lastNumberOf(props.last_number);
+        const problem = folder.error ? `\`folder\` ${folder.error}` : last.error ? `\`last_number\` ${last.error}` : null;
+        return { name, address: this.list(props.address), terms: text(props.terms), paymentNote: text(props.payment_note),
+            folder: folder.folder, lastNumber: last.number, problem, ok: !!name };
+    }
+
+    // `last_number`: a whole number from 0 to 999999, as a number or as digits, or null when blank
+    lastNumberOf(raw) {
+        if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) return { number: null, error: null };
+        const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+        if (Number.isInteger(n) && n >= 0 && n <= Invoice.MAX_NUMBER) return { number: n, error: null };
+        return { number: null, error: `isn't a whole number from 0 to ${Invoice.MAX_NUMBER} (${typeof raw === "string" ? raw.trim() : JSON.stringify(raw)})` };
     }
 
     // The note a project bills: its own `client`, else the nearest parent's. { path, name, code,
@@ -300,8 +320,12 @@ class Invoice {
             "address:",
             "terms: Net 30",
             "payment_note:",
+            "folder:",
+            "last_number: 1000",
             "---",
-            "Your details for invoices. The Invoice command copies them into each new invoice: `name` and `address` (one line per item) head it, `terms` and `payment_note` close it. A project's own `terms` wins over these. This note is yours: git ignores it, and updates leave it alone.",
+            "Your details for invoices. The Invoice command copies them into each new invoice: `name` and `address` (one line per item) head it, `terms` and `payment_note` close it. A project's own `terms` wins over these. This note is yours: updates leave it alone.",
+            "",
+            "`folder` is where new invoices go, like `Business/Invoices`; left blank, each goes into its project's `invoices/` folder. *Update Obsidian PM* puts the Invoices base there too. `last_number` is the highest invoice number given so far: the next invoice is one more than it, or than the highest invoice note's number if that's higher, and the Invoice command raises it each time, so a deleted invoice's number is never used again.",
             "",
         ].join("\n");
     }
@@ -377,12 +401,13 @@ class Invoice {
 
     // Makes a draft invoice for `project`
     async create(project, tr, billing, index) {
-        if (tr.basename(tr.dirname(project)) !== tr.basename(project)) {
-            new Notice(`${tr.basename(project)} isn't its folder's own note, so it has no folder to file invoices in`);
-            return;
-        }
         const settings = await this.settings(tr);
         if (!settings) return;
+        if (settings.problem) { new Notice(`${settings.problem} in ${tr.basename(Invoice.SETTINGS)}; fix it there, then run Invoice again`, 0); return; }
+        if (!settings.folder && tr.basename(tr.dirname(project)) !== tr.basename(project)) {
+            new Notice(`${tr.basename(project)} isn't its folder's own note, so it has no invoices/ folder; set \`folder\` in ${tr.basename(Invoice.SETTINGS)} to file every invoice in one place`, 0);
+            return;
+        }
         const client = this.readClient(project, tr, index);
         if (client.error) { new Notice(client.error); return; }
 
@@ -395,6 +420,12 @@ class Invoice {
             sel = billing.select(model, tr, index, { project, through, ledger: model.billing.ledger });
         } finally { working.hide(); }
         if (!this.billable(project, model, sel, tr, billing, through)) return;
+        // No number to count from: an older settings note, and no invoice yet (OBS-112)
+        if (settings.lastNumber === null && billing.nextNumber(model.billing.invoices) === null) {
+            await app.workspace.getLeaf(false).openFile(app.vault.getFileByPath(Invoice.SETTINGS));
+            new Notice("Set `last_number` here to the number before your first invoice (1000 to start at 1001), then run Invoice again", 0);
+            return;
+        }
         if (!(await this.confirm(project, through, sel, model, tr, billing))) return;
 
         if (client.code && !Invoice.CODE.test(client.code)) {
@@ -403,10 +434,12 @@ class Invoice {
         }
         const code = client.code || await this.askCode(client, tr);
         if (!code) return;
-        const next = billing.nextNumber(model.billing.invoices) ?? await this.askNumber();
-        if (!next) return;
+        // `last_number` as it is now: the prompts may have been open a while
+        const now = await this.lastNumberNow(tr, billing);
+        if (now.error) { new Notice(`\`last_number\` ${now.error} in ${tr.basename(Invoice.SETTINGS)}; fix it there, then run Invoice again`, 0); return; }
+        const next = billing.nextNumber(model.billing.invoices, now.number);
         const name = this.nameFor(next, code);
-        const folder = `${tr.dirname(project)}/${Invoice.FOLDER}`;
+        const folder = this.realFolder(settings.folder || `${tr.dirname(project)}/${Invoice.FOLDER}`);
         const path = `${folder}/${name}.md`;
         if (app.vault.getAbstractFileByPath(path)) { new Notice(`${name} already exists`); return; }
 
@@ -416,7 +449,7 @@ class Invoice {
         const props = index.props(project) ?? {};
         const text = this.noteText({
             id: window.moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
-            area: `[[${projectFile.basename}|${alias}]]`, clientLink: linkText(client.path), projectLink: linkText(project),
+            area: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path), projectLink: linkText(project),
             invoiceDate: window.moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
             from: settings, billTo: { name: client.billingName, address: client.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
@@ -424,8 +457,10 @@ class Invoice {
             billed: billing.snapshot(sel.entries, model, tr), linkText,
             check: this.beforeSending(sel, tr),
         }, tr, billing);
-        if (!app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
+        await this.makeFolders(folder);
         const file = await app.vault.create(path, text);
+        // Only once the note exists, so a failure before it can't skip a number
+        await this.raiseLastNumber(next, name, tr);
         // Wait for the index to know it's an invoice, so a second run can't bill its entries again
         await this.indexed(file);
         await app.workspace.getLeaf(false).openFile(file);
@@ -449,7 +484,7 @@ class Invoice {
             return false;
         }
         if (!sel.entries.length && rebuild) {
-            new Notice("Nothing left to bill on this draft, so it's unchanged. To discard it, delete its note.", 0);
+            new Notice("Nothing left to bill on this draft, so it's unchanged. To discard it, delete its note (its number isn't given again).", 0);
             return false;
         }
         if (!sel.entries.length) {
@@ -472,7 +507,7 @@ class Invoice {
         if (!file) {
             file = await app.vault.create(Invoice.SETTINGS, this.settingsText(window.moment().format("YYYYMMDDHHmmssSS")));
         } else {
-            const s = this.readSettings(await this.propsOf(file, tr));
+            const s = this.readSettings(await this.propsOf(file, tr), customJS.Billing);
             if (s.ok) return s;
         }
         await app.workspace.getLeaf(false).openFile(file);
@@ -557,11 +592,59 @@ class Invoice {
         return code.toUpperCase();
     }
 
-    // The first invoice's number
-    async askNumber() {
-        const n = await this.askText("First invoice number", "This is the first invoice in the vault. Later ones count up from it.", "1001",
-            (v) => (/^[1-9]\d{0,5}$/.test(v) ? null : "A number from 1 up, like 1001"));
-        return n ? Number(n) : null;
+    // `path` with each folder the vault already has spelled as it is there, matched in any case: on a
+    // Mac, createFolder refuses a folder that differs from one it has only in case
+    realFolder(path) {
+        let parent = app.vault.getRoot();
+        return path.split("/").map((part) => {
+            const folders = (parent?.children ?? []).filter((c) => c.children);
+            const have = folders.find((c) => c.name === part) ?? folders.find((c) => c.name.toLowerCase() === part.toLowerCase());
+            parent = have ?? null;
+            return have ? have.name : part;
+        }).join("/");
+    }
+
+    // Makes the folders `path` needs, one at a time
+    async makeFolders(path) {
+        let at = "";
+        for (const part of path.split("/")) {
+            at = at ? `${at}/${part}` : part;
+            const have = app.vault.getAbstractFileByPath(at);
+            if (!have) await app.vault.createFolder(at);
+            else if (!have.children) throw new Error(`${at} is a file, not a folder`);
+        }
+    }
+
+    // `last_number` read from the settings note now: { number, error }
+    async lastNumberNow(tr, billing) {
+        const file = app.vault.getFileByPath(Invoice.SETTINGS);
+        if (!file) return { number: null, error: null };
+        const s = this.readSettings(await this.propsOf(file, tr), billing);
+        return { number: s.lastNumber, error: s.problem?.startsWith("`last_number`") ? s.problem.replace(/^`last_number` /, "") : null };
+    }
+
+    // Raises `last_number` in the settings note to `n`, never lowering it, by rewriting that one line,
+    // so the rest of the note stays as you wrote it. Should that fail, the new note still holds its
+    // number, which the next run counts, so no number is given twice.
+    async raiseLastNumber(n, name, tr) {
+        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
+        try {
+            const file = app.vault.getFileByPath(Invoice.SETTINGS);
+            if (!file) throw new Error("the note is gone");
+            let found = true;
+            await app.vault.process(file, (text) => {
+                const info = getFrontMatterInfo(text);
+                const now = this.lastNumberOf(info.exists ? (parseYaml(info.frontmatter) ?? {}).last_number : null).number;
+                if (now !== null && now >= n) return text;
+                const after = this.setProps(text, { last_number: n });
+                if (after === null) { found = false; return text; }
+                return after;
+            });
+            if (!found) throw new Error("its properties weren't found");
+        } catch (e) {
+            console.error("Invoice: couldn't raise last_number", e);
+            new Notice(`${name} is made, but \`last_number\` in ${tr.basename(Invoice.SETTINGS)} couldn't be set to ${n} (${e.message}); set it there by hand`, 0);
+        }
     }
 
     // Shows what an invoice would bill, and asks. Resolves true to create it.
