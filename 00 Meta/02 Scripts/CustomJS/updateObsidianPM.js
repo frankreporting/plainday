@@ -44,7 +44,7 @@ class UpdateObsidianPM {
     // The base that goes beside the invoices: the repository keeps it beside the demo's invoices, and
     // a vault gets it beside its own, or in 00 Meta/04 Bases with no invoice folder (where every
     // version before OBS-112 put it). The note that says where the invoices are is the vault's own.
-    static INVOICES_BASE = "30 Reference/38 Invoices/Invoices.base";
+    static INVOICES_BASE = "30 Reference/Invoices/Invoices.base";
     static INVOICES_BASE_HOME = "00 Meta/04 Bases/Invoices.base";
     static INVOICE_SETTINGS = "00 Meta/Invoice Settings.md";
     static MANIFEST_FILE = "00 Meta/02 Scripts/update-manifest.json";
@@ -58,7 +58,7 @@ class UpdateObsidianPM {
         // Beside the projects and the invoices, so they open as files even when `00 Meta` is
         // excluded (OBS-112). The Invoices base goes where the vault keeps its invoices (placed()).
         "Projects/Projects.base",
-        "30 Reference/38 Invoices/Invoices.base",
+        "30 Reference/Invoices/Invoices.base",
         ".obsidian/daily-notes.json",
         ".obsidian/plugins/templater-obsidian/data.json",
         ".obsidian/plugins/customjs/data.json",

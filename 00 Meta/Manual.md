@@ -48,7 +48,7 @@ Projects/
   35 People/
   36 Planner/
     days/ weeks/ months/ years/  the periodic notes
-  38 Invoices/                   every invoice, with the Invoices base beside them (see Invoices)
+  Invoices/                      every invoice, with Invoices.base as the folder's note (see Invoices)
   Sources/
 90 Archive/                      finished projects, moved here whole
 ```
@@ -401,11 +401,12 @@ It needs your details first: the first run makes `00 Meta/Invoice Settings.md` t
 
 ### Where invoices live
 
-One folder for every invoice is the better choice: invoices are business records, and a project's folder moves when it's archived. The demo keeps its invoices, and the base, in `30 Reference/38 Invoices/`.
+One folder for every invoice is the better choice: invoices are business records, and a project's folder moves when it's archived. The demo keeps its invoices, and the base, in `30 Reference/Invoices/`.
 
 - **A base leaves out excluded files.** With `90 Archive` excluded (Settings → Files and links → Excluded files), an archived project's `invoices/` drop out of the *Invoices* base, and the record of what you've invoiced goes incomplete. So pick a `folder` that's never excluded and never archived, outside `Projects/`.
 - **Billing doesn't care where an invoice is.** Invoices are found by their `invoice` tag anywhere in the vault, `90 Archive` included, and each knows its project from its `project` link. So nothing is billed twice, numbering continues, and *Mark paid* works wherever the note sits.
 - **Moving your invoices into the folder** by hand, once `folder` is set, breaks nothing.
+- **Name the folder `Invoices`,** without a number in front, like `30 Reference/Invoices`. Then the base, `Invoices.base`, has the folder's name, which is what makes a file a folder's note in Notebook Navigator (a base counts). Clicking the folder opens the base. The `Projects` folder and `Projects.base` work the same way.
 - **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. *UpdateObsidianPM* puts it there, and moves it when `folder` changes. Until you set `folder`, it stays in `00 Meta/04 Bases/`. See *UpdateObsidianPM* for how its updates arrive.
 
 ### The note
@@ -564,7 +565,7 @@ Record the folds of every open daily note before an outside edit, and restore th
 
 Installs the system from a local clone of the repository into the vault it runs in. See the README. It also puts the two bases where they open as files:
 
-- **`Projects/Projects.base`**, the active projects, beside them.
+- **`Projects/Projects.base`**, the active projects, beside them: the `Projects` folder's note in Notebook Navigator.
 - **`Invoices.base`** beside the invoices, in the `folder` Invoice Settings names (see *Where invoices live*), else in `00 Meta/04 Bases/`. When `folder` changes, the next update moves it there as it is, with any sorting or filters you added. While Invoice Settings can't be read (its properties don't parse, or `folder` isn't a folder), the base stays where it is and the update says why.
 
 **A base saves your view changes into its file:** sorting, filters, column widths. So once you've used a base, an update sees it as changed by you and leaves it alone: it's listed under *Changed in this vault*. To take a new version from the repository, turn on *Take the repository's version* in the update's dialog; your copy of a file outside `00 Meta` goes to the vault's trash first, so you can copy a view back from it.

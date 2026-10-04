@@ -429,7 +429,7 @@ test("invoke: a removal that fails still records the copies that landed", async 
 
 // The base as the repository keeps it, beside the demo's invoices, and where a vault gets it with no
 // invoice folder
-const SRC = "30 Reference/38 Invoices/Invoices.base";
+const SRC = "30 Reference/Invoices/Invoices.base";
 const BASE = "00 Meta/04 Bases/Invoices.base";
 const settingsNote = (folder) => `---\nname: Juniper Hale\nfolder: ${folder}\nlast_number: 1000\n---\nYour details for invoices.\n`;
 
@@ -437,8 +437,8 @@ const settingsNote = (folder) => `---\nname: Juniper Hale\nfolder: ${folder}\nla
 function withBases(f) {
     write(f.source, SRC, "invoices base\n");
     write(f.source, "Projects/Projects.base", "projects base\n");
-    write(f.source, "30 Reference/38 Invoices/1001-KES.md", "demo invoice\n");
-    write(f.source, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/38 Invoices"));
+    write(f.source, "30 Reference/Invoices/1001-KES.md", "demo invoice\n");
+    write(f.source, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/Invoices"));
     execFileSync("git", ["-C", f.source, "add", "-A"], { stdio: "pipe" });
     execFileSync("git", ["-C", f.source, "commit", "-qm", "bases"], { stdio: "pipe" });
 }
@@ -452,7 +452,7 @@ test("invoke: the Projects base goes in Projects, and the Invoices base in 00 Me
     assert.equal(read(f.vault, BASE), "invoices base\n");
     assert.doesNotMatch(f.answers.sawSummary, /goes in/);
     // the demo's invoice, its settings and its folder never reach a vault
-    for (const p of ["00 Meta/Invoice Settings.md", "30 Reference/38 Invoices/1001-KES.md", SRC]) assert.equal(exists(f.vault, p), false, p);
+    for (const p of ["00 Meta/Invoice Settings.md", "30 Reference/Invoices/1001-KES.md", SRC]) assert.equal(exists(f.vault, p), false, p);
     assert.doesNotMatch(f.answers.sawSummary, /Invoice Settings\.md|1001-KES/);
 });
 
@@ -473,7 +473,7 @@ test("invoke: a vault that keeps its invoices where the demo does gets the base 
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     withBases(f);
     await f.up.invoke();
-    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/38 Invoices"));
+    write(f.vault, "00 Meta/Invoice Settings.md", settingsNote("30 Reference/Invoices"));
     await f.up.invoke();
     assert.equal(read(f.vault, SRC), "invoices base\n");
     assert.equal(exists(f.vault, BASE), false);

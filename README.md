@@ -59,9 +59,9 @@ Projects/
   35 People/                       people (@)
   36 Planner/
     days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
-  38 Invoices/                     every invoice, with the Invoices base beside them (Invoice Settings' `folder`)
-    1001-KES.md
   37 Journal/
+  Invoices/                        every invoice, with Invoices.base as the folder's note (Invoice Settings' `folder`)
+    1001-KES.md
   Sources/                         source notes (¶)
 90 Archive/                        finished projects, moved here whole; excluded from search and reports
 Welcome.md                         start here

@@ -22,12 +22,12 @@ const TEMPLATE = "00 Meta/01 Templates/Task.md";
 const SETTINGS = ".obsidian/plugins/customjs/data.json";
 
 test("installs: the system, never notes, never the demo's own test files", () => {
-    for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "30 Reference/38 Invoices/Invoices.base", "Projects/Projects.base",
+    for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "30 Reference/Invoices/Invoices.base", "Projects/Projects.base",
         ".obsidian/daily-notes.json", ".obsidian/plugins/templater-obsidian/data.json"]) {
         assert.equal(up.installs(path), true, path);
     }
     for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "Projects/Projects.md", "Projects/Freelance/Projects.base", "30 Reference/36 Planner/days/2026-09-16.md",
-        "00 Meta/Invoice Settings.md", "30 Reference/38 Invoices/1001-KES.md",
+        "00 Meta/Invoice Settings.md", "30 Reference/Invoices/1001-KES.md",
         "90 Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "10 Inbox/Desk lamp for the studio.md",
         ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json",
         "00 Meta/02 Scripts/tests/demoVault.test.mjs", "00 Meta/02 Scripts/tests/demo/renderReports.mjs",
@@ -85,7 +85,7 @@ test("plan: notes are never in any list, whatever the repository holds", () => {
 
 // The base as the repository keeps it (beside the demo's invoices), and its place in a vault with no
 // invoice folder (where every version before OBS-112 put it)
-const SRC = "30 Reference/38 Invoices/Invoices.base";
+const SRC = "30 Reference/Invoices/Invoices.base";
 const BASE = "00 Meta/04 Bases/Invoices.base";
 const PLACED = "Business/Invoices/Invoices.base";
 
@@ -107,7 +107,7 @@ test("placed: the Invoices base goes in the invoice folder, else in 00 Meta/04 B
     assert.deepEqual(plain([...there.files]), [[SCRIPT, "a"], [PLACED, "b"], ["Projects/Projects.base", "c"]]);
     assert.deepEqual(plain([...there.origin]), [[PLACED, SRC]]);
     // the demo's own folder: where the repository keeps it already
-    const same = up.placed(source, { invoiceFolder: "30 Reference/38 Invoices" });
+    const same = up.placed(source, { invoiceFolder: "30 Reference/Invoices" });
     assert.deepEqual(plain([...same.files.keys()]), [SCRIPT, SRC, "Projects/Projects.base"]);
     assert.equal(same.origin.size, 0);
     // a folder that puts it onto another installed file, in any case, sends it to 00 Meta/04 Bases

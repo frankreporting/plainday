@@ -7,7 +7,7 @@ address:
   - Maple Falls, ST 00000
 terms: Net 30
 payment_note: Please pay by bank transfer within 30 days.
-folder: 30 Reference/38 Invoices
+folder: 30 Reference/Invoices
 last_number: 1001
 ---
 Your details for invoices. The Invoice command copies them into each new invoice: `name` and `address` (one line per item) head it, `terms` and `payment_note` close it. A project's own `terms` wins over these. This note is yours: updates leave it alone.

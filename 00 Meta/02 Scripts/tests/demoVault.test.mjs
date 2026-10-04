@@ -29,7 +29,7 @@ const demoNotes = [...vault.notes.keys()].filter((p) => p === "Welcome.md" || NO
 const PROBLEM_NOTE = `${DAYS}/2026-09-16.md`;
 const PROBLEM_PROJECT = "Projects/Personal/Block Party Poster/Block Party Poster.md";
 const KESTREL_PROJECT = "Projects/Freelance/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md";
-const DEMO_INVOICE = "30 Reference/38 Invoices/1001-KES.md";
+const DEMO_INVOICE = "30 Reference/Invoices/1001-KES.md";
 
 // ------------------------------------------------------------------ where the bases and invoices are (OBS-112)
 
@@ -38,8 +38,10 @@ test("demo vault: invoices and their base in the folder Invoice Settings names; 
     const settings = vault.notes.get("00 Meta/Invoice Settings.md");
     assert.ok(settings, "the demo's own settings note, with invented details");
     const folder = billing.folderOf(settings.fm.folder).folder;
-    assert.equal(folder, "30 Reference/38 Invoices");
+    assert.equal(folder, "30 Reference/Invoices");
     assert.ok(vault.files.includes(`${folder}/Invoices.base`), "the Invoices base beside the invoices");
+    // named like its folder, so Notebook Navigator makes it the folder's note (OBS-115), as Projects.base is
+    assert.equal(basename(folder), "Invoices");
     const invoices = [...vault.notes].filter(([, { fm }]) => [].concat(fm.tags ?? []).includes("invoice")).map(([p]) => p);
     assert.ok(invoices.length > 0);
     for (const p of invoices) assert.equal(dirname(p), folder, p);
@@ -352,7 +354,7 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     assert.ok(at('tR += "rate_type: \\n";') < at('tR += "include_subprojects: false\\n";'));
     assert.ok(at('tR += "include_subprojects: false\\n";') < at('tR += "billed_through: \\n";'));
     assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
-    const base = fs.readFileSync(new URL("../../../30 Reference/38 Invoices/Invoices.base", import.meta.url), "utf8");
+    const base = fs.readFileSync(new URL("../../../30 Reference/Invoices/Invoices.base", import.meta.url), "utf8");
     assert.match(base, /file\.tags\.contains\("invoice"\)/);
     for (const p of ["status", "client", "project", "hours", "total", "sent", "paid"]) assert.match(base, new RegExp(`- ${p}\\n`), p);
 });
