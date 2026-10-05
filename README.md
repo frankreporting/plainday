@@ -201,3 +201,7 @@ What it installs: everything the repository has under `00 Meta/` (the manual inc
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `00 Meta/02 Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 
 Run it again whenever you want the latest.
+
+## License
+
+[MIT](LICENSE). The sample notes are invented and covered by the same license.
