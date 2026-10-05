@@ -12,5 +12,6 @@ Copy for the six panels: welcome, kids' programs, adult classes, the maker space
 - [>] [[2026-09-17|9/17]] Send final copy to Rafe
 
 ## Notes
+
 - Rafe wants the hours panel to lead with the new Sunday hours.
 - Keep every panel under 90 words.

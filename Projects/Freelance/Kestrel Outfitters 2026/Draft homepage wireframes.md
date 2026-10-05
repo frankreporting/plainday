@@ -13,5 +13,6 @@ Homepage wireframes, desktop and mobile, for Imogen to sign off on Friday. Worke
 - [ ] Export PDFs for the sign-off call
 
 ## Notes
+
 - Two-column hero on desktop, stacked on mobile.
 - Keep the seasonal banner slot; the shop changes it every month.

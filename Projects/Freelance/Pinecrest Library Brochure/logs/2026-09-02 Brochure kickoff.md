@@ -14,14 +14,17 @@ who:
 - "[[Pinecrest Public Library]]"
 ---
 ## Agenda
+
 - What goes in the brochure
 - Print run and deadline
 
 ## Notes
+
 - Six-panel fold-out, 2,000 copies, printed locally.
 - Photos from the summer reading program are fine to use; Rafe will send the release list.
 - Final files to the printer by 9/22.
 
 ## Follow-ups
+
 - [x] Gather photos and past flyers
 - [x] [[Write brochure copy]]

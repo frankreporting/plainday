@@ -18,6 +18,7 @@ status: Active
 A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee of $1,200, so the report shows hours against the 20 I budgeted but no Earned.
 
 ## Tasks
+
 - [x] Kickoff with Rafe
 - [x] [[Write brochure copy]]
 - [x] Proof corrections

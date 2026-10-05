@@ -12,10 +12,12 @@ endTime:
 who: 
 ---
 ## Notes
+
 - The printer wants the final files by the 22nd: PDF/X-4, with bleed, one file per side.
 - Quoted the same price as in the spring for the 500 run.
 
 ## Follow-ups
+
 - [ ] Send the final files by the 22nd
 - [ ] Confirm the delivery address with [[Rafe Oakes]]
 

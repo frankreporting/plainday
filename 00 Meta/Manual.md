@@ -102,11 +102,12 @@ This section is the spec for how daily notes are written, for you and for any ag
 | Filename | `YYYY-MM-DD` | `gggg[w]ww`, e.g. `2026w38` | `YYYY-MM` | `YYYY` |
 | Folder | `30 Reference/36 Planner/days` | `…/weeks` | `…/months` | `…/years` |
 | Frontmatter | `aliases: M/D/YY dddd` (`9/16/26 Wednesday`) | `aliases: Week of M/D/YY` | `aliases:` with one entry, e.g. `September 2026` | none |
-| Holds | That day's events, then its tasks | Its time report | Tasks for the month with no day yet; its time report | Its time report |
+| Holds | That day's events, then its tasks | Tasks for the week with no day yet; its time report | Tasks for the month with no day yet; its time report | Tasks for the year with no day yet; its time report |
 
 - The folder patterns match Notebook Navigator's calendar (`[days]/YYYY-MM-DD`, `[weeks]/gggg[w]ww`, `[months]/YYYY-MM`, `[years]/YYYY`). Attachments stay at the `36 Planner` root. A note named like a periodic note anywhere else isn't one.
 - A daily note has no headings above its list. It opens with one checklist: events first, then tasks. Anything that isn't a task goes under `## Notes` below it.
 - A blank line ends the first checklist. A second group can follow under a plain label (`After lunch:`), but Schedule only ever writes into the first checklist.
+- A weekly, monthly or yearly note keeps its tasks in a checklist above `## Time tracking`, the way the demo's `2026w38` and `2026-09` do. *Schedule* puts a task there for `next week`, `next month` or `next year`; schedule it from there to a day when its time comes.
 
 ### Line types
 
@@ -273,24 +274,35 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 
 ### Links at the start of a line: only outside daily notes
 
-A daily-note link as the **first** thing after the checkbox is a breadcrumb meaning "this was sent to that day." It appears only on `[>]` lines in **non-daily notes**: meeting logs, task notes, project notes, anything else.
+A link to a daily, weekly, monthly or yearly note as the **first** thing after the checkbox is a breadcrumb meaning "this was sent to that day" (or week, month, year). It appears only on `[>]` lines in **non-daily notes**: meeting logs, task notes, project notes, anything else.
 
 ```markdown
 - [>] [[2026-09-18|9/18]] Sign-off call on Friday
+- [>] [[2026w41|Wk of 10/4]] Book the photographer
+- [>] [[2026-09|Sep. 2026]] Collect member photos for the October issue
+- [>] [[2027]] Plan the spring sale
 ```
 
-The alias is `M/D`, with no year and no leading zeros. Daily notes don't get prefix links, except on an event the calendar sync forwarded (see *Calendar sync*).
+- **A day's alias** is `M/D`, with no year and no leading zeros.
+- **A week's** is `Wk of M/D`, the day the week starts. **A month's** is its short name and the year (`Oct. 2026`, `May 2026`), and **a year** is linked by its name alone.
+- A weekly, monthly or yearly note whose name another note shares is linked by its path, so the link can't open the other note.
+- Daily notes don't get prefix links, except on an event the calendar sync forwarded (see *Calendar sync*).
+- In the demo, *Garden Club Newsletter* sent a task to September's note, `2026-09`.
 
 ### What Schedule does to a line
 
-| Scheduling from… | The original line | The new line on the target day |
+| Scheduling from… | The original line | The new line on the target day, week, month or year |
 | --- | --- | --- |
 | A daily note, task **not** worked on | Removed along with its sub-bullets (it moves) | Same line and sub-bullets |
 | A daily note, task worked on (time entries) | Stays and becomes `[>]`; gets a 🗒️ link, after its note's ⭕, if it had none | `[ ]` (or `[/]`), same text, ⭕ and 🗒️ link, no sub-bullets |
-| A monthly note | Removed along with its sub-bullets, even if worked on | Same line and sub-bullets |
-| Any other note (log, task, project…) | Becomes `[>] [[YYYY-MM-DD\|M/D]] text` | `[ ] text [[Project\|⭕]] [[Source\|🗒️]]`, the ⭕ for the source's project; or `[[Source\|⭕]]` / `[[Source\|🗃️]]` if the source is a project or area |
+| A weekly, monthly or yearly note | Removed along with its sub-bullets, even if worked on | Same line and sub-bullets |
+| Any other note (log, task, project…) | Becomes `[>] [[YYYY-MM-DD\|M/D]] text`, or `[>] [[2026w41\|Wk of 10/4]] text` for a week (see *Links at the start of a line*) | `[ ] text [[Project\|⭕]] [[Source\|🗒️]]`, the ⭕ for the source's project; or `[[Source\|⭕]]` / `[[Source\|🗃️]]` if the source is a project or area |
 
-- Scheduled lines go to the end of the target day's first checklist. A daily note that doesn't exist yet is created from its template.
+- **A week, a month or a year** (`next week`, `next month`, `next year`, `w41`, `oct`, or a note's own name; see *Typing a date*) sends the line to that weekly, monthly or yearly note instead of a day. From there it's scheduled to a day when its time comes.
+- Scheduled lines go to the end of the target's first checklist. A weekly, monthly or yearly note with no checklist gets one, just above `## Time tracking` (or at the end before there's a report): a line never goes inside the report. A note that doesn't exist yet is created from its template, a period's the way *JumpToDate* creates it, before anything moves: if it can't be made, the line stays where it was.
+- **Time entries stay where they were logged.** A worked-on task's entries stay on the original line in its daily note, and count toward the time report on that day; the copy in the weekly, monthly or yearly note carries none. *ToggleTimeEntry* only times tasks in today's daily note, so schedule the task to a day before timing it.
+- A line's 🚩 due date, ⭕ and 🗒️ go with it, to a period as to a day.
+- Scheduling a line into the note it's already in changes nothing, and says "Already in this note".
 - **Events can't be scheduled:** on a `[<]` line, Schedule changes nothing and shows "Events must be moved in your calendar app."
 - A worked-on task with no task note gets one first, the way *AddTaskNote* makes it, so the time already logged isn't left Unassigned.
 
@@ -364,15 +376,15 @@ Obsidian saves folds separately on each device, and forgets a note's folds when 
 
 ### Rules for agents
 
-- Read this section before editing any daily or monthly note, and write lines exactly as the scripts would: the tab after an event's time, the symbol aliases, `M/D` link aliases.
+- Read this section before editing any daily, weekly, monthly or yearly note, and write lines exactly as the scripts would: the tab after an event's time, the symbol aliases, `M/D` link aliases.
 - A line that links a note ends `[[Project|⭕]] [[Note|🗒️]]` (or `[[Area|🗃️]]`), with the ⭕ for the project the note is filed in and any `🚩 M/D` before both: keep the note link last and its project next to it. Only the links at the end say where time counts; a link in the text doesn't.
 - Keep events at the top: `All day` events first, then timed events in time order. Add tasks after the last item of the first checklist.
 - Don't check off, forward, move or restyle a `[<]` event. Events are moved in the calendar app, not in Obsidian. The calendar sync is the one exception: it moves and removes the event lines it wrote, forwards events and marks canceled ones `[-]`, as *Calendar sync* describes.
 - Don't edit `calendar-sync.json` or `calendar-events.json` in `00 Meta/02 Scripts/Calendar/`; only the calendar sync writes them.
 - Don't add or remove time entries: they're the time log, and they change how Schedule treats a task. (The calendar sync writing and removing the end lines of its own event lines is the exception.)
 - Don't edit an invoice's Billed entries, or the body of one that's sent or paid; don't write in a timesheet note (the time report rewrites it). Change billing through the *Invoice* command.
-- To move a task to another day, follow *What Schedule does to a line*. Don't invent other forms.
-- Don't add `id` or `tags` to daily or monthly notes.
+- To move a task to another day, week, month or year, follow *What Schedule does to a line*. Don't invent other forms.
+- Don't add `id` or `tags` to daily, weekly, monthly or yearly notes.
 - When editing daily notes from outside Obsidian while it's open, run `obsidian command id=customjs:invoke-SnapshotDailyNotes` before and `obsidian command id=customjs:invoke-RefoldDailyNotes` after, so open notes keep their folds.
 - Older daily notes may use an earlier layout (`## Meetings` and `## To Do` headings). Leave them as they are; don't convert them.
 
@@ -470,15 +482,17 @@ What the words mean, typed on Sunday 9/27/26:
 | `last friday` | Fri 9/25 | Last week's: on a Saturday, 8 days back |
 | `tomorrow`, `in 3 days`, `in 2 weeks` | Mon 9/28, Wed 9/30, Sun 10/11 | Counted from today |
 | `10/2`, `oct 2` | Fri 10/2 | The next 10/2: a date already past this year is next year's, so give the year (`9/1/26`) for one behind you. *JumpToDate* takes the closer one instead: `9/16` is 11 days back, not next year's |
-| `next week`, `this week` | Sun 10/4, Sun 9/27 | The first day of next week, by your week setting; today for this week. *JumpToDate* opens the weekly note instead |
-| `week of oct 5` | Sun 10/4 | The first day of the week that day is in. *JumpToDate* opens that weekly note |
-| `next month`, `this month` | Thu 10/1, Tue 9/1 | The first of the month. *JumpToDate* opens the monthly note |
+| `next week`, `this week` | Week starting 10/4, Week starting 9/27 | The weekly note, for *Schedule* and *JumpToDate*. *DueDate* takes a day: the first of next week, by your week setting, or today for this week |
+| `week of oct 5` | Week starting 10/4 | The weekly note holding that day. *DueDate* takes the first day of that week |
+| `next month`, `this month`, `next year` | October 2026, September 2026, 2027 | The monthly or yearly note, for *Schedule* and *JumpToDate*. *DueDate* takes the first day of it |
+| `w41`, `oct`, `2026-10`, `2027` | Week starting 10/4, October 2026, October 2026, 2027 | A week or a month in words, or a note's own name (see *JumpToDate*). Without a year, *Schedule* takes the next one (`jan` is January 2027, `w5` week 5 of 2027) and *JumpToDate* this year's |
 
 ### Schedule (`⌘S`)
 
 - Asks for a date (see *Typing a date*) and moves the line (with its sub-bullets) to the end of that day's first checklist. *What Schedule does to a line* has the whole table.
+- **A week, a month or a year** (`next week`, `next month`, `next year`, `w41`, `oct`, `2026-10`) sends the line to that weekly, monthly or yearly note instead, never inside its time report. The note is created from its template if it's missing. A week's preview names its note (`Week starting 10/4 · 2026w41`).
 - **Worked on** (time entries under it): the original stays as `[>]`, and both lines link the task note. If the task has no note yet, one is made first, the way *AddTaskNote* makes it (asking for its project or area); dismissing that picker cancels the schedule. A date in front of the task name goes to the note's `due` and comes off both lines, and the line's ⭕ or 🗃️ picks the note's home and stays, set to where the note is filed: `- [>] Draft homepage wireframes [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|🗒️]]`.
-- **From any note that isn't a daily note** (a sub-task in a task note, a task in a project note or log): the original gets the forward mark and a link to the day, `- [>] [[2026-09-18|9/18]] Sign-off call on Friday`, and the new line links back to the source with 🗒️, after the ⭕ or 🗃️ for the project or area the source is filed in; or with ⭕ / 🗃️ when the source is tagged `#project` / `#area`. A line with a ⭕ or 🗃️ of its own keeps it and gets no other.
+- **From any note that isn't a daily, weekly, monthly or yearly note** (a sub-task in a task note, a task in a project note or log): the original gets the forward mark and a link to the day, `- [>] [[2026-09-18|9/18]] Sign-off call on Friday` (or the week, month or year: `[[2026w41|Wk of 10/4]]`, `[[2026-10|Oct. 2026]]`, `[[2027]]`), and the new line links back to the source with 🗒️, after the ⭕ or 🗃️ for the project or area the source is filed in; or with ⭕ / 🗃️ when the source is tagged `#project` / `#area`. A line with a ⭕ or 🗃️ of its own keeps it and gets no other.
 - `[/]` tasks keep their marker on the new day.
 - Event lines can't be scheduled: it says "Events must be moved in your calendar app" and changes nothing.
 
@@ -533,7 +547,7 @@ Asks for a date (see *Typing a date*) and opens its note in the pane you're in; 
 
 - **A day** opens its daily note. **`this`, `next` or `last` with `week`, `month` or `year`** opens the weekly, monthly or yearly note, named and filed by Notebook Navigator's week, month and year patterns (else `weeks/gggg[w]ww`, `months/YYYY-MM` and `years/YYYY` beside the daily notes).
 - **Weeks** start on the day your settings say (see *Typing a date*), so `next week` is always the week after this one's note. Revived's own weeks start on Monday, which on a Sunday would land in this week's note; JumpToDate counts the weeks from today instead. A week written with its year (`2026-W41`) is the one holding that ISO week's Monday.
-- **A week or a month in words:** `week of oct 5` (or of any date: `week of friday`, or `week starting oct 4`) opens the weekly note holding that day, and the preview says when it starts and names it (`Week starting 10/4 · 2026w41`). `w38`, `wk 38` or `week 38` is week 38, counted the way the weekly notes count, and `sep`, `sept`, `september` or `9/2026` is that month. They mean this year unless a year comes before or after: `w1 2027`, `2027 w1`, `Sep 2027`.
+- **A week or a month in words:** `week of oct 5` (or of any date: `week of friday`, or `week starting oct 4`) opens the weekly note holding that day, and the preview says when it starts and names it (`Week starting 10/4 · 2026w41`). `w38`, `wk 38` or `week 38` is week 38, counted the way the weekly notes count, and `sep`, `sept`, `september` or `9/2026` is that month. They mean this year unless a year comes before or after: `w1 2027`, `2027 w1`, `Sep 2027`. (*Schedule* takes the next one instead.)
 - **A periodic note's own name** opens it too, spelled the way the patterns spell it: `2026w41`, `2026-10`, `2027`.
 - **A quarter** (`Q4`, `next quarter`) opens the daily note of its first day: there are no quarterly notes.
 - **A month and day without a year** (`9/16`, `sep 16`) is whichever is closer, this year's or next year's, since jumping goes back as often as forward. Schedule and DueDate take the next one.

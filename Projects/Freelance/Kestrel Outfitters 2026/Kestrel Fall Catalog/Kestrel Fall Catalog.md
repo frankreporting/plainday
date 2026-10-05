@@ -17,6 +17,7 @@ status: Active
 Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|⭕ Kestrel Outfitters 2026]]: it has no rate of its own, so it bills at the parent's $95 an hour, and its hours count toward the parent's cap.
 
 ## Tasks
+
 - [x] [[Shot list for catalog]]
 - [x] Book the studio space
 - [ ] Shoot day on the 24th

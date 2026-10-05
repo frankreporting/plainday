@@ -376,6 +376,28 @@ test("JumpToDate: a week or a month in words, this year unless a year comes befo
     void j;
 });
 
+test("a week or a month in words says whether a year was given, and Schedule moves one that's over to next year (OBS-96)", () => {
+    const J = vm.runInContext(read("../CustomJS/jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
+    const opts = { months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], year: 2026 };
+    for (const t of ["w38", "sep", "september"]) assert.equal(J.periodWords(t, opts).withYear, false, t);
+    for (const t of ["w38 2026", "2027 w1", "Sep 2026", "2027 sep", "9/2026"]) assert.equal(J.periodWords(t, opts).withYear, true, t);
+    // Over once its last day has gone by
+    assert.equal(J.over({ date: "2026-08-01", unit: "month" }, "2026-09-16"), true);
+    assert.equal(J.over({ date: "2026-09-01", unit: "month" }, "2026-09-16"), false, "this month isn't over");
+    assert.equal(J.over({ date: "2026-12-01", unit: "month" }, "2026-09-16"), false);
+    assert.equal(J.over({ date: "2026-09-06", unit: "week" }, "2026-09-12"), false, "the week's last day is today");
+    assert.equal(J.over({ date: "2026-09-06", unit: "week" }, "2026-09-13"), true);
+    assert.equal(J.over({ date: "2025-12-28", unit: "week" }, "2026-01-03"), false, "a week across the new year");
+});
+
+test("JumpToDate: weekly notes count ISO weeks when their pattern says GGGG or WW", () => {
+    const { j } = loadJump();
+    assert.equal(j.isoWeeks({ format: { week: "GGGG-[W]WW" } }), true);
+    assert.equal(j.isoWeeks({ format: { week: "GGGG[w]WW" } }), true);
+    assert.equal(j.isoWeeks({ format: { week: "gggg[w]ww" } }), false);
+    assert.equal(j.isoWeeks({ format: { week: "gggg-[W]ww" } }), false, "a W in brackets is a letter, not ISO");
+});
+
 test("prompt: a label follows the preview (a week's note name)", () => {
     const h = harness(revived(SUN));
     const modal = h.dp.open("Jump to", h.onPick, { periods: true, name: (t) => (t === "w41" ? { date: "2026-10-04", unit: "week" } : null), label: (r) => (r.unit === "week" ? "2026w41" : null) });

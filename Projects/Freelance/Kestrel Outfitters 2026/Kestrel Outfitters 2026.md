@@ -19,11 +19,13 @@ status: Active
 Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two stores. [[Imogen Fenwick]] runs marketing and signs off on each stage. Hourly at $95, with the contract capped at $5,700 (60 hours) for this phase.
 
 ## Scope
+
 - New homepage and category pages, mobile layout first
 - Store locator
 - The fall catalog shoot is billed as a sub-project: [[Kestrel Fall Catalog|⭕ Kestrel Fall Catalog]]
 
 ## Tasks
+
 - [x] Proposal and estimate
 - [x] Sitemap and content inventory
 - [x] [[Draft homepage wireframes]]

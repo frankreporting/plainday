@@ -31,7 +31,8 @@ class Schedule {
             return;
         }
         const sourceIsDaily = this.isDailyNote(srcFile);
-        const sourceIsMonthly = this.isMonthlyNote(srcFile);
+        // A weekly, monthly or yearly note holds tasks with no day yet: they move out whole
+        const sourcePeriod = this.periodOf(srcFile);
 
         const children = [];
         for (let i = lineNum + 1; i < editor.lineCount(); i++) {
@@ -48,7 +49,17 @@ class Schedule {
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
-        customJS.DatePrompt.open("Schedule for", async ({ m }, modal) => {
+        const rules = customJS.DatePrompt.weekRules();
+        const jump = customJS.JumpToDate;
+        customJS.DatePrompt.open("Schedule for", async (result, modal) => {
+            const dest = this.destination(result, rules);
+            // Into the note it's already in: nothing to move
+            if (dest.path === srcFile.path) {
+                modal.close();
+                new Notice("Already in this note");
+                return;
+            }
+
             // Forwarding a worked-on task links it to its task note on both lines. The time already
             // logged only counts toward a project once that note exists, so find or create it first
             // (through AddTaskNote, which asks where a new one goes). No project picked: nothing moves.
@@ -63,17 +74,31 @@ class Schedule {
                 }
             }
 
-            const dailyPath = this.dailyNotePath(m);
-            const dailyName = dailyPath.split("/").pop().replace(/\.md$/, "");
+            // The note it goes to first, made if need be, so a line is never taken out with nowhere to go
+            let file;
+            try {
+                file = await dest.ensure();
+            } catch (err) {
+                console.error(err);
+                modal.close();
+                new Notice(`Couldn't make the ${dest.kind} note, so nothing was scheduled — check console`);
+                return;
+            }
+            if (editor.getLine(lineNum) !== lineText) {
+                modal.close();
+                new Notice("The line changed before it could be scheduled, so it wasn't");
+                return;
+            }
+
             let outgoing;
             let lineSurvives = true;
 
-            if (!sourceIsDaily && !sourceIsMonthly) {
-                // Task/project/other note: forward with a link to the daily note, and link back from there
+            if (!sourceIsDaily && !sourcePeriod) {
+                // Task/project/other note: forward with a link to the day, week, month or year, and link back from there
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
-                editor.replaceRange(`[[${dailyName}|${m.format("M/D")}]] `, { line: lineNum, ch: bodyCh });
+                editor.replaceRange(`${dest.link()} `, { line: lineNum, ch: bodyCh });
                 outgoing = [this.sentLine(`${bullet}[${destStatus}] ${body}`, srcFile)];
-            } else if (wasWorkedOn && !sourceIsMonthly) {
+            } else if (wasWorkedOn && !sourcePeriod) {
                 // Daily note, already worked on: forward in place, fresh copy goes forward
                 editor.replaceRange(">", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
                 if (found) {
@@ -85,7 +110,7 @@ class Schedule {
                 const copy = `${bullet}[${destStatus}] `;
                 outgoing = [found ? this.withNote(copy + body, copy.length, taskName, found) : copy + body];
             } else {
-                // Daily note untouched, or any monthly note: move the line and its sub-bullets
+                // Daily note untouched, or any weekly, monthly or yearly note: move the line and its sub-bullets
                 lineSurvives = false;
                 outgoing = [lineText, ...children].map(l => l.slice(indent.length));
                 const lastLine = lineNum + children.length;
@@ -115,17 +140,66 @@ class Schedule {
             }, 50);
 
             try {
-                const file = await this.ensureDailyNote(dailyPath);
                 const before = await app.vault.cachedRead(file);
                 const prevFolds = this.captureFolds(file, before.split("\n").length);
-                const { content, at, count } = await this.appendToTopChecklist(file, outgoing);
-                await this.semiFold(file, content, prevFolds, at, count);
-                new Notice(`${lineSurvives ? "Forwarded" : "Moved"} to ${m.format("M/D")}`);
+                const { content, at, count, item } = dest.unit === "day"
+                    ? await this.appendToTopChecklist(file, outgoing)
+                    : await this.appendToPeriodNote(file, outgoing);
+                await this.semiFold(file, content, prevFolds, at, count, item);
+                new Notice(`${lineSurvives ? "Forwarded" : "Moved"} to ${dest.label}`);
             } catch (err) {
                 console.error(err);
-                new Notice("Couldn't write to the daily note — check console");
+                new Notice(`Couldn't write to the ${dest.kind} note — check console`);
             }
+        }, {
+            // A week, a month or a year is its note, as for JumpToDate (OBS-96); a day, a week or a
+            // month without a year is the next one
+            periods: true,
+            name: (text) => jump.fromName(text, rules, { ahead: true }),
+            label: (r) => (r.unit === "week" ? jump.periodName(r, rules) : null),
         });
+    }
+
+    // Where a date (DatePrompt's result) sends a line: { path, unit, kind, label, link(), ensure() }.
+    // A day is its daily note; a week, a month or a year its periodic note, named and filed the way
+    // JumpToDate finds it, and made from its template the same way when it doesn't exist yet. `label`
+    // is its short name ("10/2", "Wk of 10/4", "Oct. 2026", "2027"), `link()` the forward mark's link.
+    destination(result, rules) {
+        const { unit, m } = result;
+        if (unit === "day") {
+            const path = this.dailyNotePath(m);
+            const label = m.format("M/D");
+            const name = path.split("/").pop().replace(/\.md$/, "");
+            return { path, unit, kind: "daily", label, link: () => `[[${name}|${label}]]`, ensure: () => this.ensureDailyNote(path) };
+        }
+        const jump = customJS.JumpToDate;
+        const target = jump.target(result, rules);
+        // An ISO week's note starts on Monday, whatever day the locale starts weeks on
+        const label = Schedule.periodLabel(result, { weekStart: jump.isoWeeks(rules) ? 1 : rules.weekStart, ...jump.monthNames(rules) });
+        return {
+            path: target.path, unit, kind: target.kind, label,
+            // By its path when another note has its name, so the link can't land on that one
+            link: () => {
+                const text = customJS.AddTaskNote.linktextFor({ path: target.path, basename: target.name }, app.vault.getMarkdownFiles().map((f) => f.path));
+                return text === label ? `[[${text}]]` : `[[${text}|${label}]]`;
+            },
+            ensure: async () => app.vault.getFileByPath(target.path) ?? jump.create(target),
+        };
+    }
+
+    // A period's short name, as short as a day's M/D: "Wk of 10/4" (the day the week starts, weeks
+    // starting on `weekStart`, 0 is Sunday), "Oct. 2026" (the locale's short month name, with a period
+    // unless it has one or is the whole name: "May 2026"), "2027"
+    static periodLabel({ date, unit }, { weekStart = 0, months = [], short = [] } = {}) {
+        const [y, mo, d] = date.split("-").map(Number);
+        if (unit === "year") return String(y);
+        if (unit === "month") {
+            const name = String(short[mo - 1] ?? months[mo - 1] ?? mo);
+            return `${name}${name.endsWith(".") || name === String(months[mo - 1]) ? "" : "."} ${y}`;
+        }
+        const first = new Date(Date.UTC(y, mo - 1, d));
+        first.setUTCDate(d - (first.getUTCDay() - weekStart + 7) % 7);
+        return `Wk of ${first.getUTCMonth() + 1}/${first.getUTCDate()}`;
     }
 
     dailyOpts() {
@@ -148,27 +222,17 @@ class Schedule {
         return inFolder && window.moment(file.basename, format, true).isValid();
     }
 
-    // Monthly notes are named strictly YYYY-MM ("2026-09", not "2026-09-07") and live in the months
-    // folder, so notes elsewhere with that name, like the old ones in 37 Journal, aren't monthly notes
-    isMonthlyNote(file) {
-        return /^\d{4}-\d{2}$/.test(file.basename) && (file.parent?.path ?? "") === this.monthsFolder();
-    }
-
-    // Notebook Navigator's periodic notes folder plus the folder part of its month pattern
-    // ("[months]/YYYY-MM" → "30 Reference/36 Planner/months"); without that, "months" beside the
-    // daily notes folder
-    monthsFolder() {
-        const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
-        const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
-        const pattern = String(nn?.calendarCustomMonthPattern ?? "");
-        const dir = pattern.includes("/") ? pattern.slice(0, pattern.lastIndexOf("/")) : null;
-        // Only a folder made entirely of [literal] parts is a fixed folder
-        if (base && dir && dir.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") === "") {
-            return `${base}/${dir.replace(/\[([^\]]*)\]/g, "$1")}`;
+    // "week", "month" or "year" for a weekly, monthly or yearly note, else null. One is named strictly
+    // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in its folder
+    // (TimeReport.periodFolders), so a note elsewhere with such a name isn't one.
+    periodOf(file) {
+        const rules = customJS.DatePrompt.weekRules();
+        const folders = customJS.TimeReport.periodFolders();
+        const folder = file.parent?.path ?? "";
+        for (const unit of ["week", "month", "year"]) {
+            if (folder === folders[unit] && window.moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
         }
-        const { folder } = this.dailyOpts();
-        const parent = folder.includes("/") ? folder.slice(0, folder.lastIndexOf("/")) : "";
-        return `${parent ? parent + "/" : ""}months`;
+        return null;
     }
 
     // A line of a worked-on task once it links its note (`found`, from AddTaskNote.noteFor): the task's
@@ -180,7 +244,7 @@ class Schedule {
         return helper.endWith(helper.homed(named, found), `[[${found.linktext}|${Schedule.NOTE_MARK}]]`);
     }
 
-    // A line sent here from `src`, a note that isn't a daily or monthly note: it links back to `src`,
+    // A line sent here from `src`, a note that isn't a daily, weekly, monthly or yearly note: it links back to `src`,
     // as its ⭕ or 🗃️ when `src` is a project or area, else as its 🗒️ note, after that note's own
     // project or area (OBS-90). A line that already ends in a note link of its own (a sub-task with
     // its own note) keeps that as its note, named with that note's project, and gets no second one.
@@ -239,10 +303,10 @@ class Schedule {
         let out;
         await app.vault.process(file, (content) => {
             const lines = content.split("\n");
-            const first = lines.findIndex(l => /^\s*[-*+]\s+\[.\]/.test(l));
+            const first = lines.findIndex(l => Schedule.CHECKBOX.test(l));
             if (first === -1) {
                 const head = content.replace(/\s+$/, "").split("\n");
-                out = { content: [...head, ...newLines].join("\n") + "\n", at: head.length, count: newLines.length };
+                out = { content: [...head, ...newLines].join("\n") + "\n", at: head.length, count: newLines.length, item: head.length };
                 return out.content;
             }
             const destIndent = lines[first].match(/^\s*/)[0];
@@ -254,10 +318,57 @@ class Schedule {
             }
             const at = end + 1;
             lines.splice(at, 0, ...newLines.map(l => destIndent + l));
-            out = { content: lines.join("\n"), at, count: newLines.length };
+            out = { content: lines.join("\n"), at, count: newLines.length, item: at };
             return out.content;
         });
         return out;
+    }
+
+    // The same for a weekly, monthly or yearly note (placeInPeriod)
+    async appendToPeriodNote(file, newLines) {
+        let out;
+        await app.vault.process(file, (content) => {
+            out = Schedule.placeInPeriod(content, newLines);
+            return out.content;
+        });
+        return out;
+    }
+
+    static CHECKBOX = /^\s*[-*+]\s+\[.\]/;
+
+    // Where lines go in a weekly, monthly or yearly note: the end of its first checklist, as in a daily
+    // note, but never inside the time report (its "## Time tracking" heading, or its start marker, down
+    // to its end marker). With no checklist, they start one just above the report, or at the end when
+    // there's none, set off by a blank line from what's above (none straight after the frontmatter) and
+    // by another from the report. Returns { content, at, count, item }: the new content, the line the
+    // insert starts at, how many lines it adds, and the line of the first one moved there.
+    static placeInPeriod(content, newLines) {
+        const lines = content.split("\n");
+        const fmEnd = lines[0]?.trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
+        const start = lines.findIndex((l, i) => i > fmEnd && (/^##\s+time tracking$/i.test(l.trim()) || l.trim() === "%% time:start %%"));
+        const endMark = start === -1 ? -1 : lines.findIndex((l, i) => i >= start && l.trim() === "%% time:end %%");
+        const end = endMark === -1 ? start : endMark;
+        const inReport = (i) => start !== -1 && i >= start && i <= end;
+
+        const first = lines.findIndex((l, i) => i > fmEnd && !inReport(i) && Schedule.CHECKBOX.test(l));
+        if (first !== -1) {
+            const indent = lines[first].match(/^\s*/)[0];
+            let last = first;
+            while (last + 1 < lines.length && !inReport(last + 1)) {
+                const next = lines[last + 1];
+                if (next.trim() === "" || !(/^\s*[-*+]\s/.test(next) || /^\s/.test(next))) break;
+                last++;
+            }
+            lines.splice(last + 1, 0, ...newLines.map((l) => indent + l));
+            return { content: lines.join("\n"), at: last + 1, count: newLines.length, item: last + 1 };
+        }
+
+        let at = start === -1 ? lines.length : start;
+        while (at > fmEnd + 1 && lines[at - 1].trim() === "") at--;
+        const above = at > fmEnd + 1 ? [""] : [];
+        const block = [...above, ...newLines, ...(at === start ? [""] : []), ...(at === lines.length ? [""] : [])];
+        lines.splice(at, 0, ...block);
+        return { content: lines.join("\n"), at, count: block.length, item: at + above.length };
     }
 
     // Every list item that has children is foldable; headings never get an entry
@@ -295,7 +406,9 @@ class Schedule {
     // Mixed fold state in the destination: keep it, and fold just the item we pasted.
     // Otherwise (all folded, none folded, or no trustworthy record) fold every list item.
     // applyFoldInfo silently no-ops unless `lines` matches the document.
-    async semiFold(file, content, prev, at, count) {
+    // `at` and `count` say where lines went in and how many; `item` is the line of the first one moved
+    // there, when blank lines came before it.
+    async semiFold(file, content, prev, at, count, item = at) {
         const foldable = this.foldableRanges(content);
         const byLine = new Map(foldable.map(r => [r.from, r]));
 
@@ -305,9 +418,9 @@ class Schedule {
             .map(f => byLine.get(f.from));
 
         const mixed = kept.length > 0 && kept.length < foldable.length;
-        const pasted = byLine.get(at);   // only set when sub-bullets came along
+        const pasted = byLine.get(item);   // only set when sub-bullets came along
         let folds = mixed
-            ? (pasted && !kept.some(f => f.from === at) ? [...kept, pasted] : kept)
+            ? (pasted && !kept.some(f => f.from === item) ? [...kept, pasted] : kept)
             : foldable;
 
         folds = folds.slice().sort((a, b) => a.from - b.from);

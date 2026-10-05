@@ -14,9 +14,11 @@ who:
 - "[[Kestrel Outfitters]]"
 ---
 ## Notes
+
 - Shoot on the 24th at the studio on Alder Street, one long day.
 - Two store staff will model the jackets.
 - Imogen sends the final product list by Friday.
 
 ## Follow-ups
+
 - [ ] Confirm the product list against the [[Shot list for catalog]]

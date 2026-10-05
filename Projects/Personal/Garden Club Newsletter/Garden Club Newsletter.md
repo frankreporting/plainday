@@ -17,9 +17,11 @@ status: Active
 The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_type: non-billable`, so every hour logged here counts as 🆓.
 
 ## Tasks
+
 - [x] Layout template
 - [x] September issue: member updates
 - [ ] Print and fold for the farmers market table
+- [>] [[2026-09|Sep. 2026]] Collect member photos for the October issue
 
 ## Time tracking
 

@@ -42,13 +42,14 @@ class JumpToDate {
     // A week or a month in words, read before Revived sees them: "w38", "wk 38", "week 38", with a
     // year before or after ("2027 w1", "w1 2027"); "sep", "sept", "september", "Sep 2026",
     // "2026 sep", "9/2026". Without a year, this year. `months` and `short` are the locale's month
-    // names. Returns { unit, year, n } (n the week or month number), or null.
+    // names. Returns { unit, year, n, withYear } (n the week or month number; withYear when a year was
+    // typed), or null.
     static periodWords(text, { months, short, year }) {
         const t = String(text ?? "").trim().toLowerCase().replace(/\s+/g, " ");
         const week = t.match(/^(?:(\d{4}) ?)?(?:w|wk|week) ?(\d{1,2})(?: (\d{4}))?$/);
-        if (week) return week[1] && week[3] ? null : { unit: "week", year: Number(week[1] ?? week[3] ?? year), n: Number(week[2]) };
+        if (week) return week[1] && week[3] ? null : { unit: "week", year: Number(week[1] ?? week[3] ?? year), n: Number(week[2]), withYear: !!(week[1] ?? week[3]) };
         const numeric = t.match(/^(\d{1,2})\/(\d{4})$/);
-        if (numeric) return { unit: "month", year: Number(numeric[2]), n: Number(numeric[1]) };
+        if (numeric) return { unit: "month", year: Number(numeric[2]), n: Number(numeric[1]), withYear: true };
         const named = t.match(/^(?:(\d{4}) )?([\p{L}.]+)(?: (\d{4}))?$/u);
         if (!named || (named[1] && named[3])) return null;
         const word = named[2].replace(/\.$/, "");
@@ -56,7 +57,14 @@ class JumpToDate {
         let i = plain(months).indexOf(word);
         if (i < 0) i = plain(short).indexOf(word);
         if (i < 0 && word === "sept") i = 8;
-        return i < 0 ? null : { unit: "month", year: Number(named[1] ?? named[3] ?? year), n: i + 1 };
+        return i < 0 ? null : { unit: "month", year: Number(named[1] ?? named[3] ?? year), n: i + 1, withYear: !!(named[1] ?? named[3]) };
+    }
+
+    // Whether a week or a month ({ date, unit }, `date` its first day) is over by `today`
+    static over({ date, unit }, today) {
+        if (unit === "month") return date.slice(0, 7) < today.slice(0, 7);
+        const [y, m, d] = date.split("-").map(Number);
+        return new Date(Date.UTC(y, m - 1, d + 6)).toISOString().slice(0, 10) < today;
     }
 
     // The locale's month names, full and short (a locale can keep separate forms for "in a date" and
@@ -68,14 +76,23 @@ class JumpToDate {
     }
 
     // A week or a month in words, or a periodic note's own name as typed ("2026w41", "2026-10",
-    // "2027"): { date, unit }, or null
-    fromName(text, rules) {
+    // "2027"): { date, unit }, or null. With `ahead` (Schedule), words without a year for a week or a
+    // month that's over mean next year's: "jan" in October is the coming January.
+    fromName(text, rules, { ahead = false } = {}) {
         const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: window.moment().year() });
-        if (words) return this.fromWords(words, rules);
+        if (words) {
+            const found = this.fromWords(words, rules);
+            if (ahead && found && !words.withYear && JumpToDate.over(found, window.moment().format("YYYY-MM-DD"))) {
+                return this.fromWords({ ...words, year: words.year + 1 }, rules);
+            }
+            return found;
+        }
         for (const unit of ["week", "month", "year"]) {
             const m = window.moment(text, rules.format[unit], rules.locale, true);
             if (m.isValid() && m.format(rules.format[unit]) === text) {
-                return { date: m.clone().startOf(unit).format("YYYY-MM-DD"), unit };
+                // A week's name already reads as its first day; startOf("week") would move that to the
+                // locale's first day, which for ISO weeks in English is the Sunday of the week before
+                return { date: (unit === "week" ? m : m.clone().startOf(unit)).format("YYYY-MM-DD"), unit };
             }
         }
         return null;
@@ -85,12 +102,17 @@ class JumpToDate {
     // GGGG or WW, else the locale's), or a month number: { date, unit }, or null if there's no such week
     fromWords({ unit, year, n }, rules) {
         if (unit === "month") return n >= 1 && n <= 12 ? { date: `${year}-${String(n).padStart(2, "0")}-01`, unit } : null;
-        const iso = /[GW]/.test(rules.format.week.replace(/\[[^\]]*\]/g, ""));
+        const iso = this.isoWeeks(rules);
         const m = window.moment().locale(rules.locale);
         if (iso) m.isoWeekYear(year).isoWeek(n).startOf("isoWeek");
         else m.weekYear(year).week(n).startOf("week");
         const same = iso ? m.isoWeekYear() === year && m.isoWeek() === n : m.weekYear() === year && m.week() === n;
         return n >= 1 && same ? { date: m.format("YYYY-MM-DD"), unit: "week" } : null;
+    }
+
+    // Whether the weekly notes count ISO weeks, Monday first: their pattern uses GGGG or WW outside [brackets]
+    isoWeeks(rules) {
+        return /[GW]/.test(rules.format.week.replace(/\[[^\]]*\]/g, ""));
     }
 
     // A week's, month's or year's note name, in the pattern's spelling and the user's locale

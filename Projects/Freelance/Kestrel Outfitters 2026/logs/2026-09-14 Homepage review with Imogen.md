@@ -13,10 +13,12 @@ who:
 - "[[Imogen Fenwick]]"
 ---
 ## Notes
+
 - Imogen liked the two-column hero.
 - Store locator goes above the fold on mobile; most visits are people looking for a store.
 - The seasonal banner stays, but smaller.
 
 ## Follow-ups
+
 - [x] Mobile layout for [[Draft homepage wireframes]]
 - [ ] Sign-off call on Friday

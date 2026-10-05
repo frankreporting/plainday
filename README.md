@@ -131,7 +131,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
-| Schedule | `⌘S` | Moves a task to another day; one already worked on stays behind as `[>]`, linked to its task note |
+| Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; one already worked on stays behind as `[>]`, linked to its task note |
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
 | AddTaskNote | | Links the task to its own note, creating it in the project or area you pick, and keeps the line's ⭕ for it; on an event line, links a meeting log |
 | AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
