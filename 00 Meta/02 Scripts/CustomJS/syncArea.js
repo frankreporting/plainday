@@ -5,6 +5,8 @@ class SyncArea {
     // folder above its own, so a moved project points at its new parent. Notes that land
     // outside any project or area, or anywhere in 90 Archive or 00 Meta, are left untouched,
     // and renaming a folder in place changes nothing (Obsidian updates the links itself).
+    // An invoice is never touched either: its `area` is the project it bills (OBS-114), fixed
+    // when it's made, so moving the note mustn't change what it bills.
     // Runs on every device, and each one only ever sees its own moves: Obsidian Sync delivers
     // a move made elsewhere as a delete plus a new file, not a rename (verified 2026-09-11).
     static IGNORED = ["90 Archive/", "00 Meta/"];
@@ -108,12 +110,16 @@ class SyncArea {
         };
         // processFrontMatter rewrites the whole YAML block even when nothing changes, so check first
         const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
-        const info = getFrontMatterInfo(await app.vault.read(file));
-        if (!keyToWrite(info.exists ? parseYaml(info.frontmatter) ?? {} : {})) return false;
+        const text = await app.vault.read(file);
+        const info = getFrontMatterInfo(text);
+        const front = info.exists ? parseYaml(info.frontmatter) ?? {} : {};
+        // An invoice that lost its tag but still has its Billed entries still bills, so it's left alone too
+        if (this.isInvoice(front) || customJS.Billing?.hasBilled?.(text) || !keyToWrite(front)) return false;
 
         let wrote = false;
         const recached = this.waitForCache(file);
         await app.fileManager.processFrontMatter(file, (f) => {
+            if (this.isInvoice(f)) return;
             const key = keyToWrite(f);
             if (!key) return;
             f[key] = Array.isArray(f[key]) ? [link] : link;
@@ -144,6 +150,14 @@ class SyncArea {
             folder = folder.parent;
         }
         return null;
+    }
+
+    // Whether frontmatter makes the note an invoice: its tags include `invoice`, as the Invoice
+    // command writes them and Billing finds invoices. Pure, so it's tested.
+    isInvoice(front) {
+        const raw = front?.tags ?? front?.tag ?? [];
+        return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
+            .some((t) => String(t ?? "").replace(/^#/, "").trim().toLowerCase() === "invoice");
     }
 
     // Exact #project or #area tag, in frontmatter or inline (same rule as the templates' picker)

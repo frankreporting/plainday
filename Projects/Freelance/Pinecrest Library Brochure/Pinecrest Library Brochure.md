@@ -27,7 +27,7 @@ A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee
 ## Time tracking
 
 %% time:start %%
-*Updated 2026-09-16 9:00pm*
+[[Pinecrest Library Brochure timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
 
 | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
@@ -39,8 +39,6 @@ A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee
 | [[2026w38\|9/13-9/19]] | 3 | 1.50 | 0.50 | 2.00 | 1.92 |  |
 | [[2026w37\|9/6-9/12]] | 1 | 1.50 |  | 1.50 | 1.33 |  |
 | [[2026w36\|8/30-9/5]] | 2 | 2.25 |  | 2.25 | 2.25 |  |
-
-[[Pinecrest Library Brochure timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
 
 ### Problems
 

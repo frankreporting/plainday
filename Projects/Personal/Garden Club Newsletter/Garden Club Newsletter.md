@@ -26,7 +26,7 @@ The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_t
 ## Time tracking
 
 %% time:start %%
-*Updated 2026-09-16 9:00pm*
+[[Garden Club Newsletter timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
 
 | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
@@ -37,8 +37,6 @@ The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_t
 | **Total** | **2** |  | **2.50** | **2.50** | **2.50** |  |
 | [[2026w38\|9/13-9/19]] | 1 |  | 1.25 | 1.25 | 1.25 |  |
 | [[2026w36\|8/30-9/5]] | 1 |  | 1.25 | 1.25 | 1.25 |  |
-
-[[Garden Club Newsletter timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
 
 ### Problems
 

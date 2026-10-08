@@ -123,7 +123,7 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
         "Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", PROBLEM_PROJECT, KESTREL_PROJECT,
     ].sort());
     // The poster's Problem is on its own note and on the week, month and year of its hour, and nowhere else
-    const said = "- [[Block Party Poster|⭕ Block Party Poster]] has no `rate_type`";
+    const said = "- [[Block Party Poster]] has no `rate_type`";
     for (const [p, b] of reports) {
         const listed = [PROBLEM_PROJECT, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.month}/2026-09.md`, `${FOLDERS.year}/2026.md`].includes(p);
         assert.equal(b.split("### Problems")[1].split("\n").some((l) => l.startsWith(said)), listed, p);
@@ -344,7 +344,7 @@ test("demo vault: each project with time has its timesheet note beside it, linke
         const { fm } = vault.notes.get(sheet);
         assert.deepEqual([].concat(fm.tags ?? []), ["timesheet"], sheet);
         const project = plan.index.linkDest(linkTarget(fm.area), sheet);
-        assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|Timesheet]]`), `${project} links ${sheet}`);
+        assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|View Timesheet]]`), `${project} links ${sheet}`);
     }
 });
 
@@ -356,5 +356,14 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
     const base = fs.readFileSync(new URL("../../../30 Reference/Invoices/Invoices.base", import.meta.url), "utf8");
     assert.match(base, /file\.tags\.contains\("invoice"\)/);
-    for (const p of ["status", "client", "project", "hours", "total", "sent", "paid"]) assert.match(base, new RegExp(`- ${p}\\n`), p);
+    // Its columns, in order, named as Airtable named them, and the sum of what the view shows, to the cent (OBS-117)
+    assert.match(base, /order:\n\s+- invoice_date\n\s+- file\.name\n\s+- formula\.project\n\s+- invoice_status\n\s+- total\n/);
+    for (const [p, name] of [["note.invoice_date", "Date"], ["file.name", "Invoice"], ["formula.project", "Project"], ["note.invoice_status", "Status"], ["note.total", "Total"]]) {
+        assert.match(base, new RegExp(`  ${p.replace(".", "\\.")}:\\n    displayName: ${name}\\n`), p);
+    }
+    // The project's name, linked, not area's alias; the sum with two decimals
+    assert.match(base, /\n  project: 'if\(area, link\(area\.asFile\(\)\.path, area\.asFile\(\)\.basename\), ""\)'\n/);
+    assert.match(base, /\nsummaries:\n  Sum: 'values\.sum\(\)\.toFixed\(2\)'\n/);
+    assert.match(base, /\n    summaries:\n\s+total: Sum\n/);
+    assert.doesNotMatch(base, /- (status|project)\n/, "no projects' status, no project column (OBS-114)");
 });

@@ -79,6 +79,8 @@ class TimeReport {
     static CREATED_KEY = "time-report-created-notes";
     // A project's timesheet note sits beside it, named after it: "Kestrel Outfitters 2026 timesheet"
     static SHEET = " timesheet";
+    // An invoice's status as the mark in its links, in the timesheets and on the project's note (OBS-117)
+    static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
 
@@ -541,6 +543,14 @@ class TimeReport {
     }
 
     // The mark on a report's link to a project or area: ⭕, or 🗃️ for an area
+    // A project or area's link in a report: [[Name]], or [[path/Name|Name]] when another note has its
+    // name. An area keeps its 🗃️, so it reads apart from the projects around it (OBS-117).
+    reportLink(target, path, index) {
+        const name = this.basename(path);
+        if (this.isAreaOnly(path, index)) return `[[${target}|🗃️ ${name}]]`;
+        return target === name ? `[[${name}]]` : `[[${target}|${name}]]`;
+    }
+
     linkMark(path, index) {
         return this.isAreaOnly(path, index) ? "🗃️" : "⭕";
     }
@@ -1325,7 +1335,8 @@ class TimeReport {
         }
         if (p.problem) return `- [[${p.invoice.name}]] ${p.problem}, so this project can't be invoiced until it's fixed`;
         const { invoice, change: c } = p;
-        const on = invoice.status === "paid" ? invoice.paid : invoice.sent;
+        // A sent invoice's date is the day it was sent
+        const on = invoice.status === "paid" ? invoice.paid : invoice.status === "sent" ? invoice.invoiceDate : null;
         const now = c.kind === "times" ? `now ${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)}`
             : c.kind === "moved" ? `now on [[${c.entry.date}|${this.shortDate(c.entry.date)}]]`
             : c.kind === "free" ? "now 🆓"
@@ -1344,28 +1355,33 @@ class TimeReport {
     }
 
     // A project note's timesheets (OBS-5): every entry of the project, and of the projects below it
-    // when its include_subprojects checkbox is on, split into Billable time and 🆓 time. Each table has
-    // a Total row, then a bold row per day, newest first, adding up the day's hours and amount, then the
-    // day's entries in time order. Billable time adds Amount, Invoice and Paid when anything in it bills
-    // by the hour; 🆓 time shows the 🆓 as written (on the task line, or at the start of the note), so
-    // each row says why it isn't billed.
+    // when its include_subprojects checkbox is on, split into Billable time and 🆓 time. Each heading
+    // carries its table's total (`### Billable time: 20.50 hrs`); the table has a bold row per day,
+    // newest first, adding up the day's hours, then the day's entries in time order. 🆓 time shows the
+    // 🆓 as written (on the task line, or at the start of the note), so each row says why it isn't billed.
     timesheetLines(model, scope, link) {
         const b = model.billing;
         const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
         const entries = model.entries.filter((e) => on.has(e.project));
         const project = new Set(entries.map((e) => e.project)).size > 1;
         const billable = entries.filter((e) => e.billable), free = entries.filter((e) => !e.billable);
+        const total = (list) => `${this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0))} hrs`;
         const out = [];
-        if (billable.length) out.push("### Billable time", "", ...this.sheet(model, billable, { money: true, project, link }), "");
-        if (free.length) out.push("### 🆓 time", "", ...this.sheet(model, free, { money: false, project, link, written: true }), "");
+        if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link }), "");
+        if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true }), "");
         return out;
     }
 
-    // One timesheet table
-    sheet(model, entries, { money, project, link, written = false }) {
+    // One timesheet table. Where anything in it bills by the hour, it starts with an unnamed column for
+    // the status of the invoice that billed the entry (✏️ draft, 🕒 sent, ✅ paid, ⚠️ changed since it
+    // was billed) and ends with that invoice, or `through 9/2` where billed_through covers it; an entry
+    // with neither isn't invoiced yet (OBS-117). 🆓 time has the same columns: a 🆓 entry on an invoice
+    // was billed before it was made 🆓, so it's ⚠️ (until OBS-110 puts 🆓 time on invoices at no charge).
+    // It's about time, so it has no amounts.
+    sheet(model, entries, { project, link, written = false }) {
         const b = model.billing;
         const rate = (e) => { const m = model.money.get(e.project); return m?.type === "hourly" && m.rate ? Math.round(m.rate * 100) : null; };
-        const cash = money && entries.some((e) => rate(e) !== null);
+        const billing = entries.some((e) => rate(e) !== null);
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const through = new Map();
         const standing = (e) => {
@@ -1375,51 +1391,67 @@ class TimeReport {
             const h = s.kind === "open" && b.held?.get(e);
             return h ? { kind: "changed", ...h } : s;
         };
-        // A billed entry is priced as its invoice billed it; everything else at today's rate
-        const centsOf = (e) => { const s = standing(e); return s.kind === "billed" ? s.row.cents : rate(e); };
-        const amount = (list) => {
-            const byRate = new Map();
-            for (const e of list) {
-                const c = centsOf(e);
-                if (c !== null) byRate.set(c, (byRate.get(c) ?? 0) + this.rounded(e.minutes));
-            }
-            let cents = 0;
-            for (const [c, m] of byRate) cents += Math.round((m * c) / 60);
-            return cents;
-        };
-        const billingCells = (e) => {
+        const cells = (e) => {
             const s = standing(e);
-            if (s.kind === "before") return [`through ${md(s.through)}`, ""];
+            if (s.kind === "before") return ["", e.billable ? `through ${md(s.through)}` : ""];
             if (s.kind === "open") return ["", ""];
-            const inv = s.invoice;
-            const name = `[[${inv.name}]]`;
-            return [s.kind === "changed" ? `⚠️ ${name}` : `${name}${inv.status === "draft" ? " draft" : ""}`,
-                inv.status === "paid" ? `✅${inv.paid ? ` ${md(inv.paid)}` : ""}` : ""];
+            return [s.kind === "changed" || !e.billable ? "⚠️" : this.invoiceMark(s.invoice), `[[${s.invoice.name}]]`];
         };
-        const head = ["Date", "Time", ...(project ? ["Project"] : []), "Hours", ...(cash ? ["Amount"] : []), "Task", "Notes", ...(cash ? ["Invoice", "Paid"] : [])];
-        const row = (cells) => `| ${cells.join(" | ")} |`;
+        const head = [...(billing ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
+        const row = (c) => `| ${c.join(" | ")} |`;
         const bold = (v) => (v === "" ? "" : `**${v}**`);
-        const sum = (label, minutes, cents) => row([bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)),
-            ...(cash ? [cents ? bold(this.money(cents)) : ""] : []), "", "", ...(cash ? ["", ""] : [])]);
+        const sum = (label, minutes) => row([...(billing ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])]);
         const days = [...new Set(entries.map((e) => e.date))].sort().reverse().map((d) => {
             const list = entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end);
-            return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0), cents: amount(list) };
+            return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0) };
         });
-        // The Total adds up the day rows, as the invoices that bill them do
-        const out = [row(head), row(head.map((h) => (h === "Hours" || h === "Amount" ? "--:" : "---"))),
-            sum("Total", days.reduce((m, x) => m + x.minutes, 0), days.reduce((c, x) => c + x.cents, 0))];
-        for (const { d, list, minutes, cents } of days) {
-            out.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes, cents));
+        const out = [row(head), row(head.map((h, i) => (h === "Hours" ? "--:" : billing && i === 0 ? ":-:" : "---")))];
+        for (const { d, list, minutes } of days) {
+            out.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes));
             for (const e of list) {
-                const c = centsOf(e);
-                const hours = this.rounded(e.minutes);
-                out.push(row(["", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
-                    this.hours(hours), ...(cash ? [c === null ? "" : this.money(Math.round((hours * c) / 60))] : []),
+                const [mark, invoice] = billing ? cells(e) : [];
+                out.push(row([...(billing ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
+                    this.hours(this.rounded(e.minutes)),
                     this.tableText(written ? e.taskWritten ?? e.task : e.task), this.tableText(written ? e.noteWritten ?? e.note : e.note),
-                    ...(cash ? billingCells(e) : [])]));
+                    ...(billing ? [invoice] : [])]));
             }
         }
         return out;
+    }
+
+    // An invoice's status as its mark (📄 for a status of your own)
+    invoiceMark(invoice) {
+        return TimeReport.INVOICE_MARK[invoice.status] ?? "📄";
+    }
+
+    // A project note's invoices (OBS-117): the project's and its sub-projects', newest first, each with
+    // its status mark in an unnamed first column, then a Total of all but the canceled ones. Hours and
+    // Total are the invoice's own `hours` and `total`.
+    invoiceLines(model, scope, link) {
+        const b = model.billing;
+        if (!b) return [];
+        const set = this.subtree(scope.path, model.parent);
+        const list = b.invoices.filter((i) => i.project && set.has(i.project))
+            .sort((x, y) => (y.invoiceDate ?? "").localeCompare(x.invoiceDate ?? "") || y.number.localeCompare(x.number, undefined, { numeric: true }));
+        if (!list.length) return [];
+        const project = new Set(list.map((i) => i.project)).size > 1;
+        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const minutes = (i) => (i.hours === null ? null : Math.round(i.hours * 60));
+        const cents = (i) => (i.total === null ? null : Math.round(i.total * 100));
+        const live = list.filter((i) => i.status !== "canceled");
+        const head = ["", "Invoice", ...(project ? ["Project"] : []), "Date", "Period", "Hours", "Total"];
+        const row = (cells) => `| ${cells.join(" | ")} |`;
+        return [
+            row(head), row(head.map((h, k) => (h === "Hours" || h === "Total" ? "--:" : k === 0 ? ":-:" : "---"))),
+            ...list.map((i) => row([
+                this.invoiceMark(i), `[[${i.name}]]`, ...(project ? [this.cell(link(i.project))] : []),
+                i.invoiceDate ? this.shortDate(i.invoiceDate) : "",
+                i.periodStart && i.periodEnd ? `${md(i.periodStart)} – ${this.shortDate(i.periodEnd)}` : "",
+                minutes(i) === null ? "" : this.hours(minutes(i)), cents(i) === null ? "" : this.money(cents(i)),
+            ])),
+            row(["", "**Total**", ...(project ? [""] : []), "", "", `**${this.hours(live.reduce((s, i) => s + (minutes(i) ?? 0), 0))}**`,
+                `**${this.money(live.reduce((s, i) => s + (cents(i) ?? 0), 0))}**`]),
+        ];
     }
 
     // The block, markers included, for { kind: "project", path } or { kind: "period", unit, key };
@@ -1427,8 +1459,10 @@ class TimeReport {
     // or its full path when another note has the same name).
     // `link(path)` makes a project link, aliased with ⭕ and the project's name (defaults to
     // [[basename|⭕ basename]]); inside a table its `|` is escaped (see cell).
-    render(model, scope, stamp, link = (p) => `[[${this.basename(p)}|⭕ ${this.basename(p)}]]`) {
-        const out = [TimeReport.START, `*Updated ${stamp}*`, ""];
+    render(model, scope, stamp, link = (p) => `[[${this.basename(p)}]]`) {
+        // A project's timesheet link opens the block, beside when it was updated
+        const top = scope.kind === "project" && scope.sheet ? `[[${scope.sheet}|View Timesheet]] | *Updated ${stamp}*` : `*Updated ${stamp}*`;
+        const out = [TimeReport.START, top, ""];
 
         if (scope.kind === "period" && scope.unit === "year") {
             const mine = this.inScope(model, scope);
@@ -1444,7 +1478,8 @@ class TimeReport {
         } else if (scope.kind !== "timesheet") {
             const mine = this.inScope(model, scope);
             out.push(...this.projectTables(model, mine.entries, scope, link), "");
-            if (scope.sheet) out.push(`[[${scope.sheet}|Timesheet]]: every entry, with its invoice and whether it's paid`, "");
+            const invoices = this.invoiceLines(model, scope, link);
+            if (invoices.length) out.push("### Invoices", "", ...invoices, "");
             out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
         } else {
             // Its own note, not the project's: a long table in a note costs every keystroke typed in it
@@ -1533,7 +1568,8 @@ class TimeReport {
         const lines = this.lines(content);
         const { blocks, starts, ends } = this.scan(lines);
         if (starts.length !== 1 || ends.length !== 1 || blocks.length !== 1) return false;
-        const strip = (ls) => ls.filter((l, i) => i !== 1).join("\n");
+        // Line 1 says when it was updated (after the timesheet link, on a project): that alone isn't a change
+        const strip = (ls) => ls.map((l, i) => (i === 1 ? l.replace(/\*Updated [^*]*\*/, "*Updated*") : l)).join("\n");
         return strip(lines.slice(blocks[0].start, blocks[0].end + 1)) === strip(this.lines(block));
     }
 
@@ -1837,11 +1873,10 @@ class TimeReport {
             }
             const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
             const stamp = window.moment().format("YYYY-MM-DD h:mma");
-            // Project links, aliased "⭕ Name", and area links "🗃️ Name" (tables escape the | themselves)
+            // Project links by name, area links "🗃️ Name" (tables escape the | themselves)
             const link = (p) => {
                 const f = app.vault.getFileByPath(p);
-                const target = f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p);
-                return `[[${target}|${this.linkMark(p, index)} ${this.basename(p)}]]`;
+                return this.reportLink(f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p), p, index);
             };
             const done = [], trouble = [];
             const linkTarget = this.periodLinkTarget(this.periodFolders());

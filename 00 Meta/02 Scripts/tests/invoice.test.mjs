@@ -32,7 +32,7 @@ const model = tr.build([
 const billed = billing.snapshot(model.entries, model, tr);
 const DATA = (more = {}) => ({
     id: "2026090312000000", name: "1001-HBR", status: "draft",
-    area: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co", projectLink: "Harbor Web",
+    area: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co",
     invoiceDate: "2026-09-03", periodStart: "2026-09-01", periodEnd: "2026-09-02",
     from: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"] },
     billTo: { name: "Harbor Co", address: ["1 Dock Street", "Port Town, ST 00000"] },
@@ -54,16 +54,14 @@ test("noteText: frontmatter the Invoices base and Billing read", () => {
         "cssclasses:",
         "  - pm-invoice",
         'area: "[[Harbor Web|⭕.Work.Harbor Web]]"',
-        "status: draft",
+        "invoice_status: draft",
         'number: "1001-HBR"',
         'client: "[[Harbor Co]]"',
-        'project: "[[Harbor Web]]"',
         "invoice_date: 2026-09-03",
         "period_start: 2026-09-01",
         "period_end: 2026-09-02",
         "hours: 4.00",
         "total: 340.00",
-        "sent:",
         "paid:",
         "---",
     ].join("\n"));
@@ -154,6 +152,43 @@ test("setProps: sets a value in place, replaces a list, adds a missing key last"
     assert.equal(inv.setProps(text, { paid: "2026-09-15" }), "---\nstatus: draft\ntags:\n  - invoice\nsent:\nextra: kept\npaid: 2026-09-15\n---\nbody");
     assert.equal(inv.setProps("---\nhours: 1\nlist:\n  - a\n  - b\n---\n", { list: "x" }), "---\nhours: 1\nlist: x\n---\n");
     assert.equal(inv.setProps("no frontmatter", { status: "sent" }), null);
+});
+
+test("setStatus: sets invoice_status and takes out the status an older invoice carries (OBS-117)", () => {
+    // An invoice made before: its status line becomes invoice_status where it stands
+    const old = '---\ntags:\n  - invoice\nstatus: sent\nnumber: "1001-HBR"\npaid:\n---\nbody';
+    assert.equal(inv.setStatus(old, "paid", { paid: "2026-09-15" }), '---\ntags:\n  - invoice\ninvoice_status: paid\nnumber: "1001-HBR"\npaid: 2026-09-15\n---\nbody');
+    // A `status` in the body is left alone
+    assert.equal(inv.setStatus("---\nStatus: draft\n---\nstatus: notes\n", "sent"), "---\ninvoice_status: sent\n---\nstatus: notes\n");
+    // One made now: set in place
+    assert.equal(inv.setStatus("---\ninvoice_status: sent\nsent: 2026-09-12\n---\n", "canceled"), "---\ninvoice_status: canceled\nsent: 2026-09-12\n---\n");
+    // Both: one left
+    assert.equal(inv.setStatus("---\ninvoice_status: draft\nstatus: draft\n---\n", "sent", { sent: "2026-09-12" }), "---\ninvoice_status: sent\nsent: 2026-09-12\n---\n");
+    assert.equal(inv.setStatus("\r\n---\r\n", "sent"), null);
+    assert.equal(inv.setStatus("---\r\nstatus: draft\r\nsent:\r\n---\r\nbody", "sent", { sent: "2026-09-12" }), "---\r\ninvoice_status: sent\r\nsent: 2026-09-12\r\n---\r\nbody");
+    // Invoice and Billing name the property the same way
+    assert.equal(inv.constructor.STATUS, "invoice_status");
+    assert.equal(billing.constructor.STATUS, inv.constructor.STATUS);
+});
+
+test("escapeKey: a property name with pattern characters matches only itself", () => {
+    assert.equal(inv.setProps("---\naXb: 1\n---\n", { "a.b": 2 }), "---\naXb: 1\na.b: 2\n---\n");
+    assert.equal(inv.removeProps("---\naXb: 1\na.b: 2\n---\n", ["a.b"]), "---\naXb: 1\n---\n");
+});
+
+test("removeProps: takes keys out of the frontmatter, with any list under them, and nothing else", () => {
+    assert.equal(inv.removeProps("---\na: 1\nlist:\n  - x\n  - y\nb: 2\n---\nlist: body\n", ["list", "missing"]), "---\na: 1\nb: 2\n---\nlist: body\n");
+    assert.equal(inv.removeProps("---\nStatus: sent\nstatus_note: keep\n---\n", ["status"]), "---\nstatus_note: keep\n---\n");
+    assert.equal(inv.removeProps("no frontmatter", ["a"]), null);
+});
+
+test("setPrintedDate: the date the invoice prints, set to the day it's sent", () => {
+    const text = inv.noteText(DATA(), tr, billing);
+    const sent = inv.setPrintedDate(text, "2026-09-12");
+    assert.ok(text.includes('<span class="pm-invoice-label">Invoice date</span><br>9/3/2026</p>'));
+    assert.ok(sent.includes('<span class="pm-invoice-label">Invoice date</span><br>9/12/2026</p>'));
+    assert.equal(sent.replace("9/12/2026", "9/3/2026"), text, "nothing else changes");
+    assert.equal(inv.setPrintedDate("no header", "2026-09-12"), "no header");
 });
 
 test("split: the frontmatter and the body", () => {

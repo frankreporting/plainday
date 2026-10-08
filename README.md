@@ -10,9 +10,9 @@ This README covers trying it and installing it. **[The manual](<00 Meta/Manual.m
 
 1. Clone or download this repository, and in Obsidian choose **Open folder as vault**.
 2. **Settings → Community plugins:** turn on community plugins, then install and enable:
-   - [Templater](https://github.com/SilentVoid13/Templater)
-   - [CustomJS](https://github.com/saml-dev/obsidian-custom-js)
-   - [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
+	- [Templater](https://github.com/SilentVoid13/Templater)
+	- [CustomJS](https://github.com/saml-dev/obsidian-custom-js)
+	- [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
    Their settings for this vault are already in the repository.
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.

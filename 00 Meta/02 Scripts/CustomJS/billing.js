@@ -15,6 +15,8 @@ class Billing {
     // lookups; `index` answers questions about notes as TimeReport's does.
     static CALLOUT = "pm-billed";
     static HEAD = ["Date", "Start", "End", "Minutes", "Hours", "Rate", "Project", "Task", "Note"];
+    // An invoice's status property, its own so it never mixes with the projects' `status` (OBS-117)
+    static STATUS = "invoice_status";
 
     key(e) {
         return `${e.date} ${e.start} ${e.end}`;
@@ -52,12 +54,23 @@ class Billing {
         return this.tableText(tr.defuse(text)).replace(/\\\|/g, "|");
     }
 
-    // A table row's cells, `\|` read back as `|`
+    // A table row's cells, `\|` read back as `|`. A `|` inside a [[link]] belongs to the link even when
+    // its `\` is gone: moving a note with the Advanced Rename and Delete Handler plugin strips it from
+    // every link in a table, and the row must still read (OBS-117).
     cells(line) {
         let s = line.trim();
         if (s.startsWith("|")) s = s.slice(1);
         if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-        return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+        const out = [];
+        let cell = "", inLink = false;
+        for (let i = 0; i < s.length; i++) {
+            if (!inLink && s.startsWith("[[", i) && s.indexOf("]]", i + 2) !== -1) { inLink = true; cell += "[["; i++; continue; }
+            if (inLink && s.startsWith("]]", i)) { inLink = false; cell += "]]"; i++; continue; }
+            if (s[i] === "|" && s[i - 1] !== "\\" && !inLink) { out.push(cell); cell = ""; continue; }
+            cell += s[i];
+        }
+        out.push(cell);
+        return out.map((c) => c.trim().replace(/\\\|/g, "|"));
     }
 
     // ---------------------------------------------------------------- the Billed entries table
@@ -119,20 +132,26 @@ class Billing {
 
     // ---------------------------------------------------------------- invoices
 
-    // An invoice note, read. `status` is lowercase, "canceled" for either spelling, "draft" when blank;
-    // any other word still bills. `project` is the path its `project` links to, else the project its
-    // folder is in; each row's `projectPath` is where its project link points. `problem` says why the
-    // invoice can't be trusted, or is null: its frontmatter doesn't read (`error`), it's lost its
-    // `invoice` tag (`tagged` false: found by its Billed entries where invoices are filed), no table, a
-    // row that doesn't read, no column names, no rows, or rows that don't add up to its `hours` and
-    // `total`. Its rows still count as billed either way.
+    // An invoice note, read. `status` is its `invoice_status` (OBS-117), else the `status` of an invoice
+    // made before: lowercase, "canceled" for either spelling, "draft" when blank; any other word still
+    // bills. `project` is the project an invoice made before OBS-114 names in `project` (fixed when it
+    // was made, while its `area` may have been rewritten by a move since), else the one its `area` links
+    // to (how invoices are written now), else the project its folder is in; each row's `projectPath` is where its project
+    // link points. `problem` says why the invoice can't be trusted, or is null: its frontmatter doesn't
+    // read (`error`), it's lost its `invoice` tag (`tagged` false: found by its Billed entries where
+    // invoices are filed), no table, a row that doesn't read, no column names, no rows, or rows that
+    // don't add up to its `hours` and `total`. Its rows still count as billed either way.
     readInvoice({ path, props = {}, text = "", tagged = true, error = null }, tr, index) {
         const p = (name) => tr.prop(props ?? {}, name);
-        const raw = String(p("status") ?? "").trim().toLowerCase();
+        const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+        const raw = String([p(Billing.STATUS), p("status")].find(filled) ?? "").trim().toLowerCase();
         const status = raw === "cancelled" ? "canceled" : raw || "draft";
-        const link = String([].concat(p("project") ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
-        const linked = link ? index.linkDest(link, path) : null;
-        const project = (linked && tr.counts(linked, index) ? linked : null) ?? tr.projectOfNote(path, index);
+        const linkedProject = (name) => {
+            const link = String([].concat(p(name) ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+            const dest = link ? index.linkDest(link, path) : null;
+            return dest && tr.counts(dest, index) ? dest : null;
+        };
+        const project = linkedProject("project") ?? linkedProject("area") ?? tr.projectOfNote(path, index);
         const { rows, bad, found, head } = this.readBilled(text, tr);
         for (const r of rows) r.projectPath = r.project ? index.linkDest(r.project, path) : null;
         const minutes = rows.reduce((s, r) => s + r.billed, 0);
@@ -151,8 +170,10 @@ class Billing {
             : null;
         return {
             path, name: tr.basename(path), number: String(p("number") ?? tr.basename(path)), status,
-            sent: this.isoDate(p("sent")), paid: this.isoDate(p("paid")), invoiceDate: this.isoDate(p("invoice_date")),
+            paid: this.isoDate(p("paid")), invoiceDate: this.isoDate(p("invoice_date")),
             periodStart: this.isoDate(p("period_start")), periodEnd: this.isoDate(p("period_end")), project, rows, bad, problem,
+            // As the invoice states them, for the project's list of invoices (null when blank or not a number)
+            hours: Number.isFinite(hours) ? hours : null, total: Number.isFinite(total) ? total : null,
         };
     }
 

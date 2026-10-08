@@ -35,12 +35,12 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 ## Time tracking
 
 %% time:start %%
-*Updated 2026-09-16 9:00pm*
+[[Kestrel Outfitters 2026 timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
 
 | Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------- | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| [[Kestrel Outfitters 2026\|⭕ Kestrel Outfitters 2026]] | 16 | 17.00 | 1.75 | 18.75 | 18.00 |  | $95/hr | $1,615.00 |
-| [[Kestrel Fall Catalog\|⭕ Kestrel Fall Catalog]] | 4 | 3.50 |  | 3.50 | 3.17 |  | $95/hr | $332.50 |
+| [[Kestrel Outfitters 2026]] | 16 | 17.00 | 1.75 | 18.75 | 18.00 |  | $95/hr | $1,615.00 |
+| [[Kestrel Fall Catalog]] | 4 | 3.50 |  | 3.50 | 3.17 |  | $95/hr | $332.50 |
 | **Total** | **20** | **20.50** | **1.75** | **22.25** | **21.17** | **60.00** |  | **$1,947.50** |
 
 | Week | Entries | Billable | 🆓 | Total | Exact | Earned |
@@ -50,7 +50,12 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 | [[2026w37\|9/6-9/12]] | 2 | 4.50 |  | 4.50 | 4.50 | $427.50 |
 | [[2026w35\|8/23-8/29]] | 2 | 3.00 |  | 3.00 | 2.83 | $285.00 |
 
-[[Kestrel Outfitters 2026 timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
+### Invoices
+
+|  | Invoice | Date | Period | Hours | Total |
+| :-: | --- | --- | --- | --: | --: |
+| ✅ | [[1001-KES]] | 9/12/26 | 8/27 – 9/11/26 | 7.25 | $688.75 |
+|  | **Total** |  |  | **7.25** | **$688.75** |
 
 ### Problems
 

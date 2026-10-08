@@ -1,24 +1,32 @@
 filters:
   and:
     - file.tags.contains("invoice")
+formulas:
+  project: 'if(area, link(area.asFile().path, area.asFile().basename), "")'
+summaries:
+  Sum: 'values.sum().toFixed(2)'
+properties:
+  note.invoice_date:
+    displayName: Date
+  file.name:
+    displayName: Invoice
+  formula.project:
+    displayName: Project
+  note.invoice_status:
+    displayName: Status
+  note.total:
+    displayName: Total
 views:
   - type: table
     name: Invoices
-    groupBy:
-      property: status
-      direction: ASC
     order:
-      - file.name
-      - status
-      - client
-      - project
       - invoice_date
-      - period_start
-      - period_end
-      - hours
+      - file.name
+      - formula.project
+      - invoice_status
       - total
-      - sent
-      - paid
     sort:
-      - property: file.name
+      - property: invoice_date
         direction: DESC
+    summaries:
+      total: Sum

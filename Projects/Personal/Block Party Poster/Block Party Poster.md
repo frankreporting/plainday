@@ -26,7 +26,7 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 ## Time tracking
 
 %% time:start %%
-*Updated 2026-09-16 9:00pm*
+[[Block Party Poster timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
 
 | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
@@ -37,9 +37,7 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 | **Total** | **1** | **1.00** |  | **1.00** | **1.00** |  |
 | [[2026w38\|9/13-9/19]] | 1 | 1.00 |  | 1.00 | 1.00 |  |
 
-[[Block Party Poster timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
-
 ### Problems
 
-- [[Block Party Poster|⭕ Block Party Poster]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)
+- [[Block Party Poster]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)
 %% time:end %%

@@ -163,7 +163,7 @@ export function linkers(tr, vault, index = makeIndex(tr, vault)) {
     for (const p of vault.notes.keys()) count.set(basename(p), (count.get(basename(p)) ?? 0) + 1);
     const link = (p) => {
         const target = vault.notes.has(p) && count.get(basename(p)) === 1 ? basename(p) : p.replace(/\.md$/, "");
-        return `[[${target}|${tr.linkMark(p, index)} ${tr.basename(p)}]]`;
+        return tr.reportLink(target, p, index);
     };
     const linkTarget = (unit, key) => {
         const own = vault.notes.has(`${FOLDERS[unit]}/${key}.md`) ? 1 : 0;

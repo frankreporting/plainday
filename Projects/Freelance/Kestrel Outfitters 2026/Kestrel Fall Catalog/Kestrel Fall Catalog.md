@@ -26,7 +26,7 @@ Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|
 ## Time tracking
 
 %% time:start %%
-*Updated 2026-09-16 9:00pm*
+[[Kestrel Fall Catalog timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
 
 | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
@@ -36,8 +36,6 @@ Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|
 | ---- | ------: | -------: | -: | ----: | ----: | -----: |
 | **Total** | **4** | **3.50** |  | **3.50** | **3.17** | **$332.50** |
 | [[2026w38\|9/13-9/19]] | 4 | 3.50 |  | 3.50 | 3.17 | $332.50 |
-
-[[Kestrel Fall Catalog timesheet|Timesheet]]: every entry, with its invoice and whether it's paid
 
 ### Problems
 

@@ -8,7 +8,8 @@ class Invoice {
     // the invoice's status: Rebuild or Mark sent for a draft, Check for changes, Mark paid or Cancel
     // invoice once it's sent.
     //
-    // The note is the invoice: its properties say what the Invoices base lists, its body is what
+    // The note is the invoice: its properties say what the Invoices base lists (its status is
+    // `invoice_status`, OBS-117, and its project is the one `area` links to, OBS-114), its body is what
     // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
     // (Billing reads and writes it). Your details come from 00 Meta/Invoice Settings.md, which updates
@@ -27,6 +28,8 @@ class Invoice {
     static CHECK_END = "%% invoice-check:end %%";
     static CODE = /^[A-Z0-9]{2,8}$/;
     static HEADING = "## Billable hours";
+    // The invoice's status property, as Billing reads it (Billing.STATUS; a test keeps the two equal)
+    static STATUS = "invoice_status";
 
     // ---------------------------------------------------------------- pure
 
@@ -135,16 +138,14 @@ class Invoice {
             "cssclasses:",
             "  - pm-invoice",
             `area: ${q(d.area)}`,
-            `status: ${d.status}`,
+            `${Invoice.STATUS}: ${d.status}`,
             `number: ${q(d.name)}`,
             `client: ${q(`[[${d.clientLink}]]`)}`,
-            `project: ${q(`[[${d.projectLink}]]`)}`,
             `invoice_date: ${d.invoiceDate}`,
             `period_start: ${d.periodStart}`,
             `period_end: ${d.periodEnd}`,
             `hours: ${tr.hours(d.minutes)}`,
             `total: ${(d.cents / 100).toFixed(2)}`,
-            `sent: ${d.sent ?? ""}`.trimEnd(),
             `paid: ${d.paid ?? ""}`.trimEnd(),
             "---",
         ];
@@ -257,7 +258,7 @@ class Invoice {
         if (end === -1) return null;
         for (const [key, value] of Object.entries(props)) {
             const line = `${key}: ${value ?? ""}`.trimEnd();
-            const at = lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${key}\\s*:`, "i").test(l));
+            const at = lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
             if (at === -1) { lines.splice(end, 0, line); end++; continue; }
             let next = at + 1;
             while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++;   // a list under the key goes too
@@ -265,6 +266,51 @@ class Invoice {
             end -= next - at - 1;
         }
         return lines.join(nl);
+    }
+
+    // The frontmatter without `keys` (and any list under one), or null when there's none
+    removeProps(text, keys) {
+        const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
+        const lines = String(text).split(/\r?\n/);
+        let end = this.frontmatterEnd(lines);
+        if (end === -1) return null;
+        for (const key of keys) {
+            const at = lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
+            if (at === -1) continue;
+            let next = at + 1;
+            while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++;
+            lines.splice(at, next - at);
+            end -= next - at;
+        }
+        return lines.join(nl);
+    }
+
+    // The date the invoice prints in its header, set to `date`; the rest of the note as it was
+    setPrintedDate(text, date) {
+        return String(text).replace(/(<span class="pm-invoice-label">Invoice date<\/span><br>)[^<]*/, (_, label) => `${label}${this.dateText(date)}`);
+    }
+
+    // A property name as a pattern that matches only itself
+    escapeKey(key) {
+        return String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    // An invoice's status set, with `props`. On an invoice made before OBS-117, its `status` line is
+    // renamed where it stands; any other `status` is taken out, so the note never has two.
+    setStatus(text, status, props = {}) {
+        const lines = String(text).split(/\r?\n/);
+        const end = this.frontmatterEnd(lines);
+        if (end === -1) return null;
+        const has = (key) => lines.some((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
+        let base = String(text);
+        if (!has(Invoice.STATUS) && has("status")) {
+            const nl = base.includes("\r\n") ? "\r\n" : "\n";
+            const at = lines.findIndex((l, i) => i > 0 && i < end && /^status\s*:/i.test(l));
+            lines[at] = lines[at].replace(/^status(\s*:)/i, `${Invoice.STATUS}$1`);
+            base = lines.join(nl);
+        }
+        const set = this.setProps(base, { [Invoice.STATUS]: status, ...props });
+        return set === null ? null : this.removeProps(set, ["status"]);
     }
 
     // The note split at its frontmatter: { front: "---\n…\n---", body }
@@ -449,7 +495,7 @@ class Invoice {
         const props = index.props(project) ?? {};
         const text = this.noteText({
             id: window.moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
-            area: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path), projectLink: linkText(project),
+            area: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path),
             invoiceDate: window.moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
             from: settings, billTo: { name: client.billingName, address: client.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
@@ -821,16 +867,19 @@ class Invoice {
             if (pick === "rebuild") { await this.rebuild(file, invoice, await tr.textOf(file), tr, billing, index); return; }
             if (pick !== "send") return;
         }
-        await this.mark(file, invoice, tr, { status: "sent", key: "sent", title: "Sent on", dropCheck: true });
+        // The invoice date is the day it's sent: set with the status, on the property and where it prints
+        await this.mark(file, invoice, tr, { status: "sent", key: "invoice_date", title: "Invoice date (the day it's sent)", dropCheck: true, printed: true });
     }
 
-    // Sets the status, and the date it happened, then refreshes the timesheets
-    async mark(file, invoice, tr, { status, key, title, dropCheck = false }) {
+    // Sets the status, and the date it happened, then refreshes the timesheets. `printed` also puts the
+    // date where the invoice prints it.
+    async mark(file, invoice, tr, { status, key, title, dropCheck = false, printed = false }) {
         const date = await this.askDate(title);
         if (!date) return;
         const before = await tr.textOf(file);
-        let after = this.setProps(before, { status, [key]: date });
+        let after = this.setStatus(before, status, { [key]: date });
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
+        if (printed) after = this.setPrintedDate(after, date);
         if (dropCheck) after = this.placeCheck(after, null);
         if (!(await this.write(file, before, after, tr))) return;
         new Notice(`${invoice.name} marked ${status} on ${this.md(date)}`);
@@ -842,7 +891,7 @@ class Invoice {
             [["keep", "Keep it"], ["cancel", "Cancel invoice", true]]);
         if (pick !== "cancel") return;
         const before = await tr.textOf(file);
-        const after = this.setProps(before, { status: "canceled" });
+        const after = this.setStatus(before, "canceled");
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (!(await this.write(file, before, after, tr))) return;
         new Notice(`${invoice.name} canceled`);

@@ -127,11 +127,11 @@ test("Billed entries: a table Obsidian's editor reformatted reads the same; a ba
 // ------------------------------------------------------------------ invoices and the ledger
 
 test("readInvoice: status, project and dates", () => {
-    const a = read(invoiceNote("1001-HBR", "Cancelled", ROWS(), { sent: "2026-09-04", paid: "not yet" }));
+    const a = read(invoiceNote("1001-HBR", "Cancelled", ROWS(), { invoice_date: "2026-09-04", paid: "not yet" }));
     assert.equal(a.status, "canceled");
     assert.equal(a.project, WEB);
     assert.equal(a.name, "1001-HBR");
-    assert.equal(a.sent, "2026-09-04");
+    assert.equal(a.invoiceDate, "2026-09-04");
     assert.equal(a.paid, null);
     assert.equal(a.periodEnd, "2026-09-02");
     assert.equal(a.rows.length, 3);
@@ -140,6 +140,38 @@ test("readInvoice: status, project and dates", () => {
     assert.equal(b.status, "draft");
     assert.equal(b.project, WEB);
     assert.equal(b.number, "1002-HBR");
+});
+
+test("readInvoice: invoice_status, else an older invoice's status; area's project, else project's (OBS-117, OBS-114)", () => {
+    const note = (props) => read({ ...invoiceNote("1001-HBR", null, ROWS()), props: { number: "1001-HBR", ...props } });
+    assert.equal(note({ invoice_status: "Paid" }).status, "paid");
+    assert.equal(note({ status: "sent" }).status, "sent");
+    assert.equal(note({ invoice_status: "paid", status: "sent" }).status, "paid");
+    assert.equal(note({ invoice_status: null, status: "sent" }).status, "sent");
+    assert.equal(note({ invoice_status: " ", status: "sent" }).status, "sent");
+    assert.equal(note({ invoice_status: "Cancelled" }).status, "canceled");
+    assert.equal(note({}).status, "draft");
+    // An older invoice's fixed `project` (its `area` may have moved since); else the project `area`
+    // links to, as invoices are written now; else the project its folder is in
+    assert.equal(note({ area: "[[Harbor Photos|⭕.Work.Harbor Web.Harbor Photos]]" }).project, PHOTO);
+    assert.equal(note({ area: "[[Harbor Photos]]", project: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ area: "[[Harbor Photos]]", project: "[[Harbor Co]]" }).project, PHOTO);
+    assert.equal(note({ area: "[[Harbor Co]]", project: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ area: ["[[Dune Books]]"] }).project, OTHER);
+    assert.equal(note({ area: "[[Nowhere]]" }).project, WEB);
+});
+
+test("readBilled: a row whose link escapes a move stripped still reads (OBS-117)", () => {
+    // Advanced Rename and Delete Handler turns [[2026-09-01\\|9/1/26]] into [[2026-09-01|9/1/26]] in every
+    // table of a note it moves
+    const text = billing.billedLines(ROWS(), tr, name).join("\n");
+    const stripped = text.replace(/\\\|/g, "|");
+    assert.notEqual(stripped, text);
+    assert.deepEqual(plain(billing.readBilled(stripped, tr)), plain(billing.readBilled(text, tr)));
+    assert.equal(billing.readBilled(stripped, tr).rows.length, 3);
+    // A [[ that never closes is text, and the cells still split
+    assert.deepEqual(plain(billing.cells("| a [[b | c |")), ["a [[b", "c"]);
+    assert.deepEqual(plain(billing.cells("| [[x|y]] | z \\| w |")), ["[[x|y]]", "z | w"]);
 });
 
 test("ledger: drafts count, canceled invoices don't, except leaves one out, twice is caught once", () => {
