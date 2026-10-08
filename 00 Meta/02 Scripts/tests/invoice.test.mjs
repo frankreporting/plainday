@@ -277,3 +277,20 @@ test("setProps, placeCheck and split keep a note's CRLF line endings, and a key 
 test("final review: setProps matches a key however it's capitalized", () => {
     assert.equal(inv.setProps("---\nStatus: sent\n---\n", { status: "paid" }), "---\nstatus: paid\n---\n");
 });
+
+test("askDate: a month and day without a year is the closer one, since billing looks back as often as ahead (OBS-143)", async () => {
+    const asked = [];
+    const DatePrompt = {
+        open(title, onPick, opts) {
+            asked.push({ title, nearest: opts?.nearest });
+            const modal = { contentEl: { querySelector: () => null }, close() { this.onClose?.(); } };
+            setTimeout(() => onPick({ date: "2026-09-16" }, modal), 0);
+            return modal;
+        },
+    };
+    const context = vm.createContext({ setTimeout, customJS: { DatePrompt } });
+    const src = fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8");
+    const asking = new (vm.runInContext(`${src}\n;Invoice`, context))();
+    assert.equal(await asking.askDate("Bill through"), "2026-09-16");
+    assert.deepEqual(asked, [{ title: "Bill through", nearest: true }]);
+});

@@ -6,7 +6,7 @@ class TimeReport {
     //     its sub-projects, then a week-by-week breakdown (total first, newest week next), a link to its
     //     timesheet note, and Problems (which also say what changed since an invoice, OBS-5);
     //   - each project's timesheet note, beside its note: every entry, as Billable time and 🆓 time,
-    //     with the invoice that billed it (OBS-5);
+    //     with the invoice that billed it (OBS-5), and Problems that say why an entry is ⚠️ (OBS-143);
     //   - each weekly and monthly note in 36 Planner (weeks/, months/, from Notebook Navigator's
     //     patterns) for a period with entries: that period's summary by project with a total, then
     //     hours by day (weekly) or by week (monthly), and its Problems;
@@ -892,9 +892,9 @@ class TimeReport {
     }
 
     // Invoice notes (OBS-5): read them, keep what they billed on the model for the timesheets, and
-    // list on the project's own note (never on weekly, monthly or yearly notes) a sent or paid invoice
-    // whose billed entries changed since, an entry on two invoices, and a billed_through that isn't a
-    // date. `notes` are [{ path, props, text }]; `billing` is a Billing.
+    // list on the project's own note (never on weekly, monthly or yearly notes) an invoice whose billed
+    // entries changed since it was made (a draft's too, which says to rebuild it, OBS-143), an entry on
+    // two invoices, and a billed_through that isn't a date. `notes` are [{ path, props, text }]; `billing` is a Billing.
     attachBilling(model, notes, index, billing) {
         // In number order, then path, so the first invoice to bill an entry is always the same one,
         // whatever order the vault lists its files in
@@ -904,7 +904,7 @@ class TimeReport {
         // Billed entries moved or retimed since, which look unbilled: the timesheets mark them ⚠️, as the
         // Invoice command holds them back
         const { held, byInvoice } = billing.holds(model, this, index, ledger);
-        model.billing = { billing, invoices, ledger, index, held };
+        model.billing = { billing, invoices, ledger, index, held, byInvoice };
         for (const invoice of invoices) {
             if (invoice.status === "canceled" || !invoice.project || this.isArchived(invoice.path) || this.isArchived(invoice.project)) continue;
             // A table that can't be read would let its entries look unbilled; the Invoice command refuses
@@ -913,7 +913,6 @@ class TimeReport {
                 model.projectProblems.push({ project: invoice.project, only: "project", invoice, problem: invoice.problem });
                 continue;
             }
-            if (!["sent", "paid"].includes(invoice.status)) continue;
             for (const change of byInvoice.get(invoice) ?? []) {
                 if (change.kind !== "wording") model.projectProblems.push({ project: invoice.project, only: "project", invoice, change });
             }
@@ -1324,7 +1323,9 @@ class TimeReport {
         return out.length ? out : ["None."];
     }
 
-    // A billed entry that changed since its invoice was sent or paid, or an entry on two invoices (OBS-5)
+    // A billed entry that changed since its invoice was made, or an entry on two invoices (OBS-5). A
+    // draft's change ends "rebuild it", since Rebuild fixes it. A timesheet adds an `overlap` (an entry
+    // that overlaps billed time) of its own (OBS-143), which Rebuild doesn't fix.
     invoiceProblem(p, link) {
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const when = (r) => `[[${r.date}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
@@ -1342,8 +1343,10 @@ class TimeReport {
             : c.kind === "free" ? "now 🆓"
             : c.kind === "unassigned" ? "now on no project"
             : c.kind === "project" ? `now on ${link(c.entry.project)}`
+            : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${c.entry.date}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
             : "gone from its daily note";
-        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${when(c.row)} was billed, ${now}`;
+        const fix = invoice.status === "draft" && c.kind !== "overlap" ? "; rebuild it" : "";
+        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${when(c.row)} was billed, ${now}${fix}`;
     }
 
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
@@ -1359,6 +1362,8 @@ class TimeReport {
     // carries its table's total (`### Billable time: 20.50 hrs`); the table has a bold row per day,
     // newest first, adding up the day's hours, then the day's entries in time order. 🆓 time shows the
     // 🆓 as written (on the task line, or at the start of the note), so each row says why it isn't billed.
+    // Then Problems, when there's anything to say about its invoices (see sheetProblems). Each part ends
+    // with a blank line.
     timesheetLines(model, scope, link) {
         const b = model.billing;
         const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
@@ -1369,7 +1374,71 @@ class TimeReport {
         const out = [];
         if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link }), "");
         if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true }), "");
+        if (!entries.length) out.push("No time entries.", "");
+        const problems = this.sheetProblems(model, on, entries, link);
+        if (problems.length) out.push("### Problems", "", ...problems, "");
         return out;
+    }
+
+    // A timesheet's Problems (OBS-143), so every ⚠️ in it says why: what changed since an invoice billed
+    // time in it, and an entry on two invoices. The lines are the project note's, from the same changes
+    // (Billing.holds). An entry that's ⚠️ for no change of its own, such as one that overlaps a billed
+    // row whose entry is still there, gets a line of its own. Empty when there's nothing to say.
+    sheetProblems(model, on, entries, link) {
+        const b = model.billing;
+        if (!b) return [];
+        const mine = (p) => !!p && on.has(p);
+        const out = [], explained = new Set();
+        for (const invoice of b.invoices) {
+            if (invoice.status === "canceled" || this.isArchived(invoice.path) || (invoice.project && this.isArchived(invoice.project))) continue;
+            if (invoice.problem) {
+                if (mine(invoice.project)) out.push(this.invoiceProblem({ invoice, problem: invoice.problem }, link));
+                continue;
+            }
+            for (const change of b.byInvoice?.get(invoice) ?? []) {
+                if (change.kind === "wording" || !(mine(invoice.project) || mine(change.row.projectPath) || mine(change.entry?.project))) continue;
+                out.push(this.invoiceProblem({ invoice, change }, link));
+                if (change.entry) explained.add(change.entry);
+            }
+        }
+        for (const twice of b.ledger.twice) {
+            if (mine(twice.row.projectPath) || twice.invoices.some((i) => mine(i.project))) out.push(this.invoiceProblem({ twice }, link));
+        }
+        const standing = this.sheetStanding(model);
+        const order = (x, y) => x.date.localeCompare(y.date) || x.start - y.start || x.end - y.end;
+        for (const e of [...entries].sort(order)) {
+            const s = standing(e);
+            if (explained.has(e) || !this.warned(e, s)) continue;
+            const same = e.date === s.row.date && e.start === s.row.start && e.end === s.row.end;
+            const kind = !same ? "overlap" : !e.billable ? "free" : "project";
+            out.push(this.invoiceProblem({ invoice: s.invoice, change: { row: s.row, kind, entry: e } }, link));
+        }
+        return out;
+    }
+
+    // An entry's hourly rate in cents, or null when its project isn't billed by the hour
+    hourlyCents(model, e) {
+        const m = model.money.get(e.project);
+        return m?.type === "hourly" && m.rate ? Math.round(m.rate * 100) : null;
+    }
+
+    // How a timesheet's entries stand with the invoices: (entry) → Billing.standing, with a billed entry
+    // that moved or was retimed since (`held`) as changed. Only an hourly project's entries are invoiced.
+    sheetStanding(model) {
+        const b = model.billing;
+        const through = new Map();
+        return (e) => {
+            if (!b || this.hourlyCents(model, e) === null) return { kind: "open" };
+            if (!through.has(e.project)) through.set(e.project, b.billing.billedThrough(e.project, this, b.index).date);
+            const s = b.billing.standing(e, b.ledger, through.get(e.project));
+            const h = s.kind === "open" && b.held?.get(e);
+            return h ? { kind: "changed", ...h } : s;
+        };
+    }
+
+    // Whether an entry is ⚠️: changed since it was billed, or billed and now 🆓
+    warned(e, s) {
+        return s.kind === "changed" || (s.kind === "billed" && !e.billable);
     }
 
     // One timesheet table. Where anything in it bills by the hour, it starts with an unnamed column for
@@ -1379,23 +1448,14 @@ class TimeReport {
     // was billed before it was made 🆓, so it's ⚠️ (until OBS-110 puts 🆓 time on invoices at no charge).
     // It's about time, so it has no amounts.
     sheet(model, entries, { project, link, written = false }) {
-        const b = model.billing;
-        const rate = (e) => { const m = model.money.get(e.project); return m?.type === "hourly" && m.rate ? Math.round(m.rate * 100) : null; };
-        const billing = entries.some((e) => rate(e) !== null);
+        const billing = entries.some((e) => this.hourlyCents(model, e) !== null);
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
-        const through = new Map();
-        const standing = (e) => {
-            if (!b || rate(e) === null) return { kind: "open" };
-            if (!through.has(e.project)) through.set(e.project, b.billing.billedThrough(e.project, this, b.index).date);
-            const s = b.billing.standing(e, b.ledger, through.get(e.project));
-            const h = s.kind === "open" && b.held?.get(e);
-            return h ? { kind: "changed", ...h } : s;
-        };
+        const standing = this.sheetStanding(model);
         const cells = (e) => {
             const s = standing(e);
             if (s.kind === "before") return ["", e.billable ? `through ${md(s.through)}` : ""];
             if (s.kind === "open") return ["", ""];
-            return [s.kind === "changed" || !e.billable ? "⚠️" : this.invoiceMark(s.invoice), `[[${s.invoice.name}]]`];
+            return [this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice), `[[${s.invoice.name}]]`];
         };
         const head = [...(billing ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
         const row = (c) => `| ${c.join(" | ")} |`;
@@ -1484,8 +1544,7 @@ class TimeReport {
         } else {
             // Its own note, not the project's: a long table in a note costs every keystroke typed in it
             // (OBS-5 measured about 0.05 ms a row), and nobody types in a timesheet
-            const sheets = this.timesheetLines(model, scope, link);
-            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...(sheets.length ? sheets.slice(0, -1) : ["No time entries."]));
+            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...this.timesheetLines(model, scope, link).slice(0, -1));
         }
         // Nothing between the markers may open a comment or look like a marker, or the next run can't find the block
         const body = out.slice(1).map((l) => this.defuse(l));

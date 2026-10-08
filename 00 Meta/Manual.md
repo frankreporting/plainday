@@ -193,7 +193,7 @@ The **TimeReport** command writes summaries of the time logged in daily notes. O
 | Note | What it shows |
 | --- | --- |
 | Each project or area note with entries | Under `## Time tracking`: a first line linking its timesheet note (*View Timesheet*) beside when it was updated, then the summary (Entries, Billable, 🆓, Total, Exact, Max Hrs, Rate, Earned). With no sub-project time that's one row; otherwise a Project column with a row for the project's own time, one per sub-project, and a **Total** row that carries the project's Max Hrs. Then a week-by-week table of the time logged to the project directly (total first, then each week newest first, each week linking its weekly note), its **Invoices** (see *Invoices*), and Problems |
-| Each project or area's timesheet note | Every entry, in two tables: **Billable time** and **🆓 time** (see *Timesheets*). The note sits beside the project's note, named after it (`Kestrel Outfitters 2026 timesheet`); on the desktop, it's made when the project first has time |
+| Each project or area's timesheet note | Every entry, in two tables: **Billable time** and **🆓 time**, then Problems when an invoice's entries changed (see *Timesheets*). The note sits beside the project's note, named after it (`Kestrel Outfitters 2026 timesheet`); on the desktop, it's made when the project first has time |
 | Each weekly and monthly note for a period with entries | Under `## Time tracking`, each table under its own H3: **Totals**, the period's summary by project with an **All** row. A monthly note adds **By Week**: hours by week, a column per Sunday–Saturday week that overlaps the month, each header linking its weekly note (a straddling week counts only that month's days). A weekly note adds **By Day**: a row per project, a column per day (`Sun 9/13` … `Sat 9/19`, each linking its daily note). Then the period's **Problems**. On the desktop, missing weekly and monthly notes are created first; a phone only refreshes notes that exist |
 | Each yearly note | Under `## Time tracking`: an **Earned** table and an **Hours** table (billable + 🆓), each with a row per project (non-billable ones and Unassigned too), a column per month linking its monthly note, the year's total and an **All** row; then Problems |
 
@@ -215,7 +215,7 @@ Weeks run Sunday to Saturday, the same weeks Notebook Navigator names `2026w38`.
 
 **Problems** lists what the report couldn't count cleanly: a task whose ⭕ project differs from the project its 🗒️ task note is filed under, or an event whose ⭕ differs from its log's project (listed on both project notes; a note moved by hand leaves its lines like that), running clocks, ends before starts, overlapping entries (on any day, even across midnight), list lines that look like time ranges but aren't `- h:mmam - h:mmpm` bullets, entries not under a task or event, 🆓 after other text on an entry or on both a line and an entry under it, busy events with no end line, entries or events of 12 hours or more, unclosed code blocks or comments, and entries with no project. Problems about a project itself (such as a `rate` that isn't a positive number, an hourly project with no `rate`, no `rate_type`, two projects each inside the other, a ⭕ and 🗒️ that disagree) are listed on the project's note, and on every weekly, monthly and yearly note whose period has time on that project or on a sub-project of it, so a period's report says why its hours count the way they do. There a ⭕ and 🗒️ disagreement is listed once, under the project the time counts on, with that period's entries. Quoted lines stop at 80 characters. Malformed and running entries are listed but not counted. Code blocks and `%%` / `<!-- -->` comments are skipped. The demo has one of each kind on purpose: the 9/16 note has a mistyped entry (`2:30 - 3:45pm`), and Block Party Poster, a volunteer project whose `rate_type` was never filled in, is listed on its own note and on `2026w38`, `2026-09` and `2026`.
 
-A project's own note also lists what's wrong with its invoices (see *Invoices*), and only there: a billed entry changed since its invoice was sent or paid (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`), an entry on two invoices, an invoice whose Billed entries can't be read, and a `billed_through` that isn't a date. The demo's Kestrel Outfitters 2026 shows the first.
+A project's own note also lists what's wrong with its invoices (see *Invoices*), and so does its timesheet, but no weekly, monthly or yearly note: a billed entry changed since its invoice was made (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`; a draft's line ends `; rebuild it`, since *Rebuild* fixes it), an entry on two invoices, an invoice whose Billed entries can't be read, and a `billed_through` that isn't a date. The demo's Kestrel Outfitters 2026 shows the first.
 
 #### Timesheets
 
@@ -230,6 +230,9 @@ A project's own note also lists what's wrong with its invoices (see *Invoices*),
 	- In 🆓 time, an entry on an invoice was billed before it was made 🆓, so it's ⚠️. Invoices don't show 🆓 time yet.
 - **🆓 as written:** in 🆓 time, a 🆓 on the task line stays in Task and one on the entry stays at the start of Notes, so each row says why it isn't billed.
 - **⚠️** also marks a billed entry moved or retimed since: the Invoice command holds it back.
+- **Problems** close the timesheet when there's anything to say about its invoices, so every ⚠️ says why. The lines are the project note's (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`), and billed time that's gone from its daily note is listed too.
+	- An entry added on top of billed time whose own entry is still there gets a line of its own: `… 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it`.
+	- With nothing to say, there's no Problems heading. The demo's Kestrel Outfitters 2026 timesheet has one line.
 
 ### Links at the end of a line
 
@@ -398,7 +401,7 @@ The **Invoice** command bills a project's time as an invoice note, and moves the
 
 Run *Invoice* on a project note (anywhere else, it asks which project has time to bill).
 
-1. **Bill through:** a date in words, starting at `today`.
+1. **Bill through:** a date in words, starting at `today` (see *Typing a date*). A month and day without a year is the closer one, this year's or next year's, since you bill work behind you as often as a few days ahead: in October, `9/16` is last month's. The dates *Mark sent* and *Mark paid* ask for work the same way.
 2. **What it would bill:** the project's ended, billable time on no invoice yet, through that date, for a project billed by the hour (a `rate`, with `rate_type` `hourly` or empty, its own or its parent's). With `include_subprojects` on, its sub-projects' time too.
 3. **The confirmation** shows:
 	- **Fix first?** the Problems in that time (running clocks first), and billed entries that changed since their invoice;
@@ -449,7 +452,7 @@ Run *Invoice* on the invoice note for what fits its status:
 - **Mark sent** asks for the invoice date, the day you send it, starting at today, and sets it on `invoice_date` and where the invoice prints it. On a draft that no longer matches the daily notes, it offers to rebuild it first.
 - **Mark paid** asks for the date it was paid, and sets `paid`.
 - **Cancel invoice** marks it canceled: its entries are unbilled again, for the next invoice.
-- **Check for changes** writes what changed, and entries logged in its period since, into a callout at the top, which doesn't print. The time report lists the billing changes of sent and paid invoices on the project's note.
+- **Check for changes** writes what changed, and entries logged in its period since, into a callout at the top, which doesn't print. The time report lists every invoice's billing changes on the project's note and its timesheet, a draft's ending *rebuild it*.
 - **A draft you don't want:** delete its note. Its number isn't given again, so the numbers skip it.
 - The timesheets update right away on the desktop; a status typed by hand shows at the next report run.
 
@@ -474,7 +477,7 @@ The system's commands are CustomJS scripts, run from the command palette ("Custo
 
 ### Typing a date
 
-*Schedule*, *DueDate* and *JumpToDate* ask for a date in words, and Natural Language Dates reads them. The line under the box shows the date they mean as you type (`Fri 10/2 · in 5 days`), and Enter takes it.
+*Schedule*, *DueDate*, *JumpToDate* and *Invoice* ask for a date in words, and Natural Language Dates reads them. The line under the box shows the date they mean as you type (`Fri 10/2 · in 5 days`), and Enter takes it.
 
 - **Words it can't read:** the line says "Not a date I can read", and Enter does nothing but say so. Natural Language Dates (Revived) answers with today for words it doesn't know, so a typo like `fridya` would otherwise pick today.
 - **Words it only partly read:** the line says which (`Thu 10/1 · in 4 days · read as "october"` for `end of october`), and Enter takes that date. A partial reading that comes out as today (`tomorow at 5pm` read as `at 5pm`) counts as unreadable.
@@ -490,7 +493,7 @@ What the words mean, typed on Sunday 9/27/26:
 | `next friday` | Fri 10/9 | Next week's, so on a Sunday it's 12 days away; `friday` is the one you usually want |
 | `last friday` | Fri 9/25 | Last week's: on a Saturday, 8 days back |
 | `tomorrow`, `in 3 days`, `in 2 weeks` | Mon 9/28, Wed 9/30, Sun 10/11 | Counted from today |
-| `10/2`, `oct 2` | Fri 10/2 | The next 10/2: a date already past this year is next year's, so give the year (`9/1/26`) for one behind you. *JumpToDate* takes the closer one instead: `9/16` is 11 days back, not next year's |
+| `10/2`, `oct 2` | Fri 10/2 | The next 10/2: a date already past this year is next year's, so give the year (`9/1/26`) for one behind you. *JumpToDate* and *Invoice* take the closer one instead: `9/16` is 11 days back, not next year's |
 | `next week`, `this week` | Week starting 10/4, Week starting 9/27 | The weekly note, for *Schedule* and *JumpToDate*. *DueDate* takes a day: the first of next week, by your week setting, or today for this week |
 | `week of oct 5` | Week starting 10/4 | The weekly note holding that day. *DueDate* takes the first day of that week |
 | `next month`, `this month`, `next year` | October 2026, September 2026, 2027 | The monthly or yearly note, for *Schedule* and *JumpToDate*. *DueDate* takes the first day of it |

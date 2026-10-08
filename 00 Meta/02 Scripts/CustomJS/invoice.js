@@ -585,11 +585,13 @@ class Invoice {
         await customJS.TimeReport.refresh({ quiet: true });
     }
 
-    // A date from the date prompt (the box starts at "today"), or null when dismissed
+    // A date from the date prompt (the box starts at "today"), or null when dismissed. A month and day
+    // without a year is whichever is closer, this year's or the next (OBS-143): billing looks back at
+    // work done as often as ahead, so "9/16" in October is last month's.
     askDate(title) {
         return new Promise((resolve) => {
             let picked = null;
-            const modal = customJS.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); });
+            const modal = customJS.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); }, { nearest: true });
             if (!modal) { resolve(null); return; }
             const closed = modal.onClose?.bind(modal);
             modal.onClose = () => { closed?.(); setTimeout(() => resolve(picked), 0); };

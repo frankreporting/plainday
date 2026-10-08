@@ -2075,9 +2075,9 @@ test("timesheet: each billable entry's invoice last, its status mark first (OBS-
     // Under Problems on the project's note; not on the month's
     assert.ok(block.includes("- [[1001-ORC]] (paid 9/15): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm"), block);
     assert.ok(!tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s").includes("1001-ORC"));
-    // A draft that changed isn't a Problem: it's rebuilt
+    // A draft that changed is a Problem too, which says how to fix it (OBS-143)
     const draftOnly = tr.attachBilling(tr.build(ORC_NOTES, idx), [orcInvoice("1003-ORC", "draft", [["2026-09-01", "1:00pm", "2:30pm"]])], idx, billing);
-    assert.ok(!tr.render(draftOnly, { kind: "project", path: ORCHARD_WEB }, "s").includes("was billed"));
+    assert.ok(tr.render(draftOnly, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1003-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm; rebuild it"));
 });
 
 test("invoice Problems: an entry on two invoices, a billed_through that isn't a date", () => {
@@ -2160,6 +2160,51 @@ test("timesheet: 🆓 time has the status and Invoice columns; a 🆓 entry an i
     assert.ok(free.includes("| ⚠️ |  | 9:00am - 9:50am | 1.00 | Charts | 🆓 my mistake | [[1001-ORC]] |"), free.join("\n"));
     assert.ok(free.includes("|  |  | 3:00pm - 3:30pm | 0.50 | Charts | 🆓 |  |"), free.join("\n"));
     assert.ok(section(block, "### Billable time").includes("| ✅ |  | 11:00am - 11:30am | 0.50 | Charts |  | [[1001-ORC]] |"));
+});
+
+test("timesheet: Problems say why each ⚠️ entry is ⚠️, as the project's note does, drafts too; with nothing to say, no Problems (OBS-143)", () => {
+    const idx = orcIndex();
+    // 1001 (paid) billed 9/1 9:00am - 9:50am, made 🆓 since, and 9/2 3:00pm - 3:30pm, gone since; the
+    // draft 1002 billed 9/1 1:00pm - 2:30pm, which now runs to 2:45pm
+    const notes = [
+        note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am: 🆓 my mistake\n\t- 11:00am - 11:30am\n\t- 1:00pm - 2:45pm"),
+        note("2026-09-03", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am"),
+    ];
+    const invoices = [
+        orcInvoice("1001-ORC", "paid", [["2026-09-01", "9:00am", "9:50am"], ["2026-09-02", "3:00pm", "3:30pm"]], { paid: "2026-09-15", invoice_date: "2026-09-04" }),
+        orcInvoice("1002-ORC", "draft", [["2026-09-01", "1:00pm", "2:30pm"]]),
+    ];
+    const m = tr.attachBilling(tr.build(notes, idx), invoices, idx, billing);
+    const block = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
+    assert.equal(block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).length, 2, block);
+    assert.deepEqual(section(block, "### Problems"), [
+        "- [[1001-ORC]] (paid 9/15): [[2026-09-01|9/1/26]] 9:00am - 9:50am was billed, now 🆓",
+        "- [[1001-ORC]] (paid 9/15): [[2026-09-02|9/2/26]] 3:00pm - 3:30pm was billed, gone from its daily note",
+        "- [[1002-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm; rebuild it",
+    ]);
+    assert.ok(block.endsWith("now 1:00pm - 2:45pm; rebuild it\n%% time:end %%"), "Problems come last");
+    // The project's note says the same, the draft included
+    const project = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
+    assert.deepEqual(section(project, "### Problems"), section(block, "### Problems"));
+    // Nothing ⚠️ and nothing changed: no Problems heading at all
+    const clean = tr.attachBilling(tr.build(ORC_NOTES, idx), [orcInvoice("1003-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { invoice_date: "2026-09-04" })], idx, billing);
+    assert.ok(!tr.render(clean, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes("### Problems"));
+    assert.ok(!tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes("### Problems"));
+});
+
+test("timesheet: an entry that overlaps billed time whose own entry is still there gets a Problem of its own (OBS-143)", () => {
+    const idx = orcIndex();
+    // 1:00pm - 2:30pm is billed and unchanged; 2:00pm - 3:00pm was added on top of it since
+    const notes = [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 1:00pm - 2:30pm\n\t- 2:00pm - 3:00pm")];
+    const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "1:00pm", "2:30pm"]], { invoice_date: "2026-09-04" });
+    const m = tr.attachBilling(tr.build(notes, idx), [inv], idx, billing);
+    const block = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
+    assert.ok(section(block, "### Billable time").some((l) => l.startsWith("| ⚠️ |  | 2:00pm - 3:00pm |")), block);
+    assert.deepEqual(section(block, "### Problems"), ["- [[1001-ORC]] (sent 9/4): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it"]);
+    // On a draft, it doesn't say to rebuild: Rebuild would bill both entries, overlap and all
+    const draft = tr.attachBilling(tr.build(notes, idx), [orcInvoice("1002-ORC", "draft", [["2026-09-01", "1:00pm", "2:30pm"]])], idx, billing);
+    assert.deepEqual(section(tr.render(draft, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Problems"),
+        ["- [[1002-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it"]);
 });
 
 test("review: an invoice whose Billed entries can't be read is a Problem on its project's note", () => {
