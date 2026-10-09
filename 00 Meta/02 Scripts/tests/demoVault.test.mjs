@@ -335,7 +335,8 @@ test("demo vault: the paid Kestrel invoice adds up, and is what Invoice would bi
     assert.deepEqual(plain(next.entries), []);
     assert.deepEqual(plain(next.heldBack.map((h) => [billing.key(h.entry), h.invoice.name])), [["2026-09-11 780 885", "1001-KES"]]);
     // Nothing printed links anywhere
-    assert.ok(!text.slice(text.indexOf("# Invoice No."), text.indexOf("> [!pm-billed]")).includes("[["));
+    assert.ok(text.includes("\n## Billed entries\n"), "in the section invoices are made with now (OBS-145)");
+    assert.ok(!text.slice(text.indexOf("# Invoice No."), text.indexOf("## Billed entries")).includes("[["));
 });
 
 test("demo vault: each project with time has its timesheet note beside it, linked from the project", () => {

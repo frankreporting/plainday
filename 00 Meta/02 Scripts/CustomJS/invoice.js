@@ -28,6 +28,8 @@ class Invoice {
     static CHECK_END = "%% invoice-check:end %%";
     static CODE = /^[A-Z0-9]{2,8}$/;
     static HEADING = "## Billable hours";
+    // Through this, everything logged is in scope: for the first unbilled entry after a date
+    static LAST_DAY = "9999-12-31";
     // The invoice's status property, as Billing reads it (Billing.STATUS; a test keeps the two equal)
     static STATUS = "invoice_status";
 
@@ -505,6 +507,8 @@ class Invoice {
         }, tr, billing);
         await this.makeFolders(folder);
         const file = await app.vault.create(path, text);
+        // Billed entries starts folded (OBS-145), saved before the note opens
+        await this.foldBilled(file, text, billing);
         // Only once the note exists, so a failure before it can't skip a number
         await this.raiseLastNumber(next, name, tr);
         // Wait for the index to know it's an invoice, so a second run can't bill its entries again
@@ -535,7 +539,11 @@ class Invoice {
         }
         if (!sel.entries.length) {
             const held = sel.heldBack.length ? `, ${sel.heldBack.length} held back (marked ⚠️ in the project's timesheet)` : "";
-            new Notice(`Nothing unbilled on ${name} through ${this.md(through)}${held}`);
+            // The time is all billed, or comes later: say which, so it doesn't read as a failure (OBS-149)
+            const next = billing.select(model, tr, model.billing.index, { project, through: Invoice.LAST_DAY, ledger: model.billing.ledger }).entries[0];
+            const when = (d) => (d.slice(0, 4) === through.slice(0, 4) ? this.md(d) : tr.shortDate(d));
+            const after = next ? ` The next unbilled time is on ${when(next.date)}.` : " There's none after it either.";
+            new Notice(`Nothing unbilled on ${name} through ${this.md(through)}${held}.${after}`);
             return false;
         }
         return true;
@@ -759,7 +767,7 @@ class Invoice {
 
     async actions(file, tr, billing) {
         const text = await tr.textOf(file);
-        if (!new RegExp(`\\[!${customJS.Billing.constructor.CALLOUT}\\]`, "i").test(text)) {
+        if (!billing.hasBilled(text)) {
             new Notice("This note has no Billed entries, so Invoice leaves it alone");
             return;
         }
@@ -776,8 +784,8 @@ class Invoice {
         if (!this.ready(tr, index)) return;
         if (pick === "rebuild") await this.rebuild(file, invoice, text, tr, billing, index);
         if (pick === "sent") await this.markSent(file, invoice, tr, billing, index);
-        if (pick === "paid") await this.mark(file, invoice, tr, { status: "paid", key: "paid", title: "Paid on" });
-        if (pick === "cancel") await this.cancel(file, invoice, tr);
+        if (pick === "paid") await this.mark(file, invoice, tr, { status: "paid", key: "paid", title: "Paid on" }, billing);
+        if (pick === "cancel") await this.cancel(file, invoice, tr, billing);
         if (pick === "check") await this.check(file, invoice, tr, billing, index);
     }
 
@@ -800,14 +808,11 @@ class Invoice {
     // ahead of the file), else in one step that refuses if the file changed since `before` was read
     async write(file, before, after, tr) {
         if (before === after) return true;
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor);
+        const view = this.editorOf(file);
         if (view) {
             if (view.editor.getValue() !== before) { new Notice("The invoice changed while Invoice was working; run it again"); return false; }
-            let start = 0;
-            while (start < before.length && start < after.length && before[start] === after[start]) start++;
-            let end = 0;
-            while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
-            view.editor.replaceRange(after.slice(start, after.length - end), view.editor.offsetToPos(start), view.editor.offsetToPos(before.length - end));
+            const { start, end, text } = this.changed(before, after);
+            view.editor.replaceRange(text, view.editor.offsetToPos(start), view.editor.offsetToPos(end));
             return true;
         }
         let ok = true;
@@ -817,6 +822,74 @@ class Invoice {
         });
         if (!ok) new Notice("The invoice changed while Invoice was working; run it again");
         return ok;
+    }
+
+    // The open editor showing `file`, or null
+    editorOf(file) {
+        return app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor) ?? null;
+    }
+
+    // The part of `before` that `after` replaces: before[start, end) becomes `text`
+    changed(before, after) {
+        let start = 0;
+        while (start < before.length && start < after.length && before[start] === after[start]) start++;
+        let tail = 0;
+        while (tail < before.length - start && tail < after.length - start && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+        return { start, end: before.length - tail, text: after.slice(start, after.length - tail) };
+    }
+
+    // write(), keeping the note's folds, Billed entries' among them. An open editor moves them itself;
+    // a closed note's saved folds are for its old lines (a check block, a property), so they move here,
+    // as TimeReport moves a report's.
+    async writeKeepingFold(file, before, after, tr, billing) {
+        const saved = this.editorOf(file) ? null : app.foldManager.load(file);
+        if (!(await this.write(file, before, after, tr))) return false;
+        if (!saved || saved.lines !== before.split("\n").length) return true;
+        let { start, end, text } = this.changed(before, after);
+        // shiftFolds reads an insert as going in after its line: lines put in at the start of one (a new
+        // check block, above the title) go in at the end of the line before, the same text
+        if (start === end && start > 0 && before[start - 1] === "\n" && text.endsWith("\n")) {
+            start--; end--;
+            text = `\n${text.slice(0, -1)}`;
+        }
+        await app.foldManager.save(file, { folds: tr.shiftFolds(saved.folds ?? [], before, start, end, text), lines: after.split("\n").length });
+        return true;
+    }
+
+    // ---------------------------------------------------------------- folding Billed entries (OBS-145)
+
+    // The Billed entries heading's fold in `text`, as Obsidian keeps folds: { from, to }, 0-based lines
+    // from the heading to its section's last line that isn't blank. Null without one.
+    billedFold(text, billing) {
+        const lines = String(text ?? "").split("\n");
+        const from = lines.findIndex((l) => billing.isHeading(l));
+        if (from === -1) return null;
+        let to = from + 1;
+        while (to < lines.length && !/^#{1,2}\s/.test(lines[to])) to++;
+        to--;
+        while (to > from && !lines[to].trim()) to--;
+        return to > from ? { from, to } : null;
+    }
+
+    // The note's folds as shown, when it's open, else as last saved: { folds, lines }, or null
+    foldInfo(file) {
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file);
+        return (view ? view.currentMode.getFoldInfo?.() : app.foldManager.load(file)) ?? null;
+    }
+
+    // Folds Billed entries in `text`, the note's new text. An open view folds it too, keeping the folds
+    // its editor moved with the write; a closed note keeps only its folded properties, since its saved
+    // folds were for the old text (and Obsidian takes saved folds only for a note of as many lines).
+    async foldBilled(file, text, billing) {
+        const fold = this.billedFold(text, billing);
+        if (!fold) return;
+        const lines = String(text).split("\n").length;
+        const view = this.editorOf(file);
+        const now = this.foldInfo(file);
+        const kept = (now?.folds ?? []).filter((f) => f.from !== fold.from && ((view && now.lines === lines) || (f.from === 0 && f.to === 0)));
+        const info = { folds: [...kept, fold].sort((a, b) => a.from - b.from), lines };
+        if (view) setTimeout(() => view.currentMode.applyFoldInfo?.(info), 50);
+        await app.foldManager.save(file, info);
     }
 
     // A draft rebuilt from the daily notes as they are now, through its period_end, keeping the
@@ -851,7 +924,9 @@ class Invoice {
         };
         const front = this.setProps(this.split(text).front, { period_start: sel.entries[0].date, hours: tr.hours(minutes), total: (cents / 100).toFixed(2) });
         const nl = text.includes("\r\n") ? "\r\n" : "\n";
-        if (!(await this.write(file, text, `${front}${nl}${this.body(d, tr, billing).replace(/\n/g, nl)}`, tr))) return;
+        const after = `${front}${nl}${this.body(d, tr, billing).replace(/\n/g, nl)}`;
+        if (!(await this.write(file, text, after, tr))) return;
+        await this.foldBilled(file, after, billing);
         new Notice(`${invoice.name} rebuilt: ${tr.hours(minutes)} hours, ${tr.money(cents)}`);
         await this.refreshReport();
     }
@@ -870,12 +945,12 @@ class Invoice {
             if (pick !== "send") return;
         }
         // The invoice date is the day it's sent: set with the status, on the property and where it prints
-        await this.mark(file, invoice, tr, { status: "sent", key: "invoice_date", title: "Invoice date (the day it's sent)", dropCheck: true, printed: true });
+        await this.mark(file, invoice, tr, { status: "sent", key: "invoice_date", title: "Invoice date (the day it's sent)", dropCheck: true, printed: true }, billing);
     }
 
     // Sets the status, and the date it happened, then refreshes the timesheets. `printed` also puts the
     // date where the invoice prints it.
-    async mark(file, invoice, tr, { status, key, title, dropCheck = false, printed = false }) {
+    async mark(file, invoice, tr, { status, key, title, dropCheck = false, printed = false }, billing) {
         const date = await this.askDate(title);
         if (!date) return;
         const before = await tr.textOf(file);
@@ -883,19 +958,19 @@ class Invoice {
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (printed) after = this.setPrintedDate(after, date);
         if (dropCheck) after = this.placeCheck(after, null);
-        if (!(await this.write(file, before, after, tr))) return;
+        if (!(await this.writeKeepingFold(file, before, after, tr, billing))) return;
         new Notice(`${invoice.name} marked ${status} on ${this.md(date)}`);
         await this.refreshReport();
     }
 
-    async cancel(file, invoice, tr) {
+    async cancel(file, invoice, tr, billing) {
         const pick = await this.choose(`Cancel ${invoice.name}?`, "Its entries become unbilled again, for the next invoice. The note stays, marked canceled.",
             [["keep", "Keep it"], ["cancel", "Cancel invoice", true]]);
         if (pick !== "cancel") return;
         const before = await tr.textOf(file);
         const after = this.setStatus(before, "canceled");
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
-        if (!(await this.write(file, before, after, tr))) return;
+        if (!(await this.writeKeepingFold(file, before, after, tr, billing))) return;
         new Notice(`${invoice.name} canceled`);
         await this.refreshReport();
     }
@@ -911,7 +986,7 @@ class Invoice {
         const stamp = tr.shortDate(window.moment().format("YYYY-MM-DD"));
         const title = billingChanges || result.late.length ? `Changed since invoiced · checked ${stamp}` : `No changes since invoiced · checked ${stamp}`;
         const before = await tr.textOf(file);
-        if (!(await this.write(file, before, this.placeCheck(before, this.checkLines(title, items)), tr))) return;
+        if (!(await this.writeKeepingFold(file, before, this.placeCheck(before, this.checkLines(title, items)), tr, billing))) return;
         new Notice(billingChanges || result.late.length ? `${invoice.name}: ${billingChanges} changed, ${result.late.length} logged since` : `${invoice.name}: no changes since invoiced`);
     }
 }

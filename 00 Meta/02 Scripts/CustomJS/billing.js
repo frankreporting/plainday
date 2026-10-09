@@ -1,6 +1,6 @@
 class Billing {
     // What's been billed, and where each time entry stands (OBS-5). An invoice note keeps its own copy
-    // of every entry it bills, in a folded "Billed entries" callout at its end. This class writes and
+    // of every entry it bills, in a folded "Billed entries" section at its end. This class writes and
     // reads that table, and answers from it: which entries are billed and on which invoice, what a new
     // invoice would bill, and what changed in the daily notes since an invoice was made. Daily notes
     // are only read, and nothing else records billing, so the two can't disagree.
@@ -13,8 +13,13 @@ class Billing {
     //
     // Pure: nothing here touches `app`. `tr` is a TimeReport, for its parsing, rounding and project
     // lookups; `index` answers questions about notes as TimeReport's does.
+    // The Billed entries section: a heading, then a bold row per date and that day's entries under it,
+    // as the timesheets show them (OBS-145)
+    static HEADING = "## Billed entries";
+    static HEAD = ["Date", "Time", "Project", "Task", "Notes", "Rate", "Hours"];
+    // The folded callout invoices were made with before OBS-145, still read so they keep billing
     static CALLOUT = "pm-billed";
-    static HEAD = ["Date", "Start", "End", "Minutes", "Hours", "Rate", "Project", "Task", "Note"];
+    static CALLOUT_HEAD = ["Date", "Start", "End", "Minutes", "Hours", "Rate", "Project", "Task", "Note"];
     // An invoice's status property, its own so it never mixes with the projects' `status` (OBS-117)
     static STATUS = "invoice_status";
 
@@ -75,25 +80,136 @@ class Billing {
 
     // ---------------------------------------------------------------- the Billed entries table
 
-    // The folded callout for `rows` ({ date, start, end, minutes, billed, cents, project (a path), task,
-    // note }); `linkText(path)` is the link text for a project. Task and note are defused, so text
-    // quoted from a daily note can't open a comment in the invoice.
+    // The Billed entries section for `rows` ({ date, start, end, minutes, billed, cents, project (a
+    // path), task, note }): the heading, then a bold row per date with the day's hours, and that day's
+    // entries under it without the date, oldest first. `linkText(path)` is the link text for a project.
+    // Task and note are defused, so text quoted from a daily note can't open a comment in the invoice.
     billedLines(rows, tr, linkText) {
         const t = (s) => this.tableText(tr.defuse(s));
-        return [
-            `> [!${Billing.CALLOUT}]- Billed entries`,
-            `> | ${Billing.HEAD.join(" | ")} |`,
-            "> | --- | --- | --- | --: | --: | --: | --- | --- | --- |",
-            ...rows.map((r) => `> | [[${r.date}\\|${tr.shortDate(r.date)}]] | ${tr.formatTime(r.start)} | ${tr.formatTime(r.end)} | ${r.minutes} | `
-                + `${tr.hours(r.billed)} | ${(r.cents / 100).toFixed(2)} | ${r.project ? `[[${linkText(r.project)}]]` : ""} | ${t(r.task)} | ${t(r.note)} |`),
-        ];
+        const row = (c) => `| ${c.join(" | ")} |`;
+        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end);
+        const out = [Billing.HEADING, "", row(Billing.HEAD), "| --- | --- | --- | --- | --- | --: | --: |"];
+        for (const date of new Set(sorted.map((r) => r.date))) {
+            const day = sorted.filter((r) => r.date === date);
+            out.push(row([`**[[${date}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]));
+            for (const r of day) {
+                out.push(row(["", `${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`, r.project ? `[[${linkText(r.project)}]]` : "",
+                    t(r.task), t(r.note), (r.cents / 100).toFixed(2), tr.hours(r.billed)]));
+            }
+        }
+        return out;
     }
 
-    // The rows of an invoice's Billed entries: { rows, bad: [{ line, text }], found, head }. `head` says
-    // whether the column names were there. `project` comes back as link text, to resolve with
-    // index.linkDest from the invoice's path.
+    // The rows of an invoice's Billed entries: { rows, bad: [{ line, text }], found, head, both }. `head`
+    // says whether the column names were there, and `both` that the note has two tables (two sections,
+    // or the section and an old callout), whose rows all count. `project` comes back as link text, to
+    // resolve with index.linkDest from the invoice's path.
     readBilled(text, tr) {
         const lines = String(text ?? "").split(/\r?\n/);
+        const section = this.readSection(lines, tr), callout = this.readCallout(lines, tr);
+        return {
+            rows: [...section.rows, ...callout.rows], bad: [...section.bad, ...callout.bad],
+            found: section.found || callout.found,
+            head: (section.found || callout.found) && (!section.found || section.head) && (!callout.found || callout.head),
+            both: (section.found && callout.found) || section.again,
+        };
+    }
+
+    // The line that heads the Billed entries section, whatever its case
+    isHeading(line) {
+        return /^##\s+billed entries\s*$/i.test(String(line).trim());
+    }
+
+    // The Billed entries section, from its heading to the end of the note. Each entry takes its date
+    // from the date row above it, so the date rows are checked as strictly as the entries: a date row
+    // has its date and its hours and nothing else, and its hours are what its entries add up to. A day
+    // that doesn't add up (a date row deleted, an entry dragged under another day; its date row is the
+    // one that doesn't read), an entry with no date row above it, a date row holding more than its date
+    // and hours, and a row after the table has ended don't read. Rows of a day that doesn't add up still count as billed: the
+    // invoice is a Problem until it's fixed, and nothing it may have billed looks unbilled meanwhile.
+    // `again` is a second Billed entries heading.
+    readSection(lines, tr) {
+        const rows = [], bad = [];
+        const at = lines.findIndex((l) => this.isHeading(l));
+        if (at === -1) return { rows, bad, found: false, head: false, again: false };
+        let head = false, first = true, inTable = false, ended = false, again = false, day = null;
+        const close = () => {
+            if (!day) return;
+            rows.push(...day.rows);
+            // A row of its own that didn't read already says so
+            if (!day.unread && (!day.rows.length || day.minutes !== day.rows.reduce((n, r) => n + r.billed, 0))) bad.push(day.at);
+            day = null;
+        };
+        for (let i = at + 1; i < lines.length; i++) {
+            const body = lines[i].trim();
+            // A second section (a paste, a sync conflict) reads as a table of its own, so its rows count too
+            if (this.isHeading(body)) { close(); again = true; inTable = false; ended = false; first = true; continue; }
+            if (!body.startsWith("|")) { if (inTable) ended = true; continue; }
+            if (ended) { bad.push({ line: i + 1, text: body }); continue; }
+            inTable = true;
+            const cells = this.cells(body);
+            if (first) {
+                first = false;
+                if (cells[0].toLowerCase() === "date") {
+                    head = cells.length === Billing.HEAD.length && cells.every((c, n) => c.toLowerCase() === Billing.HEAD[n].toLowerCase());
+                    continue;
+                }
+            }
+            if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+            // An empty row (Enter in the table) is nothing; a cleared entry still leaves its day short
+            if (cells.every((c) => c === "")) continue;
+            // A row with a date starts that day, even when it holds more than a date row should: it
+            // doesn't read then, but the entries under it stay on its date, not the day before
+            const date = cells[0].match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+            if (date && this.isoDate(date)) {
+                close();
+                const clean = cells.length === Billing.HEAD.length && [1, 2, 3, 4, 5].every((n) => cells[n] === "");
+                const hours = Number(String(cells[6] ?? "").replace(/\*/g, ""));
+                day = { date, minutes: cells[6] && Number.isFinite(hours) ? Math.round(hours * 60) : null, rows: [], at: { line: i + 1, text: body }, unread: !clean };
+                if (!clean) bad.push({ line: i + 1, text: body });
+                continue;
+            }
+            const row = day && cells[0] === "" ? this.readEntry(cells, day.date, tr) : null;
+            if (row) day.rows.push(row);
+            else {
+                bad.push({ line: i + 1, text: body });
+                if (day) day.unread = true;
+            }
+        }
+        close();
+        return { rows, bad, found: true, head, again };
+    }
+
+    // An entry row of the section, on `date`, or null: exactly the table's cells, and a project, since
+    // a row that doesn't say whose time it was can't show that it moved to another project since
+    readEntry(cells, date, tr) {
+        if (cells.length !== Billing.HEAD.length || !date || !this.isoDate(date)) return null;
+        const time = cells[1].match(/^(\S+)\s*[-–]\s*(\S+)$/);
+        if (!time) return null;
+        const row = this.times(date, time[1], time[2], tr);
+        if (!row || cells[2] === "" || cells[5] === "" || cells[6] === "") return null;
+        const rate = Number(cells[5].replace(/[$,]/g, "")), hours = Number(cells[6]);
+        if (![hours, rate].every(Number.isFinite)) return null;
+        const project = cells[2].match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? cells[2];
+        return { ...row, billed: Math.round(hours * 60), cents: Math.round(rate * 100), project, task: cells[3], note: cells[4] };
+    }
+
+    // { date, start, end, minutes } from a start and an end as written, an end past midnight over 1440
+    // (pm to am), or null
+    times(date, startText, endText, tr) {
+        const start = tr.minutes(startText);
+        let end = tr.minutes(endText);
+        if (start === null || end === null) return null;
+        if (end <= start) {
+            if (/pm$/i.test(startText) && /am$/i.test(endText)) end += 1440;
+            else return null;
+        }
+        return { date, start, end, minutes: end - start };
+    }
+
+    // The old folded callout, read as it always was
+    readCallout(lines, tr) {
         const opener = new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "i");
         const at = lines.findIndex((l) => opener.test(l.trim()));
         const rows = [], bad = [];
@@ -113,21 +229,17 @@ class Billing {
         return { rows, bad, found: true, head };
     }
 
+    // A row of the old callout, or null
     readRow(cells, tr) {
-        if (cells.length < Billing.HEAD.length) return null;
+        if (cells.length < Billing.CALLOUT_HEAD.length) return null;
         const date = cells[0].match(/(\d{4}-\d{2}-\d{2})/)?.[1];
-        const start = tr.minutes(cells[1]);
-        let end = tr.minutes(cells[2]);
-        if (!date || !this.isoDate(date) || start === null || end === null) return null;
-        if (end <= start) {
-            if (/pm$/i.test(cells[1]) && /am$/i.test(cells[2])) end += 1440;
-            else return null;
-        }
-        if (cells[3] === "" || cells[4] === "" || cells[5] === "") return null;
+        if (!date || !this.isoDate(date)) return null;
+        const row = this.times(date, cells[1], cells[2], tr);
+        if (!row || cells[3] === "" || cells[4] === "" || cells[5] === "") return null;
         const minutes = Number(cells[3]), hours = Number(cells[4]), rate = Number(cells[5].replace(/[$,]/g, ""));
         if (![minutes, hours, rate].every(Number.isFinite)) return null;
         const project = cells[6].match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? (cells[6] || null);
-        return { date, start, end, minutes, billed: Math.round(hours * 60), cents: Math.round(rate * 100), project, task: cells[7], note: cells[8] };
+        return { ...row, minutes, billed: Math.round(hours * 60), cents: Math.round(rate * 100), project, task: cells[7], note: cells[8] };
     }
 
     // ---------------------------------------------------------------- invoices
@@ -152,7 +264,7 @@ class Billing {
             return dest && tr.counts(dest, index) ? dest : null;
         };
         const project = linkedProject("project") ?? linkedProject("area") ?? tr.projectOfNote(path, index);
-        const { rows, bad, found, head } = this.readBilled(text, tr);
+        const { rows, bad, found, head, both } = this.readBilled(text, tr);
         for (const r of rows) r.projectPath = r.project ? index.linkDest(r.project, path) : null;
         const minutes = rows.reduce((s, r) => s + r.billed, 0);
         const cents = this.rows(rows).reduce((s, r) => s + r.amount, 0);
@@ -162,6 +274,7 @@ class Billing {
         const problem = error ? "has frontmatter that doesn't read"
             : !tagged ? "isn't tagged `invoice` any more"
             : !found ? "has no Billed entries table"
+            : both ? "has two Billed entries tables"
             : n ? `has ${n === 1 ? "a Billed entries row that doesn't" : `${n} Billed entries rows that don't`} read`
             : !head ? "has a Billed entries table without its column names"
             : !rows.length ? "has no rows in its Billed entries"
@@ -230,10 +343,16 @@ class Billing {
         return { folder, error: null };
     }
 
-    // Whether a note has a Billed entries callout: a line that opens one, as readBilled reads it, not
-    // the words anywhere (a note about invoices that mentions the callout isn't one)
+    // Whether a note has Billed entries: the heading with any table row after it, or a line that opens
+    // the old callout, as readBilled finds them; not the words anywhere (a note about invoices that
+    // mentions them isn't one). Any row is enough, column names or not, text between them or not: a
+    // table that came apart from its heading is a Problem, where missing it would let its entries be
+    // billed again. A heading with no table under it bills nothing.
     hasBilled(text) {
-        return new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "im").test(String(text ?? ""));
+        const lines = String(text ?? "").split(/\r?\n/);
+        const at = lines.findIndex((l) => this.isHeading(l));
+        return (at !== -1 && lines.slice(at + 1).some((l) => l.trim().startsWith("|")))
+            || new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "im").test(String(text ?? ""));
     }
 
     // Where invoices are filed: a note in a folder named `invoices`, in any case, or anywhere under

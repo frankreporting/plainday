@@ -2210,7 +2210,7 @@ test("timesheet: an entry that overlaps billed time whose own entry is still the
 test("review: an invoice whose Billed entries can't be read is a Problem on its project's note", () => {
     const idx = orcIndex();
     const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]]);
-    inv.text = inv.text.replace("| 9:00am |", "| 09:00 |");
+    inv.text = inv.text.replace("| 9:00am - 9:50am |", "| 09:00 - 9:50am |");
     const m = tr.attachBilling(tr.build(ORC_NOTES, idx), [inv], idx, billing);
     assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] has a Billed entries row that doesn't read, so this project can't be invoiced until it's fixed"));
     // Twice on one invoice

@@ -61,12 +61,39 @@
     padding: 0.45em 0.3em;
 }
 
+/* Billable hours (the one table of four columns): Qty, Rate and Amount never wrap, and take only the
+   width their widest value needs, so the line item gets the rest (OBS-146). Billed entries, with its
+   long tasks and notes, wraps as any table does. */
+.pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td):not(:first-child) {
+    white-space: nowrap;
+    width: 1%;
+}
+
 @media print {
     .pm-invoice .metadata-container,
     .pm-invoice .inline-title,
     .pm-invoice .callout[data-callout="pm-billed"],
     .pm-invoice .callout[data-callout="pm-invoice-check"] {
         display: none !important;
+    }
+
+    /* Billed entries, the last section: its heading and everything after it (OBS-145). Each block
+       prints in a div of its own, so that's the blocks after the heading's div; and the heading's own
+       siblings, should they print unwrapped. Never the heading's div itself: unwrapped, that would be
+       the whole note. */
+    .pm-invoice h2[data-heading="Billed entries" i],
+    .pm-invoice h2[data-heading="Billed entries" i] ~ *,
+    .pm-invoice div:has(> h2[data-heading="Billed entries" i]) ~ * {
+        display: none !important;
+    }
+
+    /* A long invoice: the column names again at the top of each page, and no row split between two */
+    .pm-invoice thead {
+        display: table-header-group;
+    }
+
+    .pm-invoice tr {
+        break-inside: avoid;
     }
 
     .pm-invoice a,

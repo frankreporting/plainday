@@ -402,7 +402,7 @@ The **Invoice** command bills a project's time as an invoice note, and moves the
 Run *Invoice* on a project note (anywhere else, it asks which project has time to bill).
 
 1. **Bill through:** a date in words, starting at `today` (see *Typing a date*). A month and day without a year is the closer one, this year's or next year's, since you bill work behind you as often as a few days ahead: in October, `9/16` is last month's. The dates *Mark sent* and *Mark paid* ask for work the same way.
-2. **What it would bill:** the project's ended, billable time on no invoice yet, through that date, for a project billed by the hour (a `rate`, with `rate_type` `hourly` or empty, its own or its parent's). With `include_subprojects` on, its sub-projects' time too.
+2. **What it would bill:** the project's ended, billable time on no invoice yet, through that date, for a project billed by the hour (a `rate`, with `rate_type` `hourly` or empty, its own or its parent's). With `include_subprojects` on, its sub-projects' time too. When there's none, it says so, and when the next unbilled time is: `Nothing unbilled on Kestrel Outfitters 2026 through 9/6. The next unbilled time is on 9/14.` Time held back (below) isn't unbilled time, so the demo's changed 9/11 entry is skipped.
 3. **The confirmation** shows:
 	- **Fix first?** the Problems in that time (running clocks first), and billed entries that changed since their invoice;
 	- **Held back:** entries it won't bill, and why (below);
@@ -435,7 +435,11 @@ One folder for every invoice is the better choice: invoices are business records
 	- **`invoice_status` is the invoice's own,** not the `status` projects use. Obsidian suggests a property's values from every note that has it, so one shared property would offer an invoice a project's status, which the Invoice command wouldn't read.
 	- **Invoices made before these two** carry `status` and `project` instead. Billing still reads them: an older invoice's `project` decides its project, since its `area` may have changed with a move. The *Invoices* base shows their Status blank. *Mark sent*, *Mark paid* and *Cancel* rename `status` to `invoice_status`; on a paid or canceled one, rename it by hand.
 - **What prints:** your name and address and the date; the client's; Project ID, Requested by and Terms when set; Total hours and Total due; then **Billable hours**, a line per date (and per rate, when sub-projects bill at different ones), like `9/14 — Homepage review with Imogen, Draft homepage wireframes`, and the payment note. Nothing printed is a link. In a draft, edit a line's description as you like.
-- **Billed entries:** a folded callout at the end, which doesn't print: the invoice's own copy of every entry it bills (date, start, end, minutes, hours, rate, project, task, note). It's what stops an entry being billed twice and what shows when one changes. Don't edit it: an invoice whose Billed entries don't read, or don't add up to its `hours` and `total`, stops the project's invoicing until it's fixed.
+- **Billed entries:** a section at the end, which doesn't print: the invoice's own copy of every entry it bills. Like a timesheet, it has a bold row per date with the day's hours, and that day's entries under it: time, project, task, notes, rate and hours. It's what stops an entry being billed twice and what shows when one changes. Don't edit it: an invoice whose Billed entries don't read, or don't add up to its `hours` and `total`, stops the project's invoicing until it's fixed.
+	- **Each entry takes its date from the date row above it,** so each date row's hours must add up to its entries. A deleted date row, or an entry dragged under another day, is a Problem, not a quiet change of date.
+	- **It's the end of the invoice:** nothing below it prints.
+	- **Folded:** *Invoice* folds it when it makes or rebuilds the invoice, and keeps it folded through *Mark sent*, *Mark paid*, *Cancel* and *Check for changes*. Obsidian keeps folds per device, so on another device it opens unfolded.
+	- **Invoices made before** keep theirs in a folded `[!pm-billed]` callout, which still reads; *Rebuild* on such a draft writes the section. A note with both counts the rows of each and lists a Problem.
 	- Moving an invoice note with the *Advanced Rename and Delete Handler* plugin strips the `\` from the `\|` in its table's links. Billing still reads the table.
 - Your details and the client's are copied in when the invoice is made, so a sent invoice never changes when they do.
 
@@ -469,7 +473,7 @@ Run *Invoice* on the invoice note for what fits its status:
 
 ### The PDF
 
-Copy `00 Meta/02 Scripts/Style Settings/pm-invoice.css` into `.obsidian/snippets/` and turn it on (Appearance → CSS snippets). Then *Export to PDF* on the invoice prints it without the properties, the Billed entries or the check callout, with any link as plain text. To be paid through a banking app that can't import invoices, attach the PDF to an invoice made there.
+Copy `00 Meta/02 Scripts/Style Settings/pm-invoice.css` into `.obsidian/snippets/` and turn it on (Appearance → CSS snippets). Then *Export to PDF* on the invoice prints it without the properties, the Billed entries or the check callout, with any link as plain text. Qty, Rate and Amount stay on one line, as wide as their widest value. On an invoice longer than a page, the column names repeat at the top of each page, and no row is split between two. To be paid through a banking app that can't import invoices, attach the PDF to an invoice made there.
 
 ## Commands
 

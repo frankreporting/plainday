@@ -84,12 +84,13 @@ test("noteText: the header, a row per date and rate, the total, then the Billed 
         "| **Total** | **4.00** |  | **$340.00** |",
     ]);
     assert.ok(at("Please pay by bank transfer within 30 days.") > at("| **Total** | **4.00** |  | **$340.00** |"));
-    assert.equal(lines[at("> [!pm-billed]- Billed entries") + 1], "> | Date | Start | End | Minutes | Hours | Rate | Project | Task | Note |");
+    assert.ok(at("## Billed entries") > at("Please pay by bank transfer within 30 days."), "Billed entries comes last");
+    assert.equal(lines[at("## Billed entries") + 2], "| Date | Time | Project | Task | Notes | Rate | Hours |");
 });
 
 test("noteText: nothing printed is a link", () => {
     const text = inv.noteText(DATA({ check: inv.checkLines("Before sending", ["[[2026-09-01|9/1/26]] line 3: x"]) }), tr, billing);
-    const printed = text.slice(text.indexOf("# Invoice No."), text.indexOf("> [!pm-billed]"));
+    const printed = text.slice(text.indexOf("# Invoice No."), text.indexOf("## Billed entries"));
     assert.ok(!printed.includes("[["), printed);
     assert.ok(text.indexOf("%% invoice-check:start %%") < text.indexOf("# Invoice No."), "the check block sits above the invoice");
 });
@@ -294,3 +295,99 @@ test("askDate: a month and day without a year is the closer one, since billing l
     assert.equal(await asking.askDate("Bill through"), "2026-09-16");
     assert.deepEqual(asked, [{ title: "Bill through", nearest: true }]);
 });
+
+// ------------------------------------------------------------------ Billed entries folded (OBS-145)
+
+// Invoice with a stand-in for Obsidian: folds as the fold manager keeps them, and the notices shown
+const withApp = ({ saved = null, view = null } = {}) => {
+    const notices = [], saves = [];
+    const app = {
+        workspace: { getLeavesOfType: () => (view ? [{ view }] : []) },
+        foldManager: { load: () => saved, save: async (file, info) => { saves.push(info); } },
+    };
+    const context = vm.createContext({ app, Notice: class { constructor(text) { notices.push(text); } }, setTimeout });
+    const src = fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8");
+    return { invoice: new (vm.runInContext(`${src}\n;Invoice`, context))(), notices, saves };
+};
+
+test("billedFold: from the Billed entries heading to its last line, 0-based, as Obsidian keeps folds (OBS-145)", () => {
+    const text = inv.noteText(DATA(), tr, billing);
+    const lines = text.split("\n");
+    const fold = inv.billedFold(text, billing);
+    assert.equal(lines[fold.from], "## Billed entries");
+    assert.equal(fold.to, lines.length - 2, "the last row; the note ends with a newline");
+    assert.ok(lines[fold.to].startsWith("|  | "));
+    assert.deepEqual(plain(inv.billedFold(text.replace(/\n/g, "\r\n"), billing)), plain(fold), "the same with CRLF");
+    assert.equal(inv.billedFold("# Invoice No. 1\n\n## Billable hours\n", billing), null);
+    assert.equal(inv.billedFold("## Billed entries\n\n", billing), null, "nothing under it to fold");
+});
+
+test("foldBilled: a new invoice opens with Billed entries folded, keeping the folded properties (OBS-145)", async () => {
+    const text = inv.noteText(DATA(), tr, billing);
+    const fold = inv.billedFold(text, billing);
+    const lines = text.split("\n").length;
+    const fresh = withApp();
+    await fresh.invoice.foldBilled({ path: "x.md" }, text, billing);
+    assert.deepEqual(plain(fresh.saves), plain([{ folds: [fold], lines }]));
+    // Saved for an older text: only the folded properties carry over
+    const old = withApp({ saved: { folds: [{ from: 0, to: 0 }, { from: 30, to: 40 }], lines: lines - 3 } });
+    await old.invoice.foldBilled({ path: "x.md" }, text, billing);
+    assert.deepEqual(plain(old.saves), plain([{ folds: [{ from: 0, to: 0 }, fold], lines }]));
+    // A closed note's saved folds were for its old text, even at the same line count: only the properties stay
+    const same = withApp({ saved: { folds: [{ from: 0, to: 0 }, { from: 20, to: 22 }], lines } });
+    await same.invoice.foldBilled({ path: "x.md" }, text, billing);
+    assert.deepEqual(plain(same.saves), plain([{ folds: [{ from: 0, to: 0 }, fold], lines }]));
+    // An open note's folds, as its editor moved them with the write, all stay
+    const file = { path: "x.md" };
+    const view = { file, editor: {}, currentMode: { getFoldInfo: () => ({ folds: [{ from: 20, to: 22 }], lines }), applyFoldInfo() {} } };
+    const open = withApp({ view });
+    await open.invoice.foldBilled(file, text, billing);
+    assert.deepEqual(plain(open.saves), plain([{ folds: [{ from: 20, to: 22 }, fold], lines }]));
+});
+
+// ------------------------------------------------------------------ nothing to bill (OBS-149)
+
+test("Nothing unbilled says when the next unbilled time is, or that there's none (OBS-149)", () => {
+    const m = tr.attachBilling(model, [], index, billing);
+    const say = (through) => {
+        const { invoice, notices } = withApp();
+        const sel = billing.select(m, tr, index, { project: WEB, through, ledger: m.billing.ledger });
+        assert.equal(invoice.billable(WEB, m, sel, tr, billing, through), false);
+        return notices;
+    };
+    assert.deepEqual(plain(say("2026-08-31")), ["Nothing unbilled on Harbor Web through 8/31. The next unbilled time is on 9/1."]);
+    // All of it billed: on an invoice, the time through 9/2 is no longer unbilled
+    const all = { path: "30 Reference/Invoices/1001-HBR.md", props: { invoice_status: "sent", area: "[[Harbor Web]]" },
+        text: ["---", "---", ...billing.billedLines(billing.snapshot(m.entries.filter((e) => e.project === WEB || e.project === PHOTO), m, tr), tr, (p) => tr.basename(p))].join("\n") };
+    const billed = tr.attachBilling(tr.build([
+        day("2026-09-01", "- [x] Site map [[Harbor Web|⭕]]\n\t- 1:00pm - 2:30pm: first pass\n- [x] Review [[Harbor Web|⭕]]\n\t- 3:00pm - 3:20pm"),
+        day("2026-09-02", "- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am\n- [x] Shoot [[Harbor Photos|⭕]]\n\t- 1:00pm - 2:00pm"),
+    ], index), [all], index, billing);
+    const { invoice, notices } = withApp();
+    const sel = billing.select(billed, tr, index, { project: WEB, through: "2026-09-30", ledger: billed.billing.ledger });
+    assert.equal(invoice.billable(WEB, billed, sel, tr, billing, "2026-09-30"), false);
+    assert.deepEqual(plain(notices), ["Nothing unbilled on Harbor Web through 9/30. There's none after it either."]);
+});
+
+test("writeKeepingFold: a closed invoice's saved folds move with a write that adds lines above them (OBS-145)", async () => {
+    const before = inv.noteText(DATA(), tr, billing);
+    const fold = inv.billedFold(before, billing);
+    const lines = before.split("\n").length;
+    const title = before.split("\n").indexOf("# Invoice No. 1001-HBR");
+    const { invoice, saves } = withApp({ saved: { folds: [{ from: 0, to: 0 }, { from: title, to: title + 5 }, fold], lines } });
+    invoice.write = async () => true;
+    const after = invoice.placeCheck(before, invoice.checkLines("Changed since invoiced", ["a", "b"]));
+    assert.equal(await invoice.writeKeepingFold({ path: "x.md" }, before, after, tr, billing), true);
+    const moved = inv.billedFold(after, billing);
+    const delta = after.split("\n").length - lines;
+    assert.equal(moved.from - fold.from, delta);
+    // The check block goes in at the start of the title's line: a fold there moves down with it
+    assert.equal(after.split("\n")[title + delta], "# Invoice No. 1001-HBR");
+    assert.deepEqual(plain(saves), plain([{ folds: [{ from: 0, to: 0 }, { from: title + delta, to: title + 5 + delta }, moved], lines: after.split("\n").length }]));
+    // Saved for another text: left alone, as Obsidian would
+    const stale = withApp({ saved: { folds: [fold], lines: lines + 2 } });
+    stale.invoice.write = async () => true;
+    await stale.invoice.writeKeepingFold({ path: "x.md" }, before, after, tr, billing);
+    assert.deepEqual(plain(stale.saves), []);
+});
+

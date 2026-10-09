@@ -80,29 +80,127 @@ test("snapshot: each entry as billed, at its project's hourly rate", () => {
     ]);
 });
 
-test("Billed entries: written as a folded callout and read back the same", () => {
+test("Billed entries: a section with a row per date, its entries under it, read back the same (OBS-145)", () => {
     const lines = billing.billedLines(ROWS(), tr, name);
-    assert.equal(lines[0], "> [!pm-billed]- Billed entries");
-    assert.equal(lines[1], "> | Date | Start | End | Minutes | Hours | Rate | Project | Task | Note |");
-    assert.equal(lines[3], "> | [[2026-09-01\\|9/1/26]] | 1:00pm | 2:30pm | 90 | 1.50 | 80.00 | [[Harbor Web]] | Site map | first pass |");
-    assert.equal(lines[5], "> | [[2026-09-03\\|9/3/26]] | 10:30pm | 1:15am | 165 | 2.75 | 80.00 | [[Harbor Web]] | Late night fix |  |");
+    assert.deepEqual(plain(lines), [
+        "## Billed entries",
+        "",
+        "| Date | Time | Project | Task | Notes | Rate | Hours |",
+        "| --- | --- | --- | --- | --- | --: | --: |",
+        "| **[[2026-09-01\\|Tue 9/1]]** |  |  |  |  |  | **1.50** |",
+        "|  | 1:00pm - 2:30pm | [[Harbor Web]] | Site map | first pass | 80.00 | 1.50 |",
+        "| **[[2026-09-02\\|Wed 9/2]]** |  |  |  |  |  | **1.00** |",
+        "|  | 9:00am - 9:50am | [[Harbor Web]] | Build pages |  | 80.00 | 1.00 |",
+        "| **[[2026-09-03\\|Thu 9/3]]** |  |  |  |  |  | **2.75** |",
+        "|  | 10:30pm - 1:15am | [[Harbor Web]] | Late night fix |  | 80.00 | 2.75 |",
+    ]);
     const back = billing.readBilled(["# x", "", ...lines, "", "after"].join("\n"), tr);
     assert.equal(back.found, true);
+    assert.equal(back.head, true);
+    assert.equal(back.both, false);
     assert.deepEqual(plain(back.bad), []);
     assert.deepEqual(plain(back.rows), plain(ROWS().map((r) => ({ ...r, project: "Harbor Web" }))));
+    // Written in any order, read the same: a day's entries go under its date
+    assert.deepEqual(plain(billing.billedLines([...ROWS()].reverse(), tr, name)), plain(lines));
 });
 
-test("Billed entries: pipes, links and comment marks in a task or note survive", () => {
-    const rows = [{ date: "2026-09-01", start: 780, end: 870, minutes: 90, billed: 90, cents: 8000, project: WEB, task: "A | B", note: "see [[Page|the page]]" }];
-    const back = billing.readBilled(billing.billedLines(rows, tr, name).join("\n"), tr).rows;
-    assert.equal(back[0].task, "A | B");
-    assert.equal(back[0].note, "see [[Page|the page]]");
-    // %% can't open a comment in the invoice; the check compares defused text, so it isn't a change
-    const marked = billing.billedLines([{ ...rows[0], task: "50%% done" }], tr, name).join("\n");
-    assert.ok(!marked.includes("%%"));
+test("Billed entries: a table the editor reformatted, with CRLF line endings, reads the same (OBS-145)", () => {
+    const text = [
+        "## Billed Entries",
+        "",
+        "|  Date                          |  Time              | Project           | Task           | Notes      | Rate    | Hours     |",
+        "| :----------------------------- | :----------------: | ----------------- | -------------- | ---------- | ------: | --------: |",
+        "|  **[[2026-09-01\\|Tue 9/1]]**  |                    |                   |                |            |         |  **2.50** |",
+        "|                                |  1:00pm - 2:30pm   | [[Harbor Web]]    | Site map       | first pass | 80.00   | 1.50      |",
+        "|                                | 1:00pm–2:00pm      | [[Harbor Photos]] | Shoot          | an en dash | $100.00 | 1.00      |",
+        "| **[[2026-09-03\\|Thu 9/3]]**   |                    |                   |                |            |         | **2.75**  |",
+        "|                                | 10:30pm - 1:15am   | [[Harbor Web]]    | Late night fix |            | 80.00   | 2.75      |",
+        "",
+        "Text after the table is fine.",
+    ].join("\r\n");
+    const { rows, bad, head, both } = billing.readBilled(text, tr);
+    assert.equal(head, true);
+    assert.equal(both, false);
+    assert.deepEqual(plain(bad), []);
+    assert.deepEqual(plain(rows.map((r) => [r.date, r.start, r.end, r.minutes, r.billed, r.cents, r.project, r.task])), [
+        ["2026-09-01", 780, 870, 90, 90, 8000, "Harbor Web", "Site map"],
+        ["2026-09-01", 780, 840, 60, 60, 10000, "Harbor Photos", "Shoot"],
+        ["2026-09-03", 1350, 1515, 165, 165, 8000, "Harbor Web", "Late night fix"],
+    ]);
+    assert.equal(billing.hasBilled(text), true);
 });
 
-test("Billed entries: a table Obsidian's editor reformatted reads the same; a bad row is set aside", () => {
+test("Billed entries: a date row with more in it keeps its entries on its date; an empty row is nothing (OBS-145)", () => {
+    const lines = billing.billedLines(ROWS(), tr, name);
+    const at = lines.findIndex((l) => /Wed 9\/2/.test(l));
+    const damaged = [...lines];
+    damaged[at] = damaged[at].replace("|  |", "| oops |");
+    damaged.splice(at + 2, 0, "|  |  |  |  |  |  |  |");
+    const { rows, bad } = billing.readBilled(damaged.join("\n"), tr);
+    assert.deepEqual(plain(rows.map((r) => billing.key(r))), plain(ROWS().map((r) => billing.key(r))), "9/2's entry stays on 9/2, not 9/1");
+    assert.deepEqual(plain(bad.map((b) => b.text.includes("oops"))), [true]);
+    // An empty row alone isn't a Problem
+    const enter = [...lines];
+    enter.splice(at + 2, 0, "|  |  |  |  |  |  |  |");
+    assert.deepEqual(plain(billing.readBilled(enter.join("\n"), tr).bad), []);
+});
+
+test("Billed entries: a deleted date row or an entry dragged to another day can't quietly re-date entries (OBS-145)", () => {
+    const lines = billing.billedLines(ROWS(), tr, name);
+    const at = (pattern) => lines.findIndex((l) => pattern.test(l));
+    // The 9/2 date row deleted: its entry falls under 9/1, which no longer adds up
+    const deleted = lines.filter((_, i) => i !== at(/Wed 9\/2/));
+    const a = billing.readBilled(deleted.join("\n"), tr);
+    assert.deepEqual(plain(a.bad.map((b) => b.text.match(/Tue 9\/1/)?.[0])), ["Tue 9/1"]);
+    assert.equal(a.rows.length, 3, "its rows still count as billed while it's a Problem");
+    // The 9/3 entry dragged under 9/1: 9/1 doesn't add up, and 9/3 has nothing under it
+    const dragged = [...lines];
+    const [late] = dragged.splice(at(/Late night fix/), 1);
+    dragged.splice(at(/Site map/) + 1, 0, late);
+    const b = billing.readBilled(dragged.join("\n"), tr);
+    assert.deepEqual(plain(b.bad.map((x) => x.text.match(/Tue 9\/1|Thu 9\/3/)?.[0])), ["Tue 9/1", "Thu 9/3"]);
+    // Either way, the invoice is a Problem, and invoicing its project waits
+    const inv = read({ ...invoiceNote("1001-HBR", "sent", ROWS()), text: ["---", "---", ...deleted].join("\n") });
+    assert.match(inv.problem, /Billed entries row that doesn't read/);
+});
+
+test("Billed entries: rows that aren't plainly a date row or an entry under one don't read (OBS-145)", () => {
+    const text = [
+        "## Billed entries",
+        "",
+        "| Date | Time | Project | Task | Notes | Rate | Hours |",
+        "| --- | --- | --- | --- | --- | --: | --: |",
+        "|  | 8:00am - 8:30am | [[Harbor Web]] | Orphan | no date row above it | 80.00 | 0.50 |",
+        "| **[[2026-09-01\\|Tue 9/1]]** |  |  |  |  |  | **2.50** |",
+        "|  | 1:00pm - 2:30pm | [[Harbor Web]] | Site map |  | 80.00 | 1.50 |",
+        "| [[2026-09-01\\|Tue 9/1]] | 3:00pm - 4:00pm | [[Harbor Web]] | Own date | an entry gives no date of its own | 80.00 | 1.00 |",
+        "| **[[2026-09-02\\|Wed 9/2]]** |  |  | Lost its time |  |  | **1.00** |",
+        "|  | 9:00am - 9:61am | [[Harbor Web]] | Bad time |  | 80.00 | 1.00 |",
+        "",
+        "|  | 10:00am - 10:30am | [[Harbor Web]] | After a gap |  | 80.00 | 0.50 |",
+    ].join("\n");
+    const { rows, bad } = billing.readBilled(text, tr);
+    assert.deepEqual(plain(rows.map((r) => r.task)), ["Site map"]);
+    const which = (t) => ["Orphan", "Own date", "Lost its time", "Bad time", "After a gap", "Tue 9/1"].find((w) => t.includes(w)) ?? t;
+    // The entry with a date of its own starts a day of its own, so 9/1 above it comes up short
+    assert.deepEqual(plain(bad.map((b) => which(b.text))), ["Orphan", "Tue 9/1", "Own date", "Lost its time", "Bad time", "After a gap"]);
+    // Column names out of order (Rate and Hours swapped) aren't its column names
+    assert.equal(billing.readBilled(text.replace("| Rate | Hours |", "| Hours | Rate |"), tr).head, false);
+    // A row wider than the table, or with a blank Project cell, doesn't read
+    const lines = billing.billedLines(ROWS().slice(0, 1), tr, name);
+    for (const changed of [lines.at(-1) + " 9 |", lines.at(-1).replace("[[Harbor Web]]", "")]) {
+        assert.deepEqual(plain(billing.readBilled([...lines.slice(0, -1), changed].join("\n"), tr).bad.map((b) => b.text)), [changed]);
+    }
+    // A second section: both count, and it says so
+    const twice = billing.readBilled([...billing.billedLines(ROWS().slice(0, 1), tr, name), "", ...billing.billedLines(ROWS().slice(1), tr, name)].join("\n"), tr);
+    assert.equal(twice.both, true);
+    assert.equal(twice.rows.length, 3);
+    assert.deepEqual(plain(billing.readBilled("# no table here", tr)), { rows: [], bad: [], found: false, head: false, both: false });
+    // The heading with no table under it: found, so the invoice is a Problem rather than unbilled
+    assert.deepEqual(plain(billing.readBilled("## Billed entries\n\nGone.", tr)), { rows: [], bad: [], found: true, head: false, both: false });
+});
+
+test("Billed entries: the callout of invoices made before OBS-145 still reads, reformatted too; a bad row is set aside", () => {
     const text = [
         "> [!pm-billed]- Billed entries",
         "> |  Date                      |  Start   |  End     | Minutes | Hours | Rate  | Project          | Task      | Note       |",
@@ -121,7 +219,11 @@ test("Billed entries: a table Obsidian's editor reformatted reads the same; a ba
     ]);
     assert.equal(bad.length, 1);
     assert.match(bad[0].text, /9:61am/);
-    assert.deepEqual(plain(billing.readBilled("# no table here", tr)), { rows: [], bad: [], found: false, head: false });
+    // With the section in the same note, both count, and it says so
+    const section = billing.billedLines(ROWS().slice(0, 1), tr, name).join("\n");
+    const both = billing.readBilled(`${section}\n\n${text}`, tr);
+    assert.equal(both.both, true);
+    assert.equal(both.rows.length, 3);
 });
 
 // ------------------------------------------------------------------ invoices and the ledger
@@ -230,7 +332,12 @@ test("folderOf: a folder setting as a vault path; blank is none; anything else i
     assert.equal(billing.folderOf("Business/00 Meta/Invoices").error, null, "only at the top");
 });
 
-test("hasBilled: a line that opens the Billed entries callout, not the words anywhere", () => {
+test("hasBilled: the Billed entries heading with its table, or a line that opens the old callout, not the words anywhere", () => {
+    assert.equal(billing.hasBilled("# 1001-HBR\n\n## Billed entries\n\n| Date | Time |\n| --- | --- |"), true);
+    assert.equal(billing.hasBilled("# 1001-HBR\r\n\r\n## Billed entries\r\n| Date | Time |"), true);
+    assert.equal(billing.hasBilled("## Billed entries\n\nText came between it and its table.\n\n| [[2026-09-01\\|Tue 9/1]] | | |"), true, "still an invoice, a Problem rather than unbilled");
+    assert.equal(billing.hasBilled("## Billed entries\n\nA project's own section, with no table: bills nothing, so not an invoice."), false);
+    assert.equal(billing.hasBilled("How invoices work: a `## Billed entries` section at the end."), false);
     assert.equal(billing.hasBilled("# 1001-HBR\n\n> [!pm-billed]- Billed entries\n> | Date |"), true);
     assert.equal(billing.hasBilled(">   [!PM-BILLED] Billed"), true);
     assert.equal(billing.hasBilled("How invoices work: the `[!pm-billed]` callout at the end."), false);
@@ -434,9 +541,10 @@ test("review: an invoice whose Billed entries can't be trusted stops invoicing t
     const good = invoiceNote("1001-HBR", "sent", rows, { hours: 3.5, total: 300 });
     assert.equal(read(good).problem, null, "hours and total match the rows");
     const cases = [
-        [{ ...good, text: good.text.replace("| 1:00pm | 2:30pm |", "| 13:00 | 2:30pm |") }, /a Billed entries row that doesn't read/],
-        [{ ...good, text: good.text.replace("[!pm-billed]", "[!note]") }, /has no Billed entries table/],
-        [{ ...good, text: good.text.replace(/> \| Date .*\n> \| --- .*\n/, "") }, /without its column names/],
+        [{ ...good, text: good.text.replace("| 1:00pm - 2:30pm |", "| 13:00 - 2:30pm |") }, /a Billed entries row that doesn't read/],
+        [{ ...good, text: good.text.replace("## Billed entries", "## Notes") }, /has no Billed entries table/],
+        [{ ...good, text: good.text.replace(/\| Date .*\n\| --- .*\n/, "") }, /without its column names/],
+        [{ ...good, text: `${good.text}\n\n> [!pm-billed]- Billed entries\n> | Date | Start | End | Minutes | Hours | Rate | Project | Task | Note |` }, /two Billed entries tables/],
         [{ ...good, props: { ...good.props, hours: 5 } }, /add up to 3\.50 hours, not its `hours` \(5\)/],
         [{ ...good, props: { ...good.props, total: 250 } }, /add up to \$300\.00, not its `total` \(250\)/],
     ];
