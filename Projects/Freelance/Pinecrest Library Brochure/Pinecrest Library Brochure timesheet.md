@@ -32,4 +32,8 @@ Every entry of [[Pinecrest Library Brochure]], newest day first.
 | --- | --- | --: | --- | --- |
 | **[[2026-09-17\|Thu 9/17]]** |  | **0.50** |  |  |
 |  | 1:00pm - 1:30pm | 0.50 | Call with Rafe Oakes | 🆓 quick check-in, not billing it |
+
+### Problems
+
+- [[2026-09-16|9/16/26]] line 12: `- 2:30 - 3:45pm` doesn't match `h:mmam - h:mmpm`, so it isn't counted
 %% time:end %%

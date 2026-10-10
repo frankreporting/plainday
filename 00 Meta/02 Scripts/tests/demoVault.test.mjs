@@ -339,13 +339,21 @@ test("demo vault: the paid Kestrel invoice adds up, and is what Invoice would bi
     assert.ok(!text.slice(text.indexOf("# Invoice No."), text.indexOf("## Billed entries")).includes("[["));
 });
 
-test("demo vault: each project with time has its timesheet note beside it, linked from the project", () => {
+test("demo vault: each project with time has its timesheet note beside it, linked from the project; an area has none", () => {
     assert.ok(plan.targets.sheet.length >= 5);
     for (const sheet of plan.targets.sheet) {
         const { fm } = vault.notes.get(sheet);
         assert.deepEqual([].concat(fm.tags ?? []), ["timesheet"], sheet);
         const project = plan.index.linkDest(linkTarget(fm.area), sheet);
         assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|View Timesheet]]`), `${project} links ${sheet}`);
+    }
+    // Household, an area with time, gets no timesheet and no link to one (OBS-131)
+    const household = "Projects/Household/Household.md";
+    assert.ok(plan.targets.project.includes(household) && tr.isAreaOnly(household, plan.index));
+    assert.ok(!vault.notes.has("Projects/Household/Household timesheet.md"));
+    assert.ok(!vault.notes.get(household).text.includes("View Timesheet"));
+    for (const p of plan.targets.project) {
+        if (tr.isAreaOnly(p, plan.index)) assert.ok(!plan.targets.sheet.includes(tr.sheetPath(p)), p);
     }
 });
 

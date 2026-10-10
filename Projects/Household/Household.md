@@ -10,7 +10,7 @@ The house, the car and paperwork. No projects, just the odd task note, and time 
 ## Time tracking
 
 %% time:start %%
-[[Household timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+*Updated 2026-09-16 9:00pm*
 
 | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
 | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |

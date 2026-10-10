@@ -223,9 +223,10 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
         const sheetPath = sheets.get(p) ?? tr.sheetPath(p);
         const block = tr.render(model, { kind: "timesheet", path: p }, stamp, link);
         let sheet = null;
-        // A note with the timesheet's name that isn't tagged `timesheet` is left alone
+        // A note with the timesheet's name that isn't tagged `timesheet` is left alone, and so is an
+        // area's timesheet made before areas stopped getting one
         const mine = sheets.has(p) || !vault.notes.has(sheetPath);
-        if (mine && (vault.notes.has(sheetPath) || tr.sheetHasEntries(model, p))) {
+        if (tr.takesTimesheet(p, index, model) && mine && (vault.notes.has(sheetPath) || tr.sheetHasEntries(model, p))) {
             const fm = vault.notes.get(p).fm;
             const area = `[[${basename(p)}|${[].concat(fm.aliases ?? [])[0] || basename(p)}]]`;
             write(sheetPath, block, tr.sheetNote(SHEET_ID, area, block));

@@ -777,6 +777,8 @@ class TimeReport {
                     message: `overlaps ${other.startText ? "the event " : ""}${this.formatTime(other.start)} - ${this.formatTime(other.end)} (${where})`,
                     text: t.e.startText ? t.e.text : `- ${this.formatTime(t.e.start)} - ${this.formatTime(t.e.end)}`,
                     projects: [t.e.project, other.project].filter(Boolean).length ? [t.e.project, other.project] : [null],
+                    // The entry it overlaps, so a timesheet can mark both rows (OBS-132)
+                    other: { path: other.path, line: other.line },
                 });
             }
             if (!latest || t.to > latest.to) latest = t;
@@ -1042,6 +1044,14 @@ class TimeReport {
     // The whole of a new timesheet note: an id, the timesheet tag and its project as `area`, then its report
     sheetNote(id, area, block) {
         return `---\nid: ${id}\ntags:\n  - timesheet\narea: ${JSON.stringify(area)}\n---\n\n${TimeReport.HEADING}\n\n${block}\n`;
+    }
+
+    // Whether a note gets a timesheet: a project does, an area doesn't, since its time never ends and
+    // its timesheet would only grow (OBS-131). An area's own report still shows its hours. An area
+    // billed by the hour keeps one: Invoice bills it, and its timesheet is where billed and held-back
+    // entries show.
+    takesTimesheet(path, index, model) {
+        return !this.isAreaOnly(path, index) || model?.money?.get(path)?.type === "hourly";
     }
 
     // Whether a project's timesheet has entries to show
@@ -1362,8 +1372,8 @@ class TimeReport {
     // carries its table's total (`### Billable time: 20.50 hrs`); the table has a bold row per day,
     // newest first, adding up the day's hours, then the day's entries in time order. 🆓 time shows the
     // 🆓 as written (on the task line, or at the start of the note), so each row says why it isn't billed.
-    // Then Problems, when there's anything to say about its invoices (see sheetProblems). Each part ends
-    // with a blank line.
+    // Then Problems, when there's anything to say: its entries' (see sheetEntryProblems), then its
+    // invoices' (see sheetProblems). Each part ends with a blank line.
     timesheetLines(model, scope, link) {
         const b = model.billing;
         const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
@@ -1371,13 +1381,34 @@ class TimeReport {
         const project = new Set(entries.map((e) => e.project)).size > 1;
         const billable = entries.filter((e) => e.billable), free = entries.filter((e) => !e.billable);
         const total = (list) => `${this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0))} hrs`;
+        const own = this.sheetEntryProblems(model, on, scope.path, entries, link);
         const out = [];
-        if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link }), "");
-        if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true }), "");
+        if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link, flagged: own.flagged }), "");
+        if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true, flagged: own.flagged }), "");
         if (!entries.length) out.push("No time entries.", "");
-        const problems = this.sheetProblems(model, on, entries, link);
+        const problems = [...own.lines, ...this.sheetProblems(model, on, entries, link)];
         if (problems.length) out.push("### Problems", "", ...problems, "");
         return out;
+    }
+
+    // A timesheet's own Problems (OBS-132): the lines its project's note has about the projects the
+    // timesheet covers (overlaps, 🆓 twice, entries of 12 hours or more, a ⭕ and 🗒️ that disagree, a
+    // project's settings), but not its invoices', which sheetProblems says. { lines, flagged }: flagged
+    // holds every entry a line is about, for its row's ⚠️: the entry on the line, both sides of an
+    // overlap, the entries under a task or event line a Problem is on (a stray 🆓 there, say), and a
+    // ⭕ and 🗒️ disagreement's entries. Running clocks and malformed lines aren't counted, so they
+    // have no row; only their line says so.
+    sheetEntryProblems(model, on, root, entries, link) {
+        const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)));
+        const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && (on.has(p.project) || (p.parent && p.parent === root)));
+        const at = (path, line) => `${path}\n${line}`;
+        const named = new Set(problems.flatMap((p) => [at(p.path, p.line), ...(p.other ? [at(p.other.path, p.other.line)] : [])]));
+        const conflicted = new Set(projectProblems.flatMap((p) => (p.conflict?.side === "line" ? p.conflict.entries : [])));
+        const about = (e) => named.has(at(e.path, e.line)) || (e.context ?? []).some((c) => named.has(at(e.path, c.line))) || conflicted.has(e);
+        return {
+            lines: problems.length || projectProblems.length ? this.problemLines(model, problems, projectProblems, entries, link) : [],
+            flagged: new Set(entries.filter(about)),
+        };
     }
 
     // A timesheet's Problems (OBS-143), so every ⚠️ in it says why: what changed since an invoice billed
@@ -1446,31 +1477,34 @@ class TimeReport {
     // was billed) and ends with that invoice, or `through 9/2` where billed_through covers it; an entry
     // with neither isn't invoiced yet (OBS-117). 🆓 time has the same columns: a 🆓 entry on an invoice
     // was billed before it was made 🆓, so it's ⚠️ (until OBS-110 puts 🆓 time on invoices at no charge).
-    // It's about time, so it has no amounts.
-    sheet(model, entries, { project, link, written = false }) {
+    // An entry in `flagged` (one a Problem names, OBS-132) is ⚠️ too, and a table that bills nothing
+    // gets the first column for it. It's about time, so it has no amounts.
+    sheet(model, entries, { project, link, written = false, flagged = new Set() }) {
         const billing = entries.some((e) => this.hourlyCents(model, e) !== null);
+        const marks = billing || entries.some((e) => flagged.has(e));
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const standing = this.sheetStanding(model);
         const cells = (e) => {
-            const s = standing(e);
-            if (s.kind === "before") return ["", e.billable ? `through ${md(s.through)}` : ""];
-            if (s.kind === "open") return ["", ""];
-            return [this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice), `[[${s.invoice.name}]]`];
+            const s = billing ? standing(e) : { kind: "open" };
+            const warn = (mark) => (flagged.has(e) ? "⚠️" : mark);
+            if (s.kind === "before") return [warn(""), e.billable ? `through ${md(s.through)}` : ""];
+            if (s.kind === "open") return [warn(""), ""];
+            return [warn(this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice)), `[[${s.invoice.name}]]`];
         };
-        const head = [...(billing ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
+        const head = [...(marks ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
         const row = (c) => `| ${c.join(" | ")} |`;
         const bold = (v) => (v === "" ? "" : `**${v}**`);
-        const sum = (label, minutes) => row([...(billing ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])]);
+        const sum = (label, minutes) => row([...(marks ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])]);
         const days = [...new Set(entries.map((e) => e.date))].sort().reverse().map((d) => {
             const list = entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end);
             return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0) };
         });
-        const out = [row(head), row(head.map((h, i) => (h === "Hours" ? "--:" : billing && i === 0 ? ":-:" : "---")))];
+        const out = [row(head), row(head.map((h, i) => (h === "Hours" ? "--:" : marks && i === 0 ? ":-:" : "---")))];
         for (const { d, list, minutes } of days) {
             out.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes));
             for (const e of list) {
-                const [mark, invoice] = billing ? cells(e) : [];
-                out.push(row([...(billing ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
+                const [mark, invoice] = cells(e);
+                out.push(row([...(marks ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
                     this.hours(this.rounded(e.minutes)),
                     this.tableText(written ? e.taskWritten ?? e.task : e.task), this.tableText(written ? e.noteWritten ?? e.note : e.note),
                     ...(billing ? [invoice] : [])]));
@@ -2212,7 +2246,8 @@ class TimeReport {
         for (const path of targets) {
             const file = app.vault.getFileByPath(path);
             if (!file || this.isArchived(path)) continue;
-            const sheet = await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created);
+            // An area's timesheet made before OBS-131 is left as it was, and no longer linked
+            const sheet = this.takesTimesheet(path, index, model) ? await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created) : null;
             try {
                 const block = this.render(model, { kind: "project", path, linkTarget, sheet }, stamp, link);
                 const r = await this.writeBlock(file, block, { onlyIfChanged: true });
