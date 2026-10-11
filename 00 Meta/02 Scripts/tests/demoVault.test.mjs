@@ -116,7 +116,7 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     // every period with a busy event that has no project; no Problems heading anywhere else (OBS-133)
     // Timesheets are checked on their own (OBS-132)
     const reports = [...plan.blocks].filter(([p]) => !plan.targets.sheet.includes(p));
-    const flagged = reports.filter(([, b]) => b.includes("### Problems")).map(([p]) => p).sort();
+    const flagged = reports.filter(([, b]) => b.includes("> [!warning] Problems")).map(([p]) => p).sort();
     assert.deepEqual(flagged, [
         `${FOLDERS.month}/2026-08.md`, `${FOLDERS.month}/2026-09.md`,
         `${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
@@ -126,10 +126,10 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     const said = "- [[Block Party Poster]] has no `rate_type`";
     for (const [p, b] of reports) {
         const listed = [PROBLEM_PROJECT, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.month}/2026-09.md`, `${FOLDERS.year}/2026.md`].includes(p);
-        assert.equal((b.split("### Problems")[1] ?? "").split("\n").some((l) => l.startsWith(said)), listed, p);
+        assert.equal((b.split("> [!warning] Problems")[1] ?? "").split("\n").some((l) => l.startsWith(`> ${said}`)), listed, p);
     }
     for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.month}/2026-08.md`]) {
-        assert.match(plan.blocks.get(p), /### Problems\n\n- 1 entry has no project \(see Unassigned\)\n/, p);
+        assert.match(plan.blocks.get(p), /> \[!warning\] Problems\n> - 1 entry has no project \(see Unassigned\)\n/, p);
     }
 });
 

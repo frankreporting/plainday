@@ -79,6 +79,9 @@ class TimeReport {
     static START = "%% time:start %%";
     static END = "%% time:end %%";
     static HEADING = "## Time Report";
+    // Problems open a report as a callout, so they catch the eye (OBS-167): built into Obsidian, and
+    // orange in the default theme too, where a checkbox like [!] is only an icon in some themes
+    static PROBLEMS = "> [!warning] Problems";
     // The heading before OBS-133, renamed where it heads a block (renameHeading), as is a "## Time
     // report" in any other case
     static OLD_HEADING = "## Time tracking";
@@ -552,15 +555,14 @@ class TimeReport {
         return index.isArea(path) && !index.isProject(path);
     }
 
-    // The mark on a report's link to a project or area: ⭕, or 🗃️ for an area
     // A project or area's link in a report: [[Name]], or [[path/Name|Name]] when another note has its
-    // name. An area keeps its 🗃️, so it reads apart from the projects around it (OBS-117).
-    reportLink(target, path, index) {
+    // name. An area's link is plain too: the tables list areas under an **Area** row (OBS-167).
+    reportLink(target, path) {
         const name = this.basename(path);
-        if (this.isAreaOnly(path, index)) return `[[${target}|🗃️ ${name}]]`;
         return target === name ? `[[${name}]]` : `[[${target}|${name}]]`;
     }
 
+    // The mark on a line's link to a project or area: ⭕, or 🗃️ for an area
     linkMark(path, index) {
         return this.isAreaOnly(path, index) ? "🗃️" : "⭕";
     }
@@ -1115,9 +1117,10 @@ class TimeReport {
         return `${dir ? `${dir}/` : ""}${this.basename(project)}${TimeReport.SHEET}.md`;
     }
 
-    // The whole of a new timesheet note: an id, the timesheet tag and its project as `area`, then its report
+    // The whole of a new timesheet note: an id, the timesheet tag and its project as `area`, then its
+    // report, with no heading: the whole note is the report (OBS-167)
     sheetNote(id, area, block) {
-        return `---\nid: ${id}\ntags:\n  - timesheet\narea: ${JSON.stringify(area)}\n---\n\n${TimeReport.HEADING}\n\n${block}\n`;
+        return `---\nid: ${id}\ntags:\n  - timesheet\narea: ${JSON.stringify(area)}\n---\n\n${block}\n`;
     }
 
     // Whether a note gets a timesheet: a project does, an area doesn't, since its time never ends and
@@ -1222,6 +1225,17 @@ class TimeReport {
             .sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
     }
 
+    // A table's rows for `projects` (OBS-167): the projects' rows, then, when there are areas, an
+    // **Area** row with `width - 1` blank cells, heading the areas below it as Project heads the
+    // table, and the areas' rows, each group in the order given. `row(path)` makes one row. The
+    // **Area** row has no numbers, so the rows still add up to All.
+    groupedRows(model, projects, row, width) {
+        const isArea = (p) => model.areas?.has(p) ?? false;
+        const areas = projects.filter(isArea);
+        return [...projects.filter((p) => !isArea(p)).map(row),
+            ...(areas.length ? [this.tableRow(["Area", ...Array(width - 1).fill("")], true), ...areas.map(row)] : [])];
+    }
+
     // Earned for a row, or "" when the row's own project isn't hourly or nothing had a rate
     earnedFor(t, project, model) {
         const m = project ? model.money.get(project) ?? {} : {};
@@ -1238,24 +1252,24 @@ class TimeReport {
         const flatHere = new Map(earned.map((f) => [f.project, f.cents]));
         const projects = [...new Set([...this.ownProjects(entries), ...flatHere.keys()])]
             .sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
-        const rows = [], hourly = [];
+        const rows = new Map(), hourly = [];
         for (const p of projects) {
             const m = model.money.get(p) ?? {};
             if (m.type === "non-billable") continue;
-            if (m.type === "flat") { rows.push([this.cell(link(p)), "–", m.label, flatHere.has(p) ? this.money(flatHere.get(p)) : "N/A"]); continue; }
+            if (m.type === "flat") { rows.set(p, [this.cell(link(p)), "–", m.label, flatHere.has(p) ? this.money(flatHere.get(p)) : "N/A"]); continue; }
             const list = entries.filter((e) => e.project === p);
             const t = this.totals(list, model.money);
             if (!t.billable) continue;
             const cents = this.earnedFor(t, p, model);
             hourly.push(...list);
-            rows.push([this.cell(link(p)), this.hoursCell(t.billable), m.label ?? "", cents === null ? "" : this.moneyCell(cents)]);
+            rows.set(p, [this.cell(link(p)), this.hoursCell(t.billable), m.label ?? "", cents === null ? "" : this.moneyCell(cents)]);
         }
-        if (!rows.length) return [];
+        if (!rows.size) return [];
         // All is priced the way the rows' entries would be invoiced together, as Total is in a project's
         // tables, plus the flat fees earned here; with only flat fees not earned here it would be blank
         const t = this.totals(hourly, model.money);
         const fees = earned.reduce((sum, f) => sum + f.cents, 0);
-        return [...this.tableHead(["Project", "Billable", "Rate", "Earned"]), ...rows.map((r) => this.tableRow(r)),
+        return [...this.tableHead(["Project", "Billable", "Rate", "Earned"]), ...this.groupedRows(model, [...rows.keys()], (p) => this.tableRow(rows.get(p)), 4),
             ...(hourly.length || fees ? [this.tableRow(["All", this.hoursCell(t.billable), "", this.moneyCell(t.cents + fees)], true)] : [])];
     }
 
@@ -1459,9 +1473,7 @@ class TimeReport {
             const cells = months.map(({ key }) => b(value(list.filter((e) => e.date.startsWith(key + "-")), project, key)));
             return `| ${bold ? `**${name}**` : name} | ${cells.join(" | ")} | ${b(value(list, project))} |`;
         };
-        for (const project of projects) {
-            out.push(row(this.cell(link(project)), entries.filter((e) => e.project === project), project));
-        }
+        out.push(...this.groupedRows(model, projects, (p) => row(this.cell(link(p)), entries.filter((e) => e.project === p), p), months.length + 2));
         const unassigned = entries.filter((e) => !e.project);
         if (unassigned.length && measure === "hours") out.push(row("Unassigned", unassigned, null));
         out.push(row("All", entries, null, true));
@@ -1482,7 +1494,7 @@ class TimeReport {
             const b = (v) => (bold && v ? `**${v}**` : v);
             return `| ${bold ? `**${name}**` : name} | ${columns.map((c) => b(hours(list.filter(c.match)))).join(" | ")} | ${b(hours(list))} |`;
         };
-        for (const project of this.ownProjects(entries)) out.push(row(this.cell(link(project)), entries.filter((e) => e.project === project)));
+        out.push(...this.groupedRows(model, this.ownProjects(entries), (p) => row(this.cell(link(p)), entries.filter((e) => e.project === p)), columns.length + 2));
         const unassigned = entries.filter((e) => !e.project);
         if (unassigned.length) out.push(row("Unassigned", unassigned));
         out.push(row("All", entries, true));
@@ -1601,12 +1613,11 @@ class TimeReport {
         const billable = entries.filter((e) => e.billable), free = entries.filter((e) => !e.billable);
         const total = (list) => `${this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0))} hrs`;
         const own = this.sheetEntryProblems(model, on, scope.path, entries, link);
-        const out = [];
+        // Problems first, as in every report (OBS-167)
+        const out = this.problemsCallout([...own.lines, ...this.sheetProblems(model, on, entries, link)]);
         if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link, flagged: own.flagged }), "");
         if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true, flagged: own.flagged }), "");
         if (!entries.length) out.push("No time entries.", "");
-        const problems = [...own.lines, ...this.sheetProblems(model, on, entries, link)];
-        if (problems.length) out.push("### Problems", "", ...problems, "");
         return out;
     }
 
@@ -1770,21 +1781,20 @@ class TimeReport {
     // The block, markers included, for { kind: "project", path } or { kind: "period", unit, key };
     // either can carry `linkTarget(unit, key)`, the link text for a weekly or monthly note (its name,
     // or its full path when another note has the same name).
-    // `link(path)` makes a project link, aliased with ⭕ and the project's name (defaults to
-    // [[basename|⭕ basename]]); inside a table its `|` is escaped (see cell).
+    // `link(path)` makes a project or area link (see reportLink; defaults to [[basename]]); inside
+    // a table its `|` is escaped (see cell).
     render(model, scope, stamp, link = (p) => `[[${this.basename(p)}]]`) {
         // A project's timesheet link opens the block, beside when it was updated
         const top = scope.kind === "project" && scope.sheet ? `[[${scope.sheet}|Timesheet]] | *Updated ${stamp}*` : `*Updated ${stamp}*`;
         const out = [TimeReport.START, top, ""];
-        // Problems only when there's something to say (OBS-133)
-        const problems = (mine) => {
-            const lines = this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link);
-            if (lines.length) out.push("### Problems", "", ...lines);
-        };
+        // Problems only when there's something to say (OBS-133), and then first, right under the
+        // Updated line, where they can't be missed below a long table (OBS-167)
+        const problems = (mine) => out.push(...this.problemsCallout(this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link)));
 
-        // A period's Earnings first, when anything bills, then its Hours (OBS-133)
+        // A period's Problems, then its Earnings, when anything bills, then its Hours (OBS-133)
         if (scope.kind === "period") {
             const mine = this.inScope(model, scope);
+            problems(mine);
             const earnings = scope.unit === "year" ? this.yearTable(model, mine.entries, scope, link, "earned") : this.earnedTable(model, mine.entries, link, scope);
             if (earnings.length) out.push("### Earnings", "", ...earnings, "");
             const hours = !mine.entries.length ? ["No time entries."]
@@ -1792,33 +1802,39 @@ class TimeReport {
                 : scope.unit === "week" ? this.weekDaysTable(model, mine.entries, scope, link)
                 : this.monthWeeksTable(model, mine.entries, scope, link);
             out.push("### Hours", "", ...hours, "");
-            problems(mine);
         } else if (scope.kind !== "timesheet") {
             const mine = this.inScope(model, scope);
+            problems(mine);
             const summary = this.summaryLines(model, mine.entries, scope.path);
             if (summary.length) out.push(...summary, "");
             out.push(...this.projectTables(model, mine.entries, scope, link), "");
             const invoices = this.invoiceLines(model, scope, link);
             if (invoices.length) out.push("### Invoices", "", ...invoices, "");
-            problems(mine);
         } else {
             // Its own note, not the project's: a long table in a note costs every keystroke typed in it
             // (OBS-5 measured about 0.05 ms a row), and nobody types in a timesheet
-            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...this.timesheetLines(model, scope, link));
+            out.push(...this.timesheetLines(model, scope, link));
         }
         while (out.at(-1) === "") out.pop();
-        // A table ends with a blank line, so the end marker can't read as a row of it
-        if (out.at(-1).startsWith("|")) out.push("");
+        // A table or callout ends with a blank line, so the end marker can't read as a row or line of it
+        if (/^[|>]/.test(out.at(-1))) out.push("");
         // Nothing between the markers may open a comment or look like a marker, or the next run can't find the block
         const body = out.slice(1).map((l) => this.defuse(l));
         return [TimeReport.START, ...body, TimeReport.END].join("\n");
+    }
+
+    // A report's Problems as a callout, then a blank line, so what follows isn't drawn inside it;
+    // [] with nothing to say
+    problemsCallout(lines) {
+        return lines.length ? [TimeReport.PROBLEMS, ...lines.map((l) => `> ${l}`), ""] : [];
     }
 
     // ---------------------------------------------------------------- writing the block
 
     // Where the block goes in `content`: { start, end, text, inserted } (character offsets to
     // replace), or { error }. An existing block is replaced. Otherwise it goes right under `heading`
-    // if the note has it, else at the end under a new `heading`. Never anywhere else.
+    // if the note has it, else at the end under a new `heading` (with `heading` null, at the end on
+    // its own, as in a timesheet). Never anywhere else.
     placeBlock(content, block, { heading = TimeReport.HEADING } = {}) {
         const nl = content.includes("\r\n") ? "\r\n" : "\n";
         const lines = content.split("\n");            // keeps any \r, so offsets stay exact
@@ -1840,7 +1856,7 @@ class TimeReport {
             return { error: `Line ${unclosed[0].line + 1} opens a ${unclosed[0].what} that never closes; close it and run it again` };
         }
 
-        const h = lines.findIndex((l, j) => !hidden[j] && l.trim().toLowerCase() === heading.toLowerCase());
+        const h = heading ? lines.findIndex((l, j) => !hidden[j] && l.trim().toLowerCase() === heading.toLowerCase()) : -1;
         if (h !== -1) {
             const here = endOf(h);
             const tail = h + 1 < lines.length && !blank(h + 1) ? nl : "";
@@ -1848,7 +1864,7 @@ class TimeReport {
         }
         const trailing = content.match(/(\r?\n)*$/)[0].split("\n").length - 1;
         const lead = content.trim() ? nl.repeat(Math.max(0, 2 - trailing)) : "";
-        return { start: content.length, end: content.length, text: `${lead}${heading}${nl}${nl}${text(block)}${nl}`, inserted: true };
+        return { start: content.length, end: content.length, text: `${lead}${heading ? heading + nl + nl : ""}${text(block)}${nl}`, inserted: true };
     }
 
     // The report's heading before OBS-133, "## Time tracking", or "## Time report" in another case,
@@ -1882,20 +1898,38 @@ class TimeReport {
     // content the ones before it left: the old heading renamed, a blank line above the heading, then
     // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
     // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
-    blockEdits(content, block, { onlyIfChanged = true } = {}) {
+    // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), and
+    // a new block gets none.
+    blockEdits(content, block, { onlyIfChanged = true, heading = true } = {}) {
         const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
         const edits = [];
         let current = content;
-        for (const step of [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)]) {
+        const steps = heading ? [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)] : [(c) => this.dropHeading(c)];
+        for (const step of steps) {
             const edit = step(current);
             if (edit) { edits.push(edit); current = apply(current, edit); }
         }
         if (!(onlyIfChanged && this.sameBlock(current, block))) {
-            const place = this.placeBlock(current, block);
+            const place = this.placeBlock(current, block, { heading: heading ? TimeReport.HEADING : null });
             if (place.error) return place;
             edits.push(place);
         }
         return edits;
+    }
+
+    // A timesheet's report has no heading (OBS-167): the "## Time Report" (or older) heading right
+    // above its block, with only blank lines between them, goes, along with those blank lines.
+    // Returns the edit { start, end, text }, or null.
+    dropHeading(content) {
+        const lines = content.split("\n");
+        const { hidden, starts } = this.scan(lines.map((l) => l.replace(/\r$/, "")));
+        if (starts.length !== 1) return null;
+        let j = starts[0] - 1;
+        while (j >= 0 && !hidden[j] && !lines[j].trim()) j--;
+        const heading = j >= 0 && !hidden[j] && [TimeReport.HEADING, TimeReport.OLD_HEADING].some((h) => lines[j].trim().toLowerCase() === h.toLowerCase());
+        if (!heading) return null;
+        const offset = (n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+        return { start: offset(j), end: offset(starts[0]), text: "" };
     }
 
     // Room to add things above the report (tasks at the top of a weekly or monthly note): the
@@ -2244,10 +2278,10 @@ class TimeReport {
             }
             const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
             const stamp = window.moment().format("YYYY-MM-DD h:mma");
-            // Project links by name, area links "🗃️ Name" (tables escape the | themselves)
+            // Project and area links by name (tables escape the | themselves)
             const link = (p) => {
                 const f = app.vault.getFileByPath(p);
-                return this.reportLink(f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p), p, index);
+                return this.reportLink(f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p), p);
             };
             const done = [], trouble = [];
             const linkTarget = this.periodLinkTarget(this.periodFolders());
@@ -2577,7 +2611,7 @@ class TimeReport {
                 app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                 created.push(file.basename);
             } else {
-                const r = await this.writeBlock(file, block, { onlyIfChanged: true });
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true, heading: false });
                 if (r.error) broken.push(file.basename);
             }
             return app.metadataCache.fileToLinktext(file, project, true);
@@ -2589,12 +2623,12 @@ class TimeReport {
     }
 
     // Writes through an open editor when there is one (the editor keeps its own folds), else
-    // through the vault in one read-modify-write, moving the saved folds to match
-    async writeBlock(file, block, { onlyIfChanged }) {
+    // through the vault in one read-modify-write, moving the saved folds to match. `heading` as in blockEdits.
+    async writeBlock(file, block, { onlyIfChanged, heading = true }) {
         const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
         // What to do to `content`: [edits in order], or { error }. Nothing when it's already right.
         const plan = (content) => {
-            const edits = this.blockEdits(content, block, { onlyIfChanged });
+            const edits = this.blockEdits(content, block, { onlyIfChanged, heading });
             return edits.error ? edits : { edits };
         };
 

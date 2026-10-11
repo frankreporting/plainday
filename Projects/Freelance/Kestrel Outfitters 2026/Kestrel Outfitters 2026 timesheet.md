@@ -5,12 +5,11 @@ tags:
 area: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 ---
 
-## Time Report
-
 %% time:start %%
 *Updated 2026-09-16 9:00pm*
 
-Every entry of [[Kestrel Outfitters 2026]], newest day first.
+> [!warning] Problems
+> - [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm
 
 ### Billable time: 20.50 hrs
 
@@ -52,7 +51,4 @@ Every entry of [[Kestrel Outfitters 2026]], newest day first.
 |  | **[[2026-09-15\|Tue 9/15]]** |  |  | **0.50** |  |  |  |
 |  |  | 11:15am - 11:45am | [[Kestrel Outfitters 2026]] | 0.50 | Draft homepage wireframes | 🆓 redid the nav after misreading my own notes |  |
 
-### Problems
-
-- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm
 %% time:end %%

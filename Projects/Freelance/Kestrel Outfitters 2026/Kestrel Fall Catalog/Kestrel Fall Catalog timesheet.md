@@ -5,12 +5,8 @@ tags:
 area: "[[Kestrel Fall Catalog|⭕.Freelance.Kestrel Outfitters 2026.Kestrel Fall Catalog]]"
 ---
 
-## Time Report
-
 %% time:start %%
 *Updated 2026-09-16 9:00pm*
-
-Every entry of [[Kestrel Fall Catalog]], newest day first.
 
 ### Billable time: 3.50 hrs
 

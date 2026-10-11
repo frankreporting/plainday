@@ -342,7 +342,7 @@ test("OBS-51 parentProject: an area is never a parent, so a project's time doesn
     assert.equal(block, ["%% time:start %%", "*Updated s*", "", "### By Month", "",
         "| Month | Exact | Total |", "| ----- | ----: | ----: |",
         "| [[2026-09\\|September 2026]] | 0.75 | 0.75 |", "| **Total** | **0.75** | **0.75** |", "", "%% time:end %%"].join("\n"));
-    assert.ok(!block.includes("### Problems"), "and it isn't asked for a rate_type");
+    assert.ok(!block.includes(PROBLEMS), "and it isn't asked for a rate_type");
 });
 
 test("OBS-51 money: an area with its own rate bills; an area filed inside a project is no sub-project of it", () => {
@@ -408,10 +408,50 @@ test("OBS-51 writing: an area note with time gets a report block added, like a p
     const studio = plan.changes.find((c) => c.path === "Projects/Studio/Studio.md").after;
     assert.match(studio, /^## Time Report\n\n%% time:start %%[^]*\| \[\[2026-09\\\|September 2026\]\] \| 0\.50 \| 0\.50 \|/m, "an existing block is filled in place, its old heading renamed");
     assert.ok(!studio.includes("Time tracking"), studio);
-    // The weekly note lists both areas as rows of their own, linked with 🗃️
+    // The weekly note lists both areas as rows of their own, under an **Area** row since there are no
+    // projects to list first, with plain links (OBS-167)
     const week = plan.changes.find((c) => c.path.includes("/weeks/")).after;
-    assert.match(week, /\[\[Cycling\\\|🗃️ Cycling\]\]/, week);
-    assert.match(week, /\[\[Studio\\\|🗃️ Studio\]\]/, week);
+    assert.match(week, /\| ---[^\n]*\n\| \*\*Area\*\* \|[ |]*\n\| \[\[Cycling\]\] \|[^\n]*\n\| \[\[Studio\]\] \|/, week);
+    assert.ok(!week.includes("🗃️"), week);
+});
+
+test("OBS-167: a table lists its projects, then an **Area** row and the areas; All still adds up", async () => {
+    const { planReports, frontmatter } = await import("./demo/renderReports.mjs");
+    const vaultOf = (files) => ({ notes: new Map(Object.entries(files).map(([p, text]) => [p, { text, fm: frontmatter(text) }])) });
+    const day = [
+        "- [x] Run [[Cycling|🗃️]]", "\t- 7:00am - 7:45am",
+        "- [x] Draft layout [[Kestrel|⭕]]", "\t- 9:00am - 10:00am",
+        "- [x] Errand", "\t- 11:00am - 11:30am",
+        "- [x] Route plan [[Century|⭕]]", "\t- 12:00pm - 12:30pm",
+        "- [x] Session [[Coaching|🗃️]]", "\t- 2:00pm - 3:00pm",
+    ].join("\n") + "\n";
+    const files = {
+        "30 Reference/36 Planner/days/2026-09-01.md": day,
+        "Projects/Kestrel/Kestrel.md": "---\ntags: project\nrate_type: hourly\nrate: 100\n---\n",
+        "Projects/Cycling/Cycling.md": "---\ntags: area\n---\n",
+        "Projects/Cycling/Century/Century.md": "---\ntags: project\nrate_type: non-billable\n---\n",
+        "Projects/Coaching/Coaching.md": "---\ntags: area\nrate_type: hourly\nrate: 80\n---\n",
+        "Projects/Both/Both.md": "---\ntags: [area, project]\nrate_type: non-billable\n---\n",
+    };
+    const plan = planReports(tr, vaultOf({ ...files, "30 Reference/36 Planner/days/2026-09-01.md": day + "- [x] Plan [[Both|⭕]]\n\t- 5:00pm - 5:15pm\n" }));
+    assert.deepEqual(plan.errors, []);
+    const rows = (text, heading) => text.split(`### ${heading}\n\n`)[1].split("\n\n")[0].split("\n").slice(2).map((r) => r.split(" | ")[0].slice(2));
+    for (const unit of ["weeks", "months", "years"]) {
+        const note = plan.changes.find((c) => c.path.includes(`/${unit}/`)).after;
+        // Projects (a note tagged both counts as one), then **Area** and the areas, then Unassigned and All
+        assert.deepEqual(rows(note, "Hours"), ["[[Both]]", "[[Century]]", "[[Kestrel]]", "**Area**", "[[Coaching]]", "[[Cycling]]", "Unassigned", "**All**"], `${unit}: ${note}`);
+        assert.deepEqual(rows(note, "Earnings"), ["[[Kestrel]]", "**Area**", "[[Coaching]]", "**All**"], `${unit}: ${note}`);
+        assert.ok(!note.includes("🗃️"), note);
+    }
+    // The **Area** row is a label: every other cell is blank, and All is the same with or without it
+    const week = plan.changes.find((c) => c.path.includes("/weeks/")).after;
+    assert.match(week, /\n\| \*\*Area\*\* \|(  \|){8}\n/, week);
+    assert.match(week, /\| \*\*All\*\* \|  \|  \| \*\*4\.00\*\* \|  \|  \|  \|  \| \*\*4\.00\*\* \|/, week);
+    assert.match(week, /\| \*\*All\*\* \| \*\*2\.00\*\* \|  \| \*\*\$180\.00\*\* \|/, week);
+
+    // With no area in the period, there's no **Area** row
+    const projectsOnly = planReports(tr, vaultOf({ ...files, "30 Reference/36 Planner/days/2026-09-01.md": "- [x] Draft layout [[Kestrel|⭕]]\n\t- 9:00am - 10:00am\n" }));
+    assert.ok(!projectsOnly.changes.some((c) => c.after.includes("**Area**")), JSON.stringify(projectsOnly.changes.map((c) => c.after)));
 });
 
 test("table cells: hours always with two decimals, and blank for zero hours or zero Earned", () => {
@@ -801,14 +841,14 @@ const SMALL_NOTES = [
 ];
 const SMALL = tr.build(SMALL_NOTES, MONEY_INDEX);
 
-test("render month: Earnings for what bills (Billable, Rate, Earned and All), then Hours; that month's Problems", () => {
+test("render month: that month's Problems first, then Earnings for what bills (Billable, Rate, Earned and All), then Hours", () => {
     const block = tr.render(SMALL, { kind: "period", unit: "month", key: "2026-09" }, "2026-09-13 7:00pm");
     const lines = block.split("\n");
     assert.equal(lines[0], "%% time:start %%");
     assert.equal(lines[1], "*Updated 2026-09-13 7:00pm*");
     assert.equal(lines.at(-1), "%% time:end %%");
-    const earnedAt = lines.indexOf("### Earnings"), hoursAt = lines.indexOf("### Hours"), problemsAt = lines.indexOf("### Problems");
-    assert.ok(earnedAt === 3 && earnedAt < hoursAt && hoursAt < problemsAt, block);
+    const earnedAt = lines.indexOf("### Earnings"), hoursAt = lines.indexOf("### Hours"), problemsAt = lines.indexOf(PROBLEMS);
+    assert.ok(problemsAt === 3 && problemsAt < earnedAt && earnedAt < hoursAt, block);
     // Each row is that project's own entries, so the rows add up to All: Orchard Lane's own hour, and
     // Orchard Lane Web's on a row of its own, at its parent's rate since it has none
     assert.deepEqual(plain(lines.slice(earnedAt, hoursAt - 1)), [
@@ -821,23 +861,23 @@ test("render month: Earnings for what bills (Billable, Rate, Earned and All), th
     ]);
     assert.ok(!block.includes("↳"));
     // Time with no project is nobody's to bill: it's in Hours only
-    assert.ok(lines.slice(hoursAt, problemsAt).some((l) => l.startsWith("| Unassigned |")), block);
+    assert.ok(lines.slice(hoursAt).some((l) => l.startsWith("| Unassigned |")), block);
     assert.ok(!block.includes("Pinecone Studio") && !block.includes("Kestrel"), "October and archived projects stay out");
     assert.ok(!block.includes("| Date |") && !block.includes("9:50am"), "no per-entry detail");
-    assert.ok(lines.some((l) => l.startsWith("- [[2026-09-01|9/1/26]] line 8: `- 5:00pm -` clock still running")));
-    assert.ok(lines.includes("- 1 entry has no project (see Unassigned)"));
+    assert.ok(lines.some((l) => l.startsWith("> - [[2026-09-01|9/1/26]] line 8: `- 5:00pm -` clock still running")));
+    assert.ok(lines.includes("> - 1 entry has no project (see Unassigned)"));
 });
 
-test("render year: Earnings for the projects billed by the hour, then Hours, a column per month linking the monthly note", () => {
+test("render year: Problems first, then Earnings for the projects billed by the hour, then Hours, a column per month linking the monthly note", () => {
     const block = tr.render(SMALL, { kind: "period", unit: "year", key: "2026" }, "s");
     const lines = block.split("\n");
-    const earnedAt = lines.indexOf("### Earnings"), hoursAt = lines.indexOf("### Hours"), problemsAt = lines.indexOf("### Problems");
-    assert.ok(earnedAt > 0 && earnedAt < hoursAt && hoursAt < problemsAt);
+    const earnedAt = lines.indexOf("### Earnings"), hoursAt = lines.indexOf("### Hours"), problemsAt = lines.indexOf(PROBLEMS);
+    assert.ok(problemsAt === 3 && problemsAt < earnedAt && earnedAt < hoursAt, block);
     const head = "| Project | " + tr.constructor.SHORT_MONTHS.map((m, i) => `[[2026-${String(i + 1).padStart(2, "0")}\\|${m}]]`).join(" | ") + " | 2026 |";
     assert.equal(lines[earnedAt + 2], head);
     assert.equal(lines[hoursAt + 2], head);
     const blanks = (n) => Array(n).fill("").map(() => " ").join("|");
-    const earned = lines.slice(earnedAt, hoursAt), hours = lines.slice(hoursAt, problemsAt);
+    const earned = lines.slice(earnedAt, hoursAt), hours = lines.slice(hoursAt);
     // Sep and Oct columns (the 9th and 10th months)
     const cells = (table, name) => table.find((l) => l.startsWith(`| ${name} |`)).split(/(?<!\\)\|/).slice(2, -1).map((c) => c.trim());
     assert.ok(!earned.some((l) => l.startsWith("| [[Bramble]] |")), "a flat fee not earned yet has no row in Earnings");
@@ -872,7 +912,7 @@ test("render project (OBS-133): hours, Earned and effective rate, By Project onl
         "", "%% time:end %%",
     ].join("\n"));
     assert.ok(!project.includes("Orchard Lane 2026"), "a sub-project's block doesn't show its parent");
-    assert.ok(!project.includes("### Problems"), "problems from other projects stay out, and with none there's no heading");
+    assert.ok(!project.includes(PROBLEMS), "problems from other projects stay out, and with none there's no heading");
 
     // A parent with sub-project time: By Project, its own row first, and By Week including the
     // sub-project's time, so both Totals agree. Its cap counts the sub-project's billable hours too.
@@ -1016,7 +1056,9 @@ test("OBS-156 render: Rate and Invested after Exact and Total; a mixed By Projec
     ]);
     // Non-billable throughout: Exact and Total, then Rate and Invested where a row is valued; no summary
     const volunteer = render("P/Volunteer/Volunteer.md");
-    assert.deepEqual(volunteer.slice(3, 10), [
+    assert.deepEqual(volunteer.slice(3, 6), [PROBLEMS,
+        "> - [[Paid]] has its own `rate` but inherits `non-billable`, so its time counts as 🆓; give it a `rate_type` of its own", ""], "Problems first, as a callout (OBS-167)");
+    assert.deepEqual(volunteer.slice(6, 13), [
         "### By Project", "",
         "| Project | Exact | Total | Rate | Invested |",
         "| ------- | ----: | ----: | ---: | -------: |",
@@ -1800,7 +1842,7 @@ test("periodic reports: the periods with entries, and a week's report with its o
     assert.ok(oct.includes("| **All** | **1.00** |  | **$80.00** |"));
     // Nothing to say: no Problems heading (OBS-133)
     assert.match(oct, /### Earnings\n[^#]*\| \*\*All\*\* [^\n]*\|\n\n### Hours\n[^#]*\|\n\n%% time:end %%$/);
-    assert.ok(!oct.includes("### Problems"));
+    assert.ok(!oct.includes(PROBLEMS));
     // A period with no entries says so under Hours, and has no Earned
     const empty = tr.render(model, { kind: "period", unit: "week", key: "2026w39" }, "s");
     assert.match(empty, /### Hours\n\nNo time entries\.\n%% time:end %%$/);
@@ -1943,7 +1985,7 @@ test("weekly notes: one table of hours per project per day, day headers linking 
     const lines = block.split("\n");
     const head = lines.findIndex((l) => l.startsWith("| Project | [[2026-09-13"));
     const earnedAt = lines.indexOf("### Earnings");
-    assert.ok(earnedAt === 3 && earnedAt < head && head < lines.indexOf("### Problems"), block);
+    assert.ok(lines.indexOf(PROBLEMS) === 3 && lines.indexOf(PROBLEMS) < earnedAt && earnedAt < head, block);
     assert.deepEqual(plain(lines.slice(head - 2, head)), ["### Hours", ""], "each table has its own H3, Earnings first");
     assert.deepEqual(plain(lines.slice(head, head + 7)), [
         "| Project | [[2026-09-13\\|Sun 9/13]] | [[2026-09-14\\|Mon 9/14]] | [[2026-09-15\\|Tue 9/15]] | [[2026-09-16\\|Wed 9/16]] | [[2026-09-17\\|Thu 9/17]] | [[2026-09-18\\|Fri 9/18]] | [[2026-09-19\\|Sat 9/19]] | Week |",
@@ -1971,7 +2013,7 @@ test("monthly notes: hours per project per week, week headers linking to weekly 
     const lines = block.split("\n");
     const head = lines.findIndex((l) => l.startsWith("| Project | [[2026w36"));
     const earnedAt = lines.indexOf("### Earnings");
-    assert.ok(earnedAt === 3 && earnedAt < head && head < lines.indexOf("### Problems"), block);
+    assert.ok(lines.indexOf(PROBLEMS) === 3 && lines.indexOf(PROBLEMS) < earnedAt && earnedAt < head, block);
     assert.deepEqual(plain(lines.slice(head - 2, head)), ["### Hours", ""], "each table has its own H3, Earnings first");
     assert.deepEqual(plain(lines.slice(head, head + 6)), [
         "| Project | [[2026w36\\|8/30-9/5]] | [[2026w37\\|9/6-9/12]] | [[2026w38\\|9/13-9/19]] | [[2026w39\\|9/20-9/26]] | [[2026w40\\|9/27-10/3]] | Month |",
@@ -2024,7 +2066,7 @@ test("OBS-34: a task line's ⭕ project and its 🔗 task note's project disagre
     const tin = tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s");
     assert.ok(tin.includes("- [[Tin]] has time (2 entries) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]]; move the note here, or change the line's project link"), tin);
     assert.ok(tin.includes("- [[Tin]] has time (1 entry) from a task line whose task note [[Elsewhere/Filed by area|Filed by area]] is filed under [[Hawk]]"), tin);
-    const tinProblems = tin.slice(tin.indexOf("### Problems"), tin.indexOf("### Billable time"));
+    const tinProblems = tin.slice(tin.indexOf(PROBLEMS), tin.indexOf("### Billable time"));
     assert.ok(!tinProblems.includes("Draft the scope") && !tinProblems.includes("Loose end"));
     assert.ok(!tin.includes("⭕ link"), "the message says project link, not ⭕ link");
 
@@ -2117,7 +2159,7 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
         note("2026-09-08", "- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|🔗]]\n\t- 1:00pm - 2:00pm"),
         note("2026-10-05", "- [x] Late [[Late|⭕]]\n\t- 9:00am - 10:00am"),
     ], idx);
-    const problems = (block) => block.slice(block.indexOf("### Problems")).split("\n").filter((l) => l.startsWith("- "));
+    const problems = (block) => block.slice(block.indexOf(PROBLEMS)).split("\n").filter((l) => l.startsWith("> - ")).map((l) => l.slice(2));
 
     const week = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-01") }, "s"));
     assert.deepEqual(plain(week), [
@@ -2173,12 +2215,22 @@ test("OBS-57, OBS-87: an event whose ⭕ and 🗒️ log disagree is a problem w
 
 // ------------------------------------------------------------------ timesheets and invoices (OBS-5)
 
+// A report's Problems callout opens with this line (OBS-167)
+const PROBLEMS = "> [!warning] Problems";
 const section = (block, heading) => {
     const lines = block.split("\n");
+    // Problems are a callout (OBS-167): its items, without the "> " that puts them in it
+    if (heading === "### Problems") {
+        const at = lines.indexOf(PROBLEMS);
+        if (at === -1) return null;
+        const end = lines.findIndex((l, i) => i > at && !l.startsWith(">"));
+        return lines.slice(at + 1, end).map((l) => l.replace(/^> /, ""));
+    }
     // A timesheet heading carries its total after a colon: `### Billable time: 2.00 hrs`
     const at = lines.findIndex((l) => l === heading || l.startsWith(`${heading}: `));
     if (at === -1) return null;
-    const end = lines.findIndex((l, i) => i > at && (l.startsWith("### ") || l === "%% time:end %%"));
+    // It ends at the next heading, or at a project note's summary when Problems come first (OBS-167)
+    const end = lines.findIndex((l, i) => i > at && (l.startsWith("### ") || l.startsWith("**") || l === "%% time:end %%"));
     return lines.slice(at + 2, end).filter((l) => l !== "");
 };
 
@@ -2196,7 +2248,7 @@ test("render timesheet: Billable time and 🆓 time, each total in its heading, 
     const block = tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s");
     const heads = block.split("\n").filter((l) => l.startsWith("### "));
     assert.deepEqual(heads, ["### Billable time: 2.00 hrs", "### 🆓 time: 0.25 hrs"]);
-    assert.ok(block.includes("Every entry of [[Orchard Lane Web 2026]], newest day first."));
+    assert.ok(block.startsWith("%% time:start %%\n*Updated s*\n\n### Billable time"), "no line about the table before it (OBS-167)");
     assert.deepEqual(section(block, "### Billable time"), [
         "|  | Date | Time | Hours | Task | Notes | Invoice |",
         "| :-: | --- | --- | --: | --- | --- | --- |",
@@ -2531,14 +2583,14 @@ test("timesheet: Problems say why each ⚠️ entry is ⚠️, as the project's 
         "- [[1001-ORC]] (paid 9/15): [[2026-09-02|9/2/26]] 3:00pm - 3:30pm was billed, gone from its daily note",
         "- [[1002-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm; rebuild it",
     ]);
-    assert.ok(block.endsWith("now 1:00pm - 2:45pm; rebuild it\n%% time:end %%"), "Problems come last");
+    assert.ok(block.startsWith(`%% time:start %%\n*Updated s*\n\n${PROBLEMS}\n> - `), "Problems come first, as a callout (OBS-167)");
     // The project's note says the same, the draft included
     const project = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
     assert.deepEqual(section(project, "### Problems"), section(block, "### Problems"));
     // Nothing ⚠️ and nothing changed: no Problems heading at all
     const clean = tr.attachBilling(tr.build(ORC_NOTES, idx), [orcInvoice("1003-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { invoice_date: "2026-09-04" })], idx, billing);
-    assert.ok(!tr.render(clean, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes("### Problems"));
-    assert.ok(!tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes("### Problems"));
+    assert.ok(!tr.render(clean, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes(PROBLEMS));
+    assert.ok(!tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s").includes(PROBLEMS));
 });
 
 test("timesheet: an entry that overlaps billed time whose own entry is still there gets a Problem of its own (OBS-143)", () => {
@@ -2619,7 +2671,7 @@ test("timesheet: a table that bills nothing gets the ⚠️ column only when a r
     const idx = orcIndex({ rate: "500", rate_type: "flat" });
     const clean = tr.render(tr.attachBilling(tr.build(ORC_NOTES, idx), [], idx, billing), { kind: "timesheet", path: ORCHARD_WEB }, "s");
     assert.equal(section(clean, "### Billable time")[0], "| Date | Time | Hours | Task | Notes |");
-    assert.ok(!clean.includes("### Problems"));
+    assert.ok(!clean.includes(PROBLEMS));
     const overlap = [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am\n\t- 9:30am - 10:30am\n\t- 1:00pm - 2:00pm")];
     const sheet = section(tr.render(tr.attachBilling(tr.build(overlap, idx), [], idx, billing), { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time");
     assert.deepEqual(sheet, [
@@ -2700,8 +2752,25 @@ test("render project: the block opens with its timesheet link, beside when it wa
     assert.ok(tr.sameBlock(note(withSheet), withSheet.replace("*Updated s*", "*Updated t*")));
     assert.ok(!tr.sameBlock(note(without), withSheet));
     assert.equal(tr.sheetPath(ORCHARD_WEB), "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Orchard Lane Web 2026 timesheet.md");
-    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\narea: "[[A|⭕.A]]"\n---\n\n## Time Report\n\nB\n');
+    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\narea: "[[A|⭕.A]]"\n---\n\nB\n', "no heading: the whole note is the report (OBS-167)");
     assert.match(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Nobody/Nobody.md" }, "s"), /No time entries\.\n%% time:end %%$/);
+});
+
+test("OBS-167: a timesheet's report has no heading; the one above an existing timesheet's block goes", () => {
+    const sheet = (body) => `---\ntags:\n  - timesheet\n---\n\n${body}\n`;
+    const write = (content) => { const edits = tr.blockEdits(content, BLOCK, { heading: false }); return edits.error ? edits : edits.reduce(apply, content); };
+    // The heading above the block goes, with the blank line under it, even when the block is unchanged
+    assert.equal(write(sheet(`## Time Report\n\n${BLOCK}`)), sheet(BLOCK));
+    assert.equal(write(sheet("## Time tracking\n\n%% time:start %%\nold\n%% time:end %%")), sheet(BLOCK));
+    assert.deepEqual(plain(tr.blockEdits(sheet(BLOCK), BLOCK, { heading: false })), [], "and the next run has nothing to do");
+    // A heading that isn't right above the block, or a hidden line between them, stays
+    assert.equal(write(sheet(`## Time Report\n\nMine\n\n${BLOCK}`)), sheet(`## Time Report\n\nMine\n\n${BLOCK}`));
+    assert.equal(write(sheet(`## Time Report\n%% kept %%\n${BLOCK}`)), sheet(`## Time Report\n%% kept %%\n${BLOCK}`));
+    // A timesheet whose block was deleted gets it back at the end, with no heading
+    assert.equal(write(sheet("Notes")), sheet(`Notes\n\n${BLOCK}`));
+    // Project notes keep theirs
+    assert.equal(write(sheet(BLOCK)).includes("## Time Report"), false);
+    assert.equal(tr.blockEdits(sheet("Notes"), BLOCK).reduce(apply, sheet("Notes")), sheet(`Notes\n\n## Time Report\n\n${BLOCK}`));
 });
 
 test("final review: the timesheet marks a billed entry moved to another day ⚠️, as Invoice holds it back", () => {

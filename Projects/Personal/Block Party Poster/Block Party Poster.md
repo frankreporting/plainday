@@ -28,6 +28,9 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 %% time:start %%
 [[Block Party Poster timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
+> [!warning] Problems
+> - [[Block Party Poster]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)
+
 **Hours:**		1.00 used
 
 ### By Week
@@ -37,7 +40,4 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 | [[2026w38\|9/13-9/19]] | 1.00 | 1.00 |  | 1.00 |  |
 | **Total** | **1.00** | **1.00** |  | **1.00** |  |
 
-### Problems
-
-- [[Block Party Poster]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)
 %% time:end %%

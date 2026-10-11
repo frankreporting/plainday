@@ -5,12 +5,8 @@ tags:
 area: "[[Garden Club Newsletter|⭕.Personal.Garden Club Newsletter]]"
 ---
 
-## Time Report
-
 %% time:start %%
 *Updated 2026-09-16 9:00pm*
-
-Every entry of [[Garden Club Newsletter]], newest day first.
 
 ### 🆓 time: 2.50 hrs
 

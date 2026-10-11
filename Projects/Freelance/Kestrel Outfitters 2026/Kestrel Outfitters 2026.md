@@ -37,6 +37,9 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 %% time:start %%
 [[Kestrel Outfitters 2026 timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
+> [!warning] Problems
+> - [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm
+
 **Hours:**		20.50 used | 39.50 left
 **Earned:**		$1,947.50 | $1,258.75 unpaid
 **Eff. rate:**		$87.53/hr
@@ -65,7 +68,4 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 | ✅ | [[1001-KES]] | 9/12/26 | 8/27 – 9/11/26 | 7.25 | $688.75 |
 |  | **Total** |  |  | **7.25** | **$688.75** |
 
-### Problems
-
-- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm
 %% time:end %%

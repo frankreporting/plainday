@@ -159,12 +159,12 @@ export function invoiceNotes(vault, billing) {
 }
 
 // Link helpers the app builds from the vault: project links and weekly/monthly link targets
-export function linkers(tr, vault, index = makeIndex(tr, vault)) {
+export function linkers(tr, vault) {
     const count = new Map();
     for (const p of vault.notes.keys()) count.set(basename(p), (count.get(basename(p)) ?? 0) + 1);
     const link = (p) => {
         const target = vault.notes.has(p) && count.get(basename(p)) === 1 ? basename(p) : p.replace(/\.md$/, "");
-        return tr.reportLink(target, p, index);
+        return tr.reportLink(target, p);
     };
     const linkTarget = (unit, key) => {
         const own = vault.notes.has(`${FOLDERS[unit]}/${key}.md`) ? 1 : 0;
@@ -175,9 +175,10 @@ export function linkers(tr, vault, index = makeIndex(tr, vault)) {
 
 const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
 
-// writeBlock's plan with onlyIfChanged (blockEdits): the note as it would be afterwards, or { error }
-export function planBlock(tr, content, block) {
-    const edits = tr.blockEdits(content, block, { onlyIfChanged: true });
+// writeBlock's plan with onlyIfChanged (blockEdits): the note as it would be afterwards, or { error }.
+// `heading` false for a timesheet, as writeTimesheet passes it.
+export function planBlock(tr, content, block, { heading = true } = {}) {
+    const edits = tr.blockEdits(content, block, { onlyIfChanged: true, heading });
     if (edits.error) return { error: edits.error };
     return { content: edits.reduce(apply, content) };
 }
@@ -188,16 +189,16 @@ export function planBlock(tr, content, block) {
 export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
     const index = makeIndex(tr, vault);
     const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault, billing), index, billing);
-    const { link, linkTarget } = linkers(tr, vault, index);
+    const { link, linkTarget } = linkers(tr, vault);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();
     const targets = { project: [], week: [], month: [], year: [] };
 
-    const write = (p, block, created) => {
+    const write = (p, block, created, { heading = true } = {}) => {
         blocks.set(p, block);
         const before = vault.notes.get(p)?.text ?? null;
         const base = before ?? created;
-        const r = planBlock(tr, base, block);
+        const r = planBlock(tr, base, block, { heading });
         if (r.error) { errors.push({ path: p, error: r.error }); return; }
         if (r.content !== before) changes.push({ path: p, before, after: r.content });
     };
@@ -227,7 +228,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
         if (tr.takesTimesheet(p, index, model) && mine && (vault.notes.has(sheetPath) || tr.sheetHasEntries(model, p))) {
             const fm = vault.notes.get(p).fm;
             const area = `[[${basename(p)}|${[].concat(fm.aliases ?? [])[0] || basename(p)}]]`;
-            write(sheetPath, block, tr.sheetNote(SHEET_ID, area, block));
+            write(sheetPath, block, tr.sheetNote(SHEET_ID, area, block), { heading: false });
             targets.sheet.push(sheetPath);
             sheet = basename(sheetPath);
         }
