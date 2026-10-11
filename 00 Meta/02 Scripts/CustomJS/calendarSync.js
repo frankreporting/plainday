@@ -1315,10 +1315,11 @@ class CalendarSync {
         return true;
     }
 
-    // A meeting log, as AddTaskNote.isLog and MoveToProject know one: filed in a `logs/` folder,
-    // or tagged #log (in its frontmatter or its text) wherever it waits
+    // A meeting log, as AddTaskNote.isLog and MoveToProject know one: filed in a `›logs` folder
+    // (AddTaskNote.isLogsFolderName), or tagged #log (in its frontmatter or its text) wherever it waits
     isLog(file, cache) {
-        if (/(?:^|\/)logs\/[^/]+$/i.test(file.path ?? "")) return true;
+        const folder = (file.path ?? "").split("/").slice(-2, -1)[0];
+        if (folder && globalThis.customJS?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .concat((cache.tags ?? []).map((t) => t.tag))

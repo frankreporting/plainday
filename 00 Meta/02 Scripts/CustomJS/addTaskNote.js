@@ -18,6 +18,11 @@ class AddTaskNote {
     static PROJECT_MARK = "⭕";
     // The `status` values that mean a project or area is finished, lowercased (see isFinished)
     static FINISHED = ["done", "canceled", "cancelled"];
+    // A project or area keeps its meeting logs in a folder of their own, `›logs`: the U+203A puts it
+    // above the project folders in Notebook Navigator's sort (OBS-164)
+    static LOGS_FOLDER = "›logs";
+    // Notebook Navigator's icon for a logs folder the system makes (a Lucide name)
+    static LOGS_ICON = "history";
     // A line's link to its own note: a task's note, or an event's meeting log (OBS-57). 🗒️ is
     // written (OBS-87); 🔗, the symbol before it, is still read, and a phone may add or drop the
     // U+FE0F on either.
@@ -212,8 +217,8 @@ class AddTaskNote {
         return pick && note.parent?.path === this.folderFor(note, pick) ? pick : this.lineHome(note);
     }
 
-    // The folder a note goes into for `home` (an area or project note): its folder, or its `logs/`
-    // for a meeting log
+    // The folder a note goes into for `home` (an area or project note): its folder, or its logs
+    // folder for a meeting log
     folderFor(note, home) {
         return this.isLog(note) ? this.logsFolder(home) : home.parent.path;
     }
@@ -369,10 +374,10 @@ class AddTaskNote {
         return !!cache && this.tagsOf(cache).includes("area");
     }
 
-    // A meeting log: a note tagged #log, or any note in a `logs` folder. Logs are filed in their
-    // project's `logs/`, so one waiting in 10 Inbox still goes there when it's moved.
+    // A meeting log: a note tagged #log, or any note in a `›logs` folder. Logs are filed in their
+    // project's `›logs`, so one waiting in 10 Inbox still goes there when it's moved.
     isLog(file) {
-        if (file.parent?.name?.toLowerCase() === "logs") return true;
+        if (this.isLogsFolderName(file.parent?.name)) return true;
         const cache = app.metadataCache.getFileCache(file);
         return !!cache && this.tagsOf(cache).includes("log");
     }
@@ -431,7 +436,7 @@ class AddTaskNote {
             .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
     }
 
-    // The note already in `home`'s folder (or its `logs/`, for a log) with the same name as `note`,
+    // The note already in `home`'s folder (or its logs folder, for a log) with the same name as `note`,
     // other than `note` itself; null when there's none. A line whose note has that twin in the picked
     // project is pointed at the twin rather than the move being refused (OBS-36).
     sameNameIn(note, home) {
@@ -442,7 +447,7 @@ class AddTaskNote {
     }
 
     // Moves `note` into the folder of `home` (an area or project note), updating links to it; a
-    // meeting log (see isLog) goes into that folder's `logs/`, where the Log template files them.
+    // meeting log (see isLog) goes into that folder's logs folder, where the Log template files them.
     // The other lines that link the note follow it: their ⭕ for where it was becomes `home`'s, as
     // MoveToProject does (OBS-90). `line` is the active editor's line the command is writing itself,
     // which is left to it. False, with a notice, when the target already has a note of the same name.
@@ -459,7 +464,7 @@ class AddTaskNote {
         const from = filed && this.isLiveHome(filed) ? filed : null, oldPath = note.path;
         // Collected before the move: Obsidian lists links by the path they point at
         const sources = mover?.linkingNotes?.(note) ?? [];
-        if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+        await this.makeFolder(folder);
         await app.fileManager.renameFile(note, target);
         let lines = null;
         try {
@@ -471,11 +476,36 @@ class AddTaskNote {
         return true;
     }
 
-    // The `logs` folder of `home` (an area or project note): the one it has, spelled as it is, or
-    // where a new one goes
+    // Whether a folder's name makes it a logs folder: `›logs`, in any case
+    isLogsFolderName(name) {
+        return String(name ?? "").toLowerCase() === AddTaskNote.LOGS_FOLDER;
+    }
+
+    // The logs folder of `home` (an area or project note); see logsFolderIn
     logsFolder(home) {
-        const path = `${home.parent.path}/logs`;
+        return this.logsFolderIn(home.parent.path);
+    }
+
+    // The `›logs` folder in the folder at `parent`: the one it has, spelled as it is, or where a new one goes
+    logsFolderIn(parent) {
+        const path = `${parent}/${AddTaskNote.LOGS_FOLDER}`;
         return (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path))?.path ?? path;
+    }
+
+    // Makes the folder at `path` unless it's there. A logs folder made this way gets Notebook
+    // Navigator's history icon, when Navigator is installed.
+    async makeFolder(path) {
+        if (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path)) return;
+        const made = await app.vault.createFolder(path);
+        if (!this.isLogsFolderName(path.slice(path.lastIndexOf("/") + 1))) return;
+        const folder = made?.path ? made : app.vault.getAbstractFileByPath(path);
+        const navigator = app.plugins?.plugins?.["notebook-navigator"]?.api?.metadata;
+        if (!folder || !navigator?.setFolderMeta) return;
+        try {
+            await navigator.setFolderMeta(folder, { icon: AddTaskNote.LOGS_ICON });
+        } catch (e) {
+            console.error(`AddTaskNote: couldn't set ${path}'s icon in Notebook Navigator`, e);
+        }
     }
 
     // The ⭕ project and 🗃️ area links in the run of links that ends a line: [{ raw, linkpath }], in

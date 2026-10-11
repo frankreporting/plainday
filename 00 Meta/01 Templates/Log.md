@@ -19,17 +19,19 @@ const dailyFile = dailyPath ? app.vault.getFileByPath(dailyPath) : null;
 const eventLine = sync && dailyFile ? tp.user.recordEvent(await app.vault.cachedRead(dailyFile), { log: logName, title: cleanTitle }, sync).line : null;
 const lineHomes = eventLine && tasks ? tasks.lineProjects(eventLine, dailyPath) : { projects: [], allLive: false };
 
-// Logs live in a logs folder under their project or area; Esc leaves the log in 10 Inbox
+// Logs live in a `›logs` folder under their project or area (AddTaskNote.logsFolderIn); Esc leaves
+// the log in 10 Inbox
 const pickedFile = lineHomes.allLive && lineHomes.projects.length === 1
 	? lineHomes.projects[0]
 	: await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select the log's project or area (Esc: Inbox)...");
 let area = "";
 let folder = "10 Inbox";
 if (pickedFile) {
-	folder = pickedFile.parent.path + "/logs";
+	folder = tasks ? tasks.logsFolderIn(pickedFile.parent.path) : pickedFile.parent.path + "/›logs";
 	const parentAlias = [].concat(app.metadataCache.getFileCache(pickedFile)?.frontmatter?.aliases ?? [])[0] || pickedFile.basename;
 	area = "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"";
-	if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+	if (tasks) await tasks.makeFolder(folder);
+	else if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
 }
 let filed = true;   // false when a log with this name is already there: that one is opened, this note goes
 if (tp.file.path(true) != folder + "/" + logName + ".md") {

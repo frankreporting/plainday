@@ -337,7 +337,7 @@ test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter move
     keys.Enter();
     assert.equal(await task, "move");
 
-    const log = helper.confirmMove({ basename: "2026-09-18 Printer call", parent: { name: "logs" } }, { basename: "Garden Club Newsletter" }, { basename: "Household" });
+    const log = helper.confirmMove({ basename: "2026-09-18 Printer call", parent: { name: "›logs" } }, { basename: "Garden Club Newsletter" }, { basename: "Household" });
     assert.equal(opened.title, "Move log?");
     assert.deepEqual(rowsOf(), [["Log", "2026-09-18 Printer call"], ["From", "⭕ Garden Club Newsletter"], ["To", "🗃️ Household"]]);
     opened.close();
@@ -391,21 +391,56 @@ const withApp = (paths, extra = {}) => {
     return { files, app };
 };
 
-test("isLog: a note in a logs folder (any case), or one tagged #log wherever it waits; logsFolder: the one there, as it's spelled", () => {
+test("isLog: a note in a ›logs folder (any case), or one tagged #log wherever it waits; logsFolder: the one there, as it's spelled, else a new ›logs (OBS-164)", () => {
     const { files, app } = withApp([
-        ["Projects/A/logs/2026-09-02 Kickoff.md", []],
-        ["Projects/B/Logs/2026-09-03 Standup.md", []],
+        ["Projects/A/›logs/2026-09-02 Kickoff.md", []],
+        ["Projects/B/›Logs/2026-09-03 Standup.md", []],
         ["10 Inbox/2026-09-18 Printer call.md", "log"],
         ["10 Inbox/Order toner.md", ["task"]],
         ["Projects/A/A.md", ["project"]],
         ["Projects/B/B.md", ["project"]],
+        ["Projects/C/logs/2026-09-04 Review.md", []],
+        ["Projects/C/C.md", ["project"]],
     ]);
-    app.vault.getAbstractFileByPathInsensitive = (p) => (p.toLowerCase() === "projects/b/logs" ? { path: "Projects/B/Logs" } : null);
+    const folders = { "projects/a/›logs": "Projects/A/›logs", "projects/b/›logs": "Projects/B/›Logs", "projects/c/logs": "Projects/C/logs" };
+    app.vault.getAbstractFileByPathInsensitive = (p) => (folders[p.toLowerCase()] ? { path: folders[p.toLowerCase()] } : null);
     const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({ app }));
     const helper = new Cls();
-    assert.deepEqual(files.slice(0, 4).map((f) => helper.isLog(f)), [true, true, true, false]);
-    assert.equal(helper.logsFolder(files[4]), "Projects/A/logs", "none yet: where a new one goes");
-    assert.equal(helper.logsFolder(files[5]), "Projects/B/Logs");
+    assert.deepEqual([0, 1, 2, 3, 6].map((i) => helper.isLog(files[i])), [true, true, true, false, false], "a folder still named logs isn't read");
+    assert.equal(helper.logsFolder(files[4]), "Projects/A/›logs");
+    assert.equal(helper.logsFolder(files[5]), "Projects/B/›Logs", "spelled as it is");
+    assert.equal(helper.logsFolder(files[7]), "Projects/C/›logs", "an old logs folder isn't used: rename it");
+    assert.deepEqual(["›logs", "›LOGS", "logs", "_logs", "›logs2", "", undefined].map((n) => helper.isLogsFolderName(n)),
+        [true, true, false, false, false, false, false]);
+});
+
+test("makeFolder: a logs folder it makes gets Navigator's history icon; another folder, one already there, or no Navigator gets none (OBS-164)", async () => {
+    const made = [], icons = [];
+    const there = new Set(["Projects/A/›logs"]);
+    const app = {
+        vault: {
+            getAbstractFileByPath: (p) => (there.has(p) ? { path: p } : null),
+            createFolder: async (p) => { made.push(p); there.add(p); return { path: p }; },
+        },
+        plugins: { plugins: { "notebook-navigator": { api: { metadata: { setFolderMeta: async (f, meta) => icons.push([f.path, meta]) } } } } },
+    };
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({ app, console }));
+    const helper = new Cls();
+    await helper.makeFolder("Projects/B/›logs");
+    await helper.makeFolder("Projects/C");
+    await helper.makeFolder("Projects/A/›logs");
+    assert.deepEqual(made, ["Projects/B/›logs", "Projects/C"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(icons)), [["Projects/B/›logs", { icon: "history" }]], "the icon only, from the vm's own objects");
+    delete app.plugins.plugins["notebook-navigator"];
+    await helper.makeFolder("Projects/D/›logs");
+    assert.deepEqual(made.at(-1), "Projects/D/›logs", "made without Navigator, and nothing fails");
+    app.plugins.plugins["notebook-navigator"] = { api: { metadata: { setFolderMeta: async () => { throw new Error("no"); } } } };
+    const errors = [];
+    const quiet = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+        vm.createContext({ app, console: { error: (...a) => errors.push(a.join(" ")) } })))();
+    await quiet.makeFolder("Projects/E/›logs");
+    assert.equal(made.at(-1), "Projects/E/›logs", "an icon that can't be set doesn't stop the folder");
+    assert.equal(errors.length, 1);
 });
 
 test("isSameNote: the note itself, its current path, or the path it was just moved from; nothing else", () => {
@@ -451,7 +486,7 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
     assert.equal(shown.placeholder, 'Move "B" to which project or area? (Esc: cancel)');
 });
 
-test("moveInto: a clash is refused before anything is made; a log from the Inbox goes into logs/", async () => {
+test("moveInto: a clash is refused before anything is made; a log from the Inbox goes into a new ›logs/", async () => {
     const made = [];
     const renamed = [];
     const notices = [];
@@ -470,8 +505,8 @@ test("moveInto: a clash is refused before anything is made; a log from the Inbox
     assert.equal(await helper.moveInto(files[2], files[0]), false);
     assert.deepEqual(notices, ["Projects/A already has a note named Order toner, so nothing changed"]);
     assert.equal(await helper.moveInto(files[3], files[0]), true);
-    assert.deepEqual(made, ["Projects/A/logs"]);
-    assert.deepEqual(renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/A/logs/2026-09-18 Printer call.md"]]);
+    assert.deepEqual(made, ["Projects/A/›logs"]);
+    assert.deepEqual(renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/A/›logs/2026-09-18 Printer call.md"]]);
 });
 
 // A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a Log template that
@@ -500,7 +535,7 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
     app.fileManager = { renameFile: async (f, to) => {
         calls.push(`move ${f.path} to ${to}`);
         f.path = to;
-        f.parent = files.find((g) => g.path.startsWith(to.slice(0, to.lastIndexOf("/")).replace(/\/logs$/, "")))?.parent ?? f.parent;
+        f.parent = files.find((g) => g.path.startsWith(to.slice(0, to.lastIndexOf("/")).replace(/\/›?logs$/, "")))?.parent ?? f.parent;
     } };
     const getFileByPath = app.vault.getFileByPath;
     app.vault.getFileByPath = (p) => (p === tpl.path ? tpl : getFileByPath(p));
@@ -559,7 +594,7 @@ test("invoke on an event line whose log exists: nothing is made, and the line an
     // A log in the Inbox has no project: the line's ⭕ files it there without asking
     const inbox = await invokeOn("- [<] 11:00am\tPrinter call [[Tin Works|⭕]]", { paths });
     assert.equal(inbox.text, "- [<] 11:00am\tPrinter call [[Tin Works|⭕]] [[2026-09-14 Printer call|🗒️]]");
-    assert.ok(inbox.calls.includes("move 10 Inbox/2026-09-14 Printer call.md to Projects/Freelance/Tin Works/logs/2026-09-14 Printer call.md"), inbox.calls.join("\n"));
+    assert.ok(inbox.calls.includes("move 10 Inbox/2026-09-14 Printer call.md to Projects/Freelance/Tin Works/›logs/2026-09-14 Printer call.md"), inbox.calls.join("\n"));
 });
 
 test("an event time with nothing after it is a line with no title; a title a file can't be named after makes a log name that works (fix round 4)", () => {
@@ -593,4 +628,16 @@ test("isFinished: a status of Done or Canceled, in any case, finishes a project 
     assert.equal(finished({ status: ["Active", "Done"] }), true, "a list counts when any value does");
     assert.equal(add.isFinished(null), false);
     assert.equal(add.isFinished({}), false, "no frontmatter");
+});
+
+test("one place for the logs folder's name: the Log template and every other script ask AddTaskNote (OBS-164)", () => {
+    const template = fs.readFileSync(new URL("../../01 Templates/Log.md", here), "utf8");
+    assert.match(template, /folder = tasks \? tasks\.logsFolderIn\(pickedFile\.parent\.path\)/, "the Log template files a log where AddTaskNote says");
+    assert.match(template, /if \(tasks\) await tasks\.makeFolder\(folder\);/, "and makes the folder through it, icon and all");
+    // No other CustomJS class spells a logs folder in its code (comments aside)
+    const dir = new URL("../CustomJS/", here);
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".js") && n !== "addTaskNote.js")) {
+        const code = fs.readFileSync(new URL(name, dir), "utf8").split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/ .*$/, "")).join("\n");
+        assert.doesNotMatch(code, /["'`/]›?logs\b/i, `${name} spells the logs folder itself`);
+    }
 });

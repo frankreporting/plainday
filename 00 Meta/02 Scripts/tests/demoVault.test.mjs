@@ -288,7 +288,7 @@ test("demo vault: every meeting log has its line in its daily note, and its time
     let timeless = 0;
     for (const p of logs) {
         const { fm } = vault.notes.get(p);
-        assert.equal(dirname(p).split("/").pop(), "logs", `${p} is in a logs folder`);
+        assert.equal(dirname(p).split("/").pop(), "›logs", `${p} is in a ›logs folder (OBS-164)`);
         const day = vault.notes.get(`${DAYS}/${fm.date}.md`);
         assert.ok(day, `${p}: no daily note for ${fm.date}`);
         assert.equal(basename(p).slice(0, 10), fm.date);

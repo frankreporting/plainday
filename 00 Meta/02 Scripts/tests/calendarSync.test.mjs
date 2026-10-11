@@ -1249,3 +1249,15 @@ test("adopting a log's timeless line keeps its 🆓, in either form", () => {
         assert.equal(after, note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"), line);
     }
 });
+
+test("isLog: a note in a ›logs folder (AddTaskNote's name, any case) or tagged #log; without AddTaskNote only the tag counts (OBS-164)", () => {
+    const helper = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const context = vm.createContext({ app: {}, window: { moment }, customJS: { Schedule: { dailyOpts: () => ({ folder: DAYS }) }, AddTaskNote: helper }, console });
+    const sync = new (vm.runInContext(code + "\n;CalendarSync", context))();
+    const isLog = (path, tags = []) => sync.isLog({ path }, { frontmatter: { tags } });
+    assert.deepEqual(["Projects/Studio/›logs/2026-09-16 Planning.md", "Projects/Studio/›Logs/2026-09-16 Planning.md", "Projects/Studio/logs/2026-09-16 Planning.md",
+        "Projects/Studio/2026-09-16 Planning.md", "Projects/Studio/›logs/2025/2025-03-02 Kickoff.md", "›logs/x.md"].map((p) => isLog(p)),
+    [true, true, false, false, false, true]);
+    assert.ok(isLog("10 Inbox/2026-09-18 Printer call.md", ["log"]), "tagged, wherever it waits");
+    assert.ok(!cs.isLog({ path: "Projects/Studio/›logs/2026-09-16 Planning.md" }, {}), "no AddTaskNote: the folder doesn't decide");
+});

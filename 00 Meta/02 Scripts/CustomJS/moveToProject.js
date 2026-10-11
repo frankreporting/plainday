@@ -5,7 +5,7 @@ class MoveToProject {
 
     // Moves the note you're on into a project or area picked from the menu AddProjectLink uses, or,
     // when Notebook Navigator's pane has the focus, the notes selected there. Where each one goes:
-    //   - a meeting log (see AddTaskNote.isLog) into the project's `logs/`, made if missing;
+    //   - a meeting log (see AddTaskNote.isLog) into the project's `›logs`, made if missing;
     //   - a project or area's folder note: the whole folder, sub-projects and logs included;
     //   - anything else into the project's folder.
     // Obsidian's move updates links, and SyncArea sets `area`; this never writes `area` itself.
@@ -161,15 +161,15 @@ class MoveToProject {
     }
 
     // Where each of `items` goes in `into` (the picked project or area's folder; `logs` is its logs
-    // folder, as it's spelled if it exists), in order: [{ ...item, into, to, skip }]. `skip` is null
+    // folder, AddTaskNote.logsFolderIn), in order: [{ ...item, into, to, skip }]. `skip` is null
     // to move it, or why not:
     //   "inside": it's in a folder that's moving too, and goes along with it;
     //   "loop": a folder into itself or one of its own folders;
     //   "here": already there (a note already in that project or area, a log anywhere in its
-    //     `logs/`, a folder already in that folder, anything already at the very path);
+    //     `›logs`, a folder already in that folder, anything already at the very path);
     //   "clash": something of that name is there already (`exists`, any case), or another item in
     //     this move is going there.
-    plan(items, into, exists, logs = `${into}/logs`) {
+    plan(items, into, exists, logs = customJS.AddTaskNote.logsFolderIn(into)) {
         const folders = items.filter((i) => i.folder).map((i) => i.path);
         const parentOf = (path) => path.slice(0, Math.max(path.lastIndexOf("/"), 0));
         const under = (path, folder) => path.toLowerCase().startsWith(`${folder.toLowerCase()}/`);
@@ -214,7 +214,7 @@ class MoveToProject {
         // Collected before the move: Obsidian lists links by the path they point at
         const sources = step.home || file.extension !== "md" ? [] : this.linkingNotes(file);
         const folder = step.to.slice(0, step.to.lastIndexOf("/"));
-        if (!this.exists(folder)) await app.vault.createFolder(folder);
+        if (!this.exists(folder)) await helper.makeFolder(folder);
         await app.fileManager.renameFile(file, step.to);
         return { moved: true, ...(await this.relinkAll(sources, file, from, home, step.path)) };
     }

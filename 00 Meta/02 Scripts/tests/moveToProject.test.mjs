@@ -109,7 +109,7 @@ const VAULT = {
     "Projects/Freelance/Freelance.md": { tags: ["area"] },
     "Projects/Freelance/Kestrel/Kestrel.md": { tags: ["project"] },
     "Projects/Freelance/Kestrel/Draft wireframes.md": { tags: ["task"] },
-    "Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md": { tags: ["log"] },
+    "Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md": { tags: ["log"] },
     "Projects/Freelance/Kestrel/Catalog/Catalog.md": { tags: ["project"] },
     "Projects/Freelance/Kestrel/Catalog/Shot list.md": { tags: ["task"] },
     "Projects/Freelance/Pinecrest/Pinecrest.md": { tags: ["project"] },
@@ -135,10 +135,13 @@ test("plan: a note goes into the project's folder, a log into its logs/, a proje
         item("Projects/Freelance/Kestrel/Catalog", { folder: true }),
     ], "Projects/Household", () => false);
     assert.deepEqual([note.to, note.skip], ["Projects/Household/Loose idea.md", null]);
-    assert.deepEqual([log.to, log.skip], ["Projects/Household/logs/2026-09-18 Printer call.md", null]);
+    assert.deepEqual([log.to, log.skip], ["Projects/Household/›logs/2026-09-18 Printer call.md", null], "no logs folder yet: a new ›logs (OBS-164)");
     assert.deepEqual([folder.to, folder.skip], ["Projects/Household/Catalog", null]);
-    const [spelled] = mover.plan([item("10 Inbox/2026-09-18 Printer call.md", { log: true })], "Projects/Household", () => false, "Projects/Household/Logs");
-    assert.equal(spelled.to, "Projects/Household/Logs/2026-09-18 Printer call.md", "a logs folder spelled another way is used as it is");
+    const [spelled] = mover.plan([item("10 Inbox/2026-09-18 Printer call.md", { log: true })], "Projects/Household", () => false, "Projects/Household/›Logs");
+    assert.equal(spelled.to, "Projects/Household/›Logs/2026-09-18 Printer call.md", "a logs folder spelled another way is used as it is");
+    // By default the plan asks AddTaskNote, which finds the project's ›logs
+    const kestrel = setup(VAULT).mover.plan([item("10 Inbox/2026-09-18 Printer call.md", { log: true })], "Projects/Freelance/Kestrel", () => false);
+    assert.equal(kestrel[0].to, "Projects/Freelance/Kestrel/›logs/2026-09-18 Printer call.md");
 });
 
 test("plan: already there is a skip, not a move; nothing is pulled up out of a folder in its own project", () => {
@@ -148,8 +151,9 @@ test("plan: already there is a skip, not a move; nothing is pulled up out of a f
     assert.deepEqual(skips([item(`${P}/Write copy.md`, { homeFolder: P })], P), ["here"]);
     assert.deepEqual(skips([item(`${P}/Drafts/Write copy.md`, { homeFolder: P })], P), ["here"], "in a plain folder inside the project: already in it");
     assert.deepEqual(skips([item(`${P}/Drafts/brief.pdf`, { homeFolder: P })], P), ["here"], "any file");
-    assert.deepEqual(skips([item(`${P}/logs/2026-09-02 Kickoff.md`, { log: true, homeFolder: P })], P), ["here"]);
-    assert.deepEqual(skips([item(`${P}/logs/2025/2025-03-02 Kickoff.md`, { log: true, homeFolder: P })], P), ["here"], "a log in a folder inside logs/");
+    assert.deepEqual(skips([item(`${P}/›logs/2026-09-02 Kickoff.md`, { log: true, homeFolder: P })], P), ["here"]);
+    assert.deepEqual(skips([item(`${P}/›logs/2025/2025-03-02 Kickoff.md`, { log: true, homeFolder: P })], P), ["here"], "a log in a folder inside logs/");
+    assert.deepEqual(skips([item(`${P}/›Logs/2025/2025-03-02 Kickoff.md`, { log: true, homeFolder: P })], P), ["here"], "any case");
     // A log that's in its project but not in its logs/ gets filed there
     assert.deepEqual(skips([item(`${P}/2026-09-02 Kickoff.md`, { log: true, homeFolder: P })], P), [null]);
     assert.deepEqual(skips([item("Projects/Freelance/Kestrel", { folder: true })], "Projects/Freelance"), ["here"]);
@@ -232,7 +236,7 @@ test("relinkStale: a ⭕ for the project the note left becomes the new one's, a 
 test("relinkStale: event lines, timed or not; code blocks, comments and line endings are left as they are", () => {
     const { mover, file } = setup(VAULT);
     const resolve = (l) => context.app.metadataCache.getFirstLinkpathDest(l);
-    const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
+    const log = file("Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md");
     const [kestrel, pinecrest] = [file("Projects/Freelance/Kestrel/Kestrel.md"), file("Projects/Freelance/Pinecrest/Pinecrest.md")];
     const args = { note: log, from: kestrel, home: pinecrest, link: "[[Pinecrest|⭕]]", resolve };
     const strip = (text) => mover.relinkStale(text, args).text;
@@ -259,9 +263,9 @@ test("relinkStale: right after a move, a lookup by name can return a stale entry
     // Seen in a vault with a rename-handling plugin: for under 50ms after a move, the vault holds a
     // second entry at the old path, and a lookup by name returns it when its path is shorter
     const { mover, file } = setup(VAULT);
-    const oldPath = "Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md";
+    const oldPath = "Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md";
     // The log, moved into the catalog's logs/
-    const log = { path: "Projects/Freelance/Kestrel/Catalog/logs/2026-09-14 Homepage review.md", basename: "2026-09-14 Homepage review", extension: "md" };
+    const log = { path: "Projects/Freelance/Kestrel/Catalog/›logs/2026-09-14 Homepage review.md", basename: "2026-09-14 Homepage review", extension: "md" };
     const [kestrel, catalog] = [file("Projects/Freelance/Kestrel/Kestrel.md"), file("Projects/Freelance/Kestrel/Catalog/Catalog.md")];
     const stale = { path: oldPath, basename: log.basename, extension: "md" };
     const resolve = (l) => (l === "2026-09-14 Homepage review" ? stale : context.app.metadataCache.getFirstLinkpathDest(l));
@@ -277,9 +281,9 @@ test("relinkStale: right after a move, a lookup by name can return a stale entry
 test("move: a stale entry at the old path right after the move doesn't stop the ⭕ following the note", async () => {
     const t = setup(VAULT, {
         texts: { [DAY]: "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Kestrel|⭕]]\n" },
-        links: { [DAY]: { "Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md": 1 } },
+        links: { [DAY]: { "Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md": 1 } },
     });
-    const log = t.file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
+    const log = t.file("Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md");
     const oldPath = log.path;
     // After the rename, a lookup by name returns a stale entry at the old path, as the real vault did
     const lookup = t.app.metadataCache.getFirstLinkpathDest;
@@ -290,9 +294,9 @@ test("move: a stale entry at the old path right after the move doesn't stop the 
     };
     t.answer({ pick: "Projects/Freelance/Kestrel/Catalog/Catalog.md" });
     await t.mover.move([log]);
-    assert.deepEqual(t.done.renamed, [[oldPath, "Projects/Freelance/Kestrel/Catalog/logs/2026-09-14 Homepage review.md"]]);
+    assert.deepEqual(t.done.renamed, [[oldPath, "Projects/Freelance/Kestrel/Catalog/›logs/2026-09-14 Homepage review.md"]]);
     assert.equal(t.texts[DAY], "- [<] 10:00am\t[[2026-09-14 Homepage review|Homepage review]] [[Catalog|⭕]]\n");
-    assert.deepEqual(notices, ["Moved 2026-09-14 Homepage review to Projects/Freelance/Kestrel/Catalog/logs. A line linking it now links ⭕ Catalog"]);
+    assert.deepEqual(notices, ["Moved 2026-09-14 Homepage review to Projects/Freelance/Kestrel/Catalog/›logs. A line linking it now links ⭕ Catalog"]);
 });
 
 test("itemFor: a project or area's folder note moves as its folder, finished or not; other notes by themselves", () => {
@@ -348,7 +352,7 @@ test("move: Leave it and Esc on the confirm change nothing", async () => {
     assert.deepEqual(notices, ["Nothing was moved"]);
 });
 
-test("move: an Inbox log goes to the project's logs/ without asking, and a ⭕ its line already had stays", async () => {
+test("move: an Inbox log goes to the project's logs folder (a new ›logs) without asking, and a ⭕ its line already had stays", async () => {
     const daily = "30 Reference/36 Planner/days/2026-09-18.md";
     const t = setup(VAULT, {
         texts: { [daily]: "- [<] 2:00pm\t[[2026-09-18 Printer call|Printer call]] [[Kestrel|⭕]]\n- 2:30pm\n" },
@@ -357,10 +361,10 @@ test("move: an Inbox log goes to the project's logs/ without asking, and a ⭕ i
     t.answer({ pick: "Projects/Freelance/Pinecrest/Pinecrest.md" });
     await t.mover.move([t.file("10 Inbox/2026-09-18 Printer call.md")]);
     assert.deepEqual(t.asked.confirm, [], "it had no project to leave");
-    assert.deepEqual(t.done.created, ["Projects/Freelance/Pinecrest/logs"]);
-    assert.deepEqual(t.done.renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/Freelance/Pinecrest/logs/2026-09-18 Printer call.md"]]);
+    assert.deepEqual(t.done.created, ["Projects/Freelance/Pinecrest/›logs"]);
+    assert.deepEqual(t.done.renamed, [["10 Inbox/2026-09-18 Printer call.md", "Projects/Freelance/Pinecrest/›logs/2026-09-18 Printer call.md"]]);
     assert.deepEqual(t.done.written, [], "the line's ⭕ is its own choice");
-    assert.deepEqual(notices, ["Moved 2026-09-18 Printer call to Projects/Freelance/Pinecrest/logs. A line linking it has ⭕ Kestrel too, so that line's time still counts there, not in Pinecrest"]);
+    assert.deepEqual(notices, ["Moved 2026-09-18 Printer call to Projects/Freelance/Pinecrest/›logs. A line linking it has ⭕ Kestrel too, so that line's time still counts there, not in Pinecrest"]);
 });
 
 test("move: a note with no project moves without asking, and the lines that link it get its new area (OBS-90)", async () => {
@@ -517,7 +521,7 @@ test("MoveToProjectMenu: adds the item to Obsidian's file menus and Notebook Nav
     const [nnFolder] = m.nn.folder;
     assert.deepEqual(m.titles((addItem) => nnFile({ addItem, file: t.file("10 Inbox/Loose idea.md"), selection: { mode: "single", files: [t.file("10 Inbox/Loose idea.md")] } })), ["Move to project…"]);
     assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel") })), ["Move to project…"]);
-    assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel/logs") })), [], "a plain folder");
+    assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel/›logs") })), [], "a plain folder");
 
     t.app.plugins.enabledPlugins.delete("customjs");
     assert.deepEqual(fileMenu(t.file("10 Inbox/Loose idea.md")), [], "CustomJS switched off: no item");
@@ -566,7 +570,7 @@ test("relinkStale: a 🗒️ note link (OBS-87) and an event's log at the end of
     for (const line of ["- [/] Draft wireframes [[Draft wireframes|🗒️]] [[Kestrel|⭕]]", "- [/] Draft wireframes [[Kestrel|⭕]] [[Draft wireframes|🗒️]]"]) {
         assert.equal(relink(line, task), "- [/] Draft wireframes [[Pinecrest|⭕]] [[Draft wireframes|🗒️]]", line);
     }
-    const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
+    const log = file("Projects/Freelance/Kestrel/›logs/2026-09-14 Homepage review.md");
     assert.equal(relink("- [<] 10:00am\tHomepage review [[2026-09-14 Homepage review|🗒️]] [[Kestrel|⭕]]\n- 10:45am\n", log),
         "- [<] 10:00am\tHomepage review [[Pinecrest|⭕]] [[2026-09-14 Homepage review|🗒️]]\n- 10:45am\n");
     assert.equal(relink("- [<] 10:00am\tHomepage review ℹ️ [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]]", log),
@@ -765,7 +769,7 @@ test("OBS-90 re-review: a log left in a finished project takes the line's ⭕ of
     const t = setup({
         ...VAULT,
         [`${OLD}/Old Job.md`]: { tags: ["project"], status: "canceled" },
-        [`${OLD}/logs/2026-09-14 Review.md`]: { tags: ["log"] },
+        [`${OLD}/›logs/2026-09-14 Review.md`]: { tags: ["log"] },
         [`${OLD}/Old task.md`]: { tags: ["task"] },
     }, {
         texts: { [DAY]: "- [<] 2:00pm\tReview [[Pinecrest|⭕]]\n", [DAY2]: "- [x] Old task [[Old Job|⭕]] [[Old task|🗒️]]\n- [x] Loose [[Old task|🗒️]]\n" },
