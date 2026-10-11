@@ -48,7 +48,7 @@ function setup(notes, { texts = {}, links = {}, active = null } = {}) {
         file.parent = folderAt(path.slice(0, path.lastIndexOf("/")));
         file.parent.children.push(file);
         files.push(file);
-        caches.set(file, props === null ? null : { frontmatter: { tags: props.tags ?? [], ...(props.completed ? { completed: true } : {}) } });
+        caches.set(file, props === null ? null : { frontmatter: { tags: props.tags ?? [], ...(props.status ? { status: props.status } : {}), ...(props.completed ? { completed: props.completed } : {}) } });
     }
     const byPath = (p) => [...files, ...folders].find((f) => f.path === p) ?? null;
     const done = { renamed: [], created: [], written: [] };
@@ -121,7 +121,7 @@ const VAULT = {
     "00 Meta/Manual.md": { tags: [] },
     "30 Reference/36 Planner/days/2026-09-18.md": { tags: [] },
     "30 Reference/36 Planner/days/2026-09-14.md": { tags: [] },
-    "90 Archive/Freelance/Marlowe/Marlowe.md": { tags: ["project"], completed: true },
+    "90 Archive/Freelance/Marlowe/Marlowe.md": { tags: ["project"], status: "Done" },
     "90 Archive/Freelance/Marlowe/Final invoice.md": { tags: ["task"] },
 };
 const DAY = "30 Reference/36 Planner/days/2026-09-14.md";
@@ -670,7 +670,7 @@ test("OBS-90 AddProjectLink: a note in no project moves without asking, unless o
 test("OBS-90 AddTaskNote.settle: where an existing note ends up and which project the line names", async () => {
     const t = setup({
         ...VAULT,
-        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], completed: true },
+        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], status: "Done" },
         "Projects/Freelance/Old Job/Old task.md": { tags: ["task"] },
     }, { texts: {}, links: {} });
     const { helper, file } = t;
@@ -703,7 +703,7 @@ test("OBS-90 AddTaskNote.settle: where an existing note ends up and which projec
 test("OBS-90 review: a note in a finished project, a project note that isn't a folder note, and notes that never move", async () => {
     const t = setup({
         ...VAULT,
-        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], completed: true },
+        "Projects/Freelance/Old Job/Old Job.md": { tags: ["project"], status: "Canceled" },
         "Projects/Freelance/Old Job/Old task.md": { tags: ["task"] },
         "Projects/Household/Tires.md": { tags: ["task"] },
     }, { texts: {}, links: {} });
@@ -764,7 +764,7 @@ test("OBS-90 re-review: a log left in a finished project takes the line's ⭕ of
     const OLD = "Projects/Freelance/Old Job";
     const t = setup({
         ...VAULT,
-        [`${OLD}/Old Job.md`]: { tags: ["project"], completed: true },
+        [`${OLD}/Old Job.md`]: { tags: ["project"], status: "canceled" },
         [`${OLD}/logs/2026-09-14 Review.md`]: { tags: ["log"] },
         [`${OLD}/Old task.md`]: { tags: ["task"] },
     }, {
@@ -779,4 +779,27 @@ test("OBS-90 re-review: a log left in a finished project takes the line's ⭕ of
     // Moving a note out of a finished project: a line's ⭕ for it stays (that time may be invoiced)
     await t.helper.moveInto(t.file(`${OLD}/Old task.md`), t.file("Projects/Freelance/Pinecrest/Pinecrest.md"));
     assert.equal(t.texts[DAY2], "- [x] Old task [[Old Job|⭕]] [[Old task|🗒️]]\n- [x] Loose [[Pinecrest|⭕]] [[Old task|🗒️]]\n");
+});
+
+test("OBS-125 isHome: a project or area whose status is Done or Canceled is no home; On Hold and completed alone still are", () => {
+    const { helper, file } = setup({
+        "Projects/Freelance/Freelance.md": { tags: ["area"] },
+        "Projects/Old Area/Old Area.md": { tags: ["area"], status: "Canceled" },
+        "Projects/Freelance/Done Job/Done Job.md": { tags: ["project"], status: "Done" },
+        "Projects/Freelance/Done Job/Leftover.md": { tags: ["task"] },
+        "Projects/Freelance/Dropped/Dropped.md": { tags: ["project"], status: "canceled" },
+        "Projects/Freelance/Paused/Paused.md": { tags: ["project"], status: "On Hold" },
+        "Projects/Freelance/Dated/Dated.md": { tags: ["project"], status: "Active", completed: "2026-09-30" },
+        "Projects/Freelance/New/New.md": { tags: ["project"], status: "To Do" },
+    });
+    const home = (p) => helper.isHome(file(p));
+    assert.equal(home("Projects/Freelance/Freelance.md"), true);
+    assert.equal(home("Projects/Old Area/Old Area.md"), false, "a canceled area");
+    assert.equal(home("Projects/Freelance/Done Job/Done Job.md"), false, "Done");
+    assert.equal(home("Projects/Freelance/Dropped/Dropped.md"), false, "canceled, lowercase");
+    assert.equal(home("Projects/Freelance/Paused/Paused.md"), true, "On Hold isn't finished");
+    assert.equal(home("Projects/Freelance/Dated/Dated.md"), true, "completed is no longer read");
+    assert.equal(home("Projects/Freelance/New/New.md"), true, "a new project's To Do");
+    // A note in a finished project belongs to the area above it, as it did with `completed`
+    assert.equal(helper.homeOf(file("Projects/Freelance/Done Job/Leftover.md")).basename, "Freelance");
 });

@@ -16,6 +16,8 @@ class AddTaskNote {
     // The suffix a home gets on a line: ⭕ for a project, 🗃️ for an area (its Quick Switcher alias)
     static AREA_MARK = "🗃️";
     static PROJECT_MARK = "⭕";
+    // The `status` values that mean a project or area is finished, lowercased (see isFinished)
+    static FINISHED = ["done", "canceled", "cancelled"];
     // A line's link to its own note: a task's note, or an event's meeting log (OBS-57). 🗒️ is
     // written (OBS-87); 🔗, the symbol before it, is still read, and a phone may add or drop the
     // U+FE0F on either.
@@ -344,7 +346,7 @@ class AddTaskNote {
 
     // A task line's ⭕ links, the ones that end it (trailingProjectLinks): { links: link texts,
     // projects: the distinct live projects or areas they point at, in line order, allLive: every
-    // link is one }. Live means tagged #project or #area, under Projects/, and not `completed`.
+    // link is one }. Live means tagged #project or #area, under Projects/, and not finished.
     lineProjects(lineText, sourcePath) {
         const links = this.trailingProjectLinks(lineText);
         const projects = [];
@@ -418,8 +420,15 @@ class AddTaskNote {
     // An area or project note still in progress (exact #area or #project, as pickParent checks)
     isHome(file) {
         const cache = app.metadataCache.getFileCache(file);
-        if (!cache || cache.frontmatter?.completed) return false;
+        if (!cache || this.isFinished(cache)) return false;
         return this.tagsOf(cache).some((t) => t === "area" || t === "project");
+    }
+
+    // A project or area is finished when its `status` is Done or Canceled, in any case (Cancelled
+    // too). Finished ones drop out of the menus that file and link notes; pickParent asks this too.
+    isFinished(cache) {
+        return [].concat(cache?.frontmatter?.status ?? [])
+            .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
     }
 
     // The note already in `home`'s folder (or its `logs/`, for a log) with the same name as `note`,

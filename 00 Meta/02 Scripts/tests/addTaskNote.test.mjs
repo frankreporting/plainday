@@ -583,3 +583,14 @@ test("invoke with a selection: its spaces stay, so the words around it don't run
     const out = await invokeOn(line, { sel: [6, "- [ ] Call the printer ".length], paths });
     assert.equal(out.text, "- [ ] Call the printer tomorrow [[Hawk Ledger|⭕]] [[Call the printer|🗒️]]");
 });
+
+test("isFinished: a status of Done or Canceled, in any case, finishes a project or area; completed doesn't (OBS-125)", () => {
+    const finished = (frontmatter) => add.isFinished({ frontmatter });
+    for (const status of ["Done", "done", "DONE", " Done ", "Canceled", "canceled", "Cancelled"]) assert.equal(finished({ status }), true, status);
+    for (const status of ["To Do", "Active", "On Hold", "In Progress", "", "Done soon"]) assert.equal(finished({ status }), false, status);
+    assert.equal(finished({}), false, "no status");
+    assert.equal(finished({ completed: "2026-09-30" }), false, "completed alone no longer finishes a project");
+    assert.equal(finished({ status: ["Active", "Done"] }), true, "a list counts when any value does");
+    assert.equal(add.isFinished(null), false);
+    assert.equal(add.isFinished({}), false, "no frontmatter");
+});

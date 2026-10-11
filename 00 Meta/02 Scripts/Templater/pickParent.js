@@ -2,8 +2,8 @@
 // and Task templates as tp.user.pickParent(tp, keepFolder, prompt).
 // Replaces dv.pages("#area or #project") with Obsidian's own metadata cache so the
 // templates no longer need Dataview. Matches the exact tags #area and #project only
-// (not nested tags like #project/sample), skips notes with `completed` set in
-// frontmatter, and labels each note by its first alias or, failing that, its name.
+// (not nested tags like #project/sample), skips finished ones (`status` Done or Canceled,
+// AddTaskNote's rule), and labels each note by its first alias or, failing that, its name.
 // Resolves to the picked TFile, or null if the picker is dismissed.
 
 const cacheOf = (f) => app.metadataCache.getFileCache(f);
@@ -20,6 +20,10 @@ const tagsOf = (c) => {
 
 const aliasOf = (f) => [].concat(cacheOf(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
 
+// Finished, by AddTaskNote's rule, so this menu and the commands' menus agree. Without CustomJS
+// the system's commands don't run either; the menu then lists every area and project.
+const finished = (c) => globalThis.customJS?.AddTaskNote?.isFinished?.(c) === true;
+
 async function pickParent(tp, keepFolder, prompt) {
     // A command that already knows the parent hands it over for the one note it's creating, and the
     // menu is skipped for that note only (AddTaskNote, from the project linked on the task line)
@@ -33,7 +37,7 @@ async function pickParent(tp, keepFolder, prompt) {
             return c
                 && tagsOf(c).some((t) => t === "area" || t === "project")
                 && keepFolder(f.parent.path)
-                && !c.frontmatter?.completed;
+                && !finished(c);
         })
         .sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
     return await tp.system.suggester(aliasOf, candidates, false, prompt);

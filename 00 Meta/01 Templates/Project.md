@@ -2,7 +2,7 @@
 tags:
   - template
 ---
-Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It asks which area or project the new project belongs to, creates a project folder there and makes this note its folder note. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". The ConvertToProject command uses this template too.
+Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It asks which area or project the new project belongs to, creates a project folder there and makes this note its folder note. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". Every new project starts at `status: To Do`. The ConvertToProject command uses this template too.
 
 <%*
 tR = "";
@@ -50,6 +50,7 @@ tR += "aliases: [" + JSON.stringify(alias) + "]\n";
 tR += "icon: circle\n";
 tR += "color: red\n";
 tR += "tags: \n- project\n";
+tR += "status: To Do\n";
 tR += "area: " + (area ? area : "") + "\n";
 tR += "start: " + (start ? start : "") + "\n";
 tR += "due: " + (due ? due : "") + "\n";

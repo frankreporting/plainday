@@ -337,7 +337,7 @@ const DEMO = [
     ["Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md", ["log"]],
     ["Projects/Household/Household.md", ["area"]],
     ["Projects/Household/Fix the gate.md", ["task"]],
-    ["Projects/Freelance/Old Job/Old Job.md", ["project"], { completed: true }],
+    ["Projects/Freelance/Old Job/Old Job.md", ["project"], { status: "Done" }],
     ["Projects/Freelance/Old Job/Old sub.md", ["task"]],
     ["10 Inbox/Loose idea.md", []],
 ];
