@@ -4,7 +4,7 @@ views:
     filters:
       and:
         - file.tags.contains("project")
-        - '!status.containsAny("Abandoned", "done", "Done")'
+        - '!status.containsAny("Canceled", "done", "Done")'
     groupBy:
       property: status
       direction: ASC
