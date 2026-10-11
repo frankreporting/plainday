@@ -175,7 +175,7 @@ test("placeInPeriod: a task goes to the end of the first checklist, never into t
         const r = Schedule.placeInPeriod(lines.join("\n"), add);
         return { lines: r.content.split("\n"), at: r.at, count: r.count, item: r.item };
     };
-    const REPORT = ["## Time tracking", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", ""];
+    const REPORT = ["## Time Report", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", ""];
 
     // A checklist above the report: its end, as in a daily note
     const week = place(["---", "aliases: Week of 9/13/26", "---", "## This week", "- [x] Brochure proofs", "- [ ] Product list", "\t- the fall colors", "", ...REPORT]);
@@ -184,17 +184,17 @@ test("placeInPeriod: a task goes to the end of the first checklist, never into t
 
     // No checklist: a new one just above the report, after the frontmatter with no blank line
     const month = place(["---", "aliases: September 2026", "---", "", ...REPORT]);
-    assert.deepEqual(month.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time tracking"]);
+    assert.deepEqual(month.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"]);
     assert.deepEqual([month.at, month.count, month.item], [3, 1, 3]);
     const tight = place(["---", "aliases: September 2026", "---", ...REPORT]);
-    assert.deepEqual(tight.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time tracking"], "a blank line before the report");
+    assert.deepEqual(tight.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"], "a blank line before the report");
     assert.deepEqual([tight.at, tight.count, tight.item], [3, 2, 3]);
 
     // After other content, blank lines set it off, so it doesn't run into a list above it
     const year = place(["## Goals", "- Two new clients", "", ...REPORT]);
-    assert.deepEqual(year.lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time tracking"]);
+    assert.deepEqual(year.lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time Report"]);
     assert.deepEqual([year.at, year.count, year.item], [2, 2, 3]);
-    assert.deepEqual(place(["## Goals", "- Two new clients", ...REPORT]).lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time tracking"]);
+    assert.deepEqual(place(["## Goals", "- Two new clients", ...REPORT]).lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time Report"]);
 
     // No report: at the end, ending the note with a newline
     assert.deepEqual(place(["## Goals", "- Two new clients", ""]).lines, ["## Goals", "- Two new clients", "", "- [ ] Call the printer", ""]);
@@ -205,11 +205,16 @@ test("placeInPeriod: a task goes to the end of the first checklist, never into t
     assert.deepEqual([empty.at, empty.count, empty.item], [0, 2, 0]);
 
     // A checklist inside the report's markers isn't one; one below the report is
-    assert.deepEqual(place(["## Time tracking", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]).lines,
-        ["- [ ] Call the printer", "", "## Time tracking", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]);
+    assert.deepEqual(place(["## Time Report", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]).lines,
+        ["- [ ] Call the printer", "", "## Time Report", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]);
     assert.deepEqual(place([...REPORT.slice(0, -1), "", "- [ ] Later", ""]).lines.slice(-3), ["- [ ] Later", "- [ ] Call the printer", ""]);
     // The markers without their heading still mark the report
     assert.deepEqual(place(["Notes", "", "%% time:start %%", "%% time:end %%"]).lines, ["Notes", "", "- [ ] Call the printer", "", "%% time:start %%", "%% time:end %%"]);
+    // A report still under its heading from before OBS-133, or in another case, is the report too, heading and all
+    for (const heading of ["## Time tracking", "## Time Tracking", "## Time report"]) {
+        assert.deepEqual(place(["---", "aliases: September 2026", "---", heading, "", "%% time:start %%", "%% time:end %%"]).lines.slice(3, 6),
+            ["- [ ] Call the printer", "", heading], heading);
+    }
 });
 
 const DAY = `${PLANNER}/days/2026-09-16.md`;
@@ -226,7 +231,7 @@ const WEEK_TEXT = [
     "---", "aliases: Week of 9/20/26", "---",
     "## This week",
     "- [ ] Pick the paper stock", "\t- 2:00pm - 3:00pm",
-    "", "## Time tracking", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", "",
+    "", "## Time Report", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", "",
 ].join("\n");
 const PROJECT = "Projects/Kestrel/Kestrel.md";
 const PROJECT_TEXT = ["---", "tags: [project]", "---", "- [ ] Plan the spring sale", "- [ ] Book the photographer", ""].join("\n");

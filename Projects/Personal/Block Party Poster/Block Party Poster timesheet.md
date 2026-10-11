@@ -5,7 +5,7 @@ tags:
 area: "[[Block Party Poster|⭕.Personal.Block Party Poster]]"
 ---
 
-## Time tracking
+## Time Report
 
 %% time:start %%
 *Updated 2026-09-16 9:00pm*

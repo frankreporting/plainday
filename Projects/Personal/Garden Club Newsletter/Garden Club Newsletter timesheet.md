@@ -5,7 +5,7 @@ tags:
 area: "[[Garden Club Newsletter|⭕.Personal.Garden Club Newsletter]]"
 ---
 
-## Time tracking
+## Time Report
 
 %% time:start %%
 *Updated 2026-09-16 9:00pm*
@@ -20,4 +20,5 @@ Every entry of [[Garden Club Newsletter]], newest day first.
 |  | 7:30pm - 8:45pm | 1.25 | September issue: collect member updates |  |
 | **[[2026-09-02\|Wed 9/2]]** |  | **1.25** |  |  |
 |  | 7:00pm - 8:15pm | 1.25 | Newsletter layout template |  |
+
 %% time:end %%

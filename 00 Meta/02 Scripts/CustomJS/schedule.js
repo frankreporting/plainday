@@ -337,15 +337,16 @@ class Schedule {
     static CHECKBOX = /^\s*[-*+]\s+\[.\]/;
 
     // Where lines go in a weekly, monthly or yearly note: the end of its first checklist, as in a daily
-    // note, but never inside the time report (its "## Time tracking" heading, or its start marker, down
-    // to its end marker). With no checklist, they start one just above the report, or at the end when
+    // note, but never inside the time report (its "## Time Report" heading in any case, "## Time tracking"
+    // before OBS-133, or its start marker, down to its end marker). With no checklist, they start one just
+    // above the report, or at the end when
     // there's none, set off by a blank line from what's above (none straight after the frontmatter) and
     // by another from the report. Returns { content, at, count, item }: the new content, the line the
     // insert starts at, how many lines it adds, and the line of the first one moved there.
     static placeInPeriod(content, newLines) {
         const lines = content.split("\n");
         const fmEnd = lines[0]?.trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
-        const start = lines.findIndex((l, i) => i > fmEnd && (/^##\s+time tracking$/i.test(l.trim()) || l.trim() === "%% time:start %%"));
+        const start = lines.findIndex((l, i) => i > fmEnd && (/^##\s+time\s+(?:report|tracking)$/i.test(l.trim()) || l.trim() === "%% time:start %%"));
         const endMark = start === -1 ? -1 : lines.findIndex((l, i) => i >= start && l.trim() === "%% time:end %%");
         const end = endMark === -1 ? start : endMark;
         const inReport = (i) => start !== -1 && i >= start && i <= end;

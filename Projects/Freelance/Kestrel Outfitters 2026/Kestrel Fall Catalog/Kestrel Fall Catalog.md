@@ -23,21 +23,20 @@ Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|
 - [ ] Shoot day on the 24th
 - [ ] Deliver edited selects
 
-## Time tracking
+## Time Report
 
 %% time:start %%
-[[Kestrel Fall Catalog timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+[[Kestrel Fall Catalog timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
-| Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
-| ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| 4 | 3.50 |  | 3.50 | 3.17 |  | $95/hr | $332.50 |
+**Hours:**		3.50 used
+**Earned:**		$332.50 | $332.50 unpaid
+**Eff. rate:**		$95.00/hr
 
-| Week | Entries | Billable | 🆓 | Total | Exact | Earned |
-| ---- | ------: | -------: | -: | ----: | ----: | -----: |
-| **Total** | **4** | **3.50** |  | **3.50** | **3.17** | **$332.50** |
-| [[2026w38\|9/13-9/19]] | 4 | 3.50 |  | 3.50 | 3.17 | $332.50 |
+### By Week
 
-### Problems
+| Week | Exact | Total | 🆓 | Billable | Earned |
+| ---- | ----: | ----: | -: | -------: | -----: |
+| [[2026w38\|9/13-9/19]] | 3.17 | 3.50 |  | 3.50 | $332.50 |
+| **Total** | **3.17** | **3.50** |  | **3.50** | **$332.50** |
 
-None.
 %% time:end %%

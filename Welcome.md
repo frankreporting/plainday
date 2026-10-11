@@ -15,7 +15,7 @@ This is a small, made-up vault that shows the Obsidian PM system at work: a free
 5. **The week's report:** [[2026w38]], then [[2026-09]] and [[2026]].
 6. **Archived work:** [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]] sits in 90 Archive. Its entries on [[2026-08-27|8/27/26]] and [[2026-08-28|8/28/26]] are left out of every report.
 
-Everything under "## Time tracking" is written by the TimeReport command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
+Everything under "## Time Report" is written by the TimeReport command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
 
 ## Basic commands
 

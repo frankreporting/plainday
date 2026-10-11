@@ -23,19 +23,19 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 - [x] First layout
 - [ ] Print copies and put them up around the block
 
-## Time tracking
+## Time Report
 
 %% time:start %%
-[[Block Party Poster timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+[[Block Party Poster timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
-| Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
-| ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| 1 | 1.00 |  | 1.00 | 1.00 |  |  |  |
+**Hours:**		1.00 used
 
-| Week | Entries | Billable | 🆓 | Total | Exact | Earned |
-| ---- | ------: | -------: | -: | ----: | ----: | -----: |
-| **Total** | **1** | **1.00** |  | **1.00** | **1.00** |  |
-| [[2026w38\|9/13-9/19]] | 1 | 1.00 |  | 1.00 | 1.00 |  |
+### By Week
+
+| Week | Exact | Total | 🆓 | Billable | Earned |
+| ---- | ----: | ----: | -: | -------: | -----: |
+| [[2026w38\|9/13-9/19]] | 1.00 | 1.00 |  | 1.00 |  |
+| **Total** | **1.00** | **1.00** |  | **1.00** |  |
 
 ### Problems
 

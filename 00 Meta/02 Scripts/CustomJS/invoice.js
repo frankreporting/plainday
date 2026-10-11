@@ -414,14 +414,25 @@ class Invoice {
     }
 
     // The projects with time to bill: those with an ended, billable, hourly entry on no invoice, and the
-    // projects above them that invoice their sub-projects
+    // projects above them that invoice their sub-projects; and the flat fees with time and no `earned`
     async pickProject(tr, billing, index) {
         const working = new Notice("Working out what's unbilled…", 0);
         let model;
         try { ({ model } = await tr.currentModel({ index })); } finally { working.hide(); }
         const candidates = new Set();
+        const money = new Map();
+        const moneyOf = (p) => { if (!money.has(p)) money.set(p, tr.moneyOf(p, index).money); return money.get(p); };
         for (const e of model.entries) {
-            if (!e.project || !e.billable || !billing.hourly(e.project, model) || tr.isArchived(e.project)) continue;
+            if (!e.project || tr.isArchived(e.project)) continue;
+            if (model.money.get(e.project)?.type === "flat") {
+                // Every flat fee its time is part of that isn't earned yet: its own, and any set above it
+                for (let p = e.project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+                    seen.add(p);
+                    if (moneyOf(p).fee && !moneyOf(p).earned && !tr.isArchived(p)) candidates.add(p);
+                }
+                continue;
+            }
+            if (!e.billable || !billing.hourly(e.project, model)) continue;
             const through = billing.billedThrough(e.project, tr, index).date;
             if (billing.standing(e, model.billing.ledger, through).kind !== "open") continue;
             candidates.add(e.project);
@@ -447,8 +458,15 @@ class Invoice {
         });
     }
 
-    // Makes a draft invoice for `project`
+    // Makes a draft invoice for `project`; for a flat fee, records when it was earned instead
     async create(project, tr, billing, index) {
+        if (tr.moneyOf(project, index).money.type === "flat") {
+            // A flat project that invoices its sub-projects' time can do either
+            const both = billing.truthy(tr.prop(index.props(project) ?? {}, "include_subprojects"));
+            const pick = both ? await this.pickOne(["Record when its flat fee was earned", "Invoice its sub-projects' time"], `${tr.basename(project)}: which? (Esc: cancel)`) : 0;
+            if (pick === null) return;
+            if (pick === 0) { await this.earnFlat(project, tr, index); return; }
+        }
         const settings = await this.settings(tr);
         if (!settings) return;
         if (settings.problem) { new Notice(`${settings.problem} in ${tr.basename(Invoice.SETTINGS)}; fix it there, then run Invoice again`, 0); return; }
@@ -517,6 +535,69 @@ class Invoice {
         const hours = sel.entries.reduce((s, e) => s + tr.rounded(e.minutes), 0);
         new Notice(`${name}: a draft for ${tr.hours(hours)} hours`);
         await this.refreshReport();
+    }
+
+    // The note whose `rate` is the flat fee `project` is part of: itself, or the nearest project above
+    // it that sets one; null when none does
+    feeHolder(project, tr, index) {
+        for (let p = project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+            seen.add(p);
+            if (tr.moneyOf(p, index).money.fee) return p;
+        }
+        return null;
+    }
+
+    // A flat fee can't be invoiced yet (OBS-165). Until it can, Invoice asks when the fee was earned and
+    // sets `earned` on the note that sets the fee: TimeReport counts the fee as that day's Earnings
+    // (OBS-133). Run again, it changes the date.
+    async earnFlat(project, tr, index) {
+        const name = tr.basename(project);
+        const holder = this.feeHolder(project, tr, index);
+        if (!holder) { new Notice(`${name} is a flat fee with no \`rate\`; set its fee first`, 0); return; }
+        if (holder !== project) { new Notice(`${name} is part of ${tr.basename(holder)}'s flat fee; run Invoice on ${tr.basename(holder)}`, 0); return; }
+        const m = tr.moneyOf(holder, index).money;
+        const fee = tr.money(Math.round(m.fee * 100)).replace(/\.00$/, "");
+        const date = await this.askDate(m.earned ? `${name}'s ${fee} fee: earned on (now ${tr.shortDate(m.earned)})` : `${name}'s ${fee} fee: earned on`);
+        if (!date) return;
+        // A day still to come is fine (a fee invoiced ahead): the report counts it in its period now, and
+        // the project's summary shows the date, so a year read wrong ("2/1" in October) is easy to see
+        const file = app.vault.getFileByPath(holder);
+        const read = this.nextChange(file);
+        await app.fileManager.processFrontMatter(file, (fm) => {
+            // The property as it's already spelled, if it is
+            const key = Object.keys(fm).find((k) => k.toLowerCase() === "earned") ?? "earned";
+            fm[key] = date;
+        });
+        // The report reads properties from the metadata cache, which can lag the edit
+        await read;
+        new Notice(`${name}: its ${fee} fee counts as earned on ${tr.shortDate(date)}`);
+        await this.refreshReport();
+    }
+
+    // Resolves when the metadata cache next reads `file`, or after two seconds
+    nextChange(file) {
+        return new Promise((resolve) => {
+            const done = () => { app.metadataCache.offref(ref); clearTimeout(timer); resolve(); };
+            const ref = app.metadataCache.on("changed", (f) => { if (f === file) done(); });
+            const timer = setTimeout(done, 2000);
+        });
+    }
+
+    // The index of the item picked from `items`, or null when dismissed
+    pickOne(items, placeholder) {
+        const { FuzzySuggestModal } = customJS.obsidian;
+        return new Promise((resolve) => {
+            let picked = null;
+            const modal = new (class extends FuzzySuggestModal {
+                getItems() { return items; }
+                getItemText(item) { return item; }
+                onChooseItem(item) { picked = items.indexOf(item); }
+                // Obsidian closes the modal before it reports the choice
+                onClose() { setTimeout(() => resolve(picked), 0); }
+            })(app);
+            modal.setPlaceholder(placeholder);
+            modal.open();
+        });
     }
 
     // Says why nothing can be billed, and returns false; true when there's something to bill. On a
@@ -709,7 +790,7 @@ class Invoice {
         const hours = sel.entries.reduce((s, e) => s + tr.rounded(e.minutes), 0);
         const rows = billing.rows(billing.snapshot(sel.entries, model, tr));
         const cents = rows.reduce((s, r) => s + r.amount, 0);
-        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems, [], (p) => tr.basename(p)).filter((l) => l !== "None.").map((l) => l.replace(/^- /, ""))];
+        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems, [], (p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
         const plain = (s) => String(s).replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2").replace(/\[\[([^\]]*)\]\]/g, "$1");
         return new Promise((resolve) => {
             let go = false;

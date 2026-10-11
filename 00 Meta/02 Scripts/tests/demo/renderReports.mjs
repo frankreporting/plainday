@@ -16,7 +16,8 @@
 //     beside the project note when it has entries, with SHEET_ID as its id);
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
-//   - writeBlock's plan: a blank line above "## Time tracking", then placeBlock unless sameBlock;
+//   - writeBlock's plan (blockEdits): the old "## Time tracking" heading renamed "## Time Report", a
+//     blank line above it, then placeBlock unless sameBlock;
 //   - the project `link` and the weekly/monthly `linkTarget` (a name, or a path when names clash).
 // What it can't reproduce exactly (see the report in demoVault.test.mjs for the checks that stand in):
 //   - `now`: the app leaves out entries that haven't ended yet. The demo's entries are all in the
@@ -174,14 +175,11 @@ export function linkers(tr, vault, index = makeIndex(tr, vault)) {
 
 const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
 
-// writeBlock's plan with onlyIfChanged: the note as it would be afterwards, or { error }
+// writeBlock's plan with onlyIfChanged (blockEdits): the note as it would be afterwards, or { error }
 export function planBlock(tr, content, block) {
-    const blank = tr.blankLineAbove(content);
-    const fixed = blank ? apply(content, blank) : content;
-    if (tr.sameBlock(fixed, block)) return { content: fixed };
-    const place = tr.placeBlock(fixed, block);
-    if (place.error) return { error: place.error };
-    return { content: apply(fixed, place) };
+    const edits = tr.blockEdits(content, block, { onlyIfChanged: true });
+    if (edits.error) return { error: edits.error };
+    return { content: edits.reduce(apply, content) };
 }
 
 // Everything a TimeReport run would do to the vault:

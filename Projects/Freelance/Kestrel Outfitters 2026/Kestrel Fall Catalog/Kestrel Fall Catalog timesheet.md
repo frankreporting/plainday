@@ -5,7 +5,7 @@ tags:
 area: "[[Kestrel Fall Catalog|⭕.Freelance.Kestrel Outfitters 2026.Kestrel Fall Catalog]]"
 ---
 
-## Time tracking
+## Time Report
 
 %% time:start %%
 *Updated 2026-09-16 9:00pm*
@@ -22,4 +22,5 @@ Every entry of [[Kestrel Fall Catalog]], newest day first.
 |  |  | 1:00pm - 1:50pm | 1.00 | Plan the catalog shoot | call sheet |  |
 |  |  | 2:00pm - 3:05pm | 1.25 | Shot list for catalog |  |  |
 |  |  | 3:10pm - 3:25pm | 0.25 | Book the studio space |  |  |
+
 %% time:end %%

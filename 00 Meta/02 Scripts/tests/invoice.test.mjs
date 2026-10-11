@@ -296,6 +296,66 @@ test("askDate: a month and day without a year is the closer one, since billing l
     assert.deepEqual(asked, [{ title: "Bill through", nearest: true }]);
 });
 
+test("Invoice on a flat project asks when its fee was earned, and sets `earned` on the note that sets the fee (OBS-133)", async () => {
+    const POSTER = "Projects/Work/Poster/Poster.md", PRINT = "Projects/Work/Poster/Print/Print.md";
+    const idx = tr.makeIndex([
+        { path: POSTER, tags: ["project"], props: { rate: 1200, rate_type: "flat", Earned: "2026-09-01" } },
+        { path: PRINT, tags: ["project"] },
+        ...INDEX_NOTES,
+    ]);
+    const notices = [], titles = [], written = [];
+    const fm = { rate: 1200, rate_type: "flat", Earned: "2026-09-01" };
+    const DatePrompt = {
+        open(title, onPick) {
+            titles.push(title);
+            const modal = { contentEl: { querySelector: () => null }, close() { this.onClose?.(); } };
+            setTimeout(() => onPick({ date: "2026-09-30" }, modal), 0);
+            return modal;
+        },
+    };
+    // The metadata cache reads a note when its frontmatter changes; Invoice waits for that before refreshing
+    const listeners = new Set(), events = [];
+    const app = {
+        vault: { getFileByPath: (p) => ({ path: p }) },
+        fileManager: { processFrontMatter: async (file, fn) => { fn(fm); written.push(file.path); events.push("written"); for (const l of listeners) l(file); } },
+        metadataCache: { on: (name, fn) => { listeners.add(fn); return fn; }, offref: (fn) => { listeners.delete(fn); events.push("read"); } },
+    };
+    let pick = null;
+    const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { if (pick !== null) this.onChooseItem(this.getItems()[pick]); this.onClose(); } };
+    const context = vm.createContext({ app, setTimeout, clearTimeout, window: { moment: () => ({ format: () => "2026-10-11" }) },
+        Notice: class { constructor(t) { notices.push(t); events.push("notice"); } },
+        customJS: { DatePrompt, obsidian: { Platform: { isDesktop: false }, FuzzySuggestModal } } });
+    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    await invoice.create(POSTER, tr, billing, idx);
+    assert.deepEqual(written, [POSTER]);
+    assert.deepEqual(plain(fm), { rate: 1200, rate_type: "flat", Earned: "2026-09-30" }, "set where it's already spelled, not added twice");
+    assert.deepEqual(titles, ["Poster's $1,200 fee: earned on (now 9/1/26)"]);
+    assert.equal(notices[0], "Poster: its $1,200 fee counts as earned on 9/30/26");
+    assert.deepEqual(events.slice(0, 3), ["written", "read", "notice"], "the report waits for the cache to read the new date");
+    // A sub-project is part of its parent's fee, so it's sent there; nothing is asked or written
+    await invoice.create(PRINT, tr, billing, idx);
+    assert.equal(notices.at(-1), "Print is part of Poster's flat fee; run Invoice on Poster");
+    assert.deepEqual([titles.length, written.length], [1, 1]);
+    assert.equal(invoice.feeHolder(PRINT, tr, idx), POSTER);
+    assert.equal(invoice.feeHolder(WEB, tr, idx), null, "an hourly project has no fee");
+    // A day still to come is fine: a fee invoiced ahead
+    const later = { ...DatePrompt, open(title, onPick) { const modal = { contentEl: { querySelector: () => null }, close() { this.onClose?.(); } }; setTimeout(() => onPick({ date: "2027-02-01" }, modal), 0); return modal; } };
+    context.customJS.DatePrompt = later;
+    await invoice.create(POSTER, tr, billing, idx);
+    assert.equal(fm.Earned, "2027-02-01");
+    assert.ok(notices.includes("Poster: its $1,200 fee counts as earned on 2/1/27"));
+    assert.equal(written.length, 2);
+    context.customJS.DatePrompt = DatePrompt;
+    // A flat project that invoices its sub-projects' time asks which; Esc does nothing
+    const both = tr.makeIndex([{ path: POSTER, tags: ["project"], props: { rate: 1200, rate_type: "flat", include_subprojects: true } }, ...INDEX_NOTES]);
+    pick = null;
+    await invoice.create(POSTER, tr, billing, both);
+    assert.deepEqual([titles.length, written.length], [1, 2], "dismissed: nothing asked or written");
+    pick = 0;
+    await invoice.create(POSTER, tr, billing, both);
+    assert.deepEqual([titles.length, written.length], [2, 3], "the first choice records the earned day");
+});
+
 // ------------------------------------------------------------------ Billed entries folded (OBS-145)
 
 // Invoice with a stand-in for Obsidian: folds as the fold manager keeps them, and the notices shown

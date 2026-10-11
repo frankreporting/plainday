@@ -1,16 +1,18 @@
 class TimeReport {
     // Time reports built from the time entries in daily notes. Runs at startup on the desktop
     // (TimeReportOnStartup), and as the command "CustomJS: TimeReport". It writes only to these
-    // notes, whatever note is open, under "## Time tracking":
-    //   - each project note with entries (or with a block already): a summary row for the project and
-    //     its sub-projects, then a week-by-week breakdown (total first, newest week next), a link to its
-    //     timesheet note, and Problems (which also say what changed since an invoice, OBS-5);
+    // notes, whatever note is open, under "## Time Report" (OBS-133; "## Time tracking" before, renamed
+    // where it heads a block):
+    //   - each project or area note with entries (or with a block already): a link to its timesheet
+    //     note, its hours, Earned and effective rate, By Project when time was logged to a sub-project,
+    //     then By Week or By Month, its invoices, and Problems (which also say what changed since an
+    //     invoice, OBS-5);
     //   - each project's timesheet note, beside its note: every entry, as Billable time and 🆓 time,
     //     with the invoice that billed it (OBS-5), and Problems that say why an entry is ⚠️ (OBS-143);
     //   - each weekly and monthly note in 36 Planner (weeks/, months/, from Notebook Navigator's
-    //     patterns) for a period with entries: that period's summary by project with a total, then
-    //     hours by day (weekly) or by week (monthly), and its Problems;
-    //   - each yearly note (years/): an Earned table and an Hours table, a row per project and a
+    //     patterns) for a period with entries: Hours, by project and by day (weekly) or by week
+    //     (monthly), then Earned, the billed projects' money, and its Problems;
+    //   - each yearly note (years/): an Hours table and an Earned table, a row per project and a
     //     column per month (headers link to the monthly notes), and Problems.
     // On the desktop, missing periodic notes are created first. Weeks run Sunday to Saturday, the
     // same weeks Notebook Navigator names gggg[w]ww.
@@ -57,7 +59,10 @@ class TimeReport {
     //
     // Money comes from project note properties: `rate` (hourly; a sub-project without one uses its
     // parent's), `rate_type` (anything but hourly means no Earned), and a cap from `max_hours`, or
-    // `contract_max` ÷ rate. Earned is billable rounded hours × rate.
+    // `contract_max` ÷ rate. Earned is billable rounded hours × rate. A flat fee's `rate` is the fee,
+    // never Earned by the hour; a project's summary divides it by the hours for an effective rate. A
+    // `rate` on a non-billable note values its time instead: Invested is its rounded hours × that
+    // rate, and never counts as Earned (OBS-156).
     //
     // Time is billable only when it's someone's to bill: the entry has a project, that project's
     // `rate_type` (its own or inherited) isn't `non-billable`, and there's no 🆓 on the entry.
@@ -73,7 +78,12 @@ class TimeReport {
     // `node --test "00 Meta/02 Scripts/tests/*.test.mjs"`.
     static START = "%% time:start %%";
     static END = "%% time:end %%";
-    static HEADING = "## Time tracking";
+    static HEADING = "## Time Report";
+    // The heading before OBS-133, renamed where it heads a block (renameHeading), as is a "## Time
+    // report" in any other case
+    static OLD_HEADING = "## Time tracking";
+    // A project note's By Week table turns into By Month once its entries span more weeks than this
+    static WEEKS_MAX = 13;
     static ARCHIVE = "90 Archive/";
     static QUOTE_MAX = 80;
     static CREATED_KEY = "time-report-created-notes";
@@ -709,6 +719,14 @@ class TimeReport {
         return !!path && path.startsWith(TimeReport.ARCHIVE);
     }
 
+    // A property's date as YYYY-MM-DD ("2026-09-30", "2026-09-30T09:00", a Date), a real day only, or null
+    isoDate(value) {
+        const m = (typeof value?.toISOString === "function" ? value.toISOString() : String(value ?? "")).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+        if (!m) return null;
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+        return d.toISOString().slice(0, 10) === `${m[1]}-${m[2]}-${m[3]}` ? d.toISOString().slice(0, 10) : null;
+    }
+
     // A frontmatter number: 100, "100", "$1,250.00"; else null
     number(value) {
         const n = typeof value === "number" ? value : parseFloat(String(value ?? "").replace(/[$,\s]/g, ""));
@@ -834,40 +852,14 @@ class TimeReport {
             }
         }
 
-        // Per project: `rate` and `rate_type`, each from the project or else its nearest parent that has
-        // one (archived parents count here), the hourly rate that Earned uses, a Rate label and the cap
+        // Per project: its money (moneyOf), and how far up its `rate_type` came from
         const money = new Map();
-        const set = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+        const typed = new Map();     // project → how far up its `rate_type` came from (0: its own), or -1 for none
         for (const p of parent.keys()) {
-            let rateRaw, typeRaw, rateFrom = null;
-            const seen = new Set();
-            for (let up = p; up && !seen.has(up); up = this.parentProject(up, index)) {
-                seen.add(up);
-                const props = index.props?.(up) ?? {};
-                if (rateRaw === undefined && set(this.prop(props, "rate"))) { rateRaw = this.prop(props, "rate"); rateFrom = up; }
-                if (typeRaw === undefined && set(this.prop(props, "rate_type"))) typeRaw = this.prop(props, "rate_type");
-                if (rateRaw !== undefined && typeRaw !== undefined) break;
-            }
-            const amount = rateRaw === undefined ? null : this.number(rateRaw);
-            let type = typeRaw === undefined ? null : String(typeRaw).trim().toLowerCase();
-            if (!type && amount !== null) type = "hourly";
-            // An area is someone's own time unless it says otherwise: with neither `rate` nor
-            // `rate_type` it's non-billable, and isn't asked for one (OBS-51)
-            if (!type && amount === null && this.isAreaOnly(p, index)) type = "non-billable";
-            const rate = type === "hourly" ? amount : null;
-            if (rateRaw !== undefined && amount === null && rateFrom === p) {
-                projectProblems.push({ project: p, message: `has a \`rate\` that isn't a positive number (${String(rateRaw).slice(0, 20)}), so it has no Earned` });
-            } else if (type === "hourly" && amount === null && rateRaw === undefined) {
-                projectProblems.push({ project: p, message: "is hourly but has no `rate`, so it has no Earned" });
-            }
-            const dollars = amount === null ? "" : this.money(Math.round(amount * 100)).replace(/\.00$/, "");
-            const label = !type ? "" : type === "hourly" ? (dollars ? `${dollars}/hr` : "hourly")
-                : type === "flat" ? (dollars ? `${dollars} flat` : "flat") : type;
-            const props = index.props?.(p) ?? {};
-            const maxHours = this.number(this.prop(props, "max_hours"));
-            const contract = this.number(this.prop(props, "contract_max"));
-            const cap = maxHours ?? (contract !== null && rate ? contract / rate : null);
-            money.set(p, { rate, type, label, capMinutes: cap === null ? null : Math.round(cap * 60) });
+            const m = this.moneyOf(p, index);
+            money.set(p, m.money);
+            typed.set(p, m.typedAt);
+            for (const message of m.problems) projectProblems.push({ project: p, message });
         }
 
         // Entries that haven't ended yet aren't work yet: out of hours and Earned alike
@@ -882,15 +874,88 @@ class TimeReport {
         const worked = new Set(counted.map((e) => e.project).filter(Boolean));
         for (const p of [...worked].sort()) {
             const m = money.get(p) ?? {};
+            const ownRate = this.number(this.prop(index.props?.(p) ?? {}, "rate")) !== null;
             if (!m.type) projectProblems.push({ project: p, message: "has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)" });
             // An own `rate` under a non-billable parent earns nothing and now bills nothing either
-            else if (m.type === "non-billable" && this.number(this.prop(index.props?.(p) ?? {}, "rate")) !== null) {
+            else if (m.type === "non-billable" && ownRate && typed.get(p) > 0) {
                 projectProblems.push({ project: p, message: "has its own `rate` but inherits `non-billable`, so its time counts as 🆓; give it a `rate_type` of its own" });
+            }
+            // An area's time is its own unless it says otherwise, so a `rate` alone making it billable is
+            // likely a mistake: a rate meant to value its time takes `rate_type: non-billable` (OBS-156)
+            else if (this.isAreaOnly(p, index) && ownRate && typed.get(p) === -1) {
+                projectProblems.push({ project: p, message: "has a `rate` and no `rate_type`, so its time counts as billable; set one (`hourly`, or `non-billable` to value its time without billing it)" });
             }
         }
 
         problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
-        return { entries: counted, problems, parent, projectProblems, money, events };
+        // Areas, whose notes report by month (OBS-133)
+        const areas = new Set([...parent.keys()].filter((p) => this.isAreaOnly(p, index)));
+        return { entries: counted, problems, parent, projectProblems, money, events, areas };
+    }
+
+    // A project's money: `rate` and `rate_type`, each from the project or else its nearest parent that
+    // has one (archived parents count here), the hourly rate that Earned uses, the rate that values a
+    // non-billable note's time (`invest`, OBS-156), a Rate label, the cap, a flat fee and when it was
+    // earned. { money, typedAt (how far up `rate_type` came from: 0 its own, -1 none), problems }.
+    // Invoice reads a flat fee with it too.
+    moneyOf(p, index) {
+        const problems = [];
+        const set = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+        // Its properties and those of the projects above it, nearest first
+        const chain = [];
+        const seen = new Set();
+        for (let up = p; up && !seen.has(up); up = this.parentProject(up, index)) {
+            seen.add(up);
+            chain.push(index.props?.(up) ?? {});
+        }
+        // Where a property is first set, from `from` up, or -1; and the `rate_type` that applies there
+        const at = (name, from = 0) => chain.findIndex((props, k) => k >= from && set(this.prop(props, name)));
+        const typeOf = (from) => { const k = at("rate_type", from); return k === -1 ? null : String(this.prop(chain[k], "rate_type")).trim().toLowerCase(); };
+        const typeAt = at("rate_type");
+        let rateAt = at("rate");
+        let type = typeOf(0);
+        // A rate set on a non-billable note values its time (OBS-156), down to its non-billable
+        // sub-projects; a sub-project that bills never bills at it, and has no rate unless it sets one
+        const valued = rateAt !== -1 && typeOf(rateAt) === "non-billable";
+        if (valued && type !== "non-billable") rateAt = -1;
+        const rateRaw = rateAt === -1 ? undefined : this.prop(chain[rateAt], "rate");
+        const amount = rateRaw === undefined ? null : this.number(rateRaw);
+        if (!type && amount !== null) type = "hourly";
+        // An area is someone's own time unless it says otherwise: with neither `rate` nor
+        // `rate_type` it's non-billable, and isn't asked for one (OBS-51)
+        if (!type && amount === null && this.isAreaOnly(p, index)) type = "non-billable";
+        const rate = type === "hourly" ? amount : null;
+        // The rate that puts a value on a non-billable note's time: never its client parent's
+        const invest = type === "non-billable" && valued && amount !== null ? amount : null;
+        if (rateRaw !== undefined && amount === null && rateAt === 0) {
+            problems.push(`has a \`rate\` that isn't a positive number (${String(rateRaw).slice(0, 20)}), so it has no Earned`);
+        } else if (type === "hourly" && amount === null && rateRaw === undefined) {
+            problems.push("is hourly but has no `rate`, so it has no Earned");
+        }
+        const dollars = amount === null ? "" : this.money(Math.round(amount * 100)).replace(/\.00$/, "");
+        // A flat fee is a `rate` set where `flat` applies: never an hourly parent's rate
+        const flatFee = type === "flat" && amount !== null && typeOf(rateAt) === "flat";
+        const label = !type ? "" : type === "hourly" ? (dollars ? `${dollars}/hr` : "hourly")
+            : type === "flat" ? (flatFee ? `${dollars} flat` : "flat")
+            : invest !== null ? `${dollars}/hr ${type}` : type;
+        const props = index.props?.(p) ?? {};
+        const maxHours = this.number(this.prop(props, "max_hours"));
+        const contract = this.number(this.prop(props, "contract_max"));
+        const cap = maxHours ?? (contract !== null && rate ? contract / rate : null);
+        // A flat fee, on the note that sets it: a sub-project inside a flat project is part of its fee
+        const fee = flatFee && rateAt === 0 ? amount : null;
+        // The day a flat fee was earned, until a flat fee can be invoiced (OBS-165): `earned` on the
+        // note that sets the fee, which Invoice writes when run on a flat project
+        let earned = null;
+        if (set(this.prop(props, "earned"))) {
+            const raw = this.prop(props, "earned");
+            if (fee === null) problems.push(type === "flat" ? "has an `earned` day, but its flat fee is set above it, so the day goes there" : "has an `earned` day but no flat fee of its own, so it counts for nothing");
+            else {
+                earned = this.isoDate(raw);
+                if (!earned) problems.push(`has an \`earned\` that isn't a date (${String(raw).slice(0, 20)}), so its fee isn't counted as earned`);
+            }
+        }
+        return { money: { rate, type, label, capMinutes: cap === null ? null : Math.round(cap * 60), invest, fee, earned }, typedAt: typeAt, problems };
     }
 
     // Invoice notes (OBS-5): read them, keep what they billed on the model for the timesheets, and
@@ -1008,13 +1073,22 @@ class TimeReport {
 
     static PERIOD_NAME = { week: /^\d{4}w\d{2}$/, month: /^\d{4}-\d{2}$/, year: /^\d{4}$/ };
 
-    // Every week, month and year that has at least one entry: { week: [...], month: [...], year: [...] }
+    // Every week, month and year that has at least one entry, or a flat fee earned in it:
+    // { week: [...], month: [...], year: [...] }
     periodsWithEntries(model) {
         const out = {};
+        const dates = [...model.entries.map((e) => e.date), ...this.earnedFees(model).map((f) => f.date)];
         for (const unit of ["week", "month", "year"]) {
-            out[unit] = [...new Set(model.entries.map((e) => this.periodOf(e.date, unit)))].sort();
+            out[unit] = [...new Set(dates.map((d) => this.periodOf(d, unit)))].sort();
         }
         return out;
+    }
+
+    // The flat fees with an `earned` day: [{ project, date, cents }], archived projects left out. A day
+    // still to come counts now, in its period: a fee invoiced ahead (Brian, 2026-10-11).
+    earnedFees(model) {
+        return [...(model.money ?? new Map())].filter(([p, m]) => m.fee && m.earned && !this.isArchived(p))
+            .map(([project, m]) => ({ project, date: m.earned, cents: Math.round(m.fee * 100) }));
     }
 
     // First and last day (YYYY-MM-DD) of a week key, for its title
@@ -1097,26 +1171,37 @@ class TimeReport {
             .replace(/<%/g, "<\u200B%");   // Templater syntax, which a device could run when the note syncs in
     }
 
-    // Totals in minutes, plus Earned in cents for entries whose project has an hourly rate.
-    // Billable or not was decided in `build`; `money` is only needed for Earned.
+    // Totals in minutes, plus Earned in cents for entries whose project has an hourly rate, and
+    // Invested in cents for entries whose non-billable project has a rate (OBS-156), which never adds to
+    // Earned. Billable or not was decided in `build`; `money` is only needed for Earned and Invested.
     totals(entries, money = new Map()) {
-        const t = { count: 0, exact: 0, billable: 0, free: 0, cents: 0, rated: false };
-        const minutesByRate = new Map();    // "date cents" (a day and an hourly rate in cents) → billable minutes
+        const t = { count: 0, exact: 0, billable: 0, free: 0, cents: 0, rated: false, invested: 0, valued: false };
+        // "date cents" (a day and an hourly rate in cents) → billable minutes, and → a valued note's minutes
+        const minutesByRate = new Map(), minutesByValue = new Map();
+        const add = (map, e, rate, minutes) => {
+            const key = `${e.date} ${Math.round(rate * 100)}`;
+            map.set(key, (map.get(key) ?? 0) + minutes);
+        };
         for (const e of entries) {
             t.count++;
             t.exact += e.minutes;
             const minutes = this.rounded(e.minutes);
             t[e.billable ? "billable" : "free"] += minutes;
-            const rate = money.get(e.project)?.rate;
-            if (rate && e.billable) {
+            const m = money.get(e.project);
+            if (m?.rate && e.billable) {
                 t.rated = true;
-                const key = `${e.date} ${Math.round(rate * 100)}`;
-                minutesByRate.set(key, (minutesByRate.get(key) ?? 0) + minutes);
+                add(minutesByRate, e, m.rate, minutes);
+            } else if (m?.invest) {
+                t.valued = true;
+                add(minutesByValue, e, m.invest, minutes);
             }
         }
         // Hours × rate per day and rate, as an invoice bills them (a row per date and rate, OBS-5): at a
-        // whole-dollar rate every quarter hour is whole cents, and Earned, a timesheet and its invoices agree
-        for (const [key, minutes] of minutesByRate) t.cents += Math.round(minutes * Number(key.split(" ")[1]) / 60);
+        // whole-dollar rate every quarter hour is whole cents, and Earned, a timesheet and its invoices
+        // agree. Invested is priced the same way, so it's what billing that time would have brought in.
+        const price = (map) => [...map].reduce((sum, [key, minutes]) => sum + Math.round(minutes * Number(key.split(" ")[1]) / 60), 0);
+        t.cents = price(minutesByRate);
+        t.invested = price(minutesByValue);
         return t;
     }
 
@@ -1143,108 +1228,242 @@ class TimeReport {
         return t.rated && !(m.type && m.type !== "hourly") ? t.cents : null;
     }
 
-    // Summary table lines for `entries`: a row per project (its own entries only), Unassigned, and All
-    summaryTable(model, entries, link, { total = false } = {}) {
-        if (!entries.length) return ["No time entries."];
-        const b = (bold) => (s) => (bold && s !== "" ? `**${s}**` : s);
-        const row = (name, t, project, bold = false) => {
-            const m = project ? model.money.get(project) ?? {} : {};
-            const f = b(bold);
-            return `| ${f(this.cell(name))} | ${f(t.count)} | ${f(this.hoursCell(t.billable))} | ${f(this.hoursCell(t.free))} | ${f(this.hoursCell(t.billable + t.free))} | ${f(this.hoursCell(t.exact))} | `
-                + `${m.capMinutes ? this.hours(m.capMinutes) : ""} | ${m.label ?? ""} | ${t.rated && !(m.type && m.type !== "hourly") ? f(this.moneyCell(t.cents)) : ""} |`;
-        };
-        const projects = this.ownProjects(entries);
-        const rows = projects.map((p) => row(link(p), this.totals(entries.filter((e) => e.project === p), model.money), p));
+    // A weekly or monthly note's Earnings (OBS-133): a row per project that bills and has billable time
+    // in the period (its own entries), with Billable, Rate and Earned, then All. A flat fee's row is there
+    // when it has time in the period or was earned in it: no hours (they aren't billed by the hour), and
+    // its fee as Earned in the period it was earned (`earned`), else N/A. Non-billable projects and
+    // Unassigned are only in Hours. [] when nothing bills.
+    earnedTable(model, entries, link, scope) {
+        const earned = this.earnedFees(model).filter((f) => this.periodOf(f.date, scope.unit) === scope.key);
+        const flatHere = new Map(earned.map((f) => [f.project, f.cents]));
+        const projects = [...new Set([...this.ownProjects(entries), ...flatHere.keys()])]
+            .sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
+        const rows = [], hourly = [];
+        for (const p of projects) {
+            const m = model.money.get(p) ?? {};
+            if (m.type === "non-billable") continue;
+            if (m.type === "flat") { rows.push([this.cell(link(p)), "–", m.label, flatHere.has(p) ? this.money(flatHere.get(p)) : "N/A"]); continue; }
+            const list = entries.filter((e) => e.project === p);
+            const t = this.totals(list, model.money);
+            if (!t.billable) continue;
+            const cents = this.earnedFor(t, p, model);
+            hourly.push(...list);
+            rows.push([this.cell(link(p)), this.hoursCell(t.billable), m.label ?? "", cents === null ? "" : this.moneyCell(cents)]);
+        }
+        if (!rows.length) return [];
+        // All is priced the way the rows' entries would be invoiced together, as Total is in a project's
+        // tables, plus the flat fees earned here; with only flat fees not earned here it would be blank
+        const t = this.totals(hourly, model.money);
+        const fees = earned.reduce((sum, f) => sum + f.cents, 0);
+        return [...this.tableHead(["Project", "Billable", "Rate", "Earned"]), ...rows.map((r) => this.tableRow(r)),
+            ...(hourly.length || fees ? [this.tableRow(["All", this.hoursCell(t.billable), "", this.moneyCell(t.cents + fees)], true)] : [])];
+    }
 
+    // A project or area note (OBS-133), its sub-projects' time included. By Project, only when time was
+    // logged to a sub-project: the note's own row first (blank when it has none), a row per sub-project,
+    // then Total. Then By Week or By Month (see reportUnit), newest first, then Total, which matches By
+    // Project's. Each table under its own H3; columns as `moneyColumns` says.
+    projectTables(model, entries, scope, link) {
+        if (!entries.length) return ["No time entries."];
+        const subs = this.ownProjects(entries).filter((p) => p !== scope.path);
+        const has = this.moneyColumns(model, [scope.path, ...subs]);
         const out = [];
-        out.push("| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |",
-            "| ------- | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |", ...rows);
-        const unassigned = entries.filter((e) => !e.project);
-        if (unassigned.length) out.push(row("Unassigned", this.totals(unassigned, model.money), null));
-        if (total || projects.length + (unassigned.length ? 1 : 0) > 1) out.push(row("All", this.totals(entries, model.money), null, true));
+        if (subs.length) {
+            const head = ["Project", ...this.numberHeads(has, { rate: true })];
+            out.push("### By Project", "", ...this.tableHead(head));
+            for (const p of [scope.path, ...subs]) {
+                out.push(this.tableRow([this.cell(link(p)), ...this.numberCells(model, entries.filter((e) => e.project === p), has, { project: p, rate: true })]));
+            }
+            out.push(this.tableRow(["Total", ...this.numberCells(model, entries, has, { rate: true })], true), "");
+        }
+        const unit = this.reportUnit(model, scope.path, entries);
+        out.push(`### By ${unit === "week" ? "Week" : "Month"}`, "", ...this.tableHead([unit === "week" ? "Week" : "Month", ...this.numberHeads(has)]));
+        for (const { label, list } of this.periodRows(entries, unit, scope.linkTarget)) {
+            out.push(this.tableRow([label, ...this.numberCells(model, list, has)]));
+        }
+        out.push(this.tableRow(["Total", ...this.numberCells(model, entries, has)], true));
         return out;
     }
 
-    // A project note. The summary: one row without a Project column when nothing was logged to a
-    // sub-project; otherwise a row per project (this one's own time, then each sub-project's), each with
-    // its own Max Hrs, Rate and Earned, and a Total row for the whole project carrying this project's
-    // cap. Then a week-by-week table of only the time logged to this project directly: its total first,
-    // then each week newest first, linking to the weekly note.
-    projectTables(model, entries, scope, link) {
-        if (!entries.length) return ["No time entries."];
-        const own = entries.filter((e) => e.project === scope.path);
-        const subs = this.ownProjects(entries).filter((p) => p !== scope.path);
-        const m = model.money.get(scope.path) ?? {};
-        const cap = (x) => (x.capMinutes ? this.hours(x.capMinutes) : "");
-        const earned = (x, project) => { const c = this.earnedFor(x, project, model); return c === null ? "" : this.moneyCell(c); };
-        const nums = (x) => [x.count, this.hoursCell(x.billable), this.hoursCell(x.free), this.hoursCell(x.billable + x.free), this.hoursCell(x.exact)];
-        const out = [];
+    // Which number columns a project or area note's tables have, from how the projects in them bill
+    // (OBS-133): Exact and Total always; 🆓, Billable, Rate and Earned when any of them bills by the hour
+    // (or by default, with no `rate_type`); Rate and Invested when a non-billable one has a rate that
+    // values its time (OBS-156). A flat fee's hours aren't billed one by one, so it has Exact and Total
+    // only, and its fee is in the summary. { billed, valued }
+    moneyColumns(model, projects) {
+        const m = (p) => model.money.get(p) ?? {};
+        return { billed: projects.some((p) => m(p).type !== "non-billable" && m(p).type !== "flat"), valued: projects.some((p) => m(p).invest) };
+    }
 
-        if (!subs.length) {
-            const t = this.totals(entries, model.money);
-            out.push("| Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |",
-                "| ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |",
-                `| ${[...nums(t), cap(m), m.label ?? "", earned(t, scope.path)].join(" | ")} |`);
-        } else {
-            out.push("| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |",
-                "| ------- | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |");
-            const row = (p, list) => {
-                const x = this.totals(list, model.money), pm = model.money.get(p) ?? {};
-                // The project's cap goes on the Total row, since it covers its sub-projects too
-                return `| ${[this.cell(link(p)), ...nums(x), p === scope.path ? "" : cap(pm), pm.label ?? "", earned(x, p)].join(" | ")} |`;
-            };
-            if (own.length) out.push(row(scope.path, own));
-            for (const p of subs) out.push(row(p, entries.filter((e) => e.project === p)));
-            const t = this.totals(entries, model.money);
-            const b = (v) => (v === "" ? "" : `**${v}**`);
-            out.push(`| ${["Total", ...nums(t), cap(m), "", earned(t, null)].map(b).join(" | ")} |`);
-        }
-        out.push("");
+    // Their headings, in order: Exact, Total, 🆓, Billable, Rate (By Project only), Earned, Invested
+    numberHeads({ billed, valued }, { rate = false } = {}) {
+        return ["Exact", "Total", ...(billed ? ["🆓", "Billable"] : []), ...(rate && (billed || valued) ? ["Rate"] : []),
+            ...(billed ? ["Earned"] : []), ...(valued ? ["Invested"] : [])];
+    }
 
-        if (!own.length) {
-            out.push("No time logged to this project directly; see its sub-projects' notes for their weeks.");
-            return out;
-        }
-        out.push("| Week | Entries | Billable | 🆓 | Total | Exact | Earned |", "| ---- | ------: | -------: | -: | ----: | ----: | -----: |");
-        const line = (name, x, bold) => {
-            const cells = [name, ...nums(x), earned(x, scope.path)];
-            return `| ${(bold ? cells.map((v) => (v === "" ? "" : `**${v}**`)) : cells).join(" | ")} |`;
+    // Their cells for `list`, the row of `project` (its Rate and, when it's hourly, its Earned) or a
+    // row of several projects (a period, a Total: Earned is whatever its hourly entries earned). A
+    // non-billable row leaves its money cells blank.
+    numberCells(model, list, { billed, valued }, { project = null, rate = false } = {}) {
+        const t = this.totals(list, model.money);
+        const earned = this.earnedFor(t, project, model);
+        return [this.hoursCell(t.exact), this.hoursCell(t.billable + t.free),
+            ...(billed ? [this.hoursCell(t.free), this.hoursCell(t.billable)] : []),
+            ...(rate && (billed || valued) ? [project ? model.money.get(project)?.label ?? "" : ""] : []),
+            ...(billed ? [earned === null ? "" : this.moneyCell(earned)] : []),
+            ...(valued ? [t.valued ? this.moneyCell(t.invested) : ""] : [])];
+    }
+
+    // A table's header and separator rows: the first column left-aligned, the numbers right-aligned
+    tableHead(head) {
+        return [this.tableRow(head), this.tableRow(head.map((h, i) => (i === 0 ? "-".repeat(Math.max(3, h.length)) : `${"-".repeat(Math.max(1, h.length - 1))}:`)))];
+    }
+
+    // A table row; a bold one (a Total) bolds every cell that has something in it
+    tableRow(cells, bold = false) {
+        return `| ${(bold ? cells.map((v) => (v === "" ? "" : `**${v}**`)) : cells).join(" | ")} |`;
+    }
+
+    // How a project or area note's time is broken down (OBS-133): an area's by month, since its time
+    // never ends; a project's by week while its entries span WEEKS_MAX weeks or fewer, then by month,
+    // so a year-long project doesn't reach 52 rows
+    reportUnit(model, path, entries) {
+        if (model.areas?.has(path)) return "month";
+        const dates = entries.map((e) => e.date).sort();
+        const sunday = (date) => {
+            const n = Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
+            return n - new Date(n * 864e5).getUTCDay();
         };
-        out.push(line("Total", this.totals(own, model.money), true));
+        return (sunday(dates.at(-1)) - sunday(dates[0])) / 7 + 1 <= TimeReport.WEEKS_MAX ? "week" : "month";
+    }
+
+    // The rows of a By Week or By Month table, newest first: [{ label, list }]. A week links its weekly
+    // note (`9/13-9/19`). By month, each month of the latest entry's year links its monthly note
+    // (`September 2026`), and each earlier year is one row linking its yearly note.
+    periodRows(entries, unit, linkTarget) {
+        const target = (u, key) => (linkTarget ? linkTarget(u, key) : key);
+        const linked = (u, key, label) => {
+            const t = target(u, key);
+            return t === label ? `[[${t}]]` : `[[${t}\\|${label}]]`;
+        };
         const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
-        for (const key of [...new Set(own.map((e) => this.weekKey(e.date)))].sort().reverse()) {
-            const [from, to] = this.weekRange(key);
-            const target = scope.linkTarget ? scope.linkTarget("week", key) : key;
-            out.push(line(`[[${target}\\|${md(from)}-${md(to)}]]`, this.totals(own.filter((e) => this.weekKey(e.date) === key), model.money), false));
+        const keyOf = unit === "week" ? (d) => this.weekKey(d) : (() => {
+            const year = entries.reduce((y, e) => (e.date.slice(0, 4) > y ? e.date.slice(0, 4) : y), "");
+            return (d) => (d.slice(0, 4) === year ? d.slice(0, 7) : d.slice(0, 4));
+        })();
+        return [...new Set(entries.map((e) => keyOf(e.date)))].sort().reverse().map((key) => {
+            const list = entries.filter((e) => keyOf(e.date) === key);
+            if (unit === "week") {
+                const [from, to] = this.weekRange(key);
+                return { label: linked("week", key, `${md(from)}-${md(to)}`), list };
+            }
+            return { label: key.length === 4 ? linked("year", key, key) : linked("month", key, this.monthTitle(key)), list };
+        });
+    }
+
+    // The summary under Timesheet and Updated on a project or area note (OBS-133), its sub-projects
+    // included: a label and a value a line.
+    //   Hours:      20.50 used | 39.50 left        (`| 0.50 over` past the cap; no `left` without one)
+    //   Earned:     $1,947.50 | $1,258.75 unpaid   (when it bills by the hour; see unpaidCents)
+    //   Flat fee:   $1,200 | earned 9/30/26         (a flat fee: its own and its sub-projects' own)
+    //   Eff. rate:  $87.53/hr                      (the effective hourly rate)
+    // The effective rate of a note billed by the hour is Earned over its hours and its non-billable
+    // sub-projects', 🆓 included, so it's at most the rates it bills at; a flat fee's is the fees, and
+    // any Earned below it, over every hour. The earned day shows once every fee in it is earned. Two tabs line the values up in Live Preview's default font (Inter: a
+    // tab is 17.8 px, the labels 52 to 66); Reading view shows a tab as a space.
+    // Used is an hourly note's billable hours, as Invoice's cap warning counts them, and every hour of a
+    // flat fee or a non-billable note. A non-billable note has a summary only when it has a cap.
+    summaryLines(model, entries, path) {
+        const m = model.money.get(path);
+        if (!m) return [];
+        const billed = m.type !== "non-billable";
+        if (!billed && !m.capMinutes) return [];
+        const t = this.totals(entries, model.money);
+        const all = t.billable + t.free;
+        const used = billed && m.type !== "flat" ? t.billable : all;
+        const left = m.capMinutes ? m.capMinutes - used : null;
+        const lines = [["Hours:", `${this.hours(used)} used${left === null ? "" : ` | ${this.hours(Math.abs(left))} ${left < 0 ? "over" : "left"}`}`]];
+        if (billed) {
+            if (t.cents) {
+                const unpaid = this.unpaidCents(model, entries);
+                lines.push(["Earned:", `${this.money(t.cents)}${unpaid > 0 ? ` | ${this.money(unpaid)} unpaid` : ""}`]);
+            }
+            let money = t.cents, minutes = all;
+            if (m.type === "flat") {
+                // A sub-project that sets a flat fee of its own is paid on top of this one's, so both count
+                const holders = [...this.subtree(path, model.parent)].map((p) => model.money.get(p)).filter((x) => x?.fee);
+                const fees = holders.reduce((sum, x) => sum + Math.round(x.fee * 100), 0);
+                const days = holders.map((x) => x.earned);
+                const earned = days.length && days.every(Boolean) ? days.sort().at(-1) : null;
+                if (fees) lines.push(["Flat fee:", `${this.money(fees).replace(/\.00$/, "")}${earned ? ` | earned ${this.shortDate(earned)}` : ""}`]);
+                money += fees;
+            } else {
+                // A flat sub-project's time is paid by its own fee, not this note's rate
+                const flat = this.totals(entries.filter((e) => model.money.get(e.project)?.type === "flat"), model.money);
+                minutes -= flat.billable + flat.free;
+            }
+            if (minutes > 0 && money) lines.push(["Eff. rate:", `${this.money(Math.round((money * 60) / minutes))}/hr`]);
         }
-        return out;
+        return lines.map(([label, value]) => `**${label}**\t\t${value}`);
+    }
+
+    // What's unpaid of `entries`' Earned, in cents, entry by entry as the timesheet stands them: every
+    // billable hourly entry but one covered by `billed_through` or billed on a paid invoice. One that
+    // changed since a paid invoice billed it is unpaid for the time it gained. So a paid invoice counts
+    // for what it billed whatever the rate or the entry is now, and an entry on two counts once.
+    unpaidCents(model, entries) {
+        const standing = this.sheetStanding(model);
+        const open = [];
+        for (const e of entries) {
+            if (!e.billable || this.hourlyCents(model, e) === null) continue;
+            const s = standing(e);
+            const paid = s.invoice?.status === "paid";
+            if (s.kind === "before" || (s.kind === "billed" && paid)) continue;
+            if (s.kind === "changed" && paid) {
+                const gained = this.rounded(e.minutes) - s.row.billed;
+                if (gained > 0) open.push({ ...e, minutes: gained });
+                continue;
+            }
+            open.push(e);
+        }
+        return this.totals(open, model.money).cents;
     }
 
     // A yearly note: a row per project (its own entries only), then Unassigned and All; a
     // column per month, headed with a link to that monthly note, then the year. `measure` is
-    // "earned" (dollars) or "hours" (billable + 🆓).
+    // "earned" (dollars) or "hours" (billable + 🆓). Earned has only the projects whose billable hours
+    // earned something by the hour (a row with no rate would be blank), and the flat fees earned that
+    // year, each in the month it was earned; no Unassigned, and [] without them.
     yearTable(model, entries, scope, link, measure) {
-        if (!entries.length) return ["No time entries."];
+        const fees = measure === "earned" ? this.earnedFees(model).filter((f) => f.date.slice(0, 4) === scope.key) : [];
+        const earning = (p) => this.earnedFor(this.totals(entries.filter((e) => e.project === p), model.money), p, model) > 0;
+        const projects = measure === "hours" ? this.ownProjects(entries)
+            : [...new Set([...this.ownProjects(entries).filter(earning), ...fees.map((f) => f.project)])].sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
+        if (measure === "earned" && !projects.length) return [];
+        if (measure === "hours" && !entries.length) return ["No time entries."];
         const months = TimeReport.SHORT_MONTHS.map((name, i) => ({ name, key: `${scope.key}-${String(i + 1).padStart(2, "0")}` }));
         const head = months.map(({ name, key }) => `[[${scope.linkTarget ? scope.linkTarget("month", key) : key}\\|${name}]]`);
         const out = [`| Project | ${head.join(" | ")} | ${scope.key} |`, `| ------- | ${months.map(() => "--:").join(" | ")} | --: |`];
-        const value = (list, project) => {
-            if (!list.length) return "";
+        // A month's (or with `month` null, the year's) Earned: what the entries earned by the hour, and
+        // the flat fees earned then (the project's, or every one on the All row)
+        const value = (list, project, month = null) => {
+            const flat = measure === "earned" ? fees.filter((f) => (project ? f.project === project : true) && (!month || f.date.startsWith(month + "-"))).reduce((s, f) => s + f.cents, 0) : 0;
+            if (!list.length && !flat) return "";
             const t = this.totals(list, model.money);
             if (measure === "hours") return this.hoursCell(t.billable + t.free);
-            const c = this.earnedFor(t, project, model);
+            const c = (list.length ? this.earnedFor(t, project, model) ?? 0 : 0) + flat;
             return c ? this.money(c).replace(/\.00$/, "") : "";
         };
         const row = (name, list, project, bold = false) => {
             const b = (v) => (bold && v ? `**${v}**` : v);
-            const cells = months.map(({ key }) => b(value(list.filter((e) => e.date.startsWith(key + "-")), project)));
+            const cells = months.map(({ key }) => b(value(list.filter((e) => e.date.startsWith(key + "-")), project, key)));
             return `| ${bold ? `**${name}**` : name} | ${cells.join(" | ")} | ${b(value(list, project))} |`;
         };
-        for (const project of this.ownProjects(entries)) {
+        for (const project of projects) {
             out.push(row(this.cell(link(project)), entries.filter((e) => e.project === project), project));
         }
         const unassigned = entries.filter((e) => !e.project);
-        if (unassigned.length) out.push(row("Unassigned", unassigned, null));
+        if (unassigned.length && measure === "hours") out.push(row("Unassigned", unassigned, null));
         out.push(row("All", entries, null, true));
         return out;
     }
@@ -1330,7 +1549,7 @@ class TimeReport {
         }
         const noProject = entries.filter((e) => !e.project).length;
         if (noProject) out.push(`- ${noProject} ${noProject === 1 ? "entry has" : "entries have"} no project (see Unassigned)`);
-        return out.length ? out : ["None."];
+        return out;
     }
 
     // A billed entry that changed since its invoice was made, or an entry on two invoices (OBS-5). A
@@ -1555,31 +1774,41 @@ class TimeReport {
     // [[basename|⭕ basename]]); inside a table its `|` is escaped (see cell).
     render(model, scope, stamp, link = (p) => `[[${this.basename(p)}]]`) {
         // A project's timesheet link opens the block, beside when it was updated
-        const top = scope.kind === "project" && scope.sheet ? `[[${scope.sheet}|View Timesheet]] | *Updated ${stamp}*` : `*Updated ${stamp}*`;
+        const top = scope.kind === "project" && scope.sheet ? `[[${scope.sheet}|Timesheet]] | *Updated ${stamp}*` : `*Updated ${stamp}*`;
         const out = [TimeReport.START, top, ""];
+        // Problems only when there's something to say (OBS-133)
+        const problems = (mine) => {
+            const lines = this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link);
+            if (lines.length) out.push("### Problems", "", ...lines);
+        };
 
-        if (scope.kind === "period" && scope.unit === "year") {
+        // A period's Earnings first, when anything bills, then its Hours (OBS-133)
+        if (scope.kind === "period") {
             const mine = this.inScope(model, scope);
-            out.push("### Earned", "", ...this.yearTable(model, mine.entries, scope, link, "earned"), "");
-            out.push("### Hours", "", ...this.yearTable(model, mine.entries, scope, link, "hours"), "");
-            out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
-        } else if (scope.kind === "period") {
-            const mine = this.inScope(model, scope);
-            out.push("### Totals", "", ...this.summaryTable(model, mine.entries, link, { total: true }), "");
-            if (scope.unit === "week" && mine.entries.length) out.push("### By Day", "", ...this.weekDaysTable(model, mine.entries, scope, link), "");
-            if (scope.unit === "month" && mine.entries.length) out.push("### By Week", "", ...this.monthWeeksTable(model, mine.entries, scope, link), "");
-            out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
+            const earnings = scope.unit === "year" ? this.yearTable(model, mine.entries, scope, link, "earned") : this.earnedTable(model, mine.entries, link, scope);
+            if (earnings.length) out.push("### Earnings", "", ...earnings, "");
+            const hours = !mine.entries.length ? ["No time entries."]
+                : scope.unit === "year" ? this.yearTable(model, mine.entries, scope, link, "hours")
+                : scope.unit === "week" ? this.weekDaysTable(model, mine.entries, scope, link)
+                : this.monthWeeksTable(model, mine.entries, scope, link);
+            out.push("### Hours", "", ...hours, "");
+            problems(mine);
         } else if (scope.kind !== "timesheet") {
             const mine = this.inScope(model, scope);
+            const summary = this.summaryLines(model, mine.entries, scope.path);
+            if (summary.length) out.push(...summary, "");
             out.push(...this.projectTables(model, mine.entries, scope, link), "");
             const invoices = this.invoiceLines(model, scope, link);
             if (invoices.length) out.push("### Invoices", "", ...invoices, "");
-            out.push("### Problems", "", ...this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link));
+            problems(mine);
         } else {
             // Its own note, not the project's: a long table in a note costs every keystroke typed in it
             // (OBS-5 measured about 0.05 ms a row), and nobody types in a timesheet
-            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...this.timesheetLines(model, scope, link).slice(0, -1));
+            out.push(`Every entry of ${link(scope.path)}, newest day first.`, "", ...this.timesheetLines(model, scope, link));
         }
+        while (out.at(-1) === "") out.pop();
+        // A table ends with a blank line, so the end marker can't read as a row of it
+        if (out.at(-1).startsWith("|")) out.push("");
         // Nothing between the markers may open a comment or look like a marker, or the next run can't find the block
         const body = out.slice(1).map((l) => this.defuse(l));
         return [TimeReport.START, ...body, TimeReport.END].join("\n");
@@ -1622,8 +1851,55 @@ class TimeReport {
         return { start: content.length, end: content.length, text: `${lead}${heading}${nl}${nl}${text(block)}${nl}`, inserted: true };
     }
 
+    // The report's heading before OBS-133, "## Time tracking", or "## Time report" in another case,
+    // renamed "## Time Report": the heading right above the block (only blank or hidden lines between
+    // them), or, in a note with no block yet, the first one ("## Time report" before "## Time tracking"),
+    // which the block then goes under instead of a second heading. Never when another heading in the
+    // note already reads "## Time Report", in any case. Only the heading's text changes, so no line
+    // moves. Returns the edit { start, end, text }, or null.
+    renameHeading(content) {
+        const lines = content.split("\n");
+        const { hidden, starts, ends } = this.scan(lines.map((l) => l.replace(/\r$/, "")));
+        const is = (j, heading) => !hidden[j] && lines[j].trim().toLowerCase() === heading.toLowerCase();
+        const either = (j) => is(j, TimeReport.HEADING) || is(j, TimeReport.OLD_HEADING);
+        let h = -1;
+        if (starts.length) {
+            let j = starts[0] - 1;
+            while (j >= 0 && (hidden[j] || !lines[j].trim())) j--;
+            if (j >= 0 && either(j)) h = j;
+        } else if (!ends.length) {
+            h = lines.findIndex((l, j) => is(j, TimeReport.HEADING));
+            if (h === -1) h = lines.findIndex((l, j) => is(j, TimeReport.OLD_HEADING));
+        }
+        if (h === -1 || lines[h].trim() === TimeReport.HEADING) return null;
+        if (lines.some((l, j) => j !== h && is(j, TimeReport.HEADING))) return null;
+        const indent = lines[h].match(/^\s*/)[0].length;
+        const start = lines.slice(0, h).reduce((sum, l) => sum + l.length + 1, 0) + indent;
+        return { start, end: start + lines[h].trim().length, text: TimeReport.HEADING };
+    }
+
+    // What writing `block` does to `content`, as edits applied one after another, each against the
+    // content the ones before it left: the old heading renamed, a blank line above the heading, then
+    // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
+    // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
+    blockEdits(content, block, { onlyIfChanged = true } = {}) {
+        const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
+        const edits = [];
+        let current = content;
+        for (const step of [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)]) {
+            const edit = step(current);
+            if (edit) { edits.push(edit); current = apply(current, edit); }
+        }
+        if (!(onlyIfChanged && this.sameBlock(current, block))) {
+            const place = this.placeBlock(current, block);
+            if (place.error) return place;
+            edits.push(place);
+        }
+        return edits;
+    }
+
     // Room to add things above the report (tasks at the top of a weekly or monthly note): the
-    // "## Time tracking" heading always has a blank line above it. Returns the insertion
+    // "## Time report" heading always has a blank line above it. Returns the insertion
     // { start, end, text } that adds one, or null when it's already there (or there's no heading).
     blankLineAbove(content, heading = TimeReport.HEADING) {
         const nl = content.includes("\r\n") ? "\r\n" : "\n";
@@ -1643,6 +1919,8 @@ class TimeReport {
         const newlines = (s) => (s.match(/\n/g) ?? []).length;
         const first = newlines(content.slice(0, start));
         const last = newlines(content.slice(0, end));
+        // A change inside one line (a heading renamed) moves no line, so a fold on it stays
+        if (first === last && !newlines(text)) return folds.slice();
         const delta = newlines(text) - newlines(content.slice(start, end));
         const moved = [];
         for (const f of folds) {
@@ -2316,16 +2594,8 @@ class TimeReport {
         const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
         // What to do to `content`: [edits in order], or { error }. Nothing when it's already right.
         const plan = (content) => {
-            const edits = [];
-            const blank = this.blankLineAbove(content);
-            const fixed = blank ? apply(content, blank) : content;
-            if (blank) edits.push(blank);
-            if (!(onlyIfChanged && this.sameBlock(fixed, block))) {
-                const place = this.placeBlock(fixed, block);
-                if (place.error) return place;
-                edits.push(place);
-            }
-            return { edits };
+            const edits = this.blockEdits(content, block, { onlyIfChanged });
+            return edits.error ? edits : { edits };
         };
 
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor);

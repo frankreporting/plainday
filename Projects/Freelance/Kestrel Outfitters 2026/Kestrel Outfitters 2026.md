@@ -32,23 +32,31 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 - [ ] Homepage build
 - [ ] Category page templates
 
-## Time tracking
+## Time Report
 
 %% time:start %%
-[[Kestrel Outfitters 2026 timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+[[Kestrel Outfitters 2026 timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
-| Project | Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
-| ------- | ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| [[Kestrel Outfitters 2026]] | 16 | 17.00 | 1.75 | 18.75 | 18.00 |  | $95/hr | $1,615.00 |
-| [[Kestrel Fall Catalog]] | 4 | 3.50 |  | 3.50 | 3.17 |  | $95/hr | $332.50 |
-| **Total** | **20** | **20.50** | **1.75** | **22.25** | **21.17** | **60.00** |  | **$1,947.50** |
+**Hours:**		20.50 used | 39.50 left
+**Earned:**		$1,947.50 | $1,258.75 unpaid
+**Eff. rate:**		$87.53/hr
 
-| Week | Entries | Billable | 🆓 | Total | Exact | Earned |
-| ---- | ------: | -------: | -: | ----: | ----: | -----: |
-| **Total** | **16** | **17.00** | **1.75** | **18.75** | **18.00** | **$1,615.00** |
-| [[2026w38\|9/13-9/19]] | 12 | 9.50 | 1.75 | 11.25 | 10.67 | $902.50 |
-| [[2026w37\|9/6-9/12]] | 2 | 4.50 |  | 4.50 | 4.50 | $427.50 |
-| [[2026w35\|8/23-8/29]] | 2 | 3.00 |  | 3.00 | 2.83 | $285.00 |
+### By Project
+
+| Project | Exact | Total | 🆓 | Billable | Rate | Earned |
+| ------- | ----: | ----: | -: | -------: | ---: | -----: |
+| [[Kestrel Outfitters 2026]] | 18.00 | 18.75 | 1.75 | 17.00 | $95/hr | $1,615.00 |
+| [[Kestrel Fall Catalog]] | 3.17 | 3.50 |  | 3.50 | $95/hr | $332.50 |
+| **Total** | **21.17** | **22.25** | **1.75** | **20.50** |  | **$1,947.50** |
+
+### By Week
+
+| Week | Exact | Total | 🆓 | Billable | Earned |
+| ---- | ----: | ----: | -: | -------: | -----: |
+| [[2026w38\|9/13-9/19]] | 13.83 | 14.75 | 1.75 | 13.00 | $1,235.00 |
+| [[2026w37\|9/6-9/12]] | 4.50 | 4.50 |  | 4.50 | $427.50 |
+| [[2026w35\|8/23-8/29]] | 2.83 | 3.00 |  | 3.00 | $285.00 |
+| **Total** | **21.17** | **22.25** | **1.75** | **20.50** | **$1,947.50** |
 
 ### Invoices
 

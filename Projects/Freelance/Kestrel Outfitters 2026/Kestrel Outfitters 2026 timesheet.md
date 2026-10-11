@@ -5,7 +5,7 @@ tags:
 area: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 ---
 
-## Time tracking
+## Time Report
 
 %% time:start %%
 *Updated 2026-09-16 9:00pm*

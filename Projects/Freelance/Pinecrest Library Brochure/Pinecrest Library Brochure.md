@@ -15,7 +15,7 @@ rate_type: flat
 max_hours: 20
 status: Active
 ---
-A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee of $1,200, so the report shows hours against the 20 I budgeted but no Earned.
+A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee of $1,200, so the report shows hours against the 20 I budgeted, and what the fee comes to an hour so far. When it's done, run *Invoice* here and pick the day: the fee then counts in that week's, month's and year's Earnings.
 
 ## Tasks
 
@@ -24,21 +24,23 @@ A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee
 - [x] Proof corrections
 - [ ] Final files to the printer by the 22nd
 
-## Time tracking
+## Time Report
 
 %% time:start %%
-[[Pinecrest Library Brochure timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+[[Pinecrest Library Brochure timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
-| Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
-| ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| 6 | 5.25 | 0.50 | 5.75 | 5.50 | 20.00 | $1,200 flat |  |
+**Hours:**		5.75 used | 14.25 left
+**Flat fee:**		$1,200
+**Eff. rate:**		$208.70/hr
 
-| Week | Entries | Billable | 🆓 | Total | Exact | Earned |
-| ---- | ------: | -------: | -: | ----: | ----: | -----: |
-| **Total** | **6** | **5.25** | **0.50** | **5.75** | **5.50** |  |
-| [[2026w38\|9/13-9/19]] | 3 | 1.50 | 0.50 | 2.00 | 1.92 |  |
-| [[2026w37\|9/6-9/12]] | 1 | 1.50 |  | 1.50 | 1.33 |  |
-| [[2026w36\|8/30-9/5]] | 2 | 2.25 |  | 2.25 | 2.25 |  |
+### By Week
+
+| Week | Exact | Total |
+| ---- | ----: | ----: |
+| [[2026w38\|9/13-9/19]] | 1.92 | 2.00 |
+| [[2026w37\|9/6-9/12]] | 1.33 | 1.50 |
+| [[2026w36\|8/30-9/5]] | 2.25 | 2.25 |
+| **Total** | **5.50** | **5.75** |
 
 ### Problems
 

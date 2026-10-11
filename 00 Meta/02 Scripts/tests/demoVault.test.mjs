@@ -113,10 +113,10 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     ]);
     // Rendered: the mistyped entry under the brochure project, the rate_type under the poster project,
     // both under the week, month and year of 9/16 and 9/17, plus the count of Unassigned entries in
-    // every period with a busy event that has no project; None. everywhere else
-    // Timesheet notes have no Problems of their own: their projects' notes do
+    // every period with a busy event that has no project; no Problems heading anywhere else (OBS-133)
+    // Timesheets are checked on their own (OBS-132)
     const reports = [...plan.blocks].filter(([p]) => !plan.targets.sheet.includes(p));
-    const flagged = reports.filter(([, b]) => !/### Problems\n\nNone\.\n/.test(b)).map(([p]) => p).sort();
+    const flagged = reports.filter(([, b]) => b.includes("### Problems")).map(([p]) => p).sort();
     assert.deepEqual(flagged, [
         `${FOLDERS.month}/2026-08.md`, `${FOLDERS.month}/2026-09.md`,
         `${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.year}/2026.md`,
@@ -126,7 +126,7 @@ test("demo vault: the only Problems are the deliberate ones: a mistyped entry on
     const said = "- [[Block Party Poster]] has no `rate_type`";
     for (const [p, b] of reports) {
         const listed = [PROBLEM_PROJECT, `${FOLDERS.week}/2026w38.md`, `${FOLDERS.month}/2026-09.md`, `${FOLDERS.year}/2026.md`].includes(p);
-        assert.equal(b.split("### Problems")[1].split("\n").some((l) => l.startsWith(said)), listed, p);
+        assert.equal((b.split("### Problems")[1] ?? "").split("\n").some((l) => l.startsWith(said)), listed, p);
     }
     for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.week}/2026w37.md`, `${FOLDERS.month}/2026-08.md`]) {
         assert.match(plan.blocks.get(p), /### Problems\n\n- 1 entry has no project \(see Unassigned\)\n/, p);
@@ -345,13 +345,13 @@ test("demo vault: each project with time has its timesheet note beside it, linke
         const { fm } = vault.notes.get(sheet);
         assert.deepEqual([].concat(fm.tags ?? []), ["timesheet"], sheet);
         const project = plan.index.linkDest(linkTarget(fm.area), sheet);
-        assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|View Timesheet]]`), `${project} links ${sheet}`);
+        assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|Timesheet]]`), `${project} links ${sheet}`);
     }
     // Household, an area with time, gets no timesheet and no link to one (OBS-131)
     const household = "Projects/Household/Household.md";
     assert.ok(plan.targets.project.includes(household) && tr.isAreaOnly(household, plan.index));
     assert.ok(!vault.notes.has("Projects/Household/Household timesheet.md"));
-    assert.ok(!vault.notes.get(household).text.includes("View Timesheet"));
+    assert.ok(!vault.notes.get(household).text.includes("|Timesheet]]"));
     for (const p of plan.targets.project) {
         if (tr.isAreaOnly(p, plan.index)) assert.ok(!plan.targets.sheet.includes(tr.sheetPath(p)), p);
     }

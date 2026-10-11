@@ -142,7 +142,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
 | CalendarSyncRange | | Picks how far ahead to sync, then syncs |
 | TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note |
-| Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick; on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
+| Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick (on a flat-fee project, records the day its fee was earned); on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
 | UpdateObsidianPM | | Installs this repository's system files into your vault from a local clone (see below) |
 | RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
 

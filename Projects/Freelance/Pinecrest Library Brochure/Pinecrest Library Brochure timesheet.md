@@ -5,7 +5,7 @@ tags:
 area: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
 ---
 
-## Time tracking
+## Time Report
 
 %% time:start %%
 *Updated 2026-09-16 9:00pm*

@@ -10,11 +10,11 @@ start: 2026-09-01
 due: 
 who: 
 client: 
-rate: 
+rate: 40
 rate_type: non-billable
 status: Active
 ---
-The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_type: non-billable`, so every hour logged here counts as 🆓.
+The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_type: non-billable`, so every hour logged here counts as 🆓. Its `rate` puts a value on that time, $40 an hour, what the club would pay a designer: the report shows it as Invested, never as Earned.
 
 ## Tasks
 
@@ -23,22 +23,17 @@ The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_t
 - [ ] Print and fold for the farmers market table
 - [>] [[2026-09|Sep. 2026]] Collect member photos for the October issue
 
-## Time tracking
+## Time Report
 
 %% time:start %%
-[[Garden Club Newsletter timesheet|View Timesheet]] | *Updated 2026-09-16 9:00pm*
+[[Garden Club Newsletter timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
 
-| Entries | Billable | 🆓 | Total | Exact | Max Hrs | Rate | Earned |
-| ------: | -------: | -: | ----: | ----: | ------: | ---: | -----: |
-| 2 |  | 2.50 | 2.50 | 2.50 |  | non-billable |  |
+### By Week
 
-| Week | Entries | Billable | 🆓 | Total | Exact | Earned |
-| ---- | ------: | -------: | -: | ----: | ----: | -----: |
-| **Total** | **2** |  | **2.50** | **2.50** | **2.50** |  |
-| [[2026w38\|9/13-9/19]] | 1 |  | 1.25 | 1.25 | 1.25 |  |
-| [[2026w36\|8/30-9/5]] | 1 |  | 1.25 | 1.25 | 1.25 |  |
+| Week | Exact | Total | Invested |
+| ---- | ----: | ----: | -------: |
+| [[2026w38\|9/13-9/19]] | 1.25 | 1.25 | $50.00 |
+| [[2026w36\|8/30-9/5]] | 1.25 | 1.25 | $50.00 |
+| **Total** | **2.50** | **2.50** | **$100.00** |
 
-### Problems
-
-None.
 %% time:end %%
