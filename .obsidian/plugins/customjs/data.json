@@ -2,6 +2,7 @@
   "jsFiles": "",
   "jsFolder": "Config/Scripts/CustomJS/",
   "startupScriptNames": [
+    "NewNoteGuard",
     "SyncArea",
     "RefoldOnOpen",
     "MoveToProjectMenu",

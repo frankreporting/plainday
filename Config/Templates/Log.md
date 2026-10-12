@@ -5,6 +5,15 @@ const logDate = tp.file.title.match(today) ? tp.date.now("YYYY-MM-DD") : tp.file
 const cleanTitle = tp.file.title.replace(rxDate,"").replace(today,"").trim();
 const friendlyDate = tp.date.now("M/D/YY", 0, logDate, "YYYY-MM-DD");
 const logName = logDate + " " + cleanTitle;
+// A note you just made is empty when this starts. One that isn't (it arrived with text, OBS-171) is
+// never trashed below, whatever its name; and when Templater's trigger runs this on a note that
+// arrived with only its properties, it stops here, before the menu, a move or the daily-note line.
+const startedEmpty = (await app.vault.read(tp.config.target_file)).trim() === "";
+if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.has(tp.config.target_file) && tp.user.arrivedNote(await app.vault.read(tp.config.target_file))) {
+	const why = `"${tp.file.title}" already has properties, so it isn't a new log: nothing was changed`;
+	new Notice(why, 10000);
+	throw new Error(why);
+}
 
 // Every log has a line in its daily note (OBS-10), and the line says where the log belongs
 // (OBS-57): when its ⭕ or 🗃️ links name one live project or area, the log is filed there without
@@ -36,7 +45,10 @@ if (pickedFile) {
 let filed = true;   // false when a log with this name is already there: that one is opened, this note goes
 if (tp.file.path(true) != folder + "/" + logName + ".md") {
 	const existing = app.vault.getFileByPath(folder + "/" + logName + ".md");
-	if (existing) {
+	if (existing && !startedEmpty) {
+		filed = false;
+		new Notice("\"" + logName + "\" is already in " + folder + ", and this note isn't new, so it wasn't deleted.");
+	} else if (existing) {
 		filed = false;
 		new Notice("\"" + logName + "\" is already in " + folder + ": opening that log. This new note is deleted.");
 		// Templater writes this note once the template returns (deleting it first would fail that
