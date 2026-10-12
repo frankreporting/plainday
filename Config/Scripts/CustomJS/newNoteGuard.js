@@ -118,6 +118,9 @@ class NewNoteGuard {
             }
             this.hold(file.path);
         };
-        wait();
+        // Templater lets go of a note it didn't open in the same turn as this event, so the first look
+        // waits a microtask: the hold then lands with no gap (OBS-55: a template with no menu can finish
+        // close to the trigger's 300ms check)
+        queueMicrotask(wait);
     }
 }

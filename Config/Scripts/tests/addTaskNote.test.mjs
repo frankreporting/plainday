@@ -60,10 +60,9 @@ test("the Task template keeps the name's last date as due, and still drops dates
     assert.ok(template.includes('tR += "area: " + area + "\\n";'), "template writes area");
     assert.ok(template.indexOf('tR += "area: "') < template.indexOf("await tp.file.move("), "area is written before the move");
     assert.ok(template.includes('"\\"[[" + pickedFile.basename + "|" + parentAlias + "]]\\""'), "same [[Project|alias]] form as the Log template");
-    // Esc files the note in Inbox, as the Log template does (OBS-36), never at the vault root
-    assert.match(template, /Esc: Inbox/, "the prompt says where Esc puts it");
+    // With no project from the command, the note goes to Inbox, as a log does (OBS-36), never at the vault root
     assert.match(template, /const inbox = "Inbox";/);
-    assert.ok(template.indexOf("const inbox") > template.indexOf("} else {"), "only when nothing was picked");
+    assert.ok(template.indexOf("const inbox") > template.indexOf("} else {"), "only when the command named no project");
     assert.ok(template.includes('tp.file.path(true) != target + ".md"'), "a note already in the Inbox isn't moved onto itself");
 });
 
@@ -219,7 +218,7 @@ test("isEvent: only `[<]` lines, and the checkbox pattern matches every status",
     assert.ok(!AddTaskNote.CHECKBOX.test("- plain bullet"));
 });
 
-test("new notes are staged outside Projects/, so a note left there means the picker was dismissed", () => {
+test("new notes are staged outside Projects/, so a note left there is unfiled", () => {
     assert.ok(!AddTaskNote.STAGING_FOLDER.startsWith("Projects/"));
     assert.equal(AddTaskNote.TASK_TEMPLATE, "Config/Templates/Task.md");
     assert.ok(fs.existsSync(new URL("../../Templates/Task.md", here)), "the Task template is where the command looks");
@@ -267,31 +266,97 @@ test("takePresetParent: the parent goes only to the note it was picked for, and 
     assert.equal(add.takePresetParent("Inbox/Order toner.md"), null, "used up");
     AddTaskNote.preset = null;
     assert.equal(add.takePresetParent("Inbox/Order toner.md"), null);
+    // Raycast's Open Log Note presets Inbox: the template files the note there, as with no preset
+    AddTaskNote.preset = { path: "Inbox/2026-09-18 Printer call.md", parent: "inbox" };
+    assert.equal(add.takePresetParent("Inbox/2026-09-18 Printer call.md"), null);
+    assert.equal(AddTaskNote.preset, null, "used up");
 });
 
-test("pickParent: skips the menu for the preset note only, and shows it for everyone else", async () => {
-    const source = fs.readFileSync(new URL("../Templater/pickParent.js", here), "utf8");
-    const load = (customJS) => {
-        const sandbox = { module: {}, customJS, app: { vault: { getMarkdownFiles: () => [] }, metadataCache: { getFileCache: () => null } } };
-        sandbox.globalThis = sandbox;
-        vm.runInContext(source, vm.createContext(sandbox));
-        return sandbox.module.exports;
-    };
-    let menus = 0;
-    const tp = (path) => ({ config: { target_file: { path } }, system: { suggester: async () => { menus++; return "FROM MENU"; } } });
-    const withPreset = load({ AddTaskNote: { takePresetParent: (p) => (p === "Inbox/Order toner.md" ? "PROJECT" : null) } });
-    assert.equal(await withPreset(tp("Inbox/Order toner.md"), () => true, "?"), "PROJECT");
-    assert.equal(menus, 0, "no menu for the preset note");
-    const inboxPreset = load({ AddTaskNote: { takePresetParent: (p) => (p === "Inbox/Log.md" ? "inbox" : null) } });
-    assert.equal(await inboxPreset(tp("Inbox/Log.md"), () => true, "?"), null, "the Inbox preset selects the template's fallback");
-    assert.equal(menus, 0, "no menu for an Inbox preset");
-    assert.equal(await withPreset(tp("Projects/Other.md"), () => true, "?"), "FROM MENU");
-    assert.equal(menus, 1);
-    // Without CustomJS (or without AddTaskNote), templates work as before
-    assert.equal(await load(undefined)(tp("Inbox/X.md"), () => true, "?"), "FROM MENU");
-    assert.equal(await load({})(tp("Inbox/X.md"), () => true, "?"), "FROM MENU");
+test("OBS-55: no template asks for a project; the Task and Log templates take one only from the command", () => {
+    const read = (name) => fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
+    for (const name of ["Task", "Log", "Project", "Area"]) {
+        const template = read(name);
+        assert.doesNotMatch(template, /tp\.system\.suggester|tp\.user\.pickParent|FuzzySuggestModal/, `${name} shows no menu`);
+    }
+    assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
+    // The Task template's parent is the command's preset, or none (Inbox), with or without CustomJS
+    const task = read("Task");
+    const line = task.split("\n").find((l) => /^const pickedFile = /.test(l));
+    assert.ok(line, "the Task template sets pickedFile in one line");
+    const pickedFor = (customJS, path) => vm.runInNewContext(line.replace(/^const pickedFile = /, "") .replace(/;$/, ""),
+        { customJS, tp: { config: { target_file: { path } } } });
+    const tasks = { takePresetParent: (p) => (p === "Inbox/Order toner.md" ? "PROJECT" : null) };
+    assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Order toner.md"), "PROJECT");
+    assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Other.md"), null);
+    assert.equal(pickedFor({}, "Inbox/Order toner.md"), null, "without AddTaskNote");
+    assert.equal(vm.runInNewContext(`typeof customJS !== "undefined" ? 1 : 0`, {}), 0);
+    assert.equal(vm.runInNewContext(line.replace(/^const pickedFile = /, "").replace(/;$/, ""), { tp: { config: { target_file: { path: "x" } } } }), null, "without CustomJS");
+    // The Log template: the line's one live home first, then the command's preset (Raycast's Inbox is null)
+    const log = read("Log");
+    const presetLine = log.split("\n").find((l) => /^const preset = /.test(l));
+    assert.ok(presetLine, "the Log template takes the command's preset in one line");
+    const presetFor = (parent) => vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""),
+        { tasks: { takePresetParent: () => parent }, tp: { config: { target_file: { path: "Inbox/2026-09-18 Printer call.md" } } } });
+    const project = { path: "Projects/Freelance/Kestrel/Kestrel.md" };
+    assert.equal(presetFor(project), project);
+    assert.equal(presetFor(null), null);
+    assert.equal(presetFor("inbox"), null, "an older AddTaskNote's Inbox preset files the log in Inbox");
+    assert.equal(vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""), { tasks: null, tp: { config: { target_file: { path: "x" } } } }), null, "without CustomJS");
+    assert.match(log, /const pickedFile = lineHomes\.allLive && lineHomes\.projects\.length === 1 \? lineHomes\.projects\[0\] : preset;/);
+    // A new project or area gets its folder at the top of Projects/, and its note in it
+    for (const name of ["Project", "Area"]) {
+        const template = read(name);
+        assert.match(template, /const path = "Projects\/" \+ cleanTitle;/, `${name}: the top of Projects`);
+        assert.match(template, /await tp\.file\.move\(path \+ "\/" \+ cleanTitle\);/, `${name}: the note is the folder's note`);
+        assert.doesNotMatch(template, /\d\d Projects\//, `${name}: no numbered folder from before OBS-81`);
+    }
+    assert.match(read("Project"), /tR \+= "area: \\n";/, "a new project's area is empty until it's filed");
 });
 
+test("OBS-55: sourceHome: a line with no project files its new note where the line's own note belongs", () => {
+    const files = new Map();
+    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+        vm.createContext({ app: { vault: { getFileByPath: (p) => files.get(p) ?? null } } }));
+    const h = new Cls();
+    // Stand-ins for the tag and folder rules, which other tests cover
+    h.isHomeNote = (f) => !!f.home;
+    h.isLiveHome = (f) => !!f.home && !f.finished;
+    h.lineHome = (f) => f.filedIn ?? null;
+    const kestrel = { path: "Projects/Freelance/Kestrel/Kestrel.md", home: true };
+    const done = { path: "Archive/Old/Old.md", home: true, finished: true };
+    const taskNote = { path: "Projects/Freelance/Kestrel/Draft.md", filedIn: kestrel };
+    const daily = { path: "Reference/Planner/days/2026-09-16.md" };
+    for (const f of [kestrel, done, taskNote, daily]) files.set(f.path, f);
+    assert.equal(h.sourceHome(kestrel.path), kestrel, "a project's own note: that project");
+    assert.equal(h.sourceHome(taskNote.path), kestrel, "a task note: the project it's filed in");
+    assert.equal(h.sourceHome(daily.path), null, "a daily note: Inbox");
+    assert.equal(h.sourceHome(done.path), null, "a finished project: Inbox");
+    assert.equal(h.sourceHome("Nowhere.md"), null);
+    assert.equal(h.sourceHome(""), null);
+    // noteFor asks it only when the line names no project or area at all
+    const code = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
+    assert.match(code, /} else if \(!line\.links\.length\) \{\n\s+pick = this\.sourceHome\(sourcePath\);/);
+});
+
+test("OBS-55: a new project, area or Inbox task note never takes a name another note already has", () => {
+    for (const name of ["Project", "Area", "Task"]) {
+        const template = fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
+        const check = template.indexOf("f.basename.toLowerCase() ===");
+        assert.ok(check > 0, `${name} checks for a note of that name anywhere`);
+        assert.match(template.slice(check - 120, check), /f !== tp\.config\.target_file/, `${name}: not counting itself`);
+        assert.match(template.slice(check, check + 400), /new Notice\(why, 10000\);\s*throw new Error\(why\)/, `${name}: says so and stops`);
+        const move = name === "Task" ? "await tp.file.move(target)" : "await tp.file.move(";
+        assert.ok(check < template.indexOf(move), `${name}: before the move`);
+    }
+    // The Area template's "🗃️.Name" titles give the plain name, not a URL-encoded one
+    const area = fs.readFileSync(new URL("../../Templates/Area.md", here), "utf8");
+    const nameLine = area.split("\n").find((l) => /^const cleanTitle = /.test(l));
+    const nameOf = (title) => vm.runInNewContext(`const fromAlias = /^🗃\\uFE0F?\\./u.test(tp.file.title); ` + nameLine + " cleanTitle", { tp: { file: { title } } });
+    assert.equal(nameOf("🗃️.Home Stuff"), "Home Stuff");
+    assert.equal(nameOf("🗃.Garden"), "Garden");
+    assert.equal(nameOf("!area Finance"), "Finance");
+    assert.doesNotMatch(area, /encodeURIComponent/);
+});
 
 test("linktextFor: the note's name, or its path only when another note really shares the name", () => {
     const note = { path: "Projects/Freelance/Hawk/Check the numbers.md", basename: "Check the numbers" };
@@ -642,8 +707,8 @@ test("one place for the logs folder's name: the Log template and every other scr
     }
 });
 
-test("OBS-81: a new task note whose picker was dismissed stays in Inbox for AddTaskNote, and goes for Schedule", async () => {
-    // A fake app: Templater makes the note in Inbox and leaves it there, as it does when the picker is dismissed
+test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote and Schedule alike", async () => {
+    // A fake app: Templater makes the note in Inbox and leaves it there, as it does when the line names no project
     const trashed = [], notices = [];
     const note = { path: "Inbox/Order toner.md", basename: "Order toner", parent: { path: "Inbox" } };
     const ctx = vm.createContext({
@@ -657,12 +722,10 @@ test("OBS-81: a new task note whose picker was dismissed stays in Inbox for AddT
     });
     const Fresh = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", ctx);
     const fresh = new Fresh();
-    assert.equal(await fresh.createTaskNote("Order toner", null, { inbox: true }), note, "the AddTaskNote command keeps it, unfiled");
-    assert.deepEqual(trashed, []);
-    assert.equal(await fresh.createTaskNote("Order toner"), null, "Schedule's call: Esc cancels");
-    assert.deepEqual(trashed, ["Inbox/Order toner.md"]);
-    assert.match(notices.at(-1), /no note was created/);
-    // A note the picker filed is the result either way
+    assert.equal(await fresh.createTaskNote("Order toner"), note, "kept, unfiled");
+    assert.deepEqual(trashed, [], "never trashed");
+    assert.deepEqual(notices, []);
+    // A note the template filed in the line's project is the result too
     const filed = { ...note, path: "Projects/Home/Order toner.md", parent: { path: "Projects/Home" } };
     ctx.app.plugins.plugins["templater-obsidian"].templater.create_new_note_from_template = async () => filed;
     assert.equal(await fresh.createTaskNote("Order toner"), filed);

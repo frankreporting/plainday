@@ -7,7 +7,7 @@ const friendlyDate = tp.date.now("M/D/YY", 0, logDate, "YYYY-MM-DD");
 const logName = logDate + " " + cleanTitle;
 // A note you just made is empty when this starts. One that isn't (it arrived with text, OBS-171) is
 // never trashed below, whatever its name; and when Templater's trigger runs this on a note that
-// arrived with only its properties, it stops here, before the menu, a move or the daily-note line.
+// arrived with only its properties, it stops here, before a move or the daily-note line.
 const startedEmpty = (await app.vault.read(tp.config.target_file)).trim() === "";
 if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.has(tp.config.target_file) && tp.user.arrivedNote(await app.vault.read(tp.config.target_file))) {
 	const why = `"${tp.file.title}" already has properties, so it isn't a new log: nothing was changed`;
@@ -16,9 +16,10 @@ if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.h
 }
 
 // Every log has a line in its daily note (OBS-10), and the line says where the log belongs
-// (OBS-57): when its ⭕ or 🗃️ links name one live project or area, the log is filed there without
-// the menu, as AddTaskNote files a task's note. Otherwise the menu asks, and the line's ⭕ becomes
-// the pick, so the line and its log agree on where the meeting's time counts (OBS-90).
+// (OBS-57): when its ⭕ or 🗃️ links name one live project or area, the log is filed there, as
+// AddTaskNote files a task's note. Otherwise it waits in Inbox, with no menu (OBS-55), and is filed
+// afterwards: AddProjectLink on its line or MoveToProject on the log moves it and sets the line's
+// ⭕, so the line and its log agree on where the meeting's time counts (OBS-90).
 const sync = typeof customJS !== "undefined" ? customJS.CalendarSync : null;
 const schedule = typeof customJS !== "undefined" ? customJS.Schedule : null;
 const tasks = typeof customJS !== "undefined" ? customJS.AddTaskNote : null;
@@ -28,11 +29,11 @@ const dailyFile = dailyPath ? app.vault.getFileByPath(dailyPath) : null;
 const eventLine = sync && dailyFile ? tp.user.recordEvent(await app.vault.cachedRead(dailyFile), { log: logName, title: cleanTitle }, sync).line : null;
 const lineHomes = eventLine && tasks ? tasks.lineProjects(eventLine, dailyPath) : { projects: [], allLive: false };
 
-// Logs live in a `›logs` folder under their project or area (AddTaskNote.logsFolderIn); Esc leaves
-// the log in Inbox
-const pickedFile = lineHomes.allLive && lineHomes.projects.length === 1
-	? lineHomes.projects[0]
-	: await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select the log's project or area (Esc: Inbox)...");
+// Logs live in a `›logs` folder under their project or area (AddTaskNote.logsFolderIn). A command
+// that already knows where the log goes hands it over; Raycast's Open Log Note hands over Inbox
+// (anything that isn't a note, such as "inbox" from an AddTaskNote that hasn't reloaded yet, is Inbox)
+const preset = [tasks?.takePresetParent?.(tp.config.target_file.path)].find((p) => p && typeof p === "object") ?? null;
+const pickedFile = lineHomes.allLive && lineHomes.projects.length === 1 ? lineHomes.projects[0] : preset;
 let area = "";
 let folder = "Inbox";
 if (pickedFile) {
@@ -67,9 +68,9 @@ if (tp.file.path(true) != folder + "/" + logName + ".md") {
 }
 
 // Templater's trigger for new notes waits 300ms, then runs Get Template on any new note whose body is
-// empty and that it no longer lists as in progress. A log is only frontmatter and, filed by its
-// line's ⭕ with no menu, is done and moved well before that, so the trigger would run this template on
-// it a second time: with the menu, and moving it back to Inbox on Esc.
+// empty and that it no longer lists as in progress. A log is only frontmatter and, with no menu, is
+// done and moved well before that, so the trigger would run this template on it a second time and
+// move a log its line filed back to Inbox.
 // So it stays listed as in progress a while longer (CalNav's Open Log Note does the same).
 const pending = app.plugins.plugins["templater-obsidian"]?.templater?.files_with_pending_templates;
 if (pending) {
@@ -93,7 +94,7 @@ if (!sync || !schedule) {
 		const dailyNote = fresh ? await schedule.ensureDailyNote(dailyPath) : app.vault.getFileByPath(dailyPath);
 		// The line names the project or area the log was filed for, in place of its own ⭕ links, before
 		// its 🗒️ (a project note that isn't its folder's own note can't hold the log, and the line
-		// still names it, as AddProjectLink does). Esc leaves the line's links as they are.
+		// still names it, as AddProjectLink does). A log left in Inbox leaves the line's links as they are.
 		const home = pickedFile && tasks ? tasks.homeLink(pickedFile, tasks.linktextFor(pickedFile, app.vault.getMarkdownFiles().map((f) => f.path))) : null;
 		const record = (text) => tp.user.recordEvent(text, { log: logName, title: cleanTitle, home }, sync, fresh);
 		// A line that's already there, already naming the log's project, means nothing to write: don't

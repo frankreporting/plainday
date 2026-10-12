@@ -64,6 +64,7 @@ function setup({ customjs = true, templater = true } = {}) {
         },
         window: {},
         setTimeout,
+        queueMicrotask,
         clearTimeout,
     });
     const Guard = vm.runInContext(SOURCE + "\n;NewNoteGuard", ctx);
@@ -153,16 +154,26 @@ test("onTemplated: a note a template just made is held where it is now, once Tem
     const made = file("Projects/Freelance/Kestrel Outfitters 2026/Order toner.md", "---\ntags: task\n---\n");
     pending.add("Inbox/Order toner.md");
     guard.onTemplated(made);
-    assert.ok(pending.has(made.path), "held at once, where it is now");
-    // Not moved: Templater still has it, so the guard waits for Templater to let it go, then holds it
+    await Promise.resolve();
+    assert.ok(pending.has(made.path), "held right after the event, where it is now");
+    // Not moved: Templater lets it go in the same turn as the event (end_templater_task), and the
+    // hold lands with no gap, so the trigger's 300ms check can't fall between the two (OBS-55)
     const kept = file("Inbox/2026-09-15 Kickoff call.md", "---\ntags: log\n---\n");
     pending.add(kept.path);
     guard.onTemplated(kept);
     pending.delete(kept.path);   // end_templater_task
+    await Promise.resolve();
+    assert.ok(pending.has(kept.path), "held with no gap");
+    // One Templater keeps a while longer (it opened the note): the guard waits for it to let go, then holds it
+    const opened = file("Inbox/2026-09-16 Catalog shoot planning.md", "---\ntags: log\n---\n");
+    pending.add(opened.path);
+    guard.onTemplated(opened);
+    await sleep(8);
+    pending.delete(opened.path);
     await sleep(15);
-    assert.ok(pending.has(kept.path), "held after Templater finished with it");
+    assert.ok(pending.has(opened.path), "held after Templater finished with it");
     await sleep(50);
-    assert.ok(!pending.has(kept.path) && !pending.has(made.path), "and let go");
+    assert.ok(!pending.has(kept.path) && !pending.has(made.path) && !pending.has(opened.path), "and let go");
     assert.ok(pending.has("Inbox/Order toner.md"), "Templater's own entry is never touched");
 });
 
@@ -182,9 +193,10 @@ test("the Log template trashes a same-named note only when it was empty when the
     const keep = text.indexOf("if (existing && !startedEmpty)"), trash = text.indexOf("app.fileManager.trashFile(here)");
     assert.ok(keep > 0 && trash > keep, "the non-empty case comes first, and only the other branch trashes");
     assert.ok(text.indexOf("const startedEmpty") < keep);
-    // The trigger running it on a note that arrived with only properties stops before the menu
+    // The trigger running it on a note that arrived with only properties stops before a move
     const stop = text.indexOf("tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.has(tp.config.target_file) && tp.user.arrivedNote(");
-    assert.ok(stop > 0 && stop < text.indexOf("tp.user.pickParent("), "before the picker");
+    assert.ok(stop > 0 && stop < text.indexOf("tp.file.move("), "before a move");
+    assert.ok(stop < text.indexOf("takePresetParent"), "before it takes a preset meant for a new note");
     assert.match(text.slice(stop, stop + 500), /new Notice\(why, 10000\);\s*throw new Error\(why\)/);
 });
 

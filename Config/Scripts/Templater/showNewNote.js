@@ -1,6 +1,6 @@
 // Called at the end of the Area, Log, Project and Task templates as tp.user.showNewNote(tp).
 // Once Templater has written the note, if it's the note open in front of you:
-// - redraws its properties panel. After those templates' picker and move/rename, Obsidian's
+// - redraws its properties panel. After those templates' move or rename, Obsidian's
 //   panel misses Templater's write and stays empty in Live Preview (the note itself is fine,
 //   and reopening it shows the properties), so it's synced from the note's text here.
 // - moves the cursor from the title to the end of the body. Obsidian focuses the title of

@@ -27,7 +27,7 @@ Everything under "## Time Report" is written by the TimeReport command, not by h
 | AddTaskNote | Make or link a task note | Command palette |
 | TimeReport | Refresh the reports | Command palette |
 | Invoice | Invoice a project's time, or move an invoice along | Command palette |
-| New note | Create note; include `!task …`, `!project …`, date + title like `2026-09-21 Kickoff call`, or plain dates like `2026-09-21`, and templates are applied | `⌘N` |
+| New note | Type the whole title in the quick switcher, then Shift+Enter: `!task …`, `!project …`, a date + title like `2026-09-21 Kickoff call`, or a plain date like `2026-09-21`, and its template is applied. (A note made with ⌘N is *Untitled* when the templates look at it.) | `⌘O`, then `⇧↩` |
 | Plan | Plan ahead: the next few daily notes side by side | Command palette |
 | JumpToDate | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
 

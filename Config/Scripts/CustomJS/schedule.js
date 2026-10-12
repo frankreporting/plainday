@@ -60,16 +60,16 @@ class Schedule {
                 return;
             }
 
-            // Forwarding a worked-on task links it to its task note on both lines. The time already
-            // logged only counts toward a project once that note exists, so find or create it first
-            // (through AddTaskNote, which asks where a new one goes). No project picked: nothing moves.
+            // Forwarding a worked-on task links it to its task note on both lines, so find or create
+            // it first, through AddTaskNote: a new one is filed where the line's ⭕ says, or else waits
+            // in Inbox (OBS-55). No note, or a menu dismissed (a line naming two projects): nothing moves.
             let found = null;
             if (sourceIsDaily && wasWorkedOn && !hasLink && taskName) {
                 modal.close();
                 found = await customJS.AddTaskNote.noteFor(taskName, srcFile.path, lineText);
                 if (!found) return;
                 if (editor.getLine(lineNum) !== lineText) {
-                    new Notice("The line changed while picking a project, so it wasn't scheduled");
+                    new Notice("The line changed while its note was made, so it wasn't scheduled");
                     return;
                 }
             }

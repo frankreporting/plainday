@@ -3,9 +3,9 @@ class AddTaskNote {
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\] ?/;
     static TASK_TEMPLATE = "Config/Templates/Task.md";
     static LOG_TEMPLATE = "Config/Templates/Log.md";
-    // Where a new task note is made before the Task template's picker files it. The picker only
-    // offers folders under Projects/, so a note still here afterwards means the picker was dismissed:
-    // the AddTaskNote command leaves it here, unfiled; Schedule deletes it and cancels.
+    // Where a new task note is made before the Task template files it. A note still here afterwards
+    // is unfiled: its line named no project, so it waits here until AddProjectLink or MoveToProject
+    // files it (OBS-55).
     static STAGING_FOLDER = "Inbox";
     static DATE = /\d{4}-\d{2}-\d{2}/g;
     // An event line's time, which comes before its title: "1:00pm\t", "all day\t", or a time with
@@ -36,11 +36,13 @@ class AddTaskNote {
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
     // An event title wrapped in a link to its log, the way lines were written before OBS-57
     static LOG_TITLE = /^\s*[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
-    // The parent picked in advance for the one note being created ({ path, parent }), read by pickParent
+    // The parent picked in advance for the one note being created ({ path, parent }), read by the
+    // Task and Log templates (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
     static preset = null;
 
-    // On a task line: link the task's note, creating it first through the Task template (which asks
-    // for its project or area) when there isn't one, then put the cursor right after the checkbox.
+    // On a task line: link the task's note, creating it first through the Task template when there
+    // isn't one (filed where the line's ⭕ says, or else in Inbox), then put the cursor right after
+    // the checkbox.
     // The name is the selected text or, with nothing selected, the task's text, as long as some text
     // comes after the cursor. With only whitespace after the cursor, insert an empty link to type a
     // name into. The line keeps a link to the note's project or area, before the note link (OBS-90).
@@ -72,7 +74,7 @@ class AddTaskNote {
             } else if (target.kind === "event") {
                 await this.linkEvent(editor, from.line, lineText, target.name);
             } else {
-                const found = await this.noteFor(target.name, source.path, lineText, { inbox: true });
+                const found = await this.noteFor(target.name, source.path, lineText);
                 if (!found) return;
                 if (editor.getLine(from.line) !== lineText) {
                     new Notice(`${found.note.basename} is ready, but the line changed, so it wasn't linked`);
@@ -95,10 +97,10 @@ class AddTaskNote {
             return;
         }
 
-        const found = await this.noteFor(selection, source.path, lineText, { inbox: true });
+        const found = await this.noteFor(selection, source.path, lineText);
         if (!found) return;
 
-        // The picker waited on you; don't write into a line that changed in the meantime
+        // A menu may have waited on you; don't write into a line that changed in the meantime
         if (editor.getLine(from.line) !== lineText) {
             new Notice(`${found.note.basename} is ready, but the line changed, so it wasn't linked`);
             return;
@@ -126,8 +128,10 @@ class AddTaskNote {
     //   - an existing note already in a different project or area: you're asked to move it there or
     //     leave it (its project is shared by every line that links it); left, the line's ⭕ becomes
     //     the note's project instead.
-    // A line with no ⭕ gets one for wherever its note is filed. A project or area note is never
-    // moved. Esc on a menu cancels and nothing changes. An existing note's `area` is then set from
+    // A line with no ⭕ gets one for wherever its note is filed. A new note for such a line goes where
+    // the note the line is in belongs (a project's own note, or a task note filed in one: see
+    // sourceHome), and otherwise waits in Inbox, unfiled; no menu asks (OBS-55). A project or area
+    // note is never moved. Esc on a menu cancels and nothing changes. An existing note's `area` is then set from
     // its folder (SyncArea's rule).
     //
     // Resolves to { note, linktext, name, created, home, homeLink, clear, projectLinks }, where `name`
@@ -135,11 +139,9 @@ class AddTaskNote {
     // from now on and `homeLink` its ⭕ or 🗃️ link (both null when there's none to name: the line's
     // own links are then left as they are, unless `clear` says they'd disagree with the note), and
     // `projectLinks` the line's ⭕ link texts, which `homeLink` replaces. Null when no note could be
-    // made or nothing was picked. Schedule uses this too, so a 🗒️ link it writes always has a note
-    // behind it. With `inbox` (the AddTaskNote command), a new note whose picker was dismissed stays
-    // in Inbox, unfiled, as the Task template's "Esc: Inbox" says (OBS-81): you can give a task its
-    // note before it has a home. Schedule leaves it off, so Esc there still cancels the schedule.
-    async noteFor(text, sourcePath, lineText = "", { inbox = false } = {}) {
+    // made or a menu was dismissed. Schedule uses this too, so a 🗒️ link it writes always has a note
+    // behind it: a task can have its note before it has a home.
+    async noteFor(text, sourcePath, lineText = "") {
         const name = this.withoutDates(text);
         const line = this.lineProjects(lineText, sourcePath);
         const existing = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
@@ -156,8 +158,10 @@ class AddTaskNote {
             } else if (line.allLive && line.projects.length > 1) {
                 pick = await this.pickHome(name, line.projects);
                 if (!pick) return this.cancelled();
+            } else if (!line.links.length) {
+                pick = this.sourceHome(sourcePath);
             }
-            note = await this.createTaskNote(text, pick, { inbox });
+            note = await this.createTaskNote(text, pick);
             if (!note) return null;
             home = this.homeFor(note, pick);
             new Notice(`Created ${note.path.replace(/\.md$/, "")}`);
@@ -241,6 +245,17 @@ class AddTaskNote {
             if (folderNote && folderNote !== file && this.isHomeNote(folderNote)) return folderNote;
         }
         return null;
+    }
+
+    // Where a new note goes when its line names no project or area (OBS-55): the note the line is in,
+    // when that's a live project or area's own note, or else the live project or area that note is
+    // filed in. That's the project Schedule names on a line sent from that note. Null for a daily
+    // note, a note in Inbox, or a finished project.
+    sourceHome(sourcePath) {
+        const source = sourcePath ? app.vault.getFileByPath(sourcePath) : null;
+        if (!source) return null;
+        if (this.isHomeNote(source)) return this.isLiveHome(source) ? source : null;
+        return this.lineHome(source);
     }
 
     // The project or area a line that links `note` should name (OBS-90): the one the note is filed
@@ -390,8 +405,8 @@ class AddTaskNote {
         return `[[${linktext}|${this.isArea(home) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK}]]`;
     }
 
-    // A note's tags as pickParent reads them: frontmatter `tags` or `tag` (list or string) and
-    // inline #tags, lowercased, without the #
+    // A note's tags: frontmatter `tags` or `tag` (list or string) and inline #tags, lowercased,
+    // without the #
     tagsOf(cache) {
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
@@ -400,7 +415,7 @@ class AddTaskNote {
     }
 
     // Asks which area or project the note `name` belongs to, with `preferred` (the task line's
-    // projects) first, then every other area and project the Task template's picker offers. Resolves
+    // projects) first, then every other live area and project under Projects/. Resolves
     // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject
     // use the same menu; MoveToProject leaves out the ones it can't file into (`exclude(file)` true)
     // and asks its own question (`placeholder`).
@@ -425,7 +440,7 @@ class AddTaskNote {
         });
     }
 
-    // An area or project note still in progress (exact #area or #project, as pickParent checks)
+    // An area or project note still in progress (exact #area or #project, as SyncArea checks)
     isHome(file) {
         const cache = app.metadataCache.getFileCache(file);
         if (!cache || this.isFinished(cache)) return false;
@@ -433,7 +448,7 @@ class AddTaskNote {
     }
 
     // A project or area is finished when its `status` is Done or Canceled, in any case (Cancelled
-    // too). Finished ones drop out of the menus that file and link notes; pickParent asks this too.
+    // too). Finished ones drop out of the menus that file and link notes.
     isFinished(cache) {
         return [].concat(cache?.frontmatter?.status ?? [])
             .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
@@ -551,13 +566,14 @@ class AddTaskNote {
         return lineText.slice(0, head) + body.trim();
     }
 
-    // For pickParent: the parent picked in advance for the note at `path`, once. Any other note, or a
-    // second ask, gets null and the usual menu.
+    // For the Task and Log templates: the parent picked in advance for the note at `path`, once. Any
+    // other note, a second ask, or Raycast's "inbox" gets null, and the template files the note in
+    // Inbox.
     takePresetParent(path) {
         const preset = AddTaskNote.preset;
         if (!preset || preset.path !== path) return null;
         AddTaskNote.preset = null;
-        return preset.parent;
+        return preset.parent === "inbox" ? null : preset.parent;
     }
 
     // "2026-09-30 Renew the domain" → "Renew the domain". Text that's only a date is left alone.
@@ -567,11 +583,9 @@ class AddTaskNote {
     }
 
     // Runs the Task template on a new note named `name` without opening it. With `parent` (a project
-    // or area note), the template files it there without showing its menu. Resolves to the note once the
-    // template has filed it, or null when it couldn't be made. When the picker was dismissed, the note
-    // is still in Inbox: with `inbox` it stays there and is the result; without, it's deleted and the
-    // result is null.
-    async createTaskNote(name, parent = null, { inbox = false } = {}) {
+    // or area note), the template files it there; without, it stays in Inbox, unfiled. Resolves to the
+    // note once the template has filed it, or null when it couldn't be made.
+    async createTaskNote(name, parent = null) {
         const templater = app.plugins.plugins["templater-obsidian"]?.templater;
         const template = app.vault.getFileByPath(AddTaskNote.TASK_TEMPLATE);
         if (!templater || !template) {
@@ -589,11 +603,6 @@ class AddTaskNote {
         }
         if (!note) {
             new Notice(`Couldn't create a note named "${name}"`);
-            return null;
-        }
-        if (note.parent?.path === AddTaskNote.STAGING_FOLDER && !inbox) {
-            await app.fileManager.trashFile(note);
-            new Notice("No project or area picked, so no note was created");
             return null;
         }
         return note;
@@ -661,7 +670,7 @@ class AddTaskNote {
     }
 
     // Links an event line to its meeting log (see eventLine) and puts the cursor after the checkbox.
-    // A new log is made (makeLog), and the Log template files it and sets the line's ⭕. A log that
+    // A new log is made (makeLog), and the Log template files it where the line's ⭕ says. A log that
     // exists already is settled the way a task's note is (settle): moved to the line's project, or the
     // line's ⭕ set to where it's filed, so the two agree (OBS-90).
     async linkEvent(editor, line, lineText, name) {
@@ -707,8 +716,8 @@ class AddTaskNote {
 
     // Makes the meeting log `name` right away, the way a task's note is made: through the Log
     // template, without opening it, so you stay in the daily note. The template files it in the
-    // project the event line's ⭕ or 🗃️ names, or asks and sets the line's ⭕ to the pick; Esc leaves
-    // it in Inbox. A log that already has the name is left where it is. The daily note is saved
+    // project the event line's ⭕ or 🗃️ names, or else leaves it in Inbox with no menu (OBS-55). A
+    // log that already has the name is left where it is. The daily note is saved
     // first, so the template reads the line just linked rather than the one on disk.
     async makeLog(name) {
         if (app.metadataCache.getFirstLinkpathDest(name, app.workspace.getActiveFile()?.path ?? "")) return;

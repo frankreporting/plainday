@@ -1,48 +1,32 @@
 <%*
-let rx = /%F0%9F%97%83%EF%B8%8F/g;
-let method = encodeURIComponent(tp.file.title).match(rx) ? "alias" : "standard";
-console.log(method);
-
+// "🗃️.Name" (an area link that doesn't resolve yet) or "!area Name"
 const thisID = tp.date.now("YYYYMMDDHHmmssSS");
-let alias, cleanTitle;
+const fromAlias = /^🗃\uFE0F?\./u.test(tp.file.title);
+const cleanTitle = (fromAlias ? tp.file.title.replace(/^🗃\uFE0F?\./u, "") : tp.file.title.replace("!area", "")).trim();
+const alias = fromAlias ? tp.file.title : `🗃️.${cleanTitle}`;
 
-if (method == "alias") {
-	alias = tp.file.title;
-	aliasEncoded = encodeURIComponent(alias);
-	console.log("Title is a project with alias");
-	let rxAlias = /%F0%9F%97%83%EF%B8%8F\.(.*)/;
-	console.log(alias.match(rxAlias));
-	let [fullMatch, cleanTitle] = aliasEncoded.match(rxAlias);
-	let path = "20 Projects/" + cleanTitle;
-	console.log(path);
-	if (!(await app.vault.getAllLoadedFiles()).map(f => f.path).includes(path)) {
-		await app.vault.createFolder(path);
-	} 
-	await tp.file.move(path + "/" + cleanTitle);
+// No menu (OBS-55): a new area gets a folder at the top of Projects, and MoveToProject files it
+// under another area afterwards. A name another note already has stops here, as in the Project
+// template: the new note would take over that note's links.
+const path = "Projects/" + cleanTitle;
+if (cleanTitle && app.vault.getMarkdownFiles().some((f) => f !== tp.config.target_file && f.basename.toLowerCase() === cleanTitle.toLowerCase())) {
+	const why = `A note named "${cleanTitle}" already exists, so no area was made: give it another name`;
+	new Notice(why, 10000);
+	throw new Error(why);
+}
+let moved = false;
+if (!cleanTitle) {
+	// Nothing to name the folder: leave the note where it is
+} else if (app.vault.getAbstractFileByPath(path)) {
+	new Notice("The folder you're trying to create already exists.");
 } else {
-	console.log("File title does not look like an alias for a project");
-	
-	cleanTitle = tp.file.title.replace("!area", "").trim();
-	alias = `🗃️.${cleanTitle}`;
-	
-	// New notes are created in the current folder (Obsidian's "Default location for new notes"),
-	// so always ask where a new area belongs rather than only for notes made in Inbox
-	const pickedFile = await tp.user.pickParent(tp, (folder) => folder !== "Config" && !folder.startsWith("Config/"), "Select parent...");
-	let moved = false;
-	if (pickedFile) {
-		const path = pickedFile.parent.path + "/" + cleanTitle;
-		if ((await app.vault.getAllLoadedFiles()).map(f => f.path).includes(path)) {
-			new Notice("The folder you're trying to create already exists.");
-		} else {
-			await app.vault.createFolder(path);
-			await tp.file.move(path + "/" + cleanTitle);
-			moved = true;
-		}
-	}
-	if (!moved && cleanTitle && cleanTitle != tp.file.title) {
-		// Not moved: leave the note where it is, but drop "!area" from its name
-		await tp.file.rename(cleanTitle);
-	}
+	await app.vault.createFolder(path);
+	await tp.file.move(path + "/" + cleanTitle);
+	moved = true;
+}
+if (!moved && cleanTitle && cleanTitle != tp.file.title) {
+	// Not moved: leave the note where it is, but drop "!area" from its name
+	await tp.file.rename(cleanTitle);
 }
 
 tR += "---\n";

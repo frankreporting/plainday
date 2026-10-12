@@ -1,7 +1,8 @@
 <%*
-// New notes are created in the current folder (Obsidian's "Default location for new notes"),
-// so always ask where a new task belongs rather than only for notes made in Inbox
-const pickedFile = await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select parent project or area (Esc: Inbox)...");
+// No menu (OBS-55): a task note goes where the command that made it says (AddTaskNote, from the
+// task line's one ⭕ or 🗃️), and otherwise waits in Inbox, to be filed afterwards with
+// AddProjectLink on its line or MoveToProject on the note
+const pickedFile = typeof customJS !== "undefined" ? customJS.AddTaskNote?.takePresetParent?.(tp.config.target_file.path) ?? null : null;
 
 const thisID = tp.date.now("YYYYMMDDHHmmssSS");
 const rxDates = /[0-9]{4}-[0-9]{2}-[0-9]{2}/g;
@@ -9,7 +10,7 @@ const dates = tp.file.title.match(rxDates);
 // A date in the name is the task's due date (with two, the last one, as in the Project template)
 const due = dates ? dates[dates.length - 1] : null;
 
-// The area the note is filed under, written here so a new task note always has one (as the Log template does)
+// The area the note is filed under, written here so a task note filed in a project has one (as the Log template does)
 const parentAlias = pickedFile ? [].concat(app.metadataCache.getFileCache(pickedFile)?.frontmatter?.aliases ?? [])[0] || pickedFile.basename : null;
 const area = pickedFile ? "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"" : "";
 
@@ -26,18 +27,21 @@ const cleanTitle = tp.file.title.replaceAll(rxDates, "").replace("!task", "").tr
 if (pickedFile) {
 	await tp.file.move(pickedFile.parent.path + "/" + cleanTitle);
 } else {
-	// Picker dismissed: the note goes to Inbox, as a log does, with "!task" and the dates dropped
-	// from its name; a note already there is only renamed (OBS-36)
+	// No project or area: the note goes to Inbox, as a log does, with "!task" and the dates dropped
+	// from its name (OBS-36). A name another note already has stops here, as in the Project template:
+	// Obsidian resolves a shared name to the shortest path, so a note in Inbox would take over the
+	// other one's links. (AddTaskNote links an existing note of that name instead of making one.)
 	const inbox = "Inbox";
-	const target = inbox + "/" + (cleanTitle || tp.file.title);
+	const name = cleanTitle || tp.file.title;
+	if (app.vault.getMarkdownFiles().some((f) => f !== tp.config.target_file && f.basename.toLowerCase() === name.toLowerCase())) {
+		const why = `A note named "${name}" already exists, so no task note was made: open that one, or give this one another name`;
+		new Notice(why, 10000);
+		throw new Error(why);
+	}
+	const target = inbox + "/" + name;
 	if (tp.file.path(true) != target + ".md") {
 		if (!app.vault.getAbstractFileByPath(inbox)) await app.vault.createFolder(inbox);
-		if (app.vault.getAbstractFileByPath(target + ".md")) {
-			new Notice("A note named \"" + (cleanTitle || tp.file.title) + "\" is already in " + inbox + ", so this one stays where it is.");
-			if (cleanTitle && cleanTitle != tp.file.title) await tp.file.rename(cleanTitle);
-		} else {
-			await tp.file.move(target);
-		}
+		await tp.file.move(target);
 	}
 }
 tp.user.showNewNote(tp);

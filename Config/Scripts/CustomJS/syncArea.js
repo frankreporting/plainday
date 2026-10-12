@@ -160,7 +160,7 @@ class SyncArea {
             .some((t) => String(t ?? "").replace(/^#/, "").trim().toLowerCase() === "invoice");
     }
 
-    // Exact #project or #area tag, in frontmatter or inline (same rule as the templates' picker)
+    // Exact #project or #area tag, in frontmatter or inline (same rule as AddTaskNote's menus)
     isProjectOrArea(note) {
         const c = app.metadataCache.getFileCache(note);
         if (!c) return false;

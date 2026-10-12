@@ -2,7 +2,7 @@
 tags:
   - template
 ---
-Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It asks which area or project the new project belongs to, creates a project folder there and makes this note its folder note. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". Every new project starts at `status: To Do`. The ConvertToProject command uses this template too.
+Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It creates a project folder for it at the top of Projects and makes this note its folder note; MoveToProject puts it under an area or another project afterwards. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". Every new project starts at `status: To Do`. The ConvertToProject command uses this template too.
 
 <%*
 tR = "";
@@ -13,31 +13,28 @@ const dates = tp.file.title.match(rxDates);
 const start = dates ? dates[0] : null;
 const due = dates && dates.length > 1 ? dates[1] : null;
 const cleanTitle = tp.file.title.replaceAll(rxDates, "").replace("!project", "").trim();
-let area;
+const alias = "⭕." + cleanTitle;
 
-// "⭕.Area.Project" from the parent's folder, e.g. "20 Projects/Freelance" → "⭕.Freelance.<name>"
-const setAlias = (parentFolder, name) => {
-	const parts = parentFolder.split("/").map(p => p.replace(/^[0-9]{2} /, "")).filter(p => p && p != "Projects");
-	return "⭕." + [...parts, name].join(".");
-};
-let alias = "⭕." + cleanTitle;
-
-// New notes are created in the current folder (Obsidian's "Default location for new notes"),
-// so always ask where a new project belongs rather than only for notes made in Inbox
-const pickedFile = await tp.user.pickParent(tp, (folder) => folder.startsWith("Projects/"), "Select parent project or area...");
+// No menu (OBS-55): a new project gets a folder at the top of Projects, and MoveToProject files it
+// under an area or another project afterwards (SyncArea then fills `area`)
+const path = "Projects/" + cleanTitle;
+// A name another note already has stops here: Obsidian resolves a shared name to the shortest path,
+// and a note at the top of Projects would take over the other note's links, and the time on them
+// (ConvertToProject refuses a used name for the same reason)
+if (cleanTitle && app.vault.getMarkdownFiles().some((f) => f !== tp.config.target_file && f.basename.toLowerCase() === cleanTitle.toLowerCase())) {
+	const why = `A note named "${cleanTitle}" already exists, so no project was made: give it another name`;
+	new Notice(why, 10000);
+	throw new Error(why);
+}
 let moved = false;
-if (pickedFile) {
-	let path = pickedFile.parent.path + "/" + cleanTitle;
-	if ((await app.vault.getAllLoadedFiles()).map(f => f.path).includes(path)) {
-		new Notice("The folder you're trying to create already exists.");
-	} else {
-		await app.vault.createFolder(path);
-		await tp.file.move(path + "/" + cleanTitle);
-		moved = true;
-		alias = setAlias(pickedFile.parent.path, cleanTitle);
-	}
-	const parentAlias = [].concat(app.metadataCache.getFileCache(pickedFile)?.frontmatter?.aliases ?? [])[0] || pickedFile.basename;
-	area = "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"";
+if (!cleanTitle) {
+	// Nothing to name the folder: leave the note where it is
+} else if (app.vault.getAbstractFileByPath(path)) {
+	new Notice("The folder you're trying to create already exists.");
+} else {
+	await app.vault.createFolder(path);
+	await tp.file.move(path + "/" + cleanTitle);
+	moved = true;
 }
 if (!moved && cleanTitle && cleanTitle != tp.file.title) {
 	// Not moved: leave the note where it is, but drop "!project" and the dates from its name
@@ -51,7 +48,7 @@ tR += "icon: circle\n";
 tR += "color: red\n";
 tR += "tags: \n- project\n";
 tR += "status: To Do\n";
-tR += "area: " + (area ? area : "") + "\n";
+tR += "area: \n";
 tR += "start: " + (start ? start : "") + "\n";
 tR += "due: " + (due ? due : "") + "\n";
 tR += "who: \n";

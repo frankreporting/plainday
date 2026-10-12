@@ -78,10 +78,10 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else asks and sets the line's ⭕ to the pick (Esc: Inbox); Raycast's Open Log Note can preset Inbox and skip the picker. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
-| `!task Draft the proposal` | Task | Task note filed in the chosen project or area (Esc: Inbox); dates are dropped from the title |
-| `!project Launch plan` | Project | New project folder and folder note under the chosen area or project; dates become `start`/`due` |
-| `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
+| `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *MoveToProject*; dates are dropped from the title |
+| `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *MoveToProject*; dates become `start`/`due` |
+| `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
 | `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `People` / `Entities` |
 | anything else | Empty Note | `id` and `tags` frontmatter |
 
@@ -96,7 +96,7 @@ Other templates, inserted with Templater:
 | Custom PDF | Frontmatter for PDF export (Enhancing Export) |
 | Autonote - Empty Note | Empty note for notes created by other tools; moved to the Inbox |
 
-Templater user scripts (`Config/Scripts/Templater/`): `pickParent` (area/project picker), `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line), `recordEvent` (a new log's line in its daily note).
+Templater user scripts (`Config/Scripts/Templater/`): `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line), `recordEvent` (a new log's line in its daily note), `arrivedNote` (tells a note that arrived with its properties from a new, empty one).
 
 ## Daily notes
 
@@ -132,7 +132,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | --- | --- | --- |
 | Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; one already worked on stays behind as `[>]`, linked to its task note |
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
-| AddTaskNote | | Links the task to its own note, creating it in the project or area you pick, and keeps the line's ⭕ for it; on an event line, links a meeting log |
+| AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and keeps the line's ⭕ for it; on an event line, links a meeting log |
 | AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
 | MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `›logs/`, a project with its whole folder. The lines that link a moved note get its new ⭕. Also *Move to project…* in the file menus |
 | ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
