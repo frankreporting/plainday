@@ -1,6 +1,6 @@
 {
   "jsFiles": "",
-  "jsFolder": "00 Meta/02 Scripts/CustomJS/",
+  "jsFolder": "Config/Scripts/CustomJS/",
   "startupScriptNames": [
     "SyncArea",
     "RefoldOnOpen",

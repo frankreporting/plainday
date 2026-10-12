@@ -16,7 +16,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { spawnSync } from "node:child_process";
 
-const SCRIPTS = "00 Meta/02 Scripts";
+const SCRIPTS = "Config/Scripts";
 const CUSTOMJS = `${SCRIPTS}/CustomJS`;
 const TEMPLATER = `${SCRIPTS}/Templater`;
 const CUSTOMJS_SETTINGS = ".obsidian/plugins/customjs/data.json";

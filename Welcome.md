@@ -13,7 +13,7 @@ This is a small, made-up vault that shows the Obsidian PM system at work: a free
 3. **A project's time report:** [[Kestrel Outfitters 2026|⭕ Kestrel Outfitters 2026]]. Its sub-project [[Kestrel Fall Catalog|⭕ Kestrel Fall Catalog]] bills at the parent's rate. Compare [[Pinecrest Library Brochure|⭕ Pinecrest Library Brochure]] (flat fee) and [[Garden Club Newsletter|⭕ Garden Club Newsletter]] (non-billable). [[Block Party Poster|⭕ Block Party Poster]] has a deliberate mistake: its `rate_type` was never filled in, so its hour counts as billable and the report lists the project under Problems, on its own note and on the week, month and year of that hour.
 4. **An invoice and a timesheet:** [[1001-KES]], billed from Kestrel's time through 9/11 and paid. [[Kestrel Outfitters 2026 timesheet]] lists every entry with the invoice that billed it. One billed entry on [[2026-09-11|9/11/26]] was edited afterward, on purpose: the timesheet marks it ⚠️ and the project's note lists it under Problems.
 5. **The week's report:** [[2026w38]], then [[2026-09]] and [[2026]].
-6. **Archived work:** [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]] sits in 90 Archive. Its entries on [[2026-08-27|8/27/26]] and [[2026-08-28|8/28/26]] are left out of every report.
+6. **Archived work:** [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]] sits in Archive. Its entries on [[2026-08-27|8/27/26]] and [[2026-08-28|8/28/26]] are left out of every report.
 
 Everything under "## Time Report" is written by the TimeReport command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
 

@@ -1,44 +1,44 @@
 {
   "data_version": 2,
   "command_timeout": 5,
-  "templates_folder": "00 Meta/01 Templates",
+  "templates_folder": "Config/Templates",
   "templates_pairs": [],
   "trigger_on_file_creation_mode": "regex",
   "auto_jump_to_cursor": true,
   "jump_to_cursor_after_file_name": false,
   "shell_path": "",
-  "user_scripts_folder": "00 Meta/02 Scripts/Templater",
+  "user_scripts_folder": "Config/Scripts/Templater",
   "folder_templates": [
     {
-      "folder": "10 Inbox",
-      "template": "00 Meta/01 Templates/Get Template.md"
+      "folder": "Inbox",
+      "template": "Config/Templates/Get Template.md"
     },
     {
       "folder": "/",
-      "template": "00 Meta/01 Templates/Get Template.md"
+      "template": "Config/Templates/Get Template.md"
     }
   ],
   "file_templates": [
     {
       "regex": ".*",
-      "template": "00 Meta/01 Templates/Get Template.md"
+      "template": "Config/Templates/Get Template.md"
     }
   ],
   "syntax_highlighting": true,
   "syntax_highlighting_mobile": false,
   "enabled_templates_hotkeys": [
     {
-      "template": "00 Meta/01 Templates/Formula.md",
+      "template": "Config/Templates/Formula.md",
       "insert_enabled": true,
       "create_enabled": false
     },
     {
-      "template": "00 Meta/01 Templates/Metadata Callout.md",
+      "template": "Config/Templates/Metadata Callout.md",
       "insert_enabled": true,
       "create_enabled": false
     },
     {
-      "template": "00 Meta/01 Templates/Writing Mode.md",
+      "template": "Config/Templates/Writing Mode.md",
       "insert_enabled": true,
       "create_enabled": false
     }

@@ -24,7 +24,7 @@ jobs:
       - name: Install zsh (the calendar sync script runs under it)
         run: command -v zsh >/dev/null || (sudo apt-get update -q && sudo apt-get install -y -q zsh)
       - name: Vault tests and CI-check tests
-        run: node --test "00 Meta/02 Scripts/tests/*.test.mjs" .github/ci/*.test.mjs
+        run: node --test "Config/Scripts/tests/*.test.mjs" .github/ci/*.test.mjs
 
   scripts:
     name: Scripts load, settings parse
@@ -35,6 +35,8 @@ jobs:
         with:
           node-version: 22
       - run: node .github/ci/checkScripts.mjs
+      - name: No numbered folders (OBS-81)
+        run: node .github/ci/checkFolders.mjs
 
   privacy:
     name: Privacy

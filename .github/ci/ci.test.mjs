@@ -10,6 +10,7 @@ import path from "node:path";
 import { loadCustomJS, checkAll as checkScripts } from "./checkScripts.mjs";
 import { scanLine, scanDiff, scanText, describe } from "./privacy.mjs";
 import { docsSection, checkLinearLink, checkDocs } from "./checkPR.mjs";
+import { oldFolderLines, checkAll as checkFolders } from "./checkFolders.mjs";
 
 // ------------------------------------------------------------------ scripts load
 
@@ -23,8 +24,8 @@ test("a class that evaluates cleanly passes; a syntax error and a missing class 
 
 test("checkAll reports a broken script and a settings name with no class", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
-    const cjs = path.join(root, "00 Meta/02 Scripts/CustomJS");
-    const tpl = path.join(root, "00 Meta/02 Scripts/Templater");
+    const cjs = path.join(root, "Config/Scripts/CustomJS");
+    const tpl = path.join(root, "Config/Scripts/Templater");
     fs.mkdirSync(cjs, { recursive: true });
     fs.mkdirSync(tpl, { recursive: true });
     fs.mkdirSync(path.join(root, ".obsidian/plugins/customjs"), { recursive: true });
@@ -47,7 +48,7 @@ test("home-folder paths block, ~ and repo paths don't", () => {
     assert.deepEqual(rulesOf("see /home/" + "somebody/vault"), ["block:home folder path"]);
     assert.deepEqual(rulesOf("log at ~/Library/Logs/calendar-sync.log"), []);
     assert.deepEqual(rulesOf("a site at https://example.com/home/page"), []);
-    assert.deepEqual(rulesOf("00 Meta/02 Scripts/CustomJS/plan.js"), []);
+    assert.deepEqual(rulesOf("Config/Scripts/CustomJS/plan.js"), []);
 });
 
 test("emails block except the bot and GitHub noreply addresses", () => {
@@ -132,13 +133,28 @@ test("Linear link: a cluster lists its issues after one keyword", () => {
 });
 
 test("docs gate: only system changes need it; the manual, the README or a Docs section saying why", () => {
-    const script = ["00 Meta/02 Scripts/CustomJS/plan.js"];
-    assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "00 Meta/04 Bases/Projects.base"] }), []);
+    const script = ["Config/Scripts/CustomJS/plan.js"];
+    assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "Config/Bases/Projects.base"] }), []);
     assert.match(checkDocs({ body: "Closes OBS-1", changed: script })[0], /## Docs/);
-    assert.deepEqual(checkDocs({ body: "", changed: [...script, "00 Meta/Manual.md"] }), []);
+    assert.deepEqual(checkDocs({ body: "", changed: [...script, "Config/Manual.md"] }), []);
     assert.deepEqual(checkDocs({ body: "", changed: [...script, "README.md"] }), []);
     assert.match(checkDocs({ body: "## Docs\n\n## Test plan\nx", changed: script })[0], /must say why/);
     assert.deepEqual(checkDocs({ body: "## Docs\nInternal refactor, nothing a user sees.", changed: script }), []);
-    assert.deepEqual(checkDocs({ body: "", changed: ["00 Meta/01 Templates/Task.md", "00 Meta/Manual.md"] }), []);
-    assert.match(checkDocs({ body: "", changed: ["00 Meta/02 Scripts/Calendar/sync-calendar.sh"] })[0], /Manual\.md and README\.md/);
+    assert.deepEqual(checkDocs({ body: "", changed: ["Config/Templates/Task.md", "Config/Manual.md"] }), []);
+    assert.match(checkDocs({ body: "", changed: ["Config/Scripts/Calendar/sync-calendar.sh"] })[0], /Manual\.md and README\.md/);
+});
+
+test("OBS-81: a numbered folder the vault dropped is caught, in any case; plain names and other numbers aren't", () => {
+    const old = (n, name) => `${n} ${name}`;   // built from parts, so this file doesn't name them
+    for (const line of [`path: "${old("00", "Meta")}/Manual.md"`, `${old("30", "Reference")}/${old("36", "Planner")}/days`, `in ${old("90", "archive")}`, old("02", "Scripts"), old("37", "Journal")]) {
+        assert.equal(oldFolderLines(line).length, 1, line);
+    }
+    for (const line of ["Config/Scripts/CustomJS", "Reference/Planner/days", "Archive", "20 Projects/Freelance", "40 Trailhead pack", "2026-09-14"]) {
+        assert.deepEqual(oldFolderLines(line), [], line);
+    }
+    assert.deepEqual(oldFolderLines(`a\nb ${old("10", "Inbox")}\nc`).map((l) => l.line), [2]);
+});
+
+test("OBS-81: no tracked file names a numbered folder", () => {
+    assert.deepEqual(checkFolders(), []);
 });

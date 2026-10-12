@@ -15,14 +15,14 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const SYSTEM_DIRS = [
-    "00 Meta/02 Scripts/CustomJS/",
-    "00 Meta/02 Scripts/Templater/",
-    "00 Meta/02 Scripts/Calendar/",
-    "00 Meta/01 Templates/",
+    "Config/Scripts/CustomJS/",
+    "Config/Scripts/Templater/",
+    "Config/Scripts/Calendar/",
+    "Config/Templates/",
 ];
 
 // Where the system is documented: the manual (how it works) and the README (installing it)
-export const DOCS = ["00 Meta/Manual.md", "README.md"];
+export const DOCS = ["Config/Manual.md", "README.md"];
 
 // A keyword and the issues after it: `Closes OBS-65, OBS-66 and OBS-67`
 const LINK = /\b(Closes|Fixes|Resolves|Part of)\s+(OBS-\d+\b(?:\s*(?:,|,?\s+and\b|&)\s*OBS-\d+\b)*)/gi;

@@ -8,4 +8,4 @@ Client work. Each client project is a folder in here, and its rate and cap are p
 - [[Kestrel Outfitters 2026|⭕ Kestrel Outfitters 2026]]: hourly, with a sub-project for the fall catalog
 - [[Pinecrest Library Brochure|⭕ Pinecrest Library Brochure]]: flat fee
 
-Finished projects move to 90 Archive, like [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]].
+Finished projects move to Archive, like [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]].
