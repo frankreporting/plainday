@@ -4,21 +4,35 @@ views:
     filters:
       and:
         - file.tags.contains("project")
-        - '!status.containsAny("Canceled", "done", "Done")'
+        - or:
+            - '!status.containsAny("Canceled", "Done", "On Hold")'
+            - status.isEmpty()
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - file.name
+      - start
+      - due
+      - status
+    sort:
+      - property: end
+        direction: ASC
+  - type: table
+    name: Inactive
+    filters:
+      and:
+        - file.tags.containsAny("project")
+        - '!status.containsAny("In Progress", "To Do")'
     groupBy:
       property: status
       direction: ASC
     order:
       - file.name
       - status
-      - start
-      - due
     sort:
-      - property: end
+      - property: file.name
         direction: ASC
-  - type: kanban
-    name: View
-    groupBy:
-      property: status
-      direction: ASC
     hideEmptyGroups: false
+    columnSize:
+      file.name: 307

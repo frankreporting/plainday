@@ -32,7 +32,7 @@ const model = tr.build([
 const billed = billing.snapshot(model.entries, model, tr);
 const DATA = (more = {}) => ({
     id: "2026090312000000", name: "1001-HBR", status: "draft",
-    area: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co",
+    parent: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co",
     invoiceDate: "2026-09-03", periodStart: "2026-09-01", periodEnd: "2026-09-02",
     from: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"] },
     billTo: { name: "Harbor Co", address: ["1 Dock Street", "Port Town, ST 00000"] },
@@ -53,7 +53,7 @@ test("noteText: frontmatter the Invoices base and Billing read", () => {
         "  - invoice",
         "cssclasses:",
         "  - pm-invoice",
-        'area: "[[Harbor Web|⭕.Work.Harbor Web]]"',
+        'parent: "[[Harbor Web|⭕.Work.Harbor Web]]"',
         "invoice_status: draft",
         'number: "1001-HBR"',
         'client: "[[Harbor Co]]"',
@@ -417,7 +417,7 @@ test("Nothing unbilled says when the next unbilled time is, or that there's none
     };
     assert.deepEqual(plain(say("2026-08-31")), ["Nothing unbilled on Harbor Web through 8/31. The next unbilled time is on 9/1."]);
     // All of it billed: on an invoice, the time through 9/2 is no longer unbilled
-    const all = { path: "Reference/Invoices/1001-HBR.md", props: { invoice_status: "sent", area: "[[Harbor Web]]" },
+    const all = { path: "Reference/Invoices/1001-HBR.md", props: { invoice_status: "sent", parent: "[[Harbor Web]]" },
         text: ["---", "---", ...billing.billedLines(billing.snapshot(m.entries.filter((e) => e.project === WEB || e.project === PHOTO), m, tr), tr, (p) => tr.basename(p))].join("\n") };
     const billed = tr.attachBilling(tr.build([
         day("2026-09-01", "- [x] Site map [[Harbor Web|⭕]]\n\t- 1:00pm - 2:30pm: first pass\n- [x] Review [[Harbor Web|⭕]]\n\t- 3:00pm - 3:20pm"),

@@ -3,7 +3,7 @@ id: 2026090209582741
 aliases: 
 - 9/2/26 Brochure kickoff
 tags: log
-area: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
+parent: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
 series: 
 topic: 
 date: 2026-09-02

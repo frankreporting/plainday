@@ -247,7 +247,7 @@ class Billing {
     // An invoice note, read. `status` is its `invoice_status` (OBS-117), else the `status` of an invoice
     // made before: lowercase, "canceled" for either spelling, "draft" when blank; any other word still
     // bills. `project` is the project an invoice made before OBS-114 names in `project` (fixed when it
-    // was made, while its `area` may have been rewritten by a move since), else the one its `area` links
+    // was made, while its `parent` may have been rewritten by a move since), else the one its `parent` links
     // to (how invoices are written now), else the project its folder is in; each row's `projectPath` is where its project
     // link points. `problem` says why the invoice can't be trusted, or is null: its frontmatter doesn't
     // read (`error`), it's lost its `invoice` tag (`tagged` false: found by its Billed entries where
@@ -258,12 +258,13 @@ class Billing {
         const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
         const raw = String([p(Billing.STATUS), p("status")].find(filled) ?? "").trim().toLowerCase();
         const status = raw === "cancelled" ? "canceled" : raw || "draft";
-        const linkedProject = (name) => {
-            const link = String([].concat(p(name) ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+        const linkedTo = (value) => {
+            const link = String([].concat(value ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
             const dest = link ? index.linkDest(link, path) : null;
             return dest && tr.counts(dest, index) ? dest : null;
         };
-        const project = linkedProject("project") ?? linkedProject("area") ?? tr.projectOfNote(path, index);
+        // `project` before OBS-117; then `parent`, or `area` before OBS-175, read as the report reads it
+        const project = linkedTo(p("project")) ?? linkedTo(tr.parentValue(props ?? {})) ?? tr.projectOfNote(path, index);
         const { rows, bad, found, head, both } = this.readBilled(text, tr);
         for (const r of rows) r.projectPath = r.project ? index.linkDest(r.project, path) : null;
         const minutes = rows.reduce((s, r) => s + r.billed, 0);

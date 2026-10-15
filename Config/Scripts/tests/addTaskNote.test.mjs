@@ -56,9 +56,11 @@ test("the Task template keeps the name's last date as due, and still drops dates
     assert.equal(dueFor("Call the printer"), null);
     assert.ok(template.includes('tR += "due: " + (due ? due : "") + "\\n";'), "template writes due into the frontmatter");
     assert.ok(/replaceAll\(rxDates, ""\)/.test(template), "template still strips dates from the note's name");
-    // It writes the picked project or area as `area`, before moving the note, in the Log template's format
-    assert.ok(template.includes('tR += "area: " + area + "\\n";'), "template writes area");
-    assert.ok(template.indexOf('tR += "area: "') < template.indexOf("await tp.file.move("), "area is written before the move");
+    // It writes the picked project or area as `parent` (`area` before OBS-175), before moving the note,
+    // in the Log template's format
+    assert.ok(template.includes('tR += "parent: " + parentLink + "\\n";'), "template writes parent");
+    assert.ok(template.indexOf('tR += "parent: "') < template.indexOf("await tp.file.move("), "parent is written before the move");
+    assert.ok(!/tR \+= "area: /.test(template), "and no area");
     assert.ok(template.includes('"\\"[[" + pickedFile.basename + "|" + parentAlias + "]]\\""'), "same [[Project|alias]] form as the Log template");
     // With no project from the command, the note goes to Inbox, as a log does (OBS-36), never at the vault root
     assert.match(template, /const inbox = "Inbox";/);
@@ -310,7 +312,7 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
         assert.match(template, /await tp\.file\.move\(path \+ "\/" \+ cleanTitle\);/, `${name}: the note is the folder's note`);
         assert.doesNotMatch(template, /\d\d Projects\//, `${name}: no numbered folder from before OBS-81`);
     }
-    assert.match(read("Project"), /tR \+= "area: \\n";/, "a new project's area is empty until it's filed");
+    assert.match(read("Project"), /tR \+= "parent: \\n";/, "a new project's parent is empty until it's filed");
 });
 
 test("OBS-55: sourceHome: a line with no project files its new note where the line's own note belongs", () => {

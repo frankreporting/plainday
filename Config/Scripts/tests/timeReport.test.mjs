@@ -186,14 +186,14 @@ test("parseNote: old-style meeting lines under ## Meetings are events", () => {
 
 const INDEX = tr.makeIndex([
     { path: "20 Projects/Freelance/Freelance.md", tags: ["area"] },
-    { path: ORCHARD, tags: ["project"], area: "[[Freelance|🗃️.Freelance]]" },
-    { path: ORCHARD_WEB, tags: ["project"], area: "[[Orchard Lane 2026|⭕.Freelance.Orchard Lane 2026]]" },
+    { path: ORCHARD, tags: ["project"], parent: "[[Freelance|🗃️.Freelance]]" },
+    { path: ORCHARD_WEB, tags: ["project"], parent: "[[Orchard Lane 2026|⭕.Freelance.Orchard Lane 2026]]" },
     { path: "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Update chart data.md", tags: ["task"] },
     { path: "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/logs/2026-04-02 Content Calendar Sync.md", tags: ["log"] },
-    { path: `${LOG}/2026-04-01 Meeting (1 hr) — Imogen Fenwick.md`, tags: ["log"], area: "[[Orchard Lane Web 2026|⭕]]" },
+    { path: `${LOG}/2026-04-01 Meeting (1 hr) — Imogen Fenwick.md`, tags: ["log"], parent: "[[Orchard Lane Web 2026|⭕]]" },
     { path: PINECONE, tags: ["project"] },
     { path: "20 Projects/Freelance/Pinecone Studio/logs/2026-09-02 Launch wrapup.md", tags: ["log"] },
-    { path: KESTREL, tags: ["project"], area: "[[Freelance|🗃.Freelance]]" },
+    { path: KESTREL, tags: ["project"], parent: "[[Freelance|🗃.Freelance]]" },
     { path: "Archive/Freelance/Kestrel Newsletter/Kestrel Handoff Report.md", tags: [] },
     { path: "20 Projects/Personal/Renew lease for 2026.md", tags: ["task"] },
     { path: "Reference/Subjects/System notes.md", tags: ["subject"] },
@@ -293,10 +293,10 @@ const CYCLING = "20 Projects/Cycling/Cycling.md";
 const CENTURY = "20 Projects/Cycling/Century Ride/Century Ride.md";
 const AREA_INDEX = tr.makeIndex([
     { path: CYCLING, tags: ["area"] },
-    { path: CENTURY, tags: ["project"], area: "[[Cycling|🗃️.Cycling]]", props: { rate_type: "non-billable" } },
+    { path: CENTURY, tags: ["project"], parent: "[[Cycling|🗃️.Cycling]]", props: { rate_type: "non-billable" } },
     { path: "20 Projects/Cycling/Tune the gears.md", tags: ["task"] },
     { path: "20 Projects/Cycling/Century Ride/Route plan.md", tags: ["task"] },
-    { path: "Reference/Logs/2026-09-01 Group ride.md", tags: ["log"], area: "[[Cycling|🗃️]]" },
+    { path: "Reference/Logs/2026-09-01 Group ride.md", tags: ["log"], parent: "[[Cycling|🗃️]]" },
     { path: "Archive/Hobbies/Hobbies.md", tags: ["area"] },
     { path: PINECONE, tags: ["project"] },
 ]);
@@ -1518,8 +1518,8 @@ test("foldsAfterInsert: a folded task takes in its new entry; a folded note abov
 
 test("review: an area loop between two projects doesn't hide hours or count them twice", () => {
     const index = tr.makeIndex([
-        { path: "P/A.md", tags: ["project"], area: "[[B]]" },
-        { path: "P/B.md", tags: ["project"], area: "[[A]]" },
+        { path: "P/A.md", tags: ["project"], parent: "[[B]]" },
+        { path: "P/B.md", tags: ["project"], parent: "[[A]]" },
     ]);
     const model = tr.build([note("2026-09-01", "- [x] Work [[A|⭕]]\n\t- 9:00am - 11:00am\n- [x] More [[B|⭕]]\n\t- 1:00pm - 2:00pm")], index);
     const loops = model.projectProblems.filter((p) => !p.message);
@@ -1758,7 +1758,7 @@ test("overview review: rate and rate_type are inherited separately; bad or missi
         { path: "P/Par/Tbd/Tbd.md", tags: ["project"], props: { rate: "TBD" } },
         { path: "P/Alone/Alone.md", tags: ["project"], props: { rate_type: "hourly" } },
         { path: "Archive/Arch/Arch.md", tags: ["project"], props: { rate: 75, rate_type: "hourly" } },
-        { path: "P/Sub/Sub.md", tags: ["project"], area: "[[Arch]]" },
+        { path: "P/Sub/Sub.md", tags: ["project"], parent: "[[Arch]]" },
     ]);
     const names = ["Typed", "Zero", "Tbd", "Alone", "Sub"];
     const model = tr.build([note("2026-09-01", names.map((n) => `- [x] ${n} [[${n}|⭕]]\n\t- 9:00am - 10:00am`).join("\n"))], index);
@@ -2043,7 +2043,7 @@ test("OBS-34: a task line's ⭕ project and its 🔗 task note's project disagre
         { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
         { path: "P/Tin/Draft the scope.md", tags: ["task"] },
         { path: "Inbox/Loose end.md", tags: ["task"] },
-        { path: "Elsewhere/Filed by area.md", tags: ["task"], area: "[[Hawk]]" },
+        { path: "Elsewhere/Filed by area.md", tags: ["task"], parent: "[[Hawk]]" },
     ]);
     const text = [
         "- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|🔗]]",   // note under Hawk, line says Tin: conflict
@@ -2143,8 +2143,8 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
         { path: "P/Par/Kid/Kid.md", tags: ["project"] },
         { path: "P/Bare/Bare.md", tags: ["project"] },
         { path: "P/Late/Late.md", tags: ["project"] },
-        { path: "P/A.md", tags: ["project"], area: "[[B]]", props: { rate_type: "non-billable" } },
-        { path: "P/B.md", tags: ["project"], area: "[[A]]", props: { rate_type: "non-billable" } },
+        { path: "P/A.md", tags: ["project"], parent: "[[B]]", props: { rate_type: "non-billable" } },
+        { path: "P/B.md", tags: ["project"], parent: "[[A]]", props: { rate_type: "non-billable" } },
         { path: "P/Hawk/Hawk.md", tags: ["project"], props: { rate_type: "non-billable" } },
         { path: "P/Tin/Tin.md", tags: ["project"], props: { rate_type: "non-billable" } },
         { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
@@ -2163,7 +2163,7 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
 
     const week = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-01") }, "s"));
     assert.deepEqual(plain(week), [
-        "- [[B]] and [[A]] are each inside the other (check their folders and `area`); [[B]] is counted as top-level",
+        "- [[B]] and [[A]] are each inside the other (check their folders and `parent`); [[B]] is counted as top-level",
         // A conflict is said once, from the project the time counts on, with this period's entries only
         "- [[Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]]; move the note here, or change the line's project link",
         // A parent's problem reaches the period through its sub-project's time
@@ -2752,7 +2752,7 @@ test("render project: the block opens with its timesheet link, beside when it wa
     assert.ok(tr.sameBlock(note(withSheet), withSheet.replace("*Updated s*", "*Updated t*")));
     assert.ok(!tr.sameBlock(note(without), withSheet));
     assert.equal(tr.sheetPath(ORCHARD_WEB), "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Orchard Lane Web 2026 timesheet.md");
-    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\narea: "[[A|⭕.A]]"\n---\n\nB\n', "no heading: the whole note is the report (OBS-167)");
+    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\nparent: "[[A|⭕.A]]"\n---\n\nB\n', "no heading: the whole note is the report (OBS-167)");
     assert.match(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Nobody/Nobody.md" }, "s"), /No time entries\.\n%% time:end %%$/);
 });
 
@@ -2825,4 +2825,31 @@ test("final review: writeTimesheet makes, refreshes, or leaves a timesheet alone
     assert.equal((await run({ desktop: false })).link, null);
     // Making it fails: said, by its own name, and the project's report still goes ahead
     assert.deepEqual(plain(await run({ createFails: true })), { link: null, broken: ["Orchard Lane Web 2026 timesheet"], made: [], created: [], writes: [] });
+});
+
+// ------------------------------------------------------------------ parent, once area (OBS-175)
+
+test("parentValue: a note's `parent`, else the older `area`, in any spelling; empty is none", () => {
+    assert.equal(tr.parentValue({ parent: "[[A]]" }), "[[A]]");
+    assert.equal(tr.parentValue({ area: "[[A]]" }), "[[A]]");
+    assert.equal(tr.parentValue({ Parent: ["[[A]]", "[[B]]"] }), "[[A]]");
+    assert.equal(tr.parentValue({ parent: "[[A]]", area: "[[B]]" }), "[[A]]", "parent wins");
+    assert.equal(tr.parentValue({ parent: "", area: "[[B]]" }), "[[B]]", "an empty parent, as a new note has, falls back");
+    assert.equal(tr.parentValue({ parent: null }), null);
+    assert.equal(tr.parentValue({}), null);
+    assert.equal(tr.parentValue(null), null);
+});
+
+test("makeIndex: a note that still has `area` belongs where it did, and `parent` wins over it", () => {
+    const idx = tr.makeIndex([
+        { path: "P/Orchard/Orchard.md", tags: ["project"] },
+        { path: "P/Other/Other.md", tags: ["project"] },
+        { path: "Notes/Old.md", tags: ["task"], area: "[[Orchard]]" },
+        { path: "Notes/New.md", tags: ["task"], parent: "[[Orchard]]" },
+        { path: "Notes/Both.md", tags: ["task"], parent: "[[Other]]", area: "[[Orchard]]" },
+    ]);
+    assert.equal(idx.parentLink("Notes/Old.md"), "[[Orchard]]");
+    assert.equal(tr.projectOfNote("Notes/Old.md", idx), "P/Orchard/Orchard.md");
+    assert.equal(tr.projectOfNote("Notes/New.md", idx), "P/Orchard/Orchard.md");
+    assert.equal(tr.projectOfNote("Notes/Both.md", idx), "P/Other/Other.md");
 });

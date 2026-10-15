@@ -3,7 +3,7 @@ id: 2026091811203118
 aliases: 
 - 9/18/26 Printer call
 tags: log
-area: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
+parent: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
 series: 
 topic: 
 date: 2026-09-18

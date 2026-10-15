@@ -1,11 +1,9 @@
 ---
 id: 2026061009124480
 aliases: ["⭕.Freelance.Marlowe Bakery Rebrand"]
-icon: circle
-color: red
 tags: 
 - project
-area: "[[Freelance|🗃️.Freelance]]"
+parent: "[[Freelance|🗃️.Freelance]]"
 start: 2026-06-10
 due: 2026-08-28
 who: 

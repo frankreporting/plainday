@@ -3,7 +3,7 @@ id: 2026091409562204
 aliases: 
 - 9/14/26 Homepage review with Imogen
 tags: log
-area: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
+parent: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 series: 
 topic: 
 date: 2026-09-14

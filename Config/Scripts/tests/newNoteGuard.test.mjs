@@ -18,7 +18,7 @@ const arrivedNote = createRequire(import.meta.url)("../Templater/arrivedNote.js"
 test("arrived: a note with properties and nothing below them isn't new; an empty one, or one with text, is left to Templater", () => {
     // Not new: what a meeting log with no notes yet, or a person note, looks like when it arrives
     for (const text of [
-        "---\nid: 2026091409000000\ntags:\n  - log\narea: \"[[Kestrel Outfitters 2026|⭕]]\"\n---\n",
+        "---\nid: 2026091409000000\ntags:\n  - log\nparent: \"[[Kestrel Outfitters 2026|⭕]]\"\n---\n",
         "---\ntags: person\n---\n\n\n",
         "---\r\ntags: person\r\n---\r\n",
         "﻿---\ntags: person\n---\n",

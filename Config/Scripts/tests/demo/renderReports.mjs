@@ -12,7 +12,7 @@
 //   - readDailyNotes: notes named YYYY-MM-DD in the daily notes folder whose text has a time in it;
 //   - readInvoices: notes whose frontmatter tags include `invoice`, attached with attachBilling (OBS-5);
 //   - projectTargets plus every live project or area note that already has a block (writeProjectNotes),
-//     each with its timesheet note (writeTimesheet: found by its `timesheet` tag and `area`, else made
+//     each with its timesheet note (writeTimesheet: found by its `timesheet` tag and `parent`, else made
 //     beside the project note when it has entries, with SHEET_ID as its id);
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
@@ -126,7 +126,7 @@ export function makeIndex(tr, vault) {
     return tr.makeIndex([...vault.notes].map(([p, { fm }]) => ({
         path: p,
         tags: [].concat(fm.tags ?? []).filter(Boolean),
-        area: fm.area ?? null,
+        parent: tr.parentValue(fm),
         props: fm,
     })));
 }
@@ -211,7 +211,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     const sheets = new Map();
     for (const [p, { fm }] of vault.notes) {
         if (![].concat(fm.tags ?? []).includes("timesheet")) continue;
-        const target = String(fm.area ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+        const target = String(index.parentLink(p) ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
         const project = target ? index.linkDest(target, p) : null;
         if (project && !sheets.has(project)) sheets.set(project, p);
     }
@@ -227,8 +227,8 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
         const mine = sheets.has(p) || !vault.notes.has(sheetPath);
         if (tr.takesTimesheet(p, index, model) && mine && (vault.notes.has(sheetPath) || tr.sheetHasEntries(model, p))) {
             const fm = vault.notes.get(p).fm;
-            const area = `[[${basename(p)}|${[].concat(fm.aliases ?? [])[0] || basename(p)}]]`;
-            write(sheetPath, block, tr.sheetNote(SHEET_ID, area, block), { heading: false });
+            const parent = `[[${basename(p)}|${[].concat(fm.aliases ?? [])[0] || basename(p)}]]`;
+            write(sheetPath, block, tr.sheetNote(SHEET_ID, parent, block), { heading: false });
             targets.sheet.push(sheetPath);
             sheet = basename(sheetPath);
         }

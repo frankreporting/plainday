@@ -1,11 +1,9 @@
 ---
 id: 2026091718552317
 aliases: ["⭕.Personal.Block Party Poster"]
-icon: circle
-color: red
 tags: 
 - project
-area: "[[Personal|🗃️.Personal]]"
+parent: "[[Personal|🗃️.Personal]]"
 start: 2026-09-17
 due: 2026-10-03
 who: 

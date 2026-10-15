@@ -1,12 +1,14 @@
 class SyncArea {
     // Startup script: when notes move to another folder (one at a time or as a whole folder),
-    // points their `area` property at the nearest project or area above them, i.e. the first
+    // points their `parent` property at the nearest project or area above them, i.e. the first
     // folder note (Folder/Folder.md) tagged #project or #area. A folder note looks from the
     // folder above its own, so a moved project points at its new parent. Notes that land
     // outside any project or area, or anywhere in Archive or Config, are left untouched,
     // and renaming a folder in place changes nothing (Obsidian updates the links itself).
-    // An invoice is never touched either: its `area` is the project it bills (OBS-114), fixed
+    // An invoice is never touched either: its `parent` is the project it bills (OBS-114), fixed
     // when it's made, so moving the note mustn't change what it bills.
+    // `parent` was called `area` until OBS-175: a moved note that still has `area` gets `parent` in
+    // its place, in the same spot in the frontmatter.
     // Runs on every device, and each one only ever sees its own moves: Obsidian Sync delivers
     // a move made elsewhere as a delete plus a new file, not a rename (verified 2026-09-11).
     static IGNORED = ["Archive/", "Config/"];
@@ -74,7 +76,7 @@ class SyncArea {
                 console.error(`SyncArea: couldn't update ${file.path}`, e);
             }
         }
-        if (updated) new Notice(`Updated area on ${updated} note${updated === 1 ? "" : "s"}`);
+        if (updated) new Notice(`Updated parent on ${updated} note${updated === 1 ? "" : "s"}`);
     }
 
     // Returns true if the note was mid-template when it moved
@@ -89,7 +91,7 @@ class SyncArea {
         return true;
     }
 
-    // Returns true if the note's area was written
+    // Returns true if the note's parent was written
     async sync(file, templated) {
         if (app.vault.getAbstractFileByPath(file.path) !== file) return false; // deleted since
         if (SyncArea.IGNORED.some((p) => file.path.startsWith(p))) return false; // moved again since
@@ -101,12 +103,17 @@ class SyncArea {
         const alias = [].concat(app.metadataCache.getFileCache(parent)?.frontmatter?.aliases ?? [])[0];
         const link = alias ? `[[${linktext}|${alias}]]` : `[[${linktext}]]`;
 
-        // The key to write, or null if the area is already right. Decided from the frontmatter
-        // as written, not the metadata cache, which can lag a template's final write.
-        const keyToWrite = (f) => {
-            const key = Object.keys(f).find((k) => k.toLowerCase() === "area") ?? "area";
-            if (templated && f[key]) return null; // keep the area a template just picked
-            return this.linksTo(f[key], file, parent) ? null : key;
+        // What to write, or null if the parent is already right and there's no older `area` to
+        // rename. Decided from the frontmatter as written, not the metadata cache, which can lag a
+        // template's final write. `parent` counts only when it holds a link, as TimeReport reads it,
+        // so an empty or blank one takes the older `area`'s value rather than losing it.
+        const plan = (f) => {
+            const { key, old } = this.parentKeys(f);
+            const current = this.hasText(f[key]) ? f[key] : old && this.hasText(f[old]) ? f[old] : undefined;
+            // Keep the parent a template just picked, or one that's already right
+            const keep = (templated && current) || this.linksTo(current, file, parent);
+            if (keep && !old) return null;
+            return { key, old, value: keep ? current : Array.isArray(current) ? [link] : link };
         };
         // processFrontMatter rewrites the whole YAML block even when nothing changes, so check first
         const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
@@ -114,15 +121,15 @@ class SyncArea {
         const info = getFrontMatterInfo(text);
         const front = info.exists ? parseYaml(info.frontmatter) ?? {} : {};
         // An invoice that lost its tag but still has its Billed entries still bills, so it's left alone too
-        if (this.isInvoice(front) || customJS.Billing?.hasBilled?.(text) || !keyToWrite(front)) return false;
+        if (this.isInvoice(front) || customJS.Billing?.hasBilled?.(text) || !plan(front)) return false;
 
         let wrote = false;
         const recached = this.waitForCache(file);
         await app.fileManager.processFrontMatter(file, (f) => {
             if (this.isInvoice(f)) return;
-            const key = keyToWrite(f);
-            if (!key) return;
-            f[key] = Array.isArray(f[key]) ? [link] : link;
+            const p = plan(f);
+            if (!p) return;
+            this.setParent(f, p);
             wrote = true;
         });
         // Until Obsidian re-reads a note we just wrote, its cached tags read as empty, so a
@@ -172,7 +179,38 @@ class SyncArea {
             .some((t) => ["area", "project"].includes(t.toLowerCase()));
     }
 
-    // Whether an existing area value (a "[[Link|Alias]]" string, or a list of them) already
+    // The frontmatter's own spelling of `parent` (or "parent" when it has none), and of the older
+    // `area` if it still has one. Pure, so it's tested.
+    parentKeys(front) {
+        const keys = Object.keys(front ?? {});
+        return {
+            key: keys.find((k) => k.toLowerCase() === "parent") ?? "parent",
+            old: keys.find((k) => k.toLowerCase() === "area") ?? null,
+        };
+    }
+
+    // Whether a property holds text: the value, or a list's first, not empty or blank (TimeReport's
+    // firstLink rule). Pure, so it's tested.
+    hasText(value) {
+        const first = Array.isArray(value) ? value[0] : value;
+        return typeof first === "string" && first.trim() !== "";
+    }
+
+    // Sets `parent` in a frontmatter object, in place of `area` when there is one, so the property
+    // keeps its spot in the note's frontmatter. Pure, so it's tested.
+    setParent(f, { key, old, value }) {
+        if (!old) { f[key] = value; return f; }
+        const entries = Object.entries(f);
+        const hasKey = entries.some(([k]) => k === key);
+        for (const k of Object.keys(f)) delete f[k];
+        for (const [k, v] of entries) {
+            if (k === old) { if (!hasKey) f[key] = value; } // with both, `parent` stays where it is
+            else f[k] = k === key ? value : v;
+        }
+        return f;
+    }
+
+    // Whether an existing parent value (a "[[Link|Alias]]" string, or a list of them) already
     // points at the parent, so an alias or path difference alone doesn't cause a rewrite
     linksTo(value, file, parent) {
         const first = [].concat(value ?? [])[0];

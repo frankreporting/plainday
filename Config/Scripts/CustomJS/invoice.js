@@ -9,7 +9,7 @@ class Invoice {
     // invoice once it's sent.
     //
     // The note is the invoice: its properties say what the Invoices base lists (its status is
-    // `invoice_status`, OBS-117, and its project is the one `area` links to, OBS-114), its body is what
+    // `invoice_status`, OBS-117, and its project is the one `parent` links to, OBS-114), its body is what
     // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
     // (Billing reads and writes it). Your details come from Config/Invoice Settings.md, which updates
@@ -139,7 +139,7 @@ class Invoice {
             "  - invoice",
             "cssclasses:",
             "  - pm-invoice",
-            `area: ${q(d.area)}`,
+            `parent: ${q(d.parent)}`,
             `${Invoice.STATUS}: ${d.status}`,
             `number: ${q(d.name)}`,
             `client: ${q(`[[${d.clientLink}]]`)}`,
@@ -515,7 +515,7 @@ class Invoice {
         const props = index.props(project) ?? {};
         const text = this.noteText({
             id: window.moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
-            area: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path),
+            parent: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path),
             invoiceDate: window.moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
             from: settings, billTo: { name: client.billingName, address: client.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),

@@ -47,7 +47,7 @@ class TimeReport {
     // task line and then the lines it's nested under:
     //   1. a ⭕ link to a project note (`[[Orchard Lane Web 2026|⭕]]`);
     //   2. the note link's note (🗒️, or 🔗 before OBS-87: a task's note, an event's log): its nearest
-    //      project folder note (Folder/Folder.md tagged #project), or its `area`. An event whose
+    //      project folder note (Folder/Folder.md tagged #project), or its `parent`. An event whose
     //      title is wrapped in a link, the way lines were written before OBS-57, has that note.
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
     // sub-project: its hours also count toward the parent. Entries of archived projects (in
@@ -540,8 +540,8 @@ class TimeReport {
 
     // ---------------------------------------------------------------- projects
     // `index` answers questions about notes: { linkDest(linktext, fromPath) → path | null,
-    // isProject(path), isArea(path), area(path) → "[[link]]" | null, exists(path) }. makeIndex builds
-    // one from plain data (tests); appIndex from Obsidian's metadata cache.
+    // isProject(path), isArea(path), parentLink(path) → "[[link]]" | null, exists(path) }. makeIndex
+    // builds one from plain data (tests); appIndex from Obsidian's metadata cache.
     //
     // Time counts toward a project or an area (OBS-51). An area (#area) takes time linked to it, or to
     // a note filed straight under it, as its own row, but it's never a parent: projects inside it
@@ -575,11 +575,33 @@ class TimeReport {
         return path.split("/").pop().replace(/\.md$/, "");
     }
 
-    // What a note's `area` points at, when `want` says yes to it
+    // What a note's `parent` points at, when `want` says yes to it
     areaProject(path, index, want = (p) => index.isProject(p)) {
-        const area = index.area(path)?.match(/\[\[([^\]|#]+)/)?.[1]?.trim();
-        const dest = area ? index.linkDest(area, path) : null;
+        const target = index.parentLink(path)?.match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+        const dest = target ? index.linkDest(target, path) : null;
         return dest && dest !== path && want(dest) ? dest : null;
+    }
+
+    // `parent` links a note to the project or area it's filed under, or an invoice to the project it
+    // bills (OBS-175). Older notes call it `area`, which is read when a note has no `parent`, so a
+    // vault works before its notes are renamed.
+    // A note's `parent` link from its frontmatter (`area` on older notes), or null. One pass over
+    // the keys, since the report asks for every note's
+    parentValue(fm) {
+        if (!fm) return null;
+        let parent, area;
+        for (const k in fm) {
+            const lower = k.toLowerCase();
+            if (lower === "parent") parent ??= fm[k];
+            else if (lower === "area") area ??= fm[k];
+        }
+        return this.firstLink(parent) ?? this.firstLink(area);
+    }
+
+    // A property's link: the value, or a list's first; null when it's empty or not text
+    firstLink(value) {
+        const first = Array.isArray(value) ? value[0] : value;
+        return typeof first === "string" && first.trim() ? first : null;
     }
 
     // The nearest folder note at or above `dir` that `want` says yes to
@@ -592,7 +614,7 @@ class TimeReport {
     }
 
     // The project or area a note belongs to: itself if it's one, else the nearest project or area
-    // folder note above it, else whatever its `area` points at if that's one
+    // folder note above it, else whatever its `parent` points at if that's one
     projectOfNote(path, index) {
         const counts = (p) => this.counts(p, index);
         if (counts(path)) return path;
@@ -600,7 +622,7 @@ class TimeReport {
     }
 
     // The project a project sits inside: the nearest project folder note above its own folder, else
-    // its `area` if that's a project. Never an area, and an area has none: time doesn't roll up into
+    // its `parent` if that's a project. Never an area, and an area has none: time doesn't roll up into
     // an area, and an area filed inside a project isn't a sub-project billed at its rate.
     parentProject(path, index) {
         if (this.isAreaOnly(path, index)) return null;
@@ -687,8 +709,9 @@ class TimeReport {
         return null;
     }
 
-    // Same answers as appIndex, from [{ path, tags, area, props }] (tags as Obsidian collects them,
-    // frontmatter and inline; props is the frontmatter, for rate and caps)
+    // Same answers as appIndex, from [{ path, tags, parent, props }] (tags as Obsidian collects them,
+    // frontmatter and inline; props is the frontmatter, for rate and caps). `area` stands in for
+    // `parent` on a note that has none, as in an older note's frontmatter.
     makeIndex(notes) {
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const byLower = new Map();
@@ -701,9 +724,9 @@ class TimeReport {
             exists: (path) => byPath.has(path),
             isProject: (path) => tagged(path, "project"),
             isArea: (path) => tagged(path, "area"),
-            area: (path) => {
-                const value = [].concat(byPath.get(path)?.area ?? [])[0];
-                return typeof value === "string" ? value : null;
+            parentLink: (path) => {
+                const n = byPath.get(path);
+                return n ? this.firstLink(n.parent) ?? this.firstLink(n.area) : null;
             },
             props: (path) => byPath.get(path)?.props ?? {},
             linkDest: (linktext) => {
@@ -804,7 +827,7 @@ class TimeReport {
             if (!latest || t.to > latest.to) latest = t;
         }
 
-        // Parent projects. A loop (A inside B inside A, through `area`) is cut where it closes.
+        // Parent projects. A loop (A inside B inside A, through `parent`) is cut where it closes.
         const parent = new Map();
         const projectProblems = [];
         const addChain = (p) => {
@@ -1117,10 +1140,10 @@ class TimeReport {
         return `${dir ? `${dir}/` : ""}${this.basename(project)}${TimeReport.SHEET}.md`;
     }
 
-    // The whole of a new timesheet note: an id, the timesheet tag and its project as `area`, then its
+    // The whole of a new timesheet note: an id, the timesheet tag and its project as `parent`, then its
     // report, with no heading: the whole note is the report (OBS-167)
-    sheetNote(id, area, block) {
-        return `---\nid: ${id}\ntags:\n  - timesheet\narea: ${JSON.stringify(area)}\n---\n\n${block}\n`;
+    sheetNote(id, parent, block) {
+        return `---\nid: ${id}\ntags:\n  - timesheet\nparent: ${JSON.stringify(parent)}\n---\n\n${block}\n`;
     }
 
     // Whether a note gets a timesheet: a project does, an area doesn't, since its time never ends and
@@ -1557,7 +1580,7 @@ class TimeReport {
                 continue;
             }
             out.push(p.message ? `- ${link(p.project)} ${p.message}`
-                : `- ${link(p.project)} and ${link(p.parent)} are each inside the other (check their folders and \`area\`); ${link(p.project)} is counted as top-level`);
+                : `- ${link(p.project)} and ${link(p.parent)} are each inside the other (check their folders and \`parent\`); ${link(p.project)} is counted as top-level`);
         }
         const noProject = entries.filter((e) => !e.project).length;
         if (noProject) out.push(`- ${noProject} ${noProject === 1 ? "entry has" : "entries have"} no project (see Unassigned)`);
@@ -2498,12 +2521,7 @@ class TimeReport {
             isProject: (path) => tagged(path, "project"),
             isArea: (path) => tagged(path, "area"),
             isInvoice: (path) => tagged(path, "invoice"),
-            area: (path) => {
-                const fm = cacheOf(path)?.frontmatter ?? {};
-                const key = Object.keys(fm).find((k) => k.toLowerCase() === "area");
-                const value = [].concat(key ? fm[key] ?? [] : [])[0];
-                return typeof value === "string" ? value : null;
-            },
+            parentLink: (path) => this.parentValue(cacheOf(path)?.frontmatter ?? {}),
             props: (path) => cacheOf(path)?.frontmatter ?? {},
             linkDest: (linktext, fromPath) => app.metadataCache.getFirstLinkpathDest(linktext, fromPath)?.path ?? null,
         };
@@ -2573,14 +2591,14 @@ class TimeReport {
         return { updated, broken, created };
     }
 
-    // Every timesheet note (tagged `timesheet`), by the project its `area` links: Map(project → path).
+    // Every timesheet note (tagged `timesheet`), by the project its `parent` links: Map(project → path).
     // Found this way, a timesheet stays its project's when either is renamed.
     timesheetNotes(index) {
         const out = new Map();
         for (const f of app.vault.getMarkdownFiles()) {
             const fm = app.metadataCache.getFileCache(f)?.frontmatter;
             if (!fm || !this.tagsOf({ frontmatter: fm }).includes("timesheet")) continue;
-            const target = String(index.area(f.path) ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+            const target = String(index.parentLink(f.path) ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
             const project = target ? index.linkDest(target, f.path) : null;
             if (project && !out.has(project)) out.set(project, f.path);
         }

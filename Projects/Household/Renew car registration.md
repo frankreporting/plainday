@@ -2,7 +2,7 @@
 id: 2026091208153390
 tags: 
 - task
-area: "[[Household|🗃️.Household]]"
+parent: "[[Household|🗃️.Household]]"
 due: 2026-09-30
 ---
 Registration runs out at the end of the month.

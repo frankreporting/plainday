@@ -2,7 +2,7 @@
 id: 2026091513594012
 tags: 
 - task
-area: "[[Kestrel Fall Catalog|⭕.Freelance.Kestrel Outfitters 2026.Kestrel Fall Catalog]]"
+parent: "[[Kestrel Fall Catalog|⭕.Freelance.Kestrel Outfitters 2026.Kestrel Fall Catalog]]"
 due: 2026-09-23
 ---
 Every product and angle for the fall catalog, grouped so the studio day runs in order.

@@ -1,11 +1,9 @@
 ---
 id: 2026090118420663
 aliases: ["⭕.Personal.Garden Club Newsletter"]
-icon: circle
-color: red
 tags: 
 - project
-area: "[[Personal|🗃️.Personal]]"
+parent: "[[Personal|🗃️.Personal]]"
 start: 2026-09-01
 due: 
 who: 

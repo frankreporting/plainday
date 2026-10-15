@@ -2,7 +2,7 @@
 tags:
   - template
 ---
-Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It creates a project folder for it at the top of Projects and makes this note its folder note; MoveToProject puts it under an area or another project afterwards. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". Every new project starts at `status: To Do`. The ConvertToProject command uses this template too.
+Runs for any new note with "!project" in its name (see Get Template), e.g. "!project Launch plan", wherever the note was created. It creates a project folder for it at the top of Projects and makes this note its folder note; MoveToProject puts it under an area or another project afterwards. A first date in the name becomes `start` and a second becomes `due`, e.g. "!project 2026-09-15 2026-10-01 Launch plan". Every new project starts at `status: To Do`. With Notebook Navigator installed, the new folder gets the look Navigator gives the `project` tag, and the note is pinned in it if Navigator pins the folder notes it makes (folderLook.js). The ConvertToProject command uses this template too.
 
 <%*
 tR = "";
@@ -16,7 +16,7 @@ const cleanTitle = tp.file.title.replaceAll(rxDates, "").replace("!project", "")
 const alias = "⭕." + cleanTitle;
 
 // No menu (OBS-55): a new project gets a folder at the top of Projects, and MoveToProject files it
-// under an area or another project afterwards (SyncArea then fills `area`)
+// under an area or another project afterwards (SyncArea then fills `parent`)
 const path = "Projects/" + cleanTitle;
 // A name another note already has stops here: Obsidian resolves a shared name to the shortest path,
 // and a note at the top of Projects would take over the other note's links, and the time on them
@@ -44,20 +44,22 @@ if (!moved && cleanTitle && cleanTitle != tp.file.title) {
 tR += "---\n";
 tR += "id: " + thisID + "\n";
 tR += "aliases: [" + JSON.stringify(alias) + "]\n";
-tR += "icon: circle\n";
-tR += "color: red\n";
 tR += "tags: \n- project\n";
 tR += "status: To Do\n";
-tR += "area: \n";
+tR += "parent: \n";
 tR += "start: " + (start ? start : "") + "\n";
 tR += "due: " + (due ? due : "") + "\n";
 tR += "who: \n";
 tR += "client: \n";
+tR += "bill_to: \n";
 tR += "rate: \n";
 tR += "rate_type: \n";
+tR += "max_hours: \n";
 tR += "include_subprojects: false\n";
 tR += "billed_through: \n";
 tR += "---\n";
 tp.file.cursor(0);
+// Its folder gets the project look in Notebook Navigator, once the note is written (OBS-142)
+if (moved) tp.user.folderLook(tp, "project");
 tp.user.showNewNote(tp);
 %>

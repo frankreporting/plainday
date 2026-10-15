@@ -2,7 +2,7 @@
 id: 2026091621000000
 tags:
   - timesheet
-area: "[[Block Party Poster|⭕.Personal.Block Party Poster]]"
+parent: "[[Block Party Poster|⭕.Personal.Block Party Poster]]"
 ---
 
 %% time:start %%

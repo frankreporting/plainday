@@ -131,7 +131,7 @@ class AddTaskNote {
     // A line with no ⭕ gets one for wherever its note is filed. A new note for such a line goes where
     // the note the line is in belongs (a project's own note, or a task note filed in one: see
     // sourceHome), and otherwise waits in Inbox, unfiled; no menu asks (OBS-55). A project or area
-    // note is never moved. Esc on a menu cancels and nothing changes. An existing note's `area` is then set from
+    // note is never moved. Esc on a menu cancels and nothing changes. An existing note's `parent` is then set from
     // its folder (SyncArea's rule).
     //
     // Resolves to { note, linktext, name, created, home, homeLink, clear, projectLinks }, where `name`
@@ -357,7 +357,7 @@ class AddTaskNote {
     }
 
     // The project or area a note sits in: its nearest folder note (Folder/Folder.md) tagged #project
-    // or #area, as SyncArea writes `area`; a project or area note is its own home. Null outside any.
+    // or #area, as SyncArea writes `parent`; a project or area note is its own home. Null outside any.
     homeOf(file) {
         if (this.isHome(file)) return file;
         for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {

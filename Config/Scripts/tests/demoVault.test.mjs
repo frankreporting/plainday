@@ -4,7 +4,7 @@
 // The time reports in the notes are rendered by tests/demo/renderReports.mjs; after changing a sample
 // note, run that script and commit what it writes. These checks keep the demo opening cleanly: the
 // startup report run finds nothing to rewrite, the only Problems are the deliberate ones, and every
-// `area` and link is right.
+// `parent` and link is right.
 import { test as baseTest } from "node:test";
 import fs from "node:fs";
 import assert from "node:assert/strict";
@@ -228,21 +228,26 @@ const nearest = (p) => {
 
 const linkTarget = (value) => String(value ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? null;
 
-test("demo vault: every note in an area or project has `area` pointing at its nearest folder note", () => {
+test("demo vault: every note in an area or project has `parent` pointing at its nearest folder note", () => {
     let checked = 0;
     for (const p of demoNotes.filter((q) => q.startsWith("Projects/"))) {
         const parent = nearest(p);
-        const area = vault.notes.get(p).fm.area;
+        const link = vault.notes.get(p).fm.parent;
         if (!parent) {
-            assert.ok(!area, `${p} is outside any project or area but has area ${area}`);
+            assert.ok(!link, `${p} is outside any project or area but has parent ${link}`);
             continue;
         }
         checked++;
-        assert.equal(plan.index.linkDest(linkTarget(area) ?? "", p), parent, `${p}: area ${area}`);
+        assert.equal(plan.index.linkDest(linkTarget(link) ?? "", p), parent, `${p}: parent ${link}`);
         const alias = [].concat(vault.notes.get(parent).fm.aliases ?? [])[0];
-        assert.equal(area, `[[${basename(parent)}|${alias}]]`, `${p}: area alias`);
+        assert.equal(link, `[[${basename(parent)}|${alias}]]`, `${p}: parent alias`);
     }
     assert.ok(checked >= 10);
+});
+
+test("demo vault: no sample note still has the old `area` property (OBS-175)", () => {
+    const left = demoNotes.filter((p) => Object.keys(vault.notes.get(p)?.fm ?? {}).some((k) => k.toLowerCase() === "area"));
+    assert.deepEqual(left, []);
 });
 
 test("demo vault: 🗒️, ⭕, meeting log and property links all resolve", () => {
@@ -261,7 +266,7 @@ test("demo vault: 🗒️, ⭕, meeting log and property links all resolve", () 
             checked++;
             assert.ok(resolves(target, p), `${p}: [[${target}]] doesn't resolve`);
         }
-        for (const key of ["area", "who", "client", "affiliation"]) {
+        for (const key of ["parent", "who", "client", "affiliation"]) {
             for (const v of [].concat(fm[key] ?? [])) {
                 const target = linkTarget(v);
                 if (!target) continue;
@@ -344,7 +349,7 @@ test("demo vault: each project with time has its timesheet note beside it, linke
     for (const sheet of plan.targets.sheet) {
         const { fm } = vault.notes.get(sheet);
         assert.deepEqual([].concat(fm.tags ?? []), ["timesheet"], sheet);
-        const project = plan.index.linkDest(linkTarget(fm.area), sheet);
+        const project = plan.index.linkDest(linkTarget(fm.parent), sheet);
         assert.ok(vault.notes.get(project).text.includes(`[[${basename(sheet)}|Timesheet]]`), `${project} links ${sheet}`);
     }
     // Household, an area with time, gets no timesheet and no link to one (OBS-131)
@@ -360,19 +365,28 @@ test("demo vault: each project with time has its timesheet note beside it, linke
 test("demo vault: the Project template and the Invoices base carry the invoice properties", () => {
     const template = fs.readFileSync(new URL("../../Templates/Project.md", import.meta.url), "utf8");
     const at = (l) => template.indexOf(l);
-    assert.ok(at('tR += "rate_type: \\n";') < at('tR += "include_subprojects: false\\n";'));
-    assert.ok(at('tR += "include_subprojects: false\\n";') < at('tR += "billed_through: \\n";'));
+    // In the maintainer's order (2026-10-14): bill_to after client, max_hours after rate_type
+    const order = ["client: ", "bill_to: ", "rate: ", "rate_type: ", "max_hours: ", "include_subprojects: false", "billed_through: "].map((k) => at(`tR += "${k}\\n";`));
+    assert.ok(order.every((i) => i > 0), "the template writes each one");
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), "in that order");
     assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
     const base = fs.readFileSync(new URL("../../../Reference/Invoices/Invoices.base", import.meta.url), "utf8");
     assert.match(base, /file\.tags\.contains\("invoice"\)/);
-    // Its columns, in order, named as Airtable named them, and the sum of what the view shows, to the cent (OBS-117)
-    assert.match(base, /order:\n\s+- invoice_date\n\s+- file\.name\n\s+- formula\.project\n\s+- invoice_status\n\s+- total\n/);
-    for (const [p, name] of [["note.invoice_date", "Date"], ["file.name", "Invoice"], ["formula.project", "Project"], ["note.invoice_status", "Status"], ["note.total", "Total"]]) {
+    // Its columns, in order, named as Airtable named them (OBS-117); Total in dollars (the maintainer's
+    // setup, 2026-10-14), grouped by status: draft, sent, paid, then canceled. Obsidian hides a status
+    // missing from groupOrder, which hid every new invoice until draft was added
+    assert.match(base, /order:\n\s+- invoice_date\n\s+- file\.name\n\s+- formula\.project\n\s+- invoice_status\n\s+- formula\.amount\n/);
+    for (const [p, name] of [["note.invoice_date", "Date"], ["file.name", "Invoice"], ["formula.project", "Project"], ["note.invoice_status", "Status"], ["formula.amount", "Total"]]) {
         assert.match(base, new RegExp(`  ${p.replace(".", "\\.")}:\\n    displayName: ${name}\\n`), p);
     }
-    // The project's name, linked, not area's alias; the sum with two decimals
-    assert.match(base, /\n  project: 'if\(area, link\(area\.asFile\(\)\.path, area\.asFile\(\)\.basename\), ""\)'\n/);
-    assert.match(base, /\nsummaries:\n  Sum: 'values\.sum\(\)\.toFixed\(2\)'\n/);
-    assert.match(base, /\n    summaries:\n\s+total: Sum\n/);
+    assert.match(base, /\n    groupBy:\n      property: invoice_status\n      direction: ASC\n    groupOrder:\n      - draft\n      - sent\n      - paid\n      - canceled\n/);
+    // The project's name, linked, not parent's alias (`area` on invoices from before OBS-175)
+    assert.match(base, /\n  project: if\(parent, link\(parent\.asFile\(\)\.path, parent\.asFile\(\)\.basename\), if\(area, link\(area\.asFile\(\)\.path, area\.asFile\(\)\.basename\), ""\)\)\n/);
+    // The total as $1,235.00, and the sum of what the view shows the same way, every comma dropped
+    // before adding
+    assert.match(base, /\n  amount: '"\$"\+total\.toFixed\(2\)\.replace\(\/\\B\(\?=\(\\d\{3\}\)\+\(\?!\\d\)\)\/g, ","\)'\n/);
+    assert.match(base, /^summaries:\n  Sum: '"\$"\+values\.reduce\(acc \+ number\(value\.slice\(1\)\.replace\(\/,\/g,""\)\),0\)/);
+    assert.match(base, /\n    summaries:\n\s+formula\.amount: Sum\n/);
     assert.doesNotMatch(base, /- (status|project)\n/, "no projects' status, no project column (OBS-114)");
 });
+

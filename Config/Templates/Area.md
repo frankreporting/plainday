@@ -35,5 +35,7 @@ tR += `aliases: ["${alias}"]\n`;
 tR += "tags: area\n";
 tR += "---\n" + tp.file.cursor(0);
 tR += "\n";
+// Its folder gets the area look in Notebook Navigator, once the note is written (OBS-142)
+if (moved) tp.user.folderLook(tp, "area");
 tp.user.showNewNote(tp);
 %>

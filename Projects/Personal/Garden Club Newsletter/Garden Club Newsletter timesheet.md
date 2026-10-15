@@ -2,7 +2,7 @@
 id: 2026091621000000
 tags:
   - timesheet
-area: "[[Garden Club Newsletter|⭕.Personal.Garden Club Newsletter]]"
+parent: "[[Garden Club Newsletter|⭕.Personal.Garden Club Newsletter]]"
 ---
 
 %% time:start %%

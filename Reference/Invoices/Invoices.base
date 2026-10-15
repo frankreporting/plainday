@@ -1,10 +1,11 @@
+summaries:
+  Sum: '"$"+values.reduce(acc + number(value.slice(1).replace(/,/g,"")),0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")'
 filters:
   and:
     - file.tags.contains("invoice")
 formulas:
-  project: 'if(area, link(area.asFile().path, area.asFile().basename), "")'
-summaries:
-  Sum: 'values.sum().toFixed(2)'
+  project: if(parent, link(parent.asFile().path, parent.asFile().basename), if(area, link(area.asFile().path, area.asFile().basename), ""))
+  amount: '"$"+total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")'
 properties:
   note.invoice_date:
     displayName: Date
@@ -16,17 +17,29 @@ properties:
     displayName: Status
   note.total:
     displayName: Total
+  formula.amount:
+    displayName: Total
 views:
   - type: table
     name: Invoices
+    groupBy:
+      property: invoice_status
+      direction: ASC
+    groupOrder:
+      - draft
+      - sent
+      - paid
+      - canceled
     order:
       - invoice_date
       - file.name
       - formula.project
       - invoice_status
-      - total
+      - formula.amount
     sort:
       - property: invoice_date
         direction: DESC
     summaries:
-      total: Sum
+      formula.amount: Sum
+    columnSize:
+      formula.amount: 270

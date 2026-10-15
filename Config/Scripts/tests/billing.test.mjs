@@ -253,14 +253,24 @@ test("readInvoice: invoice_status, else an older invoice's status; area's projec
     assert.equal(note({ invoice_status: " ", status: "sent" }).status, "sent");
     assert.equal(note({ invoice_status: "Cancelled" }).status, "canceled");
     assert.equal(note({}).status, "draft");
-    // An older invoice's fixed `project` (its `area` may have moved since); else the project `area`
+    // An older invoice's fixed `project` (its `parent` may have moved since); else the project `parent`
     // links to, as invoices are written now; else the project its folder is in
+    assert.equal(note({ parent: "[[Harbor Photos|⭕.Work.Harbor Web.Harbor Photos]]" }).project, PHOTO);
+    assert.equal(note({ parent: "[[Harbor Photos]]", project: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ parent: "[[Harbor Photos]]", project: "[[Harbor Co]]" }).project, PHOTO);
+    assert.equal(note({ parent: "[[Harbor Co]]", project: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ parent: ["[[Dune Books]]"] }).project, OTHER);
+    assert.equal(note({ parent: "[[Nowhere]]" }).project, WEB);
+    // `parent` was `area` before OBS-175: an invoice that still says `area` bills the same project,
+    // and with both, `parent` wins
     assert.equal(note({ area: "[[Harbor Photos|⭕.Work.Harbor Web.Harbor Photos]]" }).project, PHOTO);
-    assert.equal(note({ area: "[[Harbor Photos]]", project: "[[Dune Books]]" }).project, OTHER);
-    assert.equal(note({ area: "[[Harbor Photos]]", project: "[[Harbor Co]]" }).project, PHOTO);
-    assert.equal(note({ area: "[[Harbor Co]]", project: "[[Dune Books]]" }).project, OTHER);
-    assert.equal(note({ area: ["[[Dune Books]]"] }).project, OTHER);
-    assert.equal(note({ area: "[[Nowhere]]" }).project, WEB);
+    assert.equal(note({ area: "[[Harbor Photos]]", parent: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ area: "[[Dune Books]]", project: "[[Harbor Photos]]" }).project, PHOTO);
+    // The report's rule: an empty `parent` takes `area`'s; one that links nowhere doesn't, so the
+    // invoice's folder decides, as it does for the report
+    assert.equal(note({ parent: "", area: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ parent: [], area: "[[Dune Books]]" }).project, OTHER);
+    assert.equal(note({ parent: "[[Nowhere]]", area: "[[Dune Books]]" }).project, WEB);
 });
 
 test("readBilled: a row whose link escapes a move stripped still reads (OBS-117)", () => {

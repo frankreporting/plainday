@@ -20,7 +20,7 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *JumpToDate* `⌘J`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
-Optional: the **Kanban** view in `Projects/Projects.base` needs a Bases kanban view plugin, and the `writing` class and `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, copied and turned on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed).
+Optional: the `writing` class and `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, copied and turned on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive.
 
 The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
 
@@ -38,7 +38,7 @@ Config/                            the system
   Templates/                       Templater templates
 Inbox/                             new notes that haven't been filed
 Projects/
-  Projects.base                    the active projects, opened as a file (Bases)
+  Projects.base                    the projects, active and inactive, opened as a file (Bases)
   Freelance/                       an area: folder + folder note tagged #area
     Freelance.md
     Kestrel Outfitters 2026/       a project: folder + folder note tagged #project
@@ -66,7 +66,7 @@ Reference/
 Welcome.md                         start here
 ```
 
-Every note inside an area or project has an `area` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
+Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
 
 ## Creating notes: the title picks the template
 
@@ -78,7 +78,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `area`, `date`, `time`, `endTime` (from that event line), `who` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *MoveToProject*; dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *MoveToProject*; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
@@ -151,7 +151,7 @@ Startup scripts (run when Obsidian starts):
 
 | Script | What it does |
 | --- | --- |
-| SyncArea | Updates `area` when notes or folders move |
+| SyncArea | Updates `parent` when notes or folders move |
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
 | MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
 | TrailingLinks | Draws the 🚩, 🗒️, ⭕ and 🗃️ links that end a task or event line small, at the right of the line (Live Preview) |
@@ -177,7 +177,7 @@ From the vault root, with Node 20 or later:
 node --test "Config/Scripts/tests/*.test.mjs"
 ```
 
-Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `area` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
+Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
 
 ## Working on it
 

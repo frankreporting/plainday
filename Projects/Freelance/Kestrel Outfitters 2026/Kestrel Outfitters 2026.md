@@ -1,11 +1,9 @@
 ---
 id: 2026082713052210
 aliases: ["⭕.Freelance.Kestrel Outfitters 2026"]
-icon: circle
-color: red
 tags: 
 - project
-area: "[[Freelance|🗃️.Freelance]]"
+parent: "[[Freelance|🗃️.Freelance]]"
 start: 2026-08-27
 due: 2026-10-30
 who: "[[Imogen Fenwick]]"

@@ -2,7 +2,7 @@
 id: 2026091114581205
 tags: 
 - task
-area: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
+parent: "[[Pinecrest Library Brochure|⭕.Freelance.Pinecrest Library Brochure]]"
 due: 2026-09-22
 ---
 Copy for the six panels: welcome, kids' programs, adult classes, the maker space, hours, and how to get a card.

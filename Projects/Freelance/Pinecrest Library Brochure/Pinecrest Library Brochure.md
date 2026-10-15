@@ -1,11 +1,9 @@
 ---
 id: 2026090109301577
 aliases: ["⭕.Freelance.Pinecrest Library Brochure"]
-icon: circle
-color: red
 tags: 
 - project
-area: "[[Freelance|🗃️.Freelance]]"
+parent: "[[Freelance|🗃️.Freelance]]"
 start: 2026-09-02
 due: 2026-09-25
 who: "[[Rafe Oakes]]"

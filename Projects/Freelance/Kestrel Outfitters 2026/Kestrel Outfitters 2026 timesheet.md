@@ -2,7 +2,7 @@
 id: 2026091621000000
 tags:
   - timesheet
-area: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
+parent: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 ---
 
 %% time:start %%

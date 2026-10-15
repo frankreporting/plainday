@@ -10,14 +10,14 @@ const dates = tp.file.title.match(rxDates);
 // A date in the name is the task's due date (with two, the last one, as in the Project template)
 const due = dates ? dates[dates.length - 1] : null;
 
-// The area the note is filed under, written here so a task note filed in a project has one (as the Log template does)
+// The parent the note is filed under, written here so a task note filed in a project has one (as the Log template does)
 const parentAlias = pickedFile ? [].concat(app.metadataCache.getFileCache(pickedFile)?.frontmatter?.aliases ?? [])[0] || pickedFile.basename : null;
-const area = pickedFile ? "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"" : "";
+const parentLink = pickedFile ? "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"" : "";
 
 tR += "---\n";
 tR += "id: " + thisID + "\n";
 tR += "tags: \n- task\n";
-tR += "area: " + area + "\n";
+tR += "parent: " + parentLink + "\n";
 tR += "due: " + (due ? due : "") + "\n";
 tR += "---\n";
 

@@ -34,12 +34,12 @@ const lineHomes = eventLine && tasks ? tasks.lineProjects(eventLine, dailyPath) 
 // (anything that isn't a note, such as "inbox" from an AddTaskNote that hasn't reloaded yet, is Inbox)
 const preset = [tasks?.takePresetParent?.(tp.config.target_file.path)].find((p) => p && typeof p === "object") ?? null;
 const pickedFile = lineHomes.allLive && lineHomes.projects.length === 1 ? lineHomes.projects[0] : preset;
-let area = "";
+let parentLink = "";
 let folder = "Inbox";
 if (pickedFile) {
 	folder = tasks ? tasks.logsFolderIn(pickedFile.parent.path) : pickedFile.parent.path + "/›logs";
 	const parentAlias = [].concat(app.metadataCache.getFileCache(pickedFile)?.frontmatter?.aliases ?? [])[0] || pickedFile.basename;
-	area = "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"";
+	parentLink = "\"[[" + pickedFile.basename + "|" + parentAlias + "]]\"";
 	if (tasks) await tasks.makeFolder(folder);
 	else if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
 }
@@ -124,7 +124,7 @@ if (!sync || !schedule) {
 }
 
 tR += "---\nid: " + tp.date.now("YYYYMMDDHHmmssSS") + "\naliases: \n- " + friendlyDate + " " + cleanTitle + "\ntags: log\n";
-tR += `area: ${area}\n`;
+tR += `parent: ${parentLink}\n`;
 tR += `series: \n`;
 tR += `topic: \n`;
 tR += `date: ${logDate}\n`;

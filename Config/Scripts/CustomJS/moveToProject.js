@@ -8,7 +8,7 @@ class MoveToProject {
     //   - a meeting log (see AddTaskNote.isLog) into the project's `›logs`, made if missing;
     //   - a project or area's folder note: the whole folder, sub-projects and logs included;
     //   - anything else into the project's folder.
-    // Obsidian's move updates links, and SyncArea sets `area`; this never writes `area` itself.
+    // Obsidian's move updates links, and SyncArea sets `parent`; this never writes `parent` itself.
     //
     // Moving one thing asks first (AddTaskNote.confirmMove) when a note leaves a project or area,
     // since every line that links it follows it, and whenever a project or area moves, since its
