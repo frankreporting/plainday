@@ -183,7 +183,7 @@ test("demo vault: every convention the README describes shows up at least once",
     for (const t of ["hourly", "flat", "non-billable"]) assert.ok(types.has(t), t);
     assert.ok([...plan.model.parent.values()].some(Boolean), "a sub-project");
     // A task note forwarded to a day from outside the daily notes
-    assert.ok(demoNotes.some((p) => !p.startsWith(DAYS) && /^- \[>\] \[\[\d{4}-\d{2}-\d{2}\|\d{1,2}\/\d{1,2}\]\] /m.test(vault.notes.get(p).text)));
+    assert.ok(demoNotes.some((p) => !p.startsWith(DAYS) && /^- \[>\] .* \[\[\d{4}-\d{2}-\d{2}#\^[a-z0-9]{6}\|[^\]]+\]\] \^[a-z0-9]{6}$/m.test(vault.notes.get(p).text)));
 });
 
 test("demo vault: every line that links a note also links its project or area, before the note link (OBS-90)", () => {
@@ -191,9 +191,9 @@ test("demo vault: every line that links a note also links its project or area, b
     const { changes, skipped, moved } = convert(vault, tr, tr, tasks);
     assert.deepEqual(changes.map((c) => `${c.path}:${c.line}: ${c.after}`), [], "the conversion (tests/demo/addProjectLinks.mjs) finds nothing left to do");
     assert.deepEqual([skipped, moved].map((l) => l.length), [0, 0]);
-    const noted = dailyNotes(vault).flatMap((n) => n.text.split("\n")).filter((l) => /^\s*- \[.\] .*\|🗒️\]\]$/.test(l));
+    const noted = dailyNotes(vault).flatMap((n) => n.text.split("\n")).filter((l) => /^\s*- \[.\] .*\|🗒️\]\](?: \^[a-z0-9]{6})?$/.test(l));
     assert.ok(noted.length >= 10, "the demo has lines to show it");
-    for (const l of noted) assert.match(l, /\|(?:⭕|🗃️)\]\] \[\[[^\]]+\|🗒️\]\]$/, l);
+    for (const l of noted) assert.match(l, /\|(?:⭕|🗃️)\]\] \[\[[^\]]+\|🗒️\]\](?: \^[a-z0-9]{6})?$/, l);
 });
 
 test("the conversion's check: an entry counted on one side only, or with other minutes or 🆓, is caught (OBS-90 review)", () => {
@@ -390,3 +390,15 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     assert.doesNotMatch(base, /- (status|project)\n/, "no projects' status, no project column (OBS-114)");
 });
 
+test("demo vault: every task's lines agree, and the sample shows a sent task and a forwarded one with IDs (OBS-185)", () => {
+    const TaskIds = vm.runInContext(fs.readFileSync(new URL("../CustomJS/taskIds.js", import.meta.url), "utf8") + "\n;TaskIds", vm.createContext({}));
+    const kind = (p) => (p.startsWith(`${DAYS}/`) ? "day" : /\/(weeks|months|years)\//.test(p) ? "period" : "other");
+    const notes = demoNotes.map((p) => ({ path: p, kind: kind(p), text: vault.notes.get(p).text }));
+    const violations = TaskIds.check(notes, {
+        projectOf: (note, i, lines) => tr.lineProject(note, i, lines, plan.index),
+        resolve: (linkpath, from) => plan.index.linkDest(linkpath.split("#")[0], from),
+    });
+    assert.deepEqual(plain(violations), []);
+    const ids = notes.flatMap((n) => n.text.split("\n").map((l) => TaskIds.idOf(l)).filter(Boolean));
+    assert.ok(new Set(ids).size >= 3 && ids.length >= 6, "three tasks with an ID on two lines each");
+});

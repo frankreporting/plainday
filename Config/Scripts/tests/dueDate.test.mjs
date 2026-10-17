@@ -33,3 +33,14 @@ test("placement: a 🗒️ note link (OBS-87), with or without U+FE0F, and an ev
     assert.equal(apply("- [ ] Renew the car [[Renew the car|🗒]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🗒]]");
     assert.equal(apply("- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]] [[P|⭕]]"), "- [<] 9:00am\tStandup [[2026-09-30|🚩 9/30]] [[2026-09-14 Standup|🗒️]] [[P|⭕]]");
 });
+
+test("placement: the 🚩 goes ahead of a forward date, and an ID stays last (OBS-107, OBS-185)", () => {
+    const F = "[[2026-10-08#^k3x9m2|10/8]]";
+    assert.equal(apply(`- [>] Book it ${F} ^k3x9m2`), `- [>] Book it [[2026-09-30|🚩 9/30]] ${F} ^k3x9m2`);
+    assert.equal(apply(`- [>] Book it ${F} [[K|⭕]] [[Book it|🗒️]] ^k3x9m2`), `- [>] Book it [[2026-09-30|🚩 9/30]] ${F} [[K|⭕]] [[Book it|🗒️]] ^k3x9m2`);
+    assert.equal(apply("- [ ] Book it [[K|⭕]] ^k3x9m2"), "- [ ] Book it [[2026-09-30|🚩 9/30]] [[K|⭕]] ^k3x9m2");
+    assert.equal(apply("- [ ] Book it ^k3x9m2"), "- [ ] Book it [[2026-09-30|🚩 9/30]] ^k3x9m2", "no links: before the ID, not after it");
+    assert.equal(apply("- [>] Book it [[2026w41#^k3x9m2|Wk of 10/4]] ^k3x9m2"), "- [>] Book it [[2026-09-30|🚩 9/30]] [[2026w41#^k3x9m2|Wk of 10/4]] ^k3x9m2", "to a week");
+    assert.equal(apply("- [>] Book it [[2026-10-08#^k3x9m2|➡️ 10/8]] ^k3x9m2"), "- [>] Book it [[2026-09-30|🚩 9/30]] [[2026-10-08#^k3x9m2|➡️ 10/8]] ^k3x9m2", "one written with a ➡️");
+    assert.equal(apply("- [ ] Follow up on [[2026-09-15#^abc123|the call]] ^k3x9m2"), "- [ ] Follow up on [[2026-09-15#^abc123|the call]] [[2026-09-30|🚩 9/30]] ^k3x9m2", "a block link of your own is text: the 🚩 goes after it");
+});

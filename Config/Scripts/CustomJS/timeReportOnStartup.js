@@ -10,7 +10,7 @@ class TimeReportOnStartup {
     // above can wake up in the middle of that, so it gives the classes it needs a moment to come back.
     static READY_WAIT_MS = 5000;
     // Billing reads the invoice notes for the project timesheets (OBS-5)
-    static NEEDS = ["TimeReport", "Schedule", "Billing"];
+    static NEEDS = ["TimeReport", "Schedule", "Billing", "TaskIds"];
 
     async invoke() {
         if (!customJS.obsidian.Platform.isDesktop) return;

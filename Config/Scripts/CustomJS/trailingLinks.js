@@ -1,20 +1,29 @@
 class TrailingLinks {
     // Startup script (OBS-84): draws the links that end a task or event line small, at the right
-    // of the line's last row, the way Things shows a deadline. Display only: notes never change.
-    //   - Only Obsidian PM's links move: a 🚩 due date, 🗒️ (or 🔗) note, ⭕ project or 🗃️ area link
-    //     at the end of the line. People, links in the text and old wrapped event titles stay put.
+    // of the line's last row, the way Things shows a deadline. Display only, except that it keeps a
+    // task's ID at the end of its line (below): notes never change otherwise.
+    //   - Only Obsidian PM's links move: a 🚩 due date, forward date, 🗒️ (or 🔗) note, ⭕
+    //     project or 🗃️ area link at the end of the line, before a task's ID (OBS-181). People, links
+    //     in the text and old wrapped event titles stay put.
     //   - On screen: the project or area, drawn as its shortest name (faint, no pill), the note,
-    //     then the due date at the edge (faint, red once it's passed). A line with a note but no
-    //     project link (written before OBS-90 kept the link on the line) shows the project the time
-    //     report counts it toward, in faint italics: a name only, not a link.
+    //     the due date (faint, red once it's passed), then the forward date (OBS-185) at the edge after the
+    //     due date, faint. A line with a note but no project link (written before OBS-90 kept the
+    //     link on the line) shows the project the time report counts it toward, in faint italics:
+    //     a name only, not a link.
+    //   - A task's ID (^ and six letters or digits, ending the line) is hidden until the cursor
+    //     reaches the end of the line: End shows it. Shown on a line with links, it's drawn last, after
+    //     them at the right edge, where the caret then is; ← moves back into the links.
+    //   - Typing at the ID's edge never moves it off the end: text typed just after the ID goes in at
+    //     the end of the text, ahead of the links (spec default 11). Enter is Obsidian's own: End, then
+    //     Enter, starts a new line after the ID.
     //   - Only the text's last word wraps with the links; the other rows keep their full width.
     //   - Live Preview only. While a link shows its brackets, the line reads as its markdown.
-    //   - End and Cmd-→ go to the end of the line, after the note link: by default they'd stop at
-    //     the far right of the row, inside the moved links.
+    //   - End and Cmd-→ go to the end of the line, after the note link and the ID: by default
+    //     they'd stop at the far right of the row, inside the moved links.
     //   - A click on one of them opens that link. Obsidian finds a clicked link from where the
     //     click lands in the text, which the moved, reordered links throw off.
     // It only draws the lines on screen, and while you type only the edited line and the lines
-    // nested under it.
+    // nested under it; a cursor move redraws only the lines it left and reached that have an ID.
     //
     // It needs Obsidian's own CodeMirror. CustomJS runs a script inside its own plugin code, where
     // `require` is Obsidian's plugin loader, so require("@codemirror/view") works here (not in the
@@ -34,8 +43,9 @@ class TrailingLinks {
     //   .pm-trail-line  the line, with --pm-run-w (the links' width)
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
     //   .pm-trail-run   around the links, with data-pm-phantom when it shows a looked-up project
-    //   .pm-trail       around each link, with .pm-trail-due / -note / -project / -area, and
-    //                   .pm-trail-overdue on a due date that's passed
+    //   .pm-trail       around each link, with .pm-trail-due / -forward / -note / -project / -area,
+    //                   and .pm-trail-overdue on a due date that's passed; and around a shown task ID,
+    //                   with .pm-trail-id
     //   .pm-project-name  a ⭕/🗃️ link's alias, with data-pm-name, drawn as that name
     static CSS = `
 @property --pm-trail-name-size { syntax: "<length>"; inherits: true; initial-value: 0px; }
@@ -74,10 +84,14 @@ class TrailingLinks {
         --pm-trail-name-size: 1em;
     }
 
-    /* On screen: the project, the note, then the due date at the edge */
+    /* On screen: the project, the note, the due date, then the forward date at the edge */
     & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) { order: 1; }
     & .pm-trail-run > .pm-trail-note { order: 2; }
     & .pm-trail-run > .pm-trail-due { order: 3; }
+    & .pm-trail-run > .pm-trail-forward { order: 4; }
+    /* A task's ID, once the cursor at the line's end shows it, comes last, at the right edge after the
+       links: the caret sits after it there, and ← moves into the links */
+    & .pm-trail-run > .pm-trail-id { order: 5; color: var(--text-faint); }
 
     /* A project or area link reads as its name: faint, no pill, still a link */
     & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) .cm-hmd-internal-link {
@@ -107,6 +121,7 @@ class TrailingLinks {
     /* The due date: faint, red once it's passed. The inner span too: a link to a day with no note
        yet is unresolved, and the theme colours that span. */
     & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
+    & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
     & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error) !important; }
 
     /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown */
@@ -124,27 +139,42 @@ class TrailingLinks {
     // A task or event line: a list item with a checkbox
     static TASK_LINE = /^\s*[-*+] \[.\] /;
     // One system link at the end of the text given: [[target|alias]], the alias one of the symbols
-    // (DueDate's 🚩 M/D, a note's 🗒️ or the older 🔗, a project's ⭕, an area's 🗃️). A phone may add
-    // or drop the U+FE0F on an emoji.
-    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|🗒️?|🔗️?|⭕️?|🗃️?)\s*\]\]$/u;
-    static KINDS = { "🚩": "due", "🗒": "note", "🔗": "note", "⭕": "project", "🗃": "area" };
+    // (DueDate's 🚩 M/D, a note's 🗒️ or the older 🔗, a project's ⭕, an area's 🗃️); or Schedule's
+    // forward date, a periodic note's line with a date for its label (TaskIds.FORWARD), drawn as that
+    // date (one written with a ➡️ before its date too). A phone may add or drop the U+FE0F on an emoji.
+    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|🗒️?|🔗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
+    static KINDS = { "🚩": "due", "➡": "forward", "🗒": "note", "🔗": "note", "⭕": "project", "🗃": "area" };
+    // A task's ID ending its line (OBS-181), with the space before it
+    static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
+    // An ID of six letters or digits, the shape Obsidian's and the task IDs have: the one that's
+    // hidden and kept at the end of its line, so a typed "^3" stays plain text
+    static HIDDEN_ID = /\s\^[A-Za-z0-9]{6}\s*$/;
 
     // ---------------------------------------------------------------- the text rules (no app)
 
-    // The run of system links that ends a task or event line: { bodyFrom (where the text starts,
-    // after the checkbox), textEnd (where it ends, before the space ahead of the run), runFrom,
-    // runTo, links: [{ from, to, kind, target, alias }] in line order }. Null when the line
-    // doesn't end in one. Trailing spaces aren't part of the run.
+    // Where a line's ID is: { from (the space before it), to }, or null. `strict`: only the ID that's
+    // hidden (HIDDEN_ID)
+    static blockId(text, { strict = false } = {}) {
+        const m = text.match(strict ? TrailingLinks.HIDDEN_ID : TrailingLinks.BLOCK_ID);
+        return m ? { from: m.index, to: m.index + m[0].trimEnd().length } : null;
+    }
+
+    // The run of system links that ends a task or event line, before a task's ID: { bodyFrom
+    // (where the text starts, after the checkbox), textEnd (where it ends, before the space ahead
+    // of the run), runFrom, runTo, links: [{ from, to, kind, target, alias }] in line order }. Null
+    // when the line doesn't end in one. Trailing spaces and the ID aren't part of the run.
     static trail(text) {
         const head = text.match(TrailingLinks.TASK_LINE);
         if (!head) return null;
         const links = [];
-        let end = text.trimEnd().length;
+        let end = TrailingLinks.blockId(text)?.from ?? text.length;
+        end = text.slice(0, end).trimEnd().length;
         for (;;) {
             const m = text.slice(0, end).match(TrailingLinks.LINK);
             if (!m) break;
             const from = end - m[0].length;
-            const kind = TrailingLinks.KINDS[String.fromCodePoint(m[2].codePointAt(0))];
+            const kind = TrailingLinks.KINDS[String.fromCodePoint(m[2].codePointAt(0))] ?? "forward";
             links.unshift({ from, to: end, kind, target: m[1].trim(), alias: m[2] });
             end = text.slice(0, from).trimEnd().length;
         }
@@ -224,6 +254,48 @@ class TrailingLinks {
         return last;
     }
 
+    // Where an edit on a task line goes instead, so its hidden ID stays at the end of the line (spec
+    // default 11), or null to leave the edit as it is. `edit` is the one change on line `text`, in
+    // offsets into it: { from, to, insert, cursor (where the edit leaves the cursor, an offset into
+    // insert) }. The answer: { changes: [{ from, insert }] in offsets into the line, cursor (an
+    // offset from the line's start, after the changes) }.
+    //   - Text put in after the ID (typed once End or a click right of the line shows it): what comes
+    //     before any break goes in at the end of the line's text, ahead of its links, since text between
+    //     them and the ID breaks their run; on a line with no links, just before the ID.
+    //   - On a task with no text yet (`- [ ] ^id`, the checkbox's space and the ID's are one), text typed
+    //     there or after the ID gets a space of its own after the checkbox.
+    // Enter, and any other text with a line break put in before the ID, is left as it is: Enter is
+    // Obsidian's own (fix round 1). The start the old and new text share is left out (an edit may
+    // replace the character before the cursor with itself), and an edit that takes text off is left
+    // alone.
+    static keepIdAtEnd(text, edit) {
+        if (!TrailingLinks.TASK_LINE.test(text)) return null;
+        const id = TrailingLinks.blockId(text, { strict: true });
+        if (!id) return null;
+        const old = text.slice(edit.from, edit.to);
+        let same = 0;
+        while (same < old.length && same < edit.insert.length && old[same] === edit.insert[same]) same++;
+        const from = edit.from + same, taken = old.slice(same), insert = edit.insert.slice(same);
+        if (/\S/.test(taken)) return null;
+        const br = insert.indexOf("\n");
+        const before = br < 0 ? insert : insert.slice(0, br), after = br < 0 ? "" : insert.slice(br);
+        // Whether `before`, put in at `n`, would follow the checkbox straight away: a task with no text yet
+        // shares the checkbox's space with what's after it, so the text gets a space of its own there and
+        // the box stays a box
+        const boxOnly = (n) => /^\s*[-*+]\s+\[.\]$/.test(text.slice(0, n)) && /^\S/.test(before);
+        // Where `before` goes; `after` goes at the end of the line
+        let at;
+        if (before && !taken && from >= id.to) at = TrailingLinks.trail(text)?.textEnd ?? id.from;
+        else if (boxOnly(id.from) && !taken && !after && from === id.from) at = id.from;
+        else return null;
+        const pad = boxOnly(at) ? " " : "";
+        const cursor = Math.max(0, Math.min(insert.length, edit.cursor - same));
+        return {
+            changes: [{ from: at, insert: pad + before }, { from: text.length, insert: after }].filter((c) => c.insert),
+            cursor: cursor <= before.length ? at + pad.length + cursor : text.length + pad.length + cursor,
+        };
+    }
+
     // ---------------------------------------------------------------- the editor extension
 
     async invoke() {
@@ -240,7 +312,7 @@ class TrailingLinks {
         }
         const T = TrailingLinks;
         const { ViewPlugin, Decoration, EditorView, keymap } = view;
-        const { Prec, EditorSelection, StateEffect } = state;
+        const { Prec, EditorSelection, StateEffect, EditorState, Transaction } = state;
         const { editorLivePreviewField, editorInfoField, Keymap } = customJS.obsidian;
         const ws = app.workspace;
 
@@ -292,8 +364,22 @@ class TrailingLinks {
                 for (let pos = from; pos <= to;) {
                     const line = doc.lineAt(pos);
                     pos = line.to + 1;
+                    // A task's ID (OBS-181) is hidden unless the cursor is at it: End shows it. The
+                    // cursor at the end of the text (just before the space ahead of the ID) keeps it
+                    // hidden, so typing there doesn't show it; one past that space, or at the line's
+                    // end, shows it
+                    const id = T.TASK_LINE.test(line.text) ? T.blockId(line.text, { strict: true }) : null;
+                    let idShown = null;
+                    if (id) {
+                        const head = v.state.selection.main.head;
+                        if (head <= line.from + id.from || head > line.to) inner.push(Decoration.replace({}).range(line.from + id.from, line.from + id.to));
+                        else idShown = id;
+                    }
                     const t = T.trail(line.text);
                     if (!t) continue;
+                    // A shown ID (OBS-185) is drawn in the run, last, at the right edge after the links: where
+                    // it is in the text, after the room the last word keeps, it lands on top of them
+                    const idText = idShown ? line.text.slice(idShown.from + 1, idShown.to) : null;
                     const at = (i) => line.from + i;
                     const phantom = lookedUp(doc, line, t, sourcePath, index);
                     const shown = t.links.map((l) => {
@@ -301,10 +387,10 @@ class TrailingLinks {
                         return { l, text: nameOf(noteFor(l.target, sourcePath), l.target), name: true };
                     });
                     // What the links show decides their width, so it keys the measured widths
-                    const sig = shown.map((s) => `${s.l.kind}:${s.text}`).concat(phantom ? [`phantom:${phantom}`] : []).join("\n");
+                    const sig = shown.map((s) => `${s.l.kind}:${s.text}`).concat(phantom ? [`phantom:${phantom}`] : [], idText ? [`id:${idText}`] : []).join("\n");
                     if (!handles.widths.has(sig)) unmeasured = true;
                     const guess = shown.reduce((w, s) => w + T.PILL_PX + T.CHAR_PX * s.text.length, 0)
-                        + (phantom ? T.PILL_PX + T.CHAR_PX * phantom.length : 0);
+                        + (phantom ? T.PILL_PX + T.CHAR_PX * phantom.length : 0) + (idText ? T.PILL_PX + T.CHAR_PX * idText.length : 0);
                     const width = Math.ceil((handles.widths.get(sig) ?? guess) + T.GAP_PX);
 
                     outer.push(Decoration.line({ class: "pm-trail-line", attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
@@ -315,7 +401,9 @@ class TrailingLinks {
                     }
                     // inclusive: it sorts outside a link with the same range (a run of one)
                     const runAttrs = { "data-pm-sig": sig, ...(phantom ? { "data-pm-phantom": phantom } : {}) };
-                    outer.push(Decoration.mark({ inclusive: true, class: "pm-trail-run", attributes: runAttrs }).range(at(t.runFrom), at(t.runTo)));
+                    outer.push(Decoration.mark({ inclusive: true, class: "pm-trail-run", attributes: runAttrs }).range(at(t.runFrom), at(idShown ? idShown.to : t.runTo)));
+                    // Measured with the links (it has their .pm-trail), so the last word keeps room for it too
+                    if (idShown) outer.push(Decoration.mark({ class: "pm-trail pm-trail-id" }).range(at(idShown.from + 1), at(idShown.to)));
                     for (const s of shown) {
                         const overdue = s.l.kind === "due" && T.overdue(s.l.target, today) ? " pm-trail-overdue" : "";
                         outer.push(Decoration.mark({ class: `pm-trail pm-trail-${s.l.kind}${overdue}` }).range(at(s.l.from), at(s.l.to)));
@@ -397,19 +485,39 @@ class TrailingLinks {
                 const full = now !== this.span || u.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)))
                     || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false);
                 this.span = now;
-                if (!full && !u.docChanged) return;
-                const touched = full ? null : this.touched(u);
-                if (!touched) {
-                    Object.assign(this, build(u.view));
+                if (!full && !u.docChanged) {
+                    // The cursor moved: redraw the lines it left and reached, when they have a hidden ID
+                    if (!u.selectionSet) return;
+                    const touched = this.idLines(u);
+                    if (!touched.length) return;
+                    this.merge(u, build(u.view, touched), touched);
                 } else {
-                    const part = build(u.view, touched);
-                    const inside = (pos) => touched.some((r) => pos >= r.from && pos <= r.to);
-                    const merge = (set, add) => set.map(u.changes).update({ filter: (from) => !inside(from), add: [...T.ranges(add)], sort: true });
-                    this.outer = merge(this.outer, part.outer);
-                    this.inner = merge(this.inner, part.inner);
-                    this.unmeasured = part.unmeasured;
+                    const touched = full ? null : this.touched(u);
+                    if (!touched) Object.assign(this, build(u.view));
+                    else this.merge(u, build(u.view, touched), touched);
                 }
                 if (this.unmeasured) measure(u.view);
+            }
+
+            // Swaps the decorations of the lines in `touched` for `part`, what build drew for them;
+            // the rest are mapped through the update's changes
+            merge(u, part, touched) {
+                const inside = (pos) => touched.some((r) => pos >= r.from && pos <= r.to);
+                const add = (set, more) => set.map(u.changes).update({ filter: (from) => !inside(from), add: [...T.ranges(more)], sort: true });
+                this.outer = add(this.outer, part.outer);
+                this.inner = add(this.inner, part.inner);
+                this.unmeasured = part.unmeasured;
+            }
+
+            // The lines with a hidden ID (OBS-181) that the cursor left and reached, each once: the ID
+            // shows only while the cursor is at it. Only the main cursor counts, as in build.
+            idLines(u) {
+                const doc = u.state.doc;
+                const lines = [u.startState.selection.main.head, u.state.selection.main.head].map((p) => doc.lineAt(Math.min(p, doc.length)));
+                // lineAt makes a new Line each call: tell two apart by number, or one line is drawn twice
+                return lines
+                    .filter((l, i) => T.TASK_LINE.test(l.text) && T.blockId(l.text, { strict: true }) && lines.findIndex((o) => o.number === l.number) === i)
+                    .map((l) => ({ from: l.from, to: l.to }));
             }
 
             // The lines an edit touched, each with the lines nested under it (a parent's ⭕ is their
@@ -437,15 +545,18 @@ class TrailingLinks {
         const outer = EditorView.outerDecorations.of((v) => v.plugin(plugin)?.outer ?? Decoration.none);
 
         // End and Cmd-→: where the default would stop in the moved links (or past the text, on the
-        // line's last row), go to the end of the line instead
+        // line's last row), go to the end of the line instead. A hidden ID (OBS-181) counts as one:
+        // the default can stop just before it, and End is what shows it.
         const toEnd = (extend) => (v) => {
             const { state: s } = v;
             let hit = false;
             const ranges = s.selection.ranges.map((r) => {
                 const line = s.doc.lineAt(r.head);
                 const t = T.trail(line.text);
+                const id = !t && T.TASK_LINE.test(line.text) ? T.blockId(line.text, { strict: true }) : null;
+                const textEnd = t ? t.textEnd : id?.from;
                 let head = v.moveToLineBoundary(r, true, true).head;
-                if (t && head >= line.from + t.textEnd) {
+                if (textEnd !== undefined && head >= line.from + textEnd) {
                     hit = true;
                     head = line.to;
                 }
@@ -492,8 +603,40 @@ class TrailingLinks {
             }
         });
 
+        // A task's ID stays at the end of its line (OBS-181, spec default 11): text typed or pasted
+        // just after a hidden ID goes where keepIdAtEnd says (ahead of the links). Only input (typing,
+        // a paste), with one cursor and one change on one line, so commands, Sync, undo, Enter and the
+        // scripts' own writes pass through untouched. With two cursors an edit passes through as it is.
+        const keepId = EditorState.transactionFilter.of((tr) => {
+            // Composed input (an IME, an accent key) is left alone: moving it would break the composition
+            if (!tr.docChanged || !tr.isUserEvent("input") || tr.isUserEvent("input.type.compose")) return tr;
+            if (tr.startState.selection.ranges.length !== 1) return tr;
+            let one = null, count = 0;
+            tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+                count++;
+                one = { fromA, toA, fromB, inserted };
+            });
+            if (count !== 1) return tr;
+            const line = tr.startState.doc.lineAt(one.fromA);
+            if (one.toA > line.to) return tr;
+            const moved = T.keepIdAtEnd(line.text, {
+                from: one.fromA - line.from,
+                to: one.toA - line.from,
+                insert: one.inserted.toString(),
+                // Where the edit put the cursor, within the inserted text (an auto-paired bracket leaves it inside)
+                cursor: tr.newSelection.main.head - one.fromB,
+            });
+            if (!moved) return tr;
+            return {
+                changes: moved.changes.map((c) => ({ from: line.from + c.from, insert: c.insert })),
+                selection: { anchor: line.from + moved.cursor },
+                userEvent: tr.annotation(Transaction.userEvent),
+                scrollIntoView: true,
+            };
+        });
+
         handles.slot.length = 0;
-        handles.slot.push(Prec.highest(plugin), outer, keys, clicks);
+        handles.slot.push(Prec.highest(plugin), outer, keys, clicks, keepId);
         ws.updateOptions();
 
         // A note moved, renamed, retagged or given an alias changes a name; a theme or snippet

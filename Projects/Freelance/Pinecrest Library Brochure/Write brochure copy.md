@@ -9,7 +9,7 @@ Copy for the six panels: welcome, kids' programs, adult classes, the maker space
 
 - [x] First draft
 - [x] Revisions from Rafe
-- [>] [[2026-09-17|9/17]] Send final copy to Rafe
+- [>] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe
 
 ## Notes
 

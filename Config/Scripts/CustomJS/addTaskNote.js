@@ -30,8 +30,10 @@ class AddTaskNote {
     static NOTE_MARK = "🗒️";
     static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
     // One item of the run that ends a line, with the spaces before it: a 🗒️ (or 🔗), 🚩, ⭕ or 🗃️ link
-    // shaped as the time report reads them (TimeReport.TRAIL_LINK), or the ℹ️ or 🆓 mark (OBS-90)
-    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|🗒\uFE0F?|🔗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
+    // shaped as the time report reads them (TimeReport.TRAIL_LINK), or the ℹ️ or 🆓 mark (OBS-90). And a
+    // sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
+    // `[[2026-10-08#^k3x9m2|10/8]]`, or one written with a ➡️ before its date.
+    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|🗒\uFE0F?|🔗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
     // A block ID at the end of a line, ` ^abc123`, with the whitespace before it
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
     // An event title wrapped in a link to its log, the way lines were written before OBS-57
@@ -69,6 +71,14 @@ class AddTaskNote {
             if (target.error) {
                 new Notice(target.error);
             } else if (target.mode === "blank") {
+                // A task's ID stays last (OBS-181): with the cursor past its start, the link goes in before
+                // it. insert() types at the cursor (replaceSelection), after the ID, so this places it itself.
+                const id = lineText.match(AddTaskNote.BLOCK_ID);
+                if (id && from.ch > id.index) {
+                    const text = ` [[|${AddTaskNote.NOTE_MARK}]]`;
+                    editor.transaction({ changes: [{ from: { line: from.line, ch: id.index }, text }], selection: { from: { line: from.line, ch: id.index + text.indexOf("|") } } });
+                    return;
+                }
                 const before = /\S/.test(lineText.slice(from.ch - 1, from.ch)) ? " " : "";
                 this.insert(editor, from, "", before + `[[|${AddTaskNote.NOTE_MARK}]]` + this.spacer(lineText.slice(from.ch)));
             } else if (target.kind === "event") {
@@ -612,7 +622,7 @@ class AddTaskNote {
     //   { kind, mode: "text", from, to, name }: the task's text (up to its first link), when some text
     //     comes after the cursor; on an event line, its title (after its time), wherever the cursor is
     //   { kind: "task", mode: "blank" }: only whitespace follows the cursor on a task line with no note
-    //     link, so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |🗒️]]` would point
+    //     link (a block ID at its end aside), so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |🗒️]]` would point
     //     at the daily note itself.
     //   { error }: there's no text to use, or the task already links a note, or the event a log
     // `kind` is "task" or "event".
@@ -621,7 +631,10 @@ class AddTaskNote {
         if (kind === "event" && this.linksLog(lineText)) return { error: "This event already links a log" };
         // Wherever the cursor is: a task with a note never gets a second, blank link
         if (kind === "task" && AddTaskNote.NOTE_LINK.test(lineText)) return { error: "This task already links a note" };
-        if (kind === "task" && !/\S/.test(lineText.slice(ch))) return { kind, mode: "blank" };
+        // A task's ID at the end is hidden (OBS-181), so the cursor at the end of the visible text has
+        // nothing after it: the ID doesn't count
+        const id = lineText.match(AddTaskNote.BLOCK_ID);
+        if (kind === "task" && !/\S/.test(lineText.slice(ch, id ? Math.max(ch, id.index) : lineText.length))) return { kind, mode: "blank" };
         let from = this.afterCheckbox(lineText);
         if (kind === "event") from += lineText.slice(from).match(AddTaskNote.EVENT_TIME)?.[0].length ?? 0;
         from += lineText.slice(from).match(/^\s*/)[0].length;

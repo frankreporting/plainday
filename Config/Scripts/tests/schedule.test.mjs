@@ -4,60 +4,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-
-const src = (name) => fs.readFileSync(new URL(`../CustomJS/${name}.js`, import.meta.url), "utf8");
+import { src, PLANNER, NN, MONTHS, SHORT, momentOn } from "./standInVault.mjs";
 const code = src("schedule");
-const Schedule = vm.runInContext(code + "\n;Schedule", vm.createContext({}));
+// Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn)
+const statics = vm.createContext({ customJS: {} });
+const Schedule = vm.runInContext(code + "\n;Schedule", statics);
+statics.customJS.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
+// Values made in the vm, as plain ones, so deepEqual doesn't trip on the vm's own Array
+const plainOf = (x) => JSON.parse(JSON.stringify(x));
 const file = (path) => ({ basename: path.split("/").pop().replace(/\.md$/, ""), parent: { path: path.slice(0, path.lastIndexOf("/")) } });
-
-const PLANNER = "Reference/Planner";
-const NN = {
-    vaultProfiles: [{ periodicNotesFolder: PLANNER }],
-    calendarCustomWeekPattern: "[weeks]/gggg[w]ww",
-    calendarCustomMonthPattern: "[months]/YYYY-MM",
-    calendarCustomYearPattern: "[years]/YYYY",
-};
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const weekKey = (date) => new (vm.runInContext(src("timeReport") + "\n;TimeReport", vm.createContext({})))().weekKey(date);
-
-// Dates as "YYYY-MM-DD", moved by days, and their weekday (0 is Sunday)
-const utc = (date) => { const [y, m, d] = date.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
-const plus = (date, n) => new Date(utc(date).getTime() + n * 864e5).toISOString().slice(0, 10);
-const dow = (date) => utc(date).getUTCDay();
-// ISO weeks, as moment's GGGG-[W]WW names them: a date's week, and the Monday a name stands for
-const isoName = (date) => {
-    const thursday = plus(date, 3 - ((dow(date) + 6) % 7));
-    const week = Math.floor((utc(thursday) - utc(`${thursday.slice(0, 4)}-01-01`)) / 864e5 / 7) + 1;
-    return `${thursday.slice(0, 4)}-W${String(week).padStart(2, "0")}`;
-};
-const isoMonday = (name) => { const jan4 = `${name.slice(0, 4)}-01-04`; return plus(jan4, -((dow(jan4) + 6) % 7) + (Number(name.slice(6)) - 1) * 7); };
-// English weeks, as gggg[w]ww names them: the Sunday a name stands for
-const enSunday = (name) => { const jan1 = `${name.slice(0, 4)}-01-01`; return plus(jan1, -dow(jan1) + (Number(name.slice(5)) - 1) * 7); };
-
-// Enough of moment for these scripts, on `today`, in English (weeks start on Sunday), checked against
-// Obsidian's own: a note's name parses strictly to its period's first day (an ISO week's Monday), a
-// date formats as any of the names, and startOf("week") goes back to Sunday, as it does in English
-const NAMES = { "YYYY-MM-DD": /^\d{4}-\d{2}-\d{2}$/, "gggg[w]ww": /^\d{4}w\d{2}$/, "GGGG-[W]WW": /^\d{4}-W\d{2}$/, "YYYY-MM": /^\d{4}-(?:0[1-9]|1[0-2])$/, YYYY: /^\d{4}$/ };
-const momentOn = (today) => {
-    const make = (date, valid = true) => ({
-        isValid: () => valid,
-        locale: () => make(date, valid),
-        clone: () => make(date, valid),
-        startOf: (unit) => make({ week: plus(date, -dow(date)), isoWeek: plus(date, -((dow(date) + 6) % 7)), month: `${date.slice(0, 7)}-01`, year: `${date.slice(0, 4)}-01-01` }[unit] ?? date, valid),
-        year: () => Number(date.slice(0, 4)),
-        format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}` })[f] ?? assert.fail(`format ${f}`),
-    });
-    const moment = (text, format) => {
-        if (text === undefined) return make(today);
-        if (!NAMES[format]?.test(text)) return make(null, false);
-        return make({ "gggg[w]ww": () => enSunday(text), "GGGG-[W]WW": () => isoMonday(text), "YYYY-MM": () => `${text}-01`, YYYY: () => `${text}-01-01` }[format]?.() ?? text);
-    };
-    moment.locale = () => "en";
-    moment.locales = () => ["en"];
-    moment.localeData = () => ({ firstDayOfWeek: () => 0, months: () => MONTHS, monthsShort: () => SHORT });
-    return moment;
-};
 
 // Schedule on a stand-in vault and editor, beside the scripts it leans on, all real: DatePrompt for
 // the week rules, JumpToDate for a period's note, TimeReport for the periodic folders, AddTaskNote
@@ -123,7 +78,9 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
     Object.assign(customJS, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
+        TaskIds: make("taskIds", "TaskIds"),
     });
+    customJS.TaskIds.freshId = () => "k3x9m2";
     let prompt = null;
     customJS.DatePrompt.open = (title, onPick, opts) => { prompt = { onPick, opts }; return {}; };
     await customJS.Schedule.invoke();
@@ -260,23 +217,38 @@ test("Schedule: an untouched task moves into next month's note, which is made fo
 
 test("Schedule: a worked-on task is forwarded to a week, its time entries staying where they were logged (OBS-96)", async () => {
     const r = await scheduleIn({ notes: { [DAY]: DAY_TEXT, [WEEK]: WEEK_TEXT }, open: DAY, at: 6, pick: (dp) => dp.result("2026-09-23", "week") });
-    assert.equal(r.editor, DAY_TEXT.replace("- [/] Draft the brochure", "- [>] Draft the brochure"));
-    assert.equal(r.notes[WEEK], WEEK_TEXT.replace("\t- 2:00pm - 3:00pm\n", "\t- 2:00pm - 3:00pm\n- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]]\n"));
+    assert.equal(r.editor, DAY_TEXT.replace("- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]]", "- [>] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]] ^k3x9m2"));
+    assert.equal(r.notes[WEEK], WEEK_TEXT.replace("\t- 2:00pm - 3:00pm\n", "\t- 2:00pm - 3:00pm\n- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]] ^k3x9m2\n"));
     assert.deepEqual(r.notices, ["Forwarded to Wk of 9/20"]);
 });
 
-test("Schedule: from a project note, the forward mark links the month or year, by path when its name is taken (OBS-96)", async () => {
+test("Schedule: from a project note, the line stays as [>] with a forward date at the end and the task's ID; the new line has the ID too (OBS-181)", async () => {
     const month = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, "Reference/Journal/2026-10.md": "" }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-10-01", "month") });
-    assert.equal(month.editor.split("\n")[3], `- [>] [[${PLANNER}/months/2026-10|Oct. 2026]] Plan the spring sale`);
-    assert.equal(month.notes[`${PLANNER}/months/2026-10.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]]\n");
+    assert.equal(month.editor.split("\n")[3], `- [>] Plan the spring sale [[${PLANNER}/months/2026-10#^k3x9m2|Oct. 2026]] ^k3x9m2`, "by path: another note is named 2026-10");
+    assert.equal(month.notes[`${PLANNER}/months/2026-10.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
     assert.deepEqual(month.notices, ["Forwarded to Oct. 2026"]);
 
     const year = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT }, open: PROJECT, at: 4, pick: (dp) => dp.result("2027-01-01", "year") });
-    assert.equal(year.editor.split("\n")[4], "- [>] [[2027]] Book the photographer");
-    assert.equal(year.notes[`${PLANNER}/years/2027.md`], "- [ ] Book the photographer [[Kestrel|⭕]]\n");
+    assert.equal(year.editor.split("\n")[4], "- [>] Book the photographer [[2027#^k3x9m2|2027]] ^k3x9m2");
+    assert.equal(year.notes[`${PLANNER}/years/2027.md`], "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n");
 
     const week = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, [WEEK]: WEEK_TEXT }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-20", "week") });
-    assert.equal(week.editor.split("\n")[3], "- [>] [[2026w39|Wk of 9/20]] Plan the spring sale");
+    assert.equal(week.editor.split("\n")[3], "- [>] Plan the spring sale [[2026w39#^k3x9m2|Wk of 9/20]] ^k3x9m2");
+
+    const own = PROJECT_TEXT.replace("Plan the spring sale", "Plan the spring sale [[2026-10-01|🚩 10/1]] ^Ab3-x9");
+    const day = await scheduleIn({ notes: { [PROJECT]: own }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-18", "day") });
+    assert.equal(day.editor.split("\n")[3], "- [>] Plan the spring sale [[2026-10-01|🚩 10/1]] [[2026-09-18#^Ab3-x9|9/18]] ^Ab3-x9", "its own block ID is the task's");
+    assert.equal(day.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] Plan the spring sale [[2026-10-01|🚩 10/1]] [[Kestrel|⭕]] ^Ab3-x9\n");
+
+    const dated = PROJECT_TEXT.replace("- [ ] Plan the spring sale", "- [ ] [[2026-09-17|9/17]] Plan the spring sale");
+    const open = await scheduleIn({ notes: { [PROJECT]: dated }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-18", "day") });
+    assert.equal(open.editor.split("\n")[3], "- [>] [[2026-09-17|9/17]] Plan the spring sale [[2026-09-18#^k3x9m2|9/18]] ^k3x9m2", "an open line's date link is its title's");
+    assert.equal(open.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] [[2026-09-17|9/17]] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
+});
+
+test("Schedule: a day's forward date uses the note's path when another note has its name (OBS-181)", async () => {
+    const r = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, "Reference/Journal/2026-09-18.md": "" }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-18", "day") });
+    assert.equal(r.editor.split("\n")[3], `- [>] Plan the spring sale [[${PLANNER}/days/2026-09-18#^k3x9m2|9/18]] ^k3x9m2`);
 });
 
 test("Schedule: a task in a weekly note moves with its sub-bullets, like one in a monthly note (OBS-96)", async () => {
@@ -297,14 +269,40 @@ test("Schedule: a task scheduled into the note it's in stays put (OBS-96)", asyn
     assert.deepEqual(week.notices, ["Already in this note"]);
 });
 
-test("Schedule reads 🗒️, 🗒 and 🔗 as a task's note link, and writes 🗒️ (OBS-87)", () => {
+test("leaveBehind: an untouched line goes with its sub-bullets; a worked-on one in a daily note stays as [>] (OBS-181)", () => {
+    const lines = ["- [ ] A ^aaaaaa", "\t- note", "- [/] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"];
+    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 0, { daily: true })), { lines: ["- [/] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"], outgoing: ["- [ ] A ^aaaaaa", "\t- note"], moved: "moved" });
+    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 2, { daily: true })), { lines: ["- [ ] A ^aaaaaa", "\t- note", "- [>] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"], outgoing: ["- [/] B ^bbbbbb"], moved: "forwarded" });
+    assert.equal(Schedule.leaveBehind(lines, 2, { daily: false }).moved, "moved", "a weekly note's task moves whole, worked on or not");
+});
+
+test("reopenIn: the moving line takes the [>] line's place as [/], keeping what it gained; sub-bullets follow (OBS-181)", () => {
+    const text = ["- [>] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"].join("\n");
+    assert.equal(Schedule.reopenIn(text, "bbbbbb", ["- [ ] B, reworded [[2026-09-25|🚩 9/25]] ^bbbbbb", "\t- call first"]),
+        ["- [/] B, reworded [[2026-09-25|🚩 9/25]] ^bbbbbb", "\t- 9:00am - 9:30am", "\t- call first", "- [ ] C"].join("\n"));
+});
+
+test("reopenIn keeps the [>] line's own ⭕ or 🗃️ and its note link, each when the moving line has none (OBS-185)", () => {
+    const old = "- [>] B [[2026-09-20|🚩 9/20]] [[Studio|⭕]] [[B|🗒️]] ^bbbbbb";
+    // Its 🗒️ is kept, last before the ID; its 🚩 isn't: the moving line's lack of one is newer
+    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Studio|⭕]] ^bbbbbb"]), "- [/] B [[Studio|⭕]] [[B|🗒️]] ^bbbbbb");
+    // Its ⭕ too, ahead of the note link, when the moving line has none: it pins that day's time; the
+    // moving line's 🚩 and 🆓 stay
+    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[2026-09-25|🚩 9/25]] 🆓 ^bbbbbb"]), "- [/] B [[2026-09-25|🚩 9/25]] 🆓 [[Studio|⭕]] [[B|🗒️]] ^bbbbbb");
+    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Other|🗒️]] ^bbbbbb"]), "- [/] B [[Studio|⭕]] [[Other|🗒️]] ^bbbbbb", "before the moving line's own note link");
+    // An older 🔗 counts as the note link too; an 🗃️ as the project link
+    assert.equal(Schedule.reopenIn("- [>] B [[Home|🗃️]] [[B|🔗]] ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [/] B [[Home|🗃️]] [[B|🔗]] ^bbbbbb");
+    // The moving line's own ⭕ and note link win; with none on the old line, the line as it moved
+    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Kestrel|⭕]] [[Other|🗒️]] ^bbbbbb"]), "- [/] B [[Kestrel|⭕]] [[Other|🗒️]] ^bbbbbb");
+    assert.equal(Schedule.reopenIn("- [>] B [[2026-09-20|🚩 9/20]] ^bbbbbb", "bbbbbb", ["- [ ] B  [[Studio|⭕]] ^bbbbbb"]), "- [/] B  [[Studio|⭕]] ^bbbbbb");
+});
+
+test("Schedule writes 🗒️ as a task's note link (OBS-87); it reads one through AddTaskNote", () => {
     const Schedule = vm.runInContext(code + "\n;Schedule", vm.createContext({}));
-    for (const mark of ["🗒️", "🗒", "🔗", "🔗️"]) assert.ok(Schedule.NOTE_LINK.test(`Draft the brief [[Draft the brief|${mark}]]`), mark);
-    assert.ok(!Schedule.NOTE_LINK.test("Draft the brief [[Studio|⭕]]"));
     assert.equal(Schedule.NOTE_MARK, "🗒️");
-    // The two links it writes (a worked-on task's note, found or made through AddTaskNote, and a line
-    // sent from another note) both use the mark, and none is written with 🔗
-    assert.equal((code.match(/Schedule\.NOTE_MARK/g) ?? []).length, 2);
+    assert.equal(Schedule.NOTE_LINK, undefined, "AddTaskNote.NOTE_LINK is the pattern (noteLink.test.mjs)");
+    // The link it writes (a line sent from another note) uses the mark, and none is written with 🔗
+    assert.equal((code.match(/Schedule\.NOTE_MARK/g) ?? []).length, 1);
     assert.doesNotMatch(code, /\|🔗\]\]`/);
 });
 
@@ -372,28 +370,13 @@ test("sentLine: a line sent from a project or area links it before any note link
         "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]] ^a1b2");
 });
 
-test("withNote: a worked-on task's lines keep their ⭕ as the note's project, name without dates, the 🗒️ last (OBS-90)", () => {
-    const { schedule } = withVault(DEMO);
-    const found = { name: "Draft wireframes", linktext: "Draft wireframes", homeLink: "[[Kestrel|⭕]]", projectLinks: ["[[Kestrel|⭕]]"] };
-    const line = "- [>] 2026-09-18 Draft wireframes [[Kestrel|⭕]]";
-    assert.equal(schedule.withNote(line, 6, "2026-09-18 Draft wireframes", found), "- [>] Draft wireframes [[Kestrel|⭕]] [[Draft wireframes|🗒️]]");
-    // The note stayed in another project (Leave it): the line's ⭕ follows it
-    const left = { ...found, homeLink: "[[Household|🗃️]]" };
-    assert.equal(schedule.withNote("- [ ] Draft wireframes [[Kestrel|⭕]]", 6, "Draft wireframes", left), "- [ ] Draft wireframes [[Household|🗃️]] [[Draft wireframes|🗒️]]");
-    // A due date stays ahead of both
-    assert.equal(schedule.withNote("- [/] Draft wireframes [[2026-09-30|🚩 9/30]]", 6, "Draft wireframes", { ...found, projectLinks: [] }),
-        "- [/] Draft wireframes [[2026-09-30|🚩 9/30]] [[Kestrel|⭕]] [[Draft wireframes|🗒️]]");
-    // A name that also appears in the checkbox's text isn't replaced there
-    assert.equal(schedule.withNote("- [x] x", 6, "x", { name: "x", linktext: "x", homeLink: null, projectLinks: [] }), "- [x] x [[x|🗒️]]");
-});
-
 test("Schedule: ISO weekly notes (GGGG-[W]WW): a week's name is that week, labeled from its Monday", async () => {
     const ISO = { ...NN, calendarCustomWeekPattern: "[weeks]/GGGG-[W]WW" };
     const { opts } = await scheduleIn({ notes: { [DAY]: DAY_TEXT }, open: DAY, at: 4, nn: ISO });
     assert.deepEqual({ ...opts.name("2026-W41") }, { date: "2026-10-05", unit: "week" }, "not the Sunday before, in week 40");
     const r = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT }, open: PROJECT, at: 3, nn: ISO, pick: (dp) => dp.result("2026-10-07", "week") });
-    assert.equal(r.editor.split("\n")[3], "- [>] [[2026-W41|Wk of 10/5]] Plan the spring sale");
-    assert.equal(r.notes[`${PLANNER}/weeks/2026-W41.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]]\n");
+    assert.equal(r.editor.split("\n")[3], "- [>] Plan the spring sale [[2026-W41#^k3x9m2|Wk of 10/5]] ^k3x9m2");
+    assert.equal(r.notes[`${PLANNER}/weeks/2026-W41.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
 });
 
 test("Schedule: when the note it goes to can't be made, the line stays where it was", async () => {

@@ -351,7 +351,7 @@ class Invoice {
             duplicate: () => "repeats another entry at the same times",
         };
         return [
-            ...sel.problems.map((p) => `[[${p.date}|${tr.shortDate(p.date)}]] line ${p.line}: \`${String(p.text).replace(/`/g, "'")}\` ${p.message}`),
+            ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `[[${p.date}|${tr.shortDate(p.date)}]] line ${p.line}: \`${String(p.text).replace(/`/g, "'")}\` ${p.message}`),
             ...sel.changed.map(({ invoice, change }) => `${when(change.row)} on [[${invoice.name}]] changed since it was billed (${change.kind})`),
             ...sel.heldBack.map((h) => `Held back: ${when(h.entry)} ${why[h.why](h)}`),
         ];
@@ -790,7 +790,7 @@ class Invoice {
         const hours = sel.entries.reduce((s, e) => s + tr.rounded(e.minutes), 0);
         const rows = billing.rows(billing.snapshot(sel.entries, model, tr));
         const cents = rows.reduce((s, r) => s + r.amount, 0);
-        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems, [], (p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
+        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems.filter((p) => tr.changesBilling(p)), [], (p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
         const plain = (s) => String(s).replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2").replace(/\[\[([^\]]*)\]\]/g, "$1");
         return new Promise((resolve) => {
             let go = false;

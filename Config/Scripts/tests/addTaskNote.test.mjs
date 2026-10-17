@@ -588,7 +588,12 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
         getLine: () => text,
         replaceRange: (s, from, to) => { calls.push("write line"); text = text.slice(0, from.ch) + s + text.slice(to.ch); },
         setCursor: (c) => { cursor = c; },
-        transaction: ({ replaceSelection, selection }) => { calls.push("write line"); text = text.slice(0, ch) + replaceSelection + text.slice(ch); cursor = selection.from; },
+        transaction: ({ replaceSelection, changes, selection }) => {
+            calls.push("write line");
+            if (changes) for (const c of changes) text = text.slice(0, c.from.ch) + c.text + text.slice(c.to?.ch ?? c.from.ch);
+            else text = text.slice(0, ch) + replaceSelection + text.slice(ch);
+            cursor = selection.from;
+        },
     };
     const view = { editor, save: async () => { calls.push("save"); } };
     const tpl = { path: "Config/Templates/Log.md" };
@@ -731,4 +736,29 @@ test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote an
     const filed = { ...note, path: "Projects/Home/Order toner.md", parent: { path: "Projects/Home" } };
     ctx.app.plugins.plugins["templater-obsidian"].templater.create_new_note_from_template = async () => filed;
     assert.equal(await fresh.createTaskNote("Order toner"), filed);
+});
+
+test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so the ⭕ is still found (OBS-185)", () => {
+    const helper = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const plain = (v) => JSON.parse(JSON.stringify(v));
+    assert.deepEqual(plain(helper.trailingProjectLinks("- [>] Book it [[Kestrel|⭕]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2")), [{ raw: "[[Kestrel|⭕]]", linkpath: "Kestrel" }]);
+    assert.equal(helper.trailingNote("- [>] Book it [[Book it|🗒️]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");
+});
+
+test("invoke on a task with an ID and nothing after the cursor: the empty 🗒️ link goes in before the ID (OBS-185)", async () => {
+    const out = await invokeOn("- [ ] Book it ^k3x9m2");
+    assert.equal(out.text, "- [ ] Book it [[|🗒️]] ^k3x9m2");
+    assert.deepEqual(out.cursor, { line: 0, ch: "- [ ] Book it [[".length });
+});
+
+test("invoke at the visible end of a line with an ID, where a click puts the cursor: the empty 🗒️ link, before the ID (OBS-185)", async () => {
+    const line = "- [ ] Book it ^k3x9m2";
+    for (const ch of ["- [ ] Book it".length, "- [ ] Book it ".length]) {
+        assert.deepEqual(JSON.parse(JSON.stringify(add.target(line, ch))), { kind: "task", mode: "blank" }, `at ${ch}`);
+        const out = await invokeOn(line, { ch });
+        assert.equal(out.text, "- [ ] Book it [[|🗒️]] ^k3x9m2", `at ${ch}`);
+        assert.deepEqual(out.cursor, { line: 0, ch: "- [ ] Book it [[".length }, `at ${ch}`);
+    }
+    // Text after the cursor still names the note
+    assert.equal(add.target(line, "- [ ] Book".length).name, "Book it");
 });

@@ -31,7 +31,6 @@ test("every script reads 🗒️, 🗒, 🔗 and 🔗 + U+FE0F as a line's note 
         assert.ok(AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${name}`);
         assert.ok(AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${name}`);
         assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), "Draft the brief", `AddProjectLink.taskLinkpath: ${name}`);
-        assert.ok(Schedule.NOTE_LINK.test(link), `Schedule: ${name}`);
         assert.ok(once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
         assert.ok(once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
         assert.ok(report.isNoteAlias(mark), `TimeReport.isNoteAlias: ${name}`);
@@ -45,7 +44,6 @@ test("a ⭕ or 🗃️ isn't a note link to any of them", () => {
     for (const link of ["[[Studio|⭕]]", "[[Home|🗃️]]", "[[2026-09-30|🚩 9/30]]", "[[Draft the brief|Brief]]"]) {
         assert.ok(!AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${link}`);
         assert.ok(!AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${link}`);
-        assert.ok(!Schedule.NOTE_LINK.test(link), `Schedule: ${link}`);
         assert.equal(sync.splitTail(`Planning ${link}`, true).log, null, `CalendarSync: ${link}`);
     }
     assert.ok(!report.isNoteAlias("⭕") && !report.isNoteAlias("Brief"));

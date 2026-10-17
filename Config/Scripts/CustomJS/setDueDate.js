@@ -1,12 +1,16 @@
 class DueDate {
     // Note links end a line (🗒️ task note or log, or 🔗 from before OBS-87, ⭕ project, 🗃️ area), so End reaches the note; the
-    // due date goes in front of them (OBS-36). A phone may add or drop the U+FE0F on an emoji.
-    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗|⭕|🗃)\uFE0F?\s*\]\]/gu;
+    // due date goes in front of them (OBS-36), and in front of a sent line's forward date (OBS-107): a
+    // link to a periodic note's line with a date for its label, `[[2026-10-08#^k3x9m2|10/8]]`, or one
+    // written with a ➡️ before its date. A task's ID stays last (OBS-181). A phone may add or drop the U+FE0F on an emoji.
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
+    static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
 
     // Where the due link goes on `lineText`, and the text to insert there: right before the line's
-    // trailing note links (with one space either side), else at the end
+    // trailing note links and forward date (with one space either side), else at the end, ahead of an ID
     placement(lineText, dueLink) {
-        const trimmed = lineText.trimEnd();
+        const id = lineText.match(DueDate.BLOCK_ID);
+        const trimmed = lineText.slice(0, id ? id.index : lineText.length).trimEnd();
         let at = trimmed.length;
         for (;;) {
             const head = trimmed.slice(0, at).trimEnd();
@@ -15,6 +19,7 @@ class DueDate {
             at = last.index;
         }
         if (at === trimmed.length) {
+            if (id) return { from: trimmed.length, to: id.index, text: ` ${dueLink}` };
             return { from: lineText.length, to: lineText.length, text: `${lineText.endsWith(" ") || !lineText.length ? "" : " "}${dueLink} ` };
         }
         const before = trimmed.slice(0, at).trimEnd();

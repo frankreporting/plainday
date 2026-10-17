@@ -126,15 +126,20 @@ class TimeReport {
     static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
-    // 🗒️ (or 🔗, before OBS-87), ⭕, 🗃️ and 🚩 links, which say nothing about what a line is
-    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🗒|🔗|⭕|🗃|🚩)[^\]]*\]\]/gu;
+    // 🗒️ (or 🔗, before OBS-87), ⭕, 🗃️ and 🚩 links, and a sent line's forward date (FORWARD_LINK),
+    // which say nothing about what a line is
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🗒|🔗|⭕|🗃|🚩|➡)[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
+    // A sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
+    // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD); or one written with a ➡️ before its date
+    static FORWARD_LINK = /\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
     // The alias of a line's link to its own note (a task's note, an event's log): 🗒️, or 🔗 from
     // before OBS-87, compared once U+FE0F and spaces are dropped
     static NOTE_ALIAS = /^(?:🗒|🔗)$/u;
-    // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D,
-    // a note's 🗒️ (or 🔗), a project's ⭕ or an area's 🗃️, alone in its alias. A phone may add or
-    // drop the U+FE0F.
-    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|🗒️?|🔗️?|⭕️?|🗃️?)\s*\]\]$/u;
+    // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
+    // note's 🗒️ (or 🔗), a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
+    // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
+    // its date. A phone may add or drop the U+FE0F.
+    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|🗒️?|🔗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
     static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
     // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
@@ -516,7 +521,7 @@ class TimeReport {
     // date breadcrumbs; other links show their alias. With `keepFree`, a 🆓 on the line stays, for the
     // timesheet's 🆓 time, where it says why the time isn't billed (OBS-5).
     taskText(body, { keepFree = false } = {}) {
-        const text = body
+        const text = body.trimEnd().replace(TimeReport.BLOCK_ID, "")
             .replace(/^\[.\]\s*/, "")
             .replace(/^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s*/, "")
             .replace(TimeReport.OLD_EVENT, "")
@@ -655,6 +660,26 @@ class TimeReport {
         const wrapped = notes.length ? null : rest.trim().match(TimeReport.WRAPPED_TITLE);
         const title = wrapped ? { target: wrapped[1].split(/[#^]/)[0].trim(), alias: "" } : null;
         return { marks: marks.filter((l) => l.target), notes: notes.filter((l) => l.target), title: title?.target ? title : null };
+    }
+
+    // A line and the list items it's nested under, nearest first, as the report reads an entry's context
+    lineContext(lines, i) {
+        const item = /^\s*(?:[-*+]|\d+[.)])\s+/;
+        const out = [{ body: lines[i].replace(item, "").trim() }];
+        let width = this.indentWidth(lines[i]);
+        for (let j = i - 1; j >= 0 && width > 0; j--) {
+            if (!lines[j].trim() || !item.test(lines[j])) continue;
+            const w = this.indentWidth(lines[j]);
+            if (w < width) { out.push({ body: lines[j].replace(item, "").trim() }); width = w; }
+        }
+        return out;
+    }
+
+    // The project or area line `i` of `note` ({ path, kind }) counts toward, as resolve reads a line;
+    // a line outside the periodic notes falls back to the project or area its note is in (OBS-181)
+    lineProject(note, i, lines, index) {
+        const own = this.resolve(this.lineContext(lines, i), note.path, index, true);
+        return own ?? (note.kind === "other" ? this.projectOfNote(note.path, index) : null);
     }
 
     // The project for an entry's context lines, or null
@@ -1562,7 +1587,9 @@ class TimeReport {
             return t.replace(/`/g, "'");
         };
         for (const p of problems) {
-            out.push(`- [[${p.date}|${this.shortDate(p.date)}]] line ${p.line}: \`${quote(p.text)}\` ${p.message}`);
+            // A task Problem on a note that isn't a daily note links that note (addTaskProblems)
+            const at = p.note ? `[[${p.note.replace(/\.md$/, "")}|${this.basename(p.note)}]]` : `[[${p.date}|${this.shortDate(p.date)}]]`;
+            out.push(`- ${at} line ${p.line}: \`${quote(p.text)}\` ${p.message}`);
         }
         for (const p of projectProblems) {
             if (p.invoice || p.twice) {
@@ -1585,6 +1612,12 @@ class TimeReport {
         const noProject = entries.filter((e) => !e.project).length;
         if (noProject) out.push(`- ${noProject} ${noProject === 1 ? "entry has" : "entries have"} no project (see Unassigned)`);
         return out;
+    }
+
+    // Whether a Problem touches what's billed: every Problem but a task whose lines disagree, unless the
+    // disagreement is over the project (a stale forward date doesn't change a billable entry)
+    changesBilling(p) {
+        return p.kind !== "task" || p.rule === "project";
     }
 
     // A billed entry that changed since its invoice was made, or an entry on two invoices (OBS-5). A
@@ -1652,8 +1685,8 @@ class TimeReport {
     // ⭕ and 🗒️ disagreement's entries. Running clocks and malformed lines aren't counted, so they
     // have no row; only their line says so.
     sheetEntryProblems(model, on, root, entries, link) {
-        const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)));
-        const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && (on.has(p.project) || (p.parent && p.parent === root)));
+        const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)) && this.changesBilling(p));
+        const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && this.changesBilling(p) && (on.has(p.project) || (p.parent && p.parent === root)));
         const at = (path, line) => `${path}\n${line}`;
         const named = new Set(problems.flatMap((p) => [at(p.path, p.line), ...(p.other ? [at(p.other.path, p.other.line)] : [])]));
         const conflicted = new Set(projectProblems.flatMap((p) => (p.conflict?.side === "line" ? p.conflict.entries : [])));
@@ -2184,9 +2217,10 @@ class TimeReport {
         return `${this.classify(visible[line]).entry[1]}${anchor === -1 ? "" : ": " + this.itemLabel(visible[anchor])}`;
     }
 
-    // A task or event line as dropdown text: no bullet or checkbox, links shown as their text
+    // A task or event line as dropdown text: no bullet or checkbox, links shown as their text, a sent
+    // line's forward date and a task's ID left out
     itemLabel(line) {
-        return line.replace(TimeReport.BULLET, "$3").replace(/^\[.\]\s*/, "")
+        return line.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.FORWARD_LINK, "").replace(TimeReport.BULLET, "$3").replace(/^\[.\]\s*/, "")
             .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1").replace(/\[\[([^\]]*)\]\]/g, "$1")
             .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
             .replace(/\s+/g, " ").trim();
@@ -2339,14 +2373,169 @@ class TimeReport {
         }
     }
 
+    // Why a line may keep another project than the rest of its task (spec section 10): its time is on a
+    // sent or paid invoice, or its project is finished. A function of (note, i) for TaskIds.check, with
+    // the invoiced lines worked out once per report, the first time it's asked.
+    keepsProject(model, index) {
+        const b = model.billing;
+        let billed = null;
+        return (note, i) => {
+            billed ??= new Set(b ? model.entries
+                .filter((e) => ["sent", "paid"].includes(b.billing.standing(e, b.ledger).invoice?.status))
+                .map((e) => `${e.path}:${e.context?.[0]?.line}`) : []);
+            if (billed.has(`${note.path}:${i + 1}`)) return "invoiced";
+            const p = this.lineProject(note, i, note.text.split("\n"), index);
+            const f = p ? globalThis.app?.vault?.getFileByPath(p) : null;
+            const helper = globalThis.customJS?.AddTaskNote;
+            return f && helper?.isLiveHome && !helper.isLiveHome(f) ? "finished" : null;
+        };
+    }
+
+    // The notes the task checks read (OBS-181): the daily notes the report already read (`daily`,
+    // [{ date, path, text }]), every other note holding a task ID, and the periodic notes a task line's forward date
+    // points at, which the cache may not have read again since a command wrote them. Each is read as it
+    // is now (textOf: from its editor when it's open in one), as the daily notes are.
+    async taskNotes(daily) {
+        const tasks = globalThis.customJS?.TaskIds;
+        if (!tasks?.allIds) return [];
+        const T = tasks.constructor;
+        const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
+        const add = async (file) => {
+            if (!byPath.has(file.path) && !tasks.ignored(file)) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
+        };
+        for (const lines of tasks.allIds().values()) for (const { file } of lines) await add(file);
+        // A forward date is only checked on a line outside the periodic notes (TaskIds.check)
+        for (const note of [...byPath.values()].filter((n) => n.kind === "other")) {
+            for (const line of note.text.split("\n")) {
+                const fwd = T.CHECKBOX.test(line) && T.idOf(line) ? T.forwardOf(line) : null;
+                const to = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, note.path) : null;
+                if (to && tasks.kindOf(to) !== "other") await add(to);
+            }
+        }
+        return [...byPath.values()];
+    }
+
+    // A daily note's date, for one the report's list doesn't hold: its name read with the Daily notes
+    // format, not taken from the name as it is. The name itself where Schedule or moment isn't loaded.
+    dailyDate(path) {
+        const name = this.basename(path);
+        try {
+            const format = globalThis.customJS?.Schedule?.dailyOpts?.().format;
+            const m = format ? globalThis.window?.moment?.(name, format, true) : null;
+            return m?.isValid() ? m.format("YYYY-MM-DD") : name;
+        } catch {
+            return name;
+        }
+    }
+
+    // A task's lines that disagree (OBS-181), as Problems: TaskIds.check over `notes` (taskNotes). A line
+    // in a daily note is a Problem on its day; a line in any other note, one on the task's project, or,
+    // when the task counts toward none, a Problem on its note that the weekly, monthly and yearly notes
+    // list under a day (problemDate).
+    // Pure, so the demo's reports (renderReports.mjs) run it too, passing TaskIds as `T`.
+    addTaskProblems(model, index, notes, T = globalThis.customJS?.TaskIds?.constructor) {
+        if (!T?.check || !notes.length) return;
+        const byPath = new Map(notes.map((n) => [n.path, n]));
+        const violations = T.check(notes, {
+            projectOf: (note, i, lines) => this.lineProject(note, i, lines, index),
+            exempt: this.keepsProject(model, index),
+            resolve: (linkpath, from) => index.linkDest(linkpath.split("#")[0], from),
+        });
+        for (const v of violations) {
+            const first = v.lines.find((l) => byPath.get(l.path)?.kind !== "other") ?? v.lines[0];
+            const firstNote = byPath.get(first.path);
+            const taskProject = this.lineProject(firstNote, first.line, firstNote.text.split("\n"), index);
+            // A project disagreement changes what's billed, so it shows on every project the task's lines
+            // count toward; any other rule, on the task's own project
+            const projects = v.rule === "project" ? [...new Set(v.detail.projects.filter(Boolean))] : taskProject ? [taskProject] : [];
+            for (const l of v.lines) {
+                const message = this.taskProblemText(v, l);
+                const note = byPath.get(l.path);
+                if (note.kind === "day") {
+                    model.problems.push({ date: note.date ?? this.dailyDate(l.path), line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });
+                } else if (projects.length) {
+                    for (const project of projects) model.projectProblems.push({ project, kind: "task", rule: v.rule, message: `has a task line in [[${this.basename(l.path)}]] (line ${l.line + 1}) that ${message}` });
+                } else {
+                    // On no day and no project: the periodic notes list it under a day, linking the note it's in
+                    model.problems.push({ date: this.problemDate(note, l, byPath, index, T), note: l.path, line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });
+                }
+            }
+        }
+        // In the order build sorts the rest
+        model.problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
+    }
+
+    // The day a task Problem on line `l` of `note`, a note that isn't a daily note, is listed under: a
+    // week's, month's or year's first day; for any other note, the day its forward date points at (a week's, month's
+    // or year's first), else today
+    problemDate(note, l, byPath, index, T) {
+        if (note.kind !== "other") return this.periodStart(note.path, note.kind) ?? this.today();
+        const fwd = T.forwardOf(l.text);
+        const to = fwd ? index.linkDest(fwd.linkpath, l.path) : null;
+        const target = to ? byPath.get(to) : null;
+        const date = !to ? null : target?.kind === "day" ? target.date ?? this.dailyDate(to)
+            : target && target.kind !== "other" ? this.periodStart(to, target.kind) : this.dailyDate(to);
+        return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : this.today();
+    }
+
+    // The first day (YYYY-MM-DD) of a week, month or year note (`unit`), by the report's own names
+    // (2026w38, 2026-09, 2026), else read with the vault's formats where DatePrompt and moment are
+    // loaded; null when it can't be read
+    periodStart(path, unit) {
+        const name = this.basename(path);
+        if (unit === "week" && TimeReport.PERIOD_NAME.week.test(name)) return this.weekRange(name)[0];
+        if (unit === "month" && TimeReport.PERIOD_NAME.month.test(name)) return `${name}-01`;
+        if (unit === "year" && TimeReport.PERIOD_NAME.year.test(name)) return `${name}-01-01`;
+        try {
+            const rules = globalThis.customJS?.DatePrompt?.weekRules?.();
+            const m = rules ? globalThis.window?.moment?.(name, rules.format[unit], rules.locale, true) : null;
+            return m?.isValid() ? m.format("YYYY-MM-DD") : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // Today, YYYY-MM-DD, by moment where it's loaded
+    today() {
+        return globalThis.window?.moment ? window.moment().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10);
+    }
+
+    // What a Problem says about line `l` of a task check's result `v`
+    taskProblemText(v, l) {
+        const name = (p) => (/^\d{4}-\d{2}-\d{2}$/.test(this.basename(p)) ? this.shortDate(this.basename(p)) : this.basename(p));
+        const ref = (o) => `[[${this.basename(o.path)}|${name(o.path)}]] line ${o.line + 1}`;
+        const others = v.lines.filter((o) => o !== l).map(ref).join(", ");
+        switch (v.rule) {
+            case "project": return `is one task with ${others}, and they don't name the same project; give every line of the task the same one`;
+            case "open": {
+                // A sent line a click turned into [ ] keeps its ID: taking it off would lose the task's link
+                const clicked = v.lines[v.detail.clicked ?? -1];
+                if (!clicked) return `is open, and so is the same task at ${others}; a line copied by hand keeps its ID (^${v.id}): take it off the copy`;
+                const fix = "set it back to `[>]`, or Schedule it, which moves the task and puts the `[>]` back";
+                return l === clicked ? `is a sent line a click turned from \`[>]\` into \`[ ]\`, so its task is open here and at ${others}; ${fix}`
+                    : `is open, and so is the same task at ${others}; ${ref(clicked)} is a sent line a click turned from \`[>]\` into \`[ ]\`: ${fix}`;
+            }
+            case "finished": return v.detail.open ? `is part of a task that's both done and open (${others})` : `is done, and the same task is done at ${others} too`;
+            case "forward": {
+                const on = v.detail.missing ? "has no forward date" : `has its forward date on ${v.detail.to ? name(v.detail.to) : "a note that isn't there"}`;
+                // The source line, then the line where the task is
+                return l === v.lines[0] ? `${on}, but the task is at ${others || "no open line"}` : `is where its task is, but the task's line at ${others} ${on}`;
+            }
+            case "twice": return `has the ID ^${v.id}, which another line in this note has too (${others})`;
+            default: return `has text after its ID ^${v.id}, so Obsidian no longer reads it; move the text before the ID`;
+        }
+    }
+
     // The model as a report run sees it now: every daily note read, entries that haven't ended left
     // out, and the invoice notes attached (OBS-5). The Invoice command builds on the same one, so an
     // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
     // when it started (refresh, OBS-41) passes them in.
     async currentModel({ index = this.appIndex(), schedule = customJS.Schedule, billing = customJS.Billing } = {}) {
         const clock = window.moment();
-        const model = this.build(await this.readDailyNotes(schedule), index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
+        const daily = await this.readDailyNotes(schedule);
+        const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
         this.attachBilling(model, await this.readInvoices(billing), index, billing);
+        this.addTaskProblems(model, index, await this.taskNotes(daily));
         return { model, index };
     }
 

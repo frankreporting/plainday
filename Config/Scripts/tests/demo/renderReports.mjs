@@ -45,10 +45,22 @@ export const SHEET_ID = "2026091621000000";
 // Only these folders hold demo notes (Config is the system; its files still count for link names)
 export const NOTE_FOLDERS = ["Inbox/", "Projects/", "Reference/", "Archive/"];
 
+// The vm contexts timeReport.js was loaded into, so planReports can give each the vault it runs on
+const contexts = new WeakMap();
+
+// TimeReport, with TaskIds loaded beside it for the task checks (OBS-185). The context also gets the
+// stubs keepsProject reads: app.vault.getFileByPath(p) returns { path: p }, and
+// customJS.AddTaskNote.isLiveHome(f) reads the demo note's tags and status (set by planReports).
 export function loadTimeReport(root = ROOT) {
-    const code = fs.readFileSync(path.join(root, "Config/Scripts/CustomJS/timeReport.js"), "utf8");
-    const TimeReport = vm.runInContext(code + "\n;TimeReport", vm.createContext({}));
-    return new TimeReport();
+    const ctx = vm.createContext({});
+    ctx.demo = { live: () => true };
+    ctx.app = { vault: { getFileByPath: (p) => ({ path: p }) } };
+    ctx.customJS = { AddTaskNote: { isLiveHome: (f) => ctx.demo.live(f.path) } };
+    const load = (file, name) => vm.runInContext(fs.readFileSync(path.join(root, `Config/Scripts/CustomJS/${file}.js`), "utf8") + `\n;${name}`, ctx);
+    const TimeReport = load("timeReport", "TimeReport");
+    const tr = new TimeReport();
+    contexts.set(tr, { ctx, TaskIds: load("taskIds", "TaskIds") });
+    return tr;
 }
 
 // Billing, which reads the invoice notes for the project timesheets (OBS-5)
@@ -183,12 +195,41 @@ export function planBlock(tr, content, block, { heading = true } = {}) {
     return { content: edits.reduce(apply, content) };
 }
 
+// The task checks over the demo's notes (OBS-185), as TimeReport.taskNotes gathers them: the daily
+// notes and every other note that holds a task ID, with kinds `day`, `week`, `month`, `year` by
+// folder and `other` for the rest. A live project is one under Projects/ tagged project or area
+// whose status isn't Done or Canceled, as AddTaskNote.isLiveHome says.
+export function addDemoTaskProblems(tr, vault, model, index) {
+    const loaded = contexts.get(tr);
+    if (!loaded) return;
+    const { ctx, TaskIds } = loaded;
+    ctx.demo.live = (p) => {
+        const fm = vault.notes.get(p)?.fm;
+        if (!fm || !p.startsWith("Projects/")) return false;
+        const tags = [].concat(fm.tags ?? []).map((t) => String(t).replace(/^#/, ""));
+        const done = [].concat(fm.status ?? []).some((x) => ["done", "canceled", "cancelled"].includes(String(x).trim().toLowerCase()));
+        return !done && tags.some((t) => t === "area" || t === "project");
+    };
+    const daily = dailyNotes(vault);
+    const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
+    const hasId = (text) => text.split("\n").some((l) => TaskIds.CHECKBOX.test(l) && TaskIds.idOf(l));
+    for (const [p, { text }] of vault.notes) {
+        if (byPath.has(p) || !NOTE_FOLDERS.some((f) => p.startsWith(f)) || !hasId(text)) continue;
+        const dir = p.slice(0, p.lastIndexOf("/"));
+        const unit = Object.keys(FOLDERS).find((u) => FOLDERS[u] === dir);
+        const kind = dir === DAYS ? "day" : unit ?? "other";
+        byPath.set(p, { path: p, kind, ...(kind === "day" ? { date: basename(p) } : {}), text });
+    }
+    tr.addTaskProblems(model, index, [...byPath.values()], TaskIds);
+}
+
 // Everything a TimeReport run would do to the vault:
 // { model, index, targets: { project, week, month, year }, blocks: Map(path → block),
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
 export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
     const index = makeIndex(tr, vault);
     const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault, billing), index, billing);
+    addDemoTaskProblems(tr, vault, model, index);
     const { link, linkTarget } = linkers(tr, vault);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();

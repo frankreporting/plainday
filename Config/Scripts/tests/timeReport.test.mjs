@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { standIn, PLANNER } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
 const TimeReport = vm.runInContext(
@@ -2852,4 +2853,165 @@ test("makeIndex: a note that still has `area` belongs where it did, and `parent`
     assert.equal(tr.projectOfNote("Notes/Old.md", idx), "P/Orchard/Orchard.md");
     assert.equal(tr.projectOfNote("Notes/New.md", idx), "P/Orchard/Orchard.md");
     assert.equal(tr.projectOfNote("Notes/Both.md", idx), "P/Other/Other.md");
+});
+
+test("taskText and itemLabel leave out a task's ID and its forward date (OBS-185)", () => {
+    const body = "[x] Draft homepage wireframes [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|🗒️]] ^w2h5nf";
+    assert.equal(tr.taskText(body), "Draft homepage wireframes");
+    assert.equal(tr.taskText("[>] Book it [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");
+    assert.equal(tr.itemLabel("- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2"), "Book the photographer ⭕");
+    assert.equal(tr.taskText("[>] Book it [[2026w41#^k3x9m2|Wk of 10/4]] [[Kestrel|⭕]] ^k3x9m2"), "Book it");
+    assert.equal(tr.taskText("[>] Book it [[2026-10-08#^k3x9m2|➡️ 10/8]] ^k3x9m2"), "Book it", "one written with a ➡️");
+    assert.equal(tr.itemLabel("- [>] Book it [[2026-10-08#^k3x9m2|10/8]] [[Kestrel|⭕]] ^k3x9m2"), "Book it ⭕");
+    assert.equal(tr.itemLabel("- [>] Book it [[2026-10-08#^k3x9m2|➡️ 10/8]] ^k3x9m2"), "Book it");
+    // A block link of your own to a day's line is text, read as its alias
+    assert.equal(tr.taskText("[/] Prep for [[2026-09-15#^abc123|Monday's call]] agenda [[Kestrel|⭕]] ^q1w2e3"), "Prep for Monday's call agenda");
+    assert.equal(tr.itemLabel("- [/] Prep for [[2026-09-15#^abc123|Monday's call]] agenda [[Kestrel|⭕]] ^q1w2e3"), "Prep for Monday's call agenda ⭕");
+});
+
+test("lineLinks: a forward date after the ⭕ doesn't end the run (OBS-185)", () => {
+    for (const f of ["[[2026-09-20#^k3x9m2|9/20]]", "[[2026w38#^k3x9m2|Wk of 9/13]]", "[[2026-09-20|➡️ 9/20]]"]) {
+        const l = tr.lineLinks(`[>] Book it [[Kestrel|⭕]] ${f} ^k3x9m2`);
+        assert.deepEqual(plain(l.marks.map((m) => m.target)), ["Kestrel"], f);
+    }
+});
+
+test("lineProject: its own ⭕, a line it's nested under, its note's, or the note it's in (OBS-185)", () => {
+    const KES = "Projects/Freelance/Kestrel/Kestrel.md";
+    const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book it ^k3x9m2\n" } });
+    const t = v.customJS.TimeReport, index = t.appIndex();
+    const day = ["- [ ] Kestrel errands [[Kestrel|⭕]]", "\t- [/] Call the printer", "- [ ] Mow the lawn"];
+    assert.equal(t.lineProject({ path: `${PLANNER}/days/2026-09-17.md`, kind: "day" }, 1, day, index), KES, "from the line it's nested under");
+    assert.equal(t.lineProject({ path: `${PLANNER}/days/2026-09-17.md`, kind: "day" }, 2, day, index), null);
+    assert.equal(t.lineProject({ path: KES, kind: "other" }, 5, v.notes()[KES].split("\n"), index), KES, "a sent line counts as the project its note is");
+});
+
+test("addTaskProblems: a task's lines that disagree are Problems on their day and on the task's project (OBS-185)", () => {
+    const KES = "Projects/Freelance/Kestrel/Kestrel.md";
+    const notes = {
+        [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-09-16#^k3x9m2|9/16]] ^k3x9m2\n",
+        [`${PLANNER}/days/2026-09-16.md`]: "- [x] Something else\n",
+        [`${PLANNER}/days/2026-09-17.md`]: "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n",
+    };
+    const tr = standIn({ notes }).customJS.TimeReport;
+    const model = { problems: [], projectProblems: [], entries: [], billing: null };
+    tr.addTaskProblems(model, tr.appIndex(), Object.entries(notes).map(([path, text]) => ({ path, kind: path === KES ? "other" : "day", text })));
+    // Sorted by date and line, as build sorts the rest
+    assert.deepEqual(plain(model.problems.map((p) => [p.rule, p.line])), [["open", 1], ["forward", 1], ["twice", 1], ["open", 2], ["twice", 2]]);
+    assert.deepEqual(plain(model.projectProblems.map((p) => [p.rule, p.project])), [["forward", KES]]);
+    assert.ok(model.projectProblems[0].message.includes("has its forward date on 9/16/26"), model.projectProblems[0].message);
+});
+
+test("OBS-185: a task Problem marks a timesheet and an invoice only when the lines disagree about the project", () => {
+    const tr = standIn({ notes: {} }).customJS.TimeReport;
+    const task = (rule) => ({ kind: "task", rule });
+    assert.equal(tr.changesBilling(task("project")), true);
+    for (const rule of ["open", "finished", "forward", "twice", "trailing"]) assert.equal(tr.changesBilling(task(rule)), false, rule);
+    assert.equal(tr.changesBilling({ kind: "overlap" }), true, "every other Problem still counts");
+    const model = { problems: [{ path: "d.md", line: 1, projects: ["P.md"], kind: "task", rule: "open", date: "2026-09-17", text: "x", message: "m" }], projectProblems: [{ project: "P.md", kind: "task", rule: "forward", message: "m" }] };
+    const sheet = tr.sheetEntryProblems(model, new Set(["P.md"]), "P.md", [], (p) => p);
+    assert.deepEqual(plain(sheet.lines), []);
+});
+
+test("OBS-185: the demo's report render runs the task checks too", async () => {
+    const { planReports, frontmatter, loadTimeReport } = await import("./demo/renderReports.mjs");
+    const vaultOf = (files) => ({ notes: new Map(Object.entries(files).map(([p, text]) => [p, { text, fm: frontmatter(text) }])) });
+    const day = "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n- [x] Draft [[Kestrel|⭕]]\n\t- 9:00am - 10:00am\n";
+    const plan = planReports(loadTimeReport(), vaultOf({
+        "Reference/Planner/days/2026-09-17.md": day,
+        "Projects/Kestrel/Kestrel.md": "---\ntags: project\n---\n- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n",
+    }));
+    assert.deepEqual(plain(plan.model.problems.map((p) => [p.date, p.line, p.rule])), [["2026-09-17", 1, "open"], ["2026-09-17", 1, "twice"], ["2026-09-17", 2, "open"], ["2026-09-17", 2, "twice"]]);
+});
+
+// A task sent from Kestrel's note whose day line names Household: two projects (OBS-185)
+const DISAGREE = (extra = {}) => {
+    const KES = "Projects/Freelance/Kestrel/Kestrel.md", HOME = "Projects/Personal/Household/Household.md", DAY = `${PLANNER}/days/2026-09-17.md`;
+    const notes = {
+        [KES]: "---\ntags: [project]\n---\n- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n",
+        [HOME]: `---\ntags: [project]\n${extra.homeStatus ? `status: ${extra.homeStatus}\n` : ""}---\nHome.\n`,
+        [DAY]: "- [ ] Book it [[Household|⭕]] ^k3x9m2\n",
+    };
+    const tr = standIn({ notes }).customJS.TimeReport;
+    const list = Object.entries(notes).map(([path, text]) => ({ path, kind: path === DAY ? "day" : "other", text }));
+    return { KES, HOME, DAY, tr, list };
+};
+
+test("OBS-185: a project disagreement shows on every project the task names, and counts for billing there", () => {
+    const { KES, HOME, tr, list } = DISAGREE();
+    const model = { problems: [], projectProblems: [], entries: [], billing: null };
+    tr.addTaskProblems(model, tr.appIndex(), list);
+    assert.deepEqual(plain(model.problems.map((p) => [p.rule, p.projects.slice().sort()])), [["project", [HOME, KES].sort()]]);
+    assert.deepEqual(plain(model.projectProblems.map((p) => [p.rule, p.project]).sort()), [["project", KES], ["project", HOME]]);
+    for (const project of [KES, HOME]) {
+        const sheet = tr.sheetEntryProblems(model, new Set([project]), project, [], (p) => p);
+        assert.ok(sheet.lines.some((l) => /don't name the same project|task line/.test(l)), `${project}: ${sheet.lines}`);
+    }
+});
+
+test("OBS-185: a line whose time is on a sent or paid invoice may keep its project; so may one in a finished project", () => {
+    for (const status of ["sent", "paid"]) {
+        const { DAY, tr, list } = DISAGREE();
+        const entries = [{ path: DAY, context: [{ line: 1 }] }];
+        const billing = { billing: { standing: () => ({ invoice: { status } }) }, ledger: {} };
+        const model = { problems: [], projectProblems: [], entries, billing };
+        tr.addTaskProblems(model, tr.appIndex(), list);
+        assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project")), [], `invoiced (${status})`);
+        const draft = { problems: [], projectProblems: [], entries, billing: { billing: { standing: () => ({ invoice: { status: "draft" } }) }, ledger: {} } };
+        tr.addTaskProblems(draft, tr.appIndex(), list);
+        assert.equal(draft.problems.filter((p) => p.rule === "project").length, 1, "a draft invoice is no exemption");
+    }
+    // Household is Done: the stand-in's own AddTaskNote.isLiveHome says it's finished
+    const { tr, list } = DISAGREE({ homeStatus: "Done" });
+    const model = { problems: [], projectProblems: [], entries: [], billing: null };
+    tr.addTaskProblems(model, tr.appIndex(), list);
+    assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project")), [], "finished");
+});
+
+test("OBS-185: a task Problem on no day and no project is listed too, dated by its note's period or its forward date, and linked to its note", () => {
+    const IN = "Inbox/Errands.md", CH = "Inbox/Chores.md", W = `${PLANNER}/weeks/2026w38.md`;
+    const notes = {
+        // Its day line deleted by hand
+        [IN]: "- [>] Return the library books [[2026-09-17#^abc123|9/17]] ^abc123\n",
+        [`${PLANNER}/days/2026-09-17.md`]: "- [ ] Something else\n",
+        // Copied by hand in a week note
+        [W]: "- [ ] Water the plants [[Errands|🗒️]] ^def456\n- [ ] Water the plants [[Errands|🗒️]] ^def456\n",
+        [CH]: "- [>] Water the plants [[2026w38#^def456|Wk of 9/13]] ^def456\n",
+    };
+    const v = standIn({ notes });
+    const tr = v.customJS.TimeReport;
+    const list = Object.keys(notes).map((path) => ({ path, kind: v.customJS.TaskIds.kindOf(v.app.vault.getFileByPath(path)), text: notes[path] }));
+    const model = { problems: [], projectProblems: [], entries: [], billing: null };
+    tr.addTaskProblems(model, tr.appIndex(), list);
+    assert.deepEqual(plain(model.projectProblems), []);
+    assert.deepEqual(plain(model.problems.map((p) => [p.date, p.note, p.line, p.rule])), [
+        ["2026-09-13", W, 1, "open"], ["2026-09-13", W, 1, "twice"], ["2026-09-13", W, 2, "open"], ["2026-09-13", W, 2, "twice"], ["2026-09-17", IN, 1, "forward"],
+    ]);
+    // The whole report lists them, each with a link to the note it's in
+    const { problems } = tr.inScope({ ...model, parent: new Map() }, { kind: "all" });
+    const lines = tr.problemLines(model, problems, [], [], (p) => p);
+    assert.equal(lines.length, 5);
+    assert.ok(lines[0].startsWith(`- [[${W.replace(/\.md$/, "")}|2026w38]] line 1: \``), lines[0]);
+    assert.ok(lines[4].startsWith("- [[Inbox/Errands|Errands]] line 1: `- [>] Return the library books"), lines[4]);
+});
+
+test("OBS-185: the open-twice Problem for a sent line a click turned into [ ] says to set it back, on both lines; a copy keeps the copy advice", async () => {
+    const KES = "Projects/Freelance/Kestrel/Kestrel.md", DAY = `${PLANNER}/days/2026-09-17.md`;
+    const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [ ] Book the photographer\n" }, open: KES, at: 5 });
+    await v.schedule("2026-09-17");
+    // One click on the project note's [>] box
+    v.app.workspace.activeLeaf.view.editor.replaceRange(" ", { line: 5, ch: 3 }, { line: 5, ch: 4 });
+    const tr = v.customJS.TimeReport;
+    const said = (c) => Object.fromEntries(c.lines.map((l) => [l.path, tr.taskProblemText(c, l)]));
+    const [open] = v.check();
+    assert.equal(open.rule, "open");
+    const fix = "set it back to `[>]`, or Schedule it, which moves the task and puts the `[>]` back";
+    assert.deepEqual(said(open), {
+        [KES]: `is a sent line a click turned from \`[>]\` into \`[ ]\`, so its task is open here and at [[2026-09-17|9/17/26]] line 2; ${fix}`,
+        [DAY]: `is open, and so is the same task at [[Kestrel|Kestrel]] line 6; [[Kestrel|Kestrel]] line 6 is a sent line a click turned from \`[>]\` into \`[ ]\`: ${fix}`,
+    });
+    // A line copied by hand to another day: the copy advice, as before
+    const w = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n", [DAY]: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n", [`${PLANNER}/days/2026-09-18.md`]: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n" } });
+    const copy = w.check().find((c) => c.rule === "open");
+    for (const text of Object.values(said(copy))) assert.match(text, /a line copied by hand keeps its ID \(\^k3x9m2\): take it off the copy$/);
 });

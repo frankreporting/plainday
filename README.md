@@ -120,7 +120,7 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 - [>] Send the invoice [[Pinecrest Library Brochure|⭕]] [[Send the invoice|🗒️]]
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `🗒️` the line's own note (a task's note, or an event's meeting log), filed in that project. The note link comes last, and a `🚩 M/D` due date first. A link in the text is part of the title, even a link to a project.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `🗒️` the line's own note (a task's note, or an event's meeting log), filed in that project. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
 
 The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
 
@@ -130,7 +130,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
-| Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; one already worked on stays behind as `[>]`, linked to its task note |
+| Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; one already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line |
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
 | AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and keeps the line's ⭕ for it; on an event line, links a meeting log |
 | AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
@@ -154,7 +154,7 @@ Startup scripts (run when Obsidian starts):
 | SyncArea | Updates `parent` when notes or folders move |
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
 | MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
-| TrailingLinks | Draws the 🚩, 🗒️, ⭕ and 🗃️ links that end a task or event line small, at the right of the line (Live Preview) |
+| TrailingLinks | Draws the 🚩, forward date, 🗒️, ⭕ and 🗃️ links that end a task or event line small, at the right of the line, and hides a task's ID until the cursor reaches it (Live Preview) |
 | TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian

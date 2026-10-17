@@ -19,7 +19,7 @@ The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_t
 - [x] Layout template
 - [x] September issue: member updates
 - [ ] Print and fold for the farmers market table
-- [>] [[2026-09|Sep. 2026]] Collect member photos for the October issue
+- [>] Collect member photos for the October issue [[2026-09#^g4m8sk|Sep. 2026]] ^g4m8sk
 
 ## Time Report
 
