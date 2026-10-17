@@ -1011,7 +1011,8 @@ class TimeReport {
     // Invoice notes (OBS-5): read them, keep what they billed on the model for the timesheets, and
     // list on the project's own note (never on weekly, monthly or yearly notes) an invoice whose billed
     // entries changed since it was made (a draft's too, which says to rebuild it, OBS-143), an entry on
-    // two invoices, and a billed_through that isn't a date. `notes` are [{ path, props, text }]; `billing` is a Billing.
+    // two invoices, and an invoice whose Billed entries can't be read. `notes` are [{ path, props, text }];
+    // `billing` is a Billing.
     attachBilling(model, notes, index, billing) {
         // In number order, then path, so the first invoice to bill an entry is always the same one,
         // whatever order the vault lists its files in
@@ -1037,12 +1038,6 @@ class TimeReport {
         for (const twice of ledger.twice) {
             const project = twice.invoices[1].project ?? twice.invoices[0].project;
             if (project) model.projectProblems.push({ project, only: "project", twice });
-        }
-        for (const p of model.parent.keys()) {
-            const b = billing.billedThrough(p, this, index);
-            if (b.bad && b.from === p) {
-                model.projectProblems.push({ project: p, only: "project", message: `has a \`billed_through\` that isn't a date (${b.bad.slice(0, 20)}), so it can't be invoiced until it's fixed` });
-            }
         }
         return model;
     }
@@ -1470,9 +1465,9 @@ class TimeReport {
     }
 
     // What's unpaid of `entries`' Earned, in cents, entry by entry as the timesheet stands them: every
-    // billable hourly entry but one covered by `billed_through` or billed on a paid invoice. One that
-    // changed since a paid invoice billed it is unpaid for the time it gained. So a paid invoice counts
-    // for what it billed whatever the rate or the entry is now, and an entry on two counts once.
+    // billable hourly entry but one billed on a paid invoice. One that changed since a paid invoice
+    // billed it is unpaid for the time it gained. So a paid invoice counts for what it billed whatever
+    // the rate or the entry is now, and an entry on two counts once.
     unpaidCents(model, entries) {
         const standing = this.sheetStanding(model);
         const open = [];
@@ -1480,7 +1475,7 @@ class TimeReport {
             if (!e.billable || this.hourlyCents(model, e) === null) continue;
             const s = standing(e);
             const paid = s.invoice?.status === "paid";
-            if (s.kind === "before" || (s.kind === "billed" && paid)) continue;
+            if (s.kind === "billed" && paid) continue;
             if (s.kind === "changed" && paid) {
                 const gained = this.rounded(e.minutes) - s.row.billed;
                 if (gained > 0) open.push({ ...e, minutes: gained });
@@ -1743,11 +1738,9 @@ class TimeReport {
     // that moved or was retimed since (`held`) as changed. Only an hourly project's entries are invoiced.
     sheetStanding(model) {
         const b = model.billing;
-        const through = new Map();
         return (e) => {
             if (!b || this.hourlyCents(model, e) === null) return { kind: "open" };
-            if (!through.has(e.project)) through.set(e.project, b.billing.billedThrough(e.project, this, b.index).date);
-            const s = b.billing.standing(e, b.ledger, through.get(e.project));
+            const s = b.billing.standing(e, b.ledger);
             const h = s.kind === "open" && b.held?.get(e);
             return h ? { kind: "changed", ...h } : s;
         };
@@ -1760,9 +1753,9 @@ class TimeReport {
 
     // One timesheet table. Where anything in it bills by the hour, it starts with an unnamed column for
     // the status of the invoice that billed the entry (✏️ draft, 🕒 sent, ✅ paid, ⚠️ changed since it
-    // was billed) and ends with that invoice, or `through 9/2` where billed_through covers it; an entry
-    // with neither isn't invoiced yet (OBS-117). 🆓 time has the same columns: a 🆓 entry on an invoice
-    // was billed before it was made 🆓, so it's ⚠️ (until OBS-110 puts 🆓 time on invoices at no charge).
+    // was billed) and ends with that invoice; an entry on none isn't invoiced yet (OBS-117). 🆓 time has
+    // the same columns: a 🆓 entry on an invoice was billed before it was made 🆓, so it's ⚠️ (until
+    // OBS-110 puts 🆓 time on invoices at no charge).
     // An entry in `flagged` (one a Problem names, OBS-132) is ⚠️ too, and a table that bills nothing
     // gets the first column for it. It's about time, so it has no amounts.
     sheet(model, entries, { project, link, written = false, flagged = new Set() }) {
@@ -1773,7 +1766,6 @@ class TimeReport {
         const cells = (e) => {
             const s = billing ? standing(e) : { kind: "open" };
             const warn = (mark) => (flagged.has(e) ? "⚠️" : mark);
-            if (s.kind === "before") return [warn(""), e.billable ? `through ${md(s.through)}` : ""];
             if (s.kind === "open") return [warn(""), ""];
             return [warn(this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice)), `[[${s.invoice.name}]]`];
         };

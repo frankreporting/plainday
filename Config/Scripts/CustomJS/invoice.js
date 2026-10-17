@@ -433,8 +433,7 @@ class Invoice {
                 continue;
             }
             if (!e.billable || !billing.hourly(e.project, model)) continue;
-            const through = billing.billedThrough(e.project, tr, index).date;
-            if (billing.standing(e, model.billing.ledger, through).kind !== "open") continue;
+            if (billing.standing(e, model.billing.ledger).kind !== "open") continue;
             candidates.add(e.project);
             for (let up = model.parent.get(e.project); up; up = model.parent.get(up)) {
                 if (billing.scope(up, model, tr, index).has(e.project)) candidates.add(up);
@@ -606,7 +605,7 @@ class Invoice {
         const name = tr.basename(project);
         if (sel.bad.length) {
             const b = sel.bad[0];
-            new Notice(b.invoice ? `${b.invoice.name} ${b.problem}; fix it before invoicing ${name}` : `${tr.basename(b.project)} has a billed_through that isn't a date (${b.value}); fix it first`, 0);
+            new Notice(`${b.invoice.name} ${b.problem}; fix it before invoicing ${name}`, 0);
             return false;
         }
         const type = model.money.get(project)?.type ?? String(tr.prop(model.billing.index.props(project) ?? {}, "rate_type") ?? "").trim().toLowerCase();
@@ -809,7 +808,6 @@ class Invoice {
             section("Fix first?", fix);
             section("Held back", this.beforeSendingItems({ problems: [], changed: [], heldBack: sel.heldBack }, tr).map((i) => i.replace(/^Held back: /, "")));
             section("Not billed by the hour", sel.notHourly.map((p) => tr.basename(p)));
-            if (sel.before) section("Billed before", [`${sel.before} ${sel.before === 1 ? "entry" : "entries"} on or before billed_through`]);
             section("To bill", [
                 `${this.md(sel.entries[0].date)} – ${this.md(through)}: ${sel.entries.length} ${sel.entries.length === 1 ? "entry" : "entries"}, ${tr.hours(hours)} hours, ${tr.money(cents)}`,
                 ...(sel.cap ? [`This brings ${tr.basename(project)} to ${tr.hours(sel.cap.used)} of its ${tr.hours(sel.cap.cap)} hours`] : []),

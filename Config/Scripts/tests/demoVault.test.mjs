@@ -366,10 +366,12 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     const template = fs.readFileSync(new URL("../../Templates/Project.md", import.meta.url), "utf8");
     const at = (l) => template.indexOf(l);
     // In the maintainer's order (2026-10-14): bill_to after client, max_hours after rate_type
-    const order = ["client: ", "bill_to: ", "rate: ", "rate_type: ", "max_hours: ", "include_subprojects: false", "billed_through: "].map((k) => at(`tR += "${k}\\n";`));
+    const order = ["client: ", "bill_to: ", "rate: ", "rate_type: ", "max_hours: ", "include_subprojects: false"].map((k) => at(`tR += "${k}\\n";`));
     assert.ok(order.every((i) => i > 0), "the template writes each one");
     assert.deepEqual(order, [...order].sort((a, b) => a - b), "in that order");
-    assert.ok(at('tR += "billed_through: \\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
+    assert.ok(at('tR += "include_subprojects: false\\n";') < at('tR += "---\\n";\ntp.file.cursor(0);'), "inside the frontmatter it writes");
+    // Retired (OBS-192): invoice notes record what was billed, so no date stands in for them
+    assert.ok(!template.includes("billed_through"), "no billed_through");
     const base = fs.readFileSync(new URL("../../../Reference/Invoices/Invoices.base", import.meta.url), "utf8");
     assert.match(base, /file\.tags\.contains\("invoice"\)/);
     // Its columns, in order, named as Airtable named them (OBS-117); Total in dollars (the maintainer's

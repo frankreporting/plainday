@@ -371,11 +371,10 @@ class Billing {
     //   billed    its key is on an invoice, for the same project
     //   changed   a billed row overlaps it without matching it (a billed entry edited since), or has
     //             its key on another project (re-pointed since, or a different entry at the same times)
-    //   before    on or before `through`, the project's billed_through
     //   open      none of these
     // Overlaps are checked on the day before and after too, for entries that cross midnight; touching
     // (one ends when the other starts) isn't overlapping.
-    standing(e, ledger, through = null) {
+    standing(e, ledger) {
         const hit = ledger.byKey.get(this.key(e));
         if (hit) return hit.row.projectPath && e.project && hit.row.projectPath !== e.project ? { kind: "changed", ...hit } : { kind: "billed", ...hit };
         const base = this.day(e.date) * 1440;
@@ -386,23 +385,7 @@ class Billing {
                 if (hb + h.row.start < to && from < hb + h.row.end) return { kind: "changed", ...h };
             }
         }
-        if (through && e.date <= through) return { kind: "before", through };
         return { kind: "open" };
-    }
-
-    // A project's billed_through, or its nearest parent's: { date, from } when set, { date: null, from,
-    // bad } when set to something that isn't a date, { date: null } when nothing up the chain sets it.
-    // A parent's date covers its sub-projects, as its rate does, unless they set their own.
-    billedThrough(project, tr, index) {
-        const seen = new Set();
-        for (let p = project; p && !seen.has(p); p = tr.parentProject(p, index)) {
-            seen.add(p);
-            const raw = tr.prop(index.props?.(p) ?? {}, "billed_through");
-            if (raw === undefined || raw === null || String(raw).trim() === "") continue;
-            const date = this.isoDate(raw);
-            return date ? { date, from: p } : { date: null, from: p, bad: String(raw) };
-        }
-        return { date: null };
     }
 
     // The projects a project's invoices and timesheet cover: itself, and every project below it when
@@ -468,21 +451,14 @@ class Billing {
     //              any day) through `through`, running clocks first
     //   projectProblems  the project-level ones in scope (a rate that isn't a number, an entry on two
     //              invoices), without the invoice changes `changed` already lists
-    //   before     how many entries billed_through covers
-    //   bad        [{ project, value }] a billed_through that isn't a date, or [{ invoice, problem }] an
-    //              invoice in scope whose Billed entries can't be trusted: invoicing is refused
+    //   bad        [{ invoice, problem }] an invoice in scope whose Billed entries can't be trusted:
+    //              invoicing is refused
     //   cap        { used, cap } in minutes when billable time through `through` passes the cap
     select(model, tr, index, { project, through, ledger }) {
         if (!this.isoDate(through)) throw new Error(`Billing.select: "${through}" isn't a date`);
         const scope = this.scope(project, model, tr, index);
         const entries = [], heldBack = [], notHourly = new Set(), bad = [];
-        const thru = new Map();
-        let before = 0, first = null;
-        for (const p of scope) {
-            const b = this.billedThrough(p, tr, index);
-            thru.set(p, b.date);
-            if (b.bad && !bad.some((x) => x.project === b.from)) bad.push({ project: b.from, value: b.bad });
-        }
+        let first = null;
         for (const invoice of ledger.invoices ?? []) {
             if (invoice.problem && this.touches(invoice, scope)) bad.push({ invoice, problem: invoice.problem });
         }
@@ -490,9 +466,8 @@ class Billing {
         for (const e of model.entries) {
             if (!scope.has(e.project) || e.date > through || !e.billable) continue;
             if (!this.hourly(e.project, model)) { notHourly.add(e.project); continue; }
-            const s = this.standing(e, ledger, thru.get(e.project));
+            const s = this.standing(e, ledger);
             if (s.kind === "billed") continue;
-            if (s.kind === "before") { before++; continue; }
             if (first === null || e.date < first) first = e.date;
             if (s.kind === "changed") { heldBack.push({ entry: e, invoice: s.invoice, row: s.row, why: "changed" }); continue; }
             if (keys.has(this.key(e))) { heldBack.push({ entry: e, invoice: null, row: null, why: "duplicate" }); continue; }
@@ -525,7 +500,7 @@ class Billing {
                 .reduce((sum, e) => sum + tr.rounded(e.minutes), 0);
             if (used > m.capMinutes) cap = { used, cap: m.capMinutes };
         }
-        return { scope, entries, heldBack, changed, notHourly: [...notHourly].sort(), problems, projectProblems, before, bad, cap };
+        return { scope, entries, heldBack, changed, notHourly: [...notHourly].sort(), problems, projectProblems, bad, cap };
     }
 
     // Billed entries rows for `entries`, at each entry's project's hourly rate
@@ -564,8 +539,7 @@ class Billing {
     //   gone        none of these (with several candidates for a move or a retime, a recurring meeting
     //               say, it's gone rather than a guess)
     // A row for a project that's been archived since is left alone: its entries are out of the model.
-    // late: entries in the invoice's scope and period, billable and hourly, on no invoice and not
-    // covered by billed_through.
+    // late: entries in the invoice's scope and period, billable and hourly, on no invoice.
     changes(invoice, model, tr, index, ledger, { byDate = this.byDate(model), late: wantLate = true } = {}) {
         const abs = (x) => [this.day(x.date) * 1440 + x.start, this.day(x.date) * 1440 + x.end];
         const out = [];
@@ -598,7 +572,7 @@ class Billing {
         const scope = wantLate && invoice.project ? this.scope(invoice.project, model, tr, index) : new Set();
         const late = !wantLate || !invoice.periodStart || !invoice.periodEnd ? [] : model.entries.filter((e) => scope.has(e.project) && e.billable
             && this.hourly(e.project, model) && e.date >= invoice.periodStart && e.date <= invoice.periodEnd
-            && this.standing(e, ledger, this.billedThrough(e.project, tr, index).date).kind === "open");
+            && this.standing(e, ledger).kind === "open");
         return { changes: out, late };
     }
 }

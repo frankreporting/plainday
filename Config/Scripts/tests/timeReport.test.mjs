@@ -2312,6 +2312,7 @@ const orcIndex = (web = {}) => tr.makeIndex([
 ]);
 
 test("timesheet: each billable entry's invoice last, its status mark first (OBS-117)", () => {
+    // A leftover billed_through is ignored (OBS-192): 3:00pm - 3:30pm is on no invoice, so its cell is empty
     const idx = orcIndex({ billed_through: "2026-09-02" });
     const invoices = [
         orcInvoice("1001-ORC", "paid", [["2026-09-01", "9:00am", "9:50am"], ["2026-09-01", "1:00pm", "2:30pm"]], { paid: "2026-09-15", invoice_date: "2026-09-04" }),
@@ -2323,7 +2324,7 @@ test("timesheet: each billable entry's invoice last, its status mark first (OBS-
         .map((l) => billing.cells(l)).filter((c) => /^\d{1,2}:\d{2}[ap]m - /.test(c[2])).map((c) => [c[2], c[0], c.at(-1)]);
     assert.deepEqual(cells, [
         ["9:00am - 10:00am", "", ""],
-        ["3:00pm - 3:30pm", "", "through 9/2"],
+        ["3:00pm - 3:30pm", "", ""],
         ["9:00am - 9:50am", "✅", "[[1001-ORC]]"],
         ["11:00am - 11:30am", "✏️", "[[1002-ORC]]"],
         ["1:00pm - 2:45pm", "⚠️", "[[1001-ORC]]"],
@@ -2336,7 +2337,7 @@ test("timesheet: each billable entry's invoice last, its status mark first (OBS-
     assert.ok(tr.render(draftOnly, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1003-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm; rebuild it"));
 });
 
-test("invoice Problems: an entry on two invoices, a billed_through that isn't a date", () => {
+test("invoice Problems: an entry on two invoices; a leftover billed_through is none (OBS-192)", () => {
     const idx = orcIndex({ billed_through: "soon" });
     const invoices = [
         orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "9:50am"]], { invoice_date: "2026-09-04" }),
@@ -2345,8 +2346,8 @@ test("invoice Problems: an entry on two invoices, a billed_through that isn't a 
     const m = tr.attachBilling(tr.build(ORC_NOTES, idx), invoices, idx, billing);
     const block = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
     assert.ok(block.includes("- [[2026-09-01|9/1/26]] 9:00am - 9:50am is billed on both [[1001-ORC]] and [[1002-ORC]]"), block);
-    assert.ok(block.includes("- [[Orchard Lane Web 2026]] has a `billed_through` that isn't a date (soon), so it can't be invoiced until it's fixed"), block);
-    assert.ok(!tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s").includes("billed_through"));
+    assert.ok(!block.includes("billed_through") && !block.includes("soon"), block);
+    assert.ok(!tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s").includes("is billed on both"));
 });
 
 test("render project: its invoices, newest first, each marked with its status, then a Total of all but the canceled (OBS-117)", () => {
@@ -2372,7 +2373,7 @@ test("render project: its invoices, newest first, each marked with its status, t
     assert.ok(!tr.render(tr.attachBilling(tr.build(ORC_NOTES, idx), [], idx, billing), { kind: "project", path: ORCHARD_WEB }, "s").includes("### Invoices"));
 });
 
-test("render project (OBS-133): unpaid is the Earned of every entry not covered by billed_through or a paid invoice", () => {
+test("render project (OBS-133): unpaid is the Earned of every entry not billed on a paid invoice", () => {
     const idx = orcIndex();
     const summary = (invoices, path = ORCHARD_WEB, index = idx) => {
         const m = tr.attachBilling(tr.build(ORC_NOTES, index), invoices, index, billing);
@@ -2392,8 +2393,8 @@ test("render project (OBS-133): unpaid is the Earned of every entry not covered 
     // Nothing unpaid: no unpaid
     const all = [["2026-09-01", "9:00am", "9:50am"], ["2026-09-01", "11:00am", "11:30am"], ["2026-09-01", "1:00pm", "2:45pm"], ["2026-09-02", "3:00pm", "3:30pm"], ["2026-09-03", "9:00am", "10:00am"]];
     assert.equal(earned([orcInvoice("1001-ORC", "paid", all, { paid: "2026-09-15" })]), "**Earned:**\t\t$380.00");
-    // Time billed outside Obsidian, up to billed_through, isn't unpaid: 9/2 and 9/3 are
-    assert.equal(earned([], orcIndex({ billed_through: "2026-09-01" })), "**Earned:**\t\t$380.00 | $120.00 unpaid");
+    // A leftover billed_through is ignored (OBS-192): with no invoices, all of it is unpaid
+    assert.equal(earned([], orcIndex({ billed_through: "2026-09-01" })), "**Earned:**\t\t$380.00 | $380.00 unpaid");
     // Paid at $80, the rate raised to $100 since: Earned is at today's rate, and nothing is unpaid
     assert.equal(earned([orcInvoice("1001-ORC", "paid", all)], orcIndex({ rate: 100, rate_type: "hourly" })), "**Earned:**\t\t$475.00");
     // An entry on two paid invoices is paid once
@@ -2546,9 +2547,9 @@ test("review: a billed entry shows the invoice that billed it, at whatever rate,
 });
 
 test("timesheet: 🆓 time has the status and Invoice columns; a 🆓 entry an invoice billed is ⚠️", () => {
-    const idx = orcIndex({ billed_through: "2026-09-02" });
-    // 1001 billed 9:00am - 9:50am, which was made 🆓 since; 3:00pm - 3:30pm is 🆓 and on no invoice,
-    // though billed_through covers it, so it says nothing about an invoice
+    const idx = orcIndex();
+    // 1001 billed 9:00am - 9:50am, which was made 🆓 since; 3:00pm - 3:30pm is 🆓 and on no invoice, so
+    // it says nothing about an invoice
     const notes = [
         note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am: 🆓 my mistake\n\t- 11:00am - 11:30am"),
         note("2026-09-02", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 3:00pm - 3:30pm: 🆓"),

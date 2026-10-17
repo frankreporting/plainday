@@ -56,7 +56,6 @@ tR += "rate: \n";
 tR += "rate_type: \n";
 tR += "max_hours: \n";
 tR += "include_subprojects: false\n";
-tR += "billed_through: \n";
 tR += "---\n";
 tp.file.cursor(0);
 // Its folder gets the project look in Notebook Navigator, once the note is written (OBS-142)

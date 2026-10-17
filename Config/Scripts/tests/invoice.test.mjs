@@ -451,3 +451,24 @@ test("writeKeepingFold: a closed invoice's saved folds move with a write that ad
     assert.deepEqual(plain(stale.saves), []);
 });
 
+
+// ------------------------------------------------------------------ the project picker (OBS-192)
+
+test("pickProject: lists the projects with unbilled time; a leftover billed_through changes nothing (OBS-192)", async () => {
+    const items = [];
+    // Esc as soon as it opens: the list is what it offered
+    const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
+    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    for (const value of [undefined, "2026-09-02", "soon"]) {
+        const idx = tr.makeIndex(INDEX_NOTES.map((n) => (n.path === WEB && value ? { ...n, props: { ...n.props, billed_through: value } } : n)));
+        const m = tr.attachBilling(tr.build([
+            day("2026-09-01", "- [x] Site map [[Harbor Web|⭕]]\n\t- 1:00pm - 2:30pm: first pass"),
+            day("2026-09-02", "- [x] Shoot [[Harbor Photos|⭕]]\n\t- 1:00pm - 2:00pm"),
+        ], idx), [], idx, billing);
+        const current = Object.assign(Object.create(tr), { currentModel: async () => ({ model: m }) });
+        items.length = 0;
+        assert.equal(await invoice.pickProject(current, billing, idx), null, "nothing picked");
+        assert.deepEqual(plain(items), [PHOTO, WEB], String(value));
+    }
+});

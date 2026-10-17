@@ -20,13 +20,13 @@ const DAYS = "Reference/Planner/days";
 const WEB = "Projects/Work/Harbor Web/Harbor Web.md";                     // hourly $80, sub-projects on
 const PHOTO = "Projects/Work/Harbor Web/Harbor Photos/Harbor Photos.md";   // sub-project, its own $100
 const FLAT = "Projects/Work/Harbor Web/Harbor Print/Harbor Print.md";      // sub-project, flat fee
-const OTHER = "Projects/Work/Dune Books/Dune Books.md";                    // hourly $60, billed through 9/1
+const OTHER = "Projects/Work/Dune Books/Dune Books.md";                    // hourly $60
 const INV = "Projects/Work/Harbor Web/invoices";
 const NOTES_INDEX = [
     { path: WEB, tags: ["project"], props: { rate: 80, rate_type: "hourly", include_subprojects: true, max_hours: 3, client: "[[Harbor Co]]" } },
     { path: PHOTO, tags: ["project"], props: { rate: 100, rate_type: "hourly" } },
     { path: FLAT, tags: ["project"], props: { rate: 500, rate_type: "flat" } },
-    { path: OTHER, tags: ["project"], props: { rate: 60, rate_type: "hourly", billed_through: "2026-09-01" } },
+    { path: OTHER, tags: ["project"], props: { rate: 60, rate_type: "hourly" } },
     { path: "Reference/Entities/Harbor Co.md", tags: [], props: { code: "HBR" } },
 ];
 const index = tr.makeIndex(NOTES_INDEX);
@@ -376,7 +376,7 @@ test("inInvoiceFolder: a folder named invoices in any case, or anywhere under th
 
 // ------------------------------------------------------------------ where an entry stands
 
-test("standing: billed, changed (overlapping a billed row), before billed_through, open", () => {
+test("standing: billed, changed (overlapping a billed row), open", () => {
     const rows = ROWS();
     const ledger = billing.ledger([read(invoiceNote("1001-HBR", "sent", rows))]);
     assert.equal(billing.standing(entry(model, "2026-09-01", "1:00pm"), ledger).kind, "billed");
@@ -390,17 +390,6 @@ test("standing: billed, changed (overlapping a billed row), before billed_throug
     // Across midnight: a billed 9/3 10:30pm - 1:15am overlaps a 9/4 12:30am - 1:00am entry
     assert.equal(billing.standing({ date: "2026-09-04", start: 30, end: 60 }, ledger).kind, "changed");
     assert.equal(billing.standing({ date: "2026-09-04", start: 75, end: 120 }, ledger).kind, "open");
-    assert.deepEqual(plain(billing.standing({ date: "2026-09-01", start: 540, end: 600 }, emptyLedger(), "2026-09-01")), { kind: "before", through: "2026-09-01" });
-    assert.equal(billing.standing({ date: "2026-09-02", start: 540, end: 600 }, emptyLedger(), "2026-09-01").kind, "open");
-});
-
-test("billedThrough: the project's own, else its parent's; one that isn't a date is flagged", () => {
-    assert.deepEqual(plain(billing.billedThrough(OTHER, tr, index)), { date: "2026-09-01", from: OTHER });
-    assert.deepEqual(plain(billing.billedThrough(WEB, tr, index)), { date: null });
-    const idx = tr.makeIndex(NOTES_INDEX.map((n) => (n.path === WEB ? { ...n, props: { ...n.props, billed_through: "2026-08-31" } } : n)));
-    assert.deepEqual(plain(billing.billedThrough(PHOTO, tr, idx)), { date: "2026-08-31", from: WEB }, "inherited");
-    const bad = tr.makeIndex(NOTES_INDEX.map((n) => (n.path === OTHER ? { ...n, props: { ...n.props, billed_through: "soon" } } : n)));
-    assert.deepEqual(plain(billing.billedThrough(OTHER, tr, bad)), { date: null, from: OTHER, bad: "soon" });
 });
 
 test("scope: sub-projects only when include_subprojects is on", () => {
@@ -423,7 +412,6 @@ test("select: billable, hourly, ended, in scope, through the date; 🆓 and flat
     assert.deepEqual(picked(sel), [["2026-09-01", "1:00pm", "Harbor Web"], ["2026-09-02", "9:00am", "Harbor Web"], ["2026-09-02", "1:00pm", "Harbor Photos"]]);
     assert.deepEqual(plain(sel.notHourly), [FLAT]);
     assert.deepEqual(plain(sel.problems), [], "the running clock is after the date");
-    assert.equal(sel.before, 0);
     assert.deepEqual(plain(sel.bad), []);
 });
 
@@ -458,12 +446,14 @@ test("select: a draft's entries are billed for other invoices; a canceled invoic
     assert.equal(billing.select(model, tr, index, { project: WEB, through: "2026-09-02", ledger: billing.ledger([draft], { except: draft.path }) }).entries.length, 3);
 });
 
-test("select: billed_through covers older entries; one that isn't a date is reported", () => {
-    const sel = billing.select(model, tr, index, { project: OTHER, through: "2026-09-02", ledger: emptyLedger() });
-    assert.equal(sel.before, 1);
-    assert.deepEqual(picked(sel), [["2026-09-02", "4:00pm", "Dune Books"]]);
-    const bad = tr.makeIndex(NOTES_INDEX.map((n) => (n.path === OTHER ? { ...n, props: { ...n.props, billed_through: "soon" } } : n)));
-    assert.deepEqual(plain(billing.select(model, tr, bad, { project: OTHER, through: "2026-09-02", ledger: emptyLedger() }).bad), [{ project: OTHER, value: "soon" }]);
+test("select: a leftover billed_through, a date or not, changes nothing (OBS-192)", () => {
+    for (const value of ["2026-09-01", "soon"]) {
+        const idx = tr.makeIndex(NOTES_INDEX.map((n) => (n.path === OTHER ? { ...n, props: { ...n.props, billed_through: value } } : n)));
+        const sel = billing.select(tr.build(NOTES, idx), tr, idx, { project: OTHER, through: "2026-09-02", ledger: emptyLedger() });
+        assert.deepEqual(picked(sel), [["2026-09-01", "9:00am", "Dune Books"], ["2026-09-02", "4:00pm", "Dune Books"]], value);
+        assert.deepEqual(plain(sel.bad), [], value);
+        assert.ok(!("before" in sel), value);
+    }
 });
 
 test("select: two identical lines on one day bill once; the second is held back", () => {
@@ -593,12 +583,12 @@ test("review: changes says unassigned, and ignores another project's overlapping
     assert.deepEqual(plain(billing.changes(inv, other, tr, index, l).changes.map((c) => c.kind)), ["gone"]);
 });
 
-test("review: late leaves out what billed_through covers", () => {
+test("review: late takes no notice of a leftover billed_through (OBS-192)", () => {
     const idx = tr.makeIndex(NOTES_INDEX.map((n) => (n.path === WEB ? { ...n, props: { ...n.props, billed_through: "2026-09-01" } } : n)));
     const m = tr.build(NOTES, idx);
     const inv = billing.readInvoice(invoiceNote("1001-HBR", "sent", billing.snapshot([entry(m, "2026-09-02", "9:00am")], m, tr), { period_start: "2026-09-01" }), tr, idx);
     const late = billing.changes(inv, m, tr, idx, billing.ledger([inv])).late;
-    assert.ok(!late.some((e) => e.date === "2026-09-01"), "9/1 is covered by billed_through");
+    assert.ok(late.some((e) => e.date === "2026-09-01" && e.project === WEB), "9/1 is late, like any unbilled entry");
     assert.ok(late.some((e) => e.date === "2026-09-02" && e.project === PHOTO));
 });
 
