@@ -42,6 +42,7 @@ For reading notes, `grep` on the markdown files is often faster.
 - **Issues:** issues are tracked in Linear, not GitHub.
   - A branch named `<user>/obs-N-<slug>` and a `Closes OBS-N` line in the PR description link the PR and close the issue when it merges.
   - `Part of OBS-N` links without closing. Put a PR like that on a branch without `obs-N` in its name, since the branch name alone would close the issue.
+  - **Example issue numbers are `OBS-N`, never real ones.** Linear closes every issue named after `Closes`, `Fixes`, `Resolves` or `Completes` (or another form of those words) in a PR's description or commit messages when it merges, even inside backticks or in an example. A real number written that way closes its issue unbuilt; two issues were lost that way for a month (OBS-65 and OBS-66, by PR #19). To name an issue without closing it, write `Part of OBS-N`, or leave the keyword off.
   - Don't set Linear statuses by hand.
   - **Clusters:** an agent working on an issue may take on a linked issue in the same PR when that saves real work. Review and the one-at-a-time dev vault are the slow part, not building, so a bigger PR only helps when it replaces two of them. All of these must hold, or the issue is left alone and named in the PR as a possible follow-up:
     1. **Same code:** it changes the same script or function, so doing it separately would redo or conflict with this work. A "related" link on its own isn't enough.
