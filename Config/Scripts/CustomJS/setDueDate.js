@@ -32,23 +32,39 @@ class DueDate {
         if (!view) { new Notice("Need an active editor"); return; }
 
         const editor = view.editor;
-        const lineNum = editor.getCursor().line;
+        // On a sub-task, or any line under a task, the deadline is the task's: the line at the top of the nest
+        // (rule 5, OBS-193). An event has none (rule 14), whatever its form.
+        const cursor = editor.getCursor();
+        const top = customJS.TimeReport.topOf((n) => editor.getLine(n), cursor.line);
+        if (top.event) {
+            new Notice("An event has no deadline, so none was set");
+            return;
+        }
+        const lineNum = top.at;
 
-        // Bail unless the line starts with a checklist box: "- [ ]", "- [x]", "- [<]", etc.
-        if (!/^\s*[-*+]\s+\[.\]/.test(editor.getLine(lineNum))) {
+        // Bail unless the line starts with a checklist box: "- [ ]", "- [x]", "- [>]", etc.
+        if (top.box === null) {
             new Notice("Not on a checklist item");
             return;
         }
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
+        const read = top.line;
         customJS.DatePrompt.open("Due date", ({ m }, modal) => {
             const lineText = editor.getLine(lineNum);
+            // The date box waited on you: don't write into a line that changed meanwhile (rule 12)
+            if (lineText !== read) {
+                modal.close();
+                new Notice("The line changed while the date box was open, so no deadline was set");
+                return;
+            }
             const { from, to, text } = this.placement(lineText, `[[${m.format("YYYY-MM-DD")}|🚩 ${m.format("M/D")}]]`);
 
             // Insert while the modal is still open — same order NLD uses
             editor.replaceRange(text, { line: lineNum, ch: from }, { line: lineNum, ch: to });
-            editor.setCursor({ line: lineNum, ch: editor.getLine(lineNum).length });
+            // Run from a line under the task, the cursor stays where it was
+            editor.setCursor(lineNum !== cursor.line ? cursor : { line: lineNum, ch: editor.getLine(lineNum).length });
             modal.close();
 
             // Safety net: if the fold got dropped anyway, restore the pre-edit fold map

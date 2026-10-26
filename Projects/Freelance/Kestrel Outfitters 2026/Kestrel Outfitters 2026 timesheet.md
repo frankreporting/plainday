@@ -27,8 +27,8 @@ parent: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 |  | **[[2026-09-15\|Tue 9/15]]** |  |  | **4.50** |  |  |  |
 |  |  | 9:15am - 11:15am | [[Kestrel Outfitters 2026]] | 2.00 | Draft homepage wireframes | mobile layout |  |
 |  |  | 1:00pm - 1:50pm | [[Kestrel Fall Catalog]] | 1.00 | Plan the catalog shoot | call sheet |  |
-|  |  | 2:00pm - 3:05pm | [[Kestrel Fall Catalog]] | 1.25 | Shot list for catalog |  |  |
-|  |  | 3:10pm - 3:25pm | [[Kestrel Fall Catalog]] | 0.25 | Book the studio space |  |  |
+|  |  | 2:00pm - 3:05pm | [[Kestrel Fall Catalog]] | 1.25 | Plan the catalog shoot | shot list |  |
+|  |  | 3:10pm - 3:25pm | [[Kestrel Fall Catalog]] | 0.25 | Plan the catalog shoot | booked the studio |  |
 |  | **[[2026-09-14\|Mon 9/14]]** |  |  | **3.75** |  |  |  |
 |  |  | 10:00am - 10:45am | [[Kestrel Outfitters 2026]] | 0.75 | Homepage review with Imogen |  |  |
 |  |  | 11:00am - 12:30pm | [[Kestrel Outfitters 2026]] | 1.50 | Draft homepage wireframes | desktop layout |  |

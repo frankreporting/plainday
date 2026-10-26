@@ -36,8 +36,9 @@ class AddTaskNote {
     static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|🗒\uFE0F?|🔗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
     // A block ID at the end of a line, ` ^abc123`, with the whitespace before it
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
-    // An event title wrapped in a link to its log, the way lines were written before OBS-57
-    static LOG_TITLE = /^\s*[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
+    // An event title wrapped in a link to its log, the way lines were written before OBS-57, and the way a
+    // meeting line in the form used before August 2025 (no bullet, its time first) was (OBS-193)
+    static LOG_TITLE = /^\s*(?:[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?|(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
     // The parent picked in advance for the one note being created ({ path, parent }), read by the
     // Task and Log templates (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
     static preset = null;
@@ -56,13 +57,23 @@ class AddTaskNote {
         const source = app.workspace.getActiveFile();
         if (!editor || !source) return;
 
-        const selection = editor.getSelection();
-        const from = editor.getCursor("from");
-        const to = editor.getCursor("to");
-        const lineText = editor.getLine(from.line);
+        // On a sub-task, or any line under a task or event, the note is the task's or the event's log: the line
+        // at the top of the nest (rule 5, OBS-193), named from its text, the cursor and selection set aside
+        const cursor = editor.getCursor("from");
+        const top = customJS.TimeReport ? customJS.TimeReport.topOf((n) => editor.getLine(n), cursor.line).at : cursor.line;
+        const nested = top !== cursor.line;
+        const lineText = editor.getLine(top);
+        const selection = nested ? "" : editor.getSelection();
+        const from = nested ? { line: top, ch: this.afterCheckbox(lineText) } : cursor;
+        const to = nested ? from : editor.getCursor("to");
 
-        if (!AddTaskNote.CHECKBOX.test(lineText)) {
+        if (!AddTaskNote.CHECKBOX.test(lineText) && !this.isEvent(lineText)) {
             new Notice("Not on a checklist item");
+            return;
+        }
+        // An event the calendar moved to another day keeps its log on its line there
+        if (globalThis.customJS?.TimeReport?.eventKind(lineText) === "forwarded") {
+            new Notice("This event moved to another day: link its log from its line there");
             return;
         }
 
@@ -70,6 +81,12 @@ class AddTaskNote {
             const target = this.target(lineText, from.ch);
             if (target.error) {
                 new Notice(target.error);
+            } else if (target.mode === "blank" && nested) {
+                // The task at the top of the nest has no text yet: the empty link goes on it, before its ID
+                const id = lineText.match(AddTaskNote.BLOCK_ID);
+                const at = id ? id.index : lineText.length;
+                const text = `${/\S/.test(lineText[at - 1] ?? "") ? " " : ""}[[|${AddTaskNote.NOTE_MARK}]]`;
+                editor.transaction({ changes: [{ from: { line: from.line, ch: at }, text }], selection: { from: { line: from.line, ch: at + text.indexOf("|") } } });
             } else if (target.mode === "blank") {
                 // A task's ID stays last (OBS-181): with the cursor past its start, the link goes in before
                 // it. insert() types at the cursor (replaceSelection), after the ID, so this places it itself.
@@ -83,6 +100,7 @@ class AddTaskNote {
                 this.insert(editor, from, "", before + `[[|${AddTaskNote.NOTE_MARK}]]` + this.spacer(lineText.slice(from.ch)));
             } else if (target.kind === "event") {
                 await this.linkEvent(editor, from.line, lineText, target.name);
+                if (nested) editor.setCursor(cursor);
             } else {
                 const found = await this.noteFor(target.name, source.path, lineText);
                 if (!found) return;
@@ -92,7 +110,8 @@ class AddTaskNote {
                 }
                 const linked = this.lineWithLink(lineText, target, found);
                 editor.replaceRange(linked, { line: from.line, ch: 0 }, { line: from.line, ch: lineText.length });
-                editor.setCursor({ line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
+                // Run from a line under the task, the cursor stays where it was
+                editor.setCursor(nested ? cursor : { line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
             }
             return;
         }
@@ -773,8 +792,10 @@ class AddTaskNote {
         }
     }
 
+    // An event line: a [<] line, and, told by their form (rule 1, OBS-193), a [-] line the calendar sync wrote
+    // and a meeting line in the form used before August 2025
     isEvent(lineText) {
-        return /^\s*[-*+]\s+\[<\]/.test(lineText);
+        return /^\s*[-*+]\s+\[<\]/.test(lineText) || ["canceled", "meeting"].includes(globalThis.customJS?.TimeReport?.eventKind(lineText));
     }
 
     // " " when `followedBy` starts with something other than whitespace, so a link doesn't run into it

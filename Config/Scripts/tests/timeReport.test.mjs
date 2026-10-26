@@ -1317,11 +1317,13 @@ test("toggleEntry: the entry on the cursor's line wins", () => {
     assert.equal(tr.toggleEntry(loose, 1, "2:30pm").summary, "Stopped 2:00pm - 2:30pm");
 });
 
-test("toggleEntry: two running entries under the task ask which, labelled with the task each is under", () => {
+test("toggleEntry: several running entries under the task ask which, labelled with the task; a sub-task's is the task's too (OBS-193)", () => {
     const lines = ["- [ ] Charts [[Orchard Lane Web 2026|⭕]]", "\t- 9:00am - : draft", "\t- Prep", "\t\t- 10:30am - ", "\t- [ ] Legend", "\t\t- 10:45am - ", "- [ ] b"];
-    // the sub-task's timer isn't the parent's; an entry under a plain bullet is
+    // an entry under a plain bullet, and one under a sub-task, are the task's (rule 5)
     assert.deepEqual(plain(tr.toggleEntry(lines, 0, "11:00am").choose),
-        [{ line: 1, label: "Stop 9:00am: Charts ⭕" }, { line: 3, label: "Stop 10:30am: Charts ⭕" }]);
+        [{ line: 1, label: "Stop 9:00am: Charts ⭕" }, { line: 3, label: "Stop 10:30am: Charts ⭕" }, { line: 5, label: "Stop 10:45am: Charts ⭕" }]);
+    // from the sub-task's line the question is the same
+    assert.deepEqual(plain(tr.toggleEntry(lines, 4, "11:00am").choose).map((c) => c.line), [1, 3, 5]);
     // the one picked is then toggled from its own line
     assert.deepEqual(edit(lines, tr.toggleEntry(lines, 3, "11:00am").edit)[3], "\t\t- 10:30am - 11:00am");
 });
@@ -1434,8 +1436,11 @@ test("toggleEntry: starting a timer marks an open task [/], and nothing else cha
     assert.deepEqual(plain(task.status), { line: 0, text: "- [/] Task" });
     assert.deepEqual(apply(lines, task).slice(0, 2), ["- [/] Task", "\t- 9:01am - "]);
     for (const cursor of [1, 2, 3]) assert.equal(tr.toggleEntry(lines, cursor, "9:01am").status, undefined);
-    // from a note under a subtask, the subtask is the one marked
-    assert.deepEqual(plain(tr.toggleEntry(lines, 5, "9:01am").status), { line: 4, text: "\t- [/] Subtask" });
+    // from a note under a sub-task, the task at the top of the nest is the one timed: its entry goes above
+    // the sub-task, and its box, already [/], is left alone (OBS-193)
+    const fromNote = tr.toggleEntry(lines, 5, "9:01am");
+    assert.equal(fromNote.status, undefined);
+    assert.deepEqual(edit(lines, fromNote.edit).slice(3, 6), ["- [/] Started", "\t- 9:01am - ", "\t- [ ] Subtask"]);
     // stopping leaves [/] as it is
     const running = apply(lines, task);
     const stop = tr.toggleEntry(running, 0, "9:30am");
@@ -1455,24 +1460,20 @@ test("toggleEntry: where a timer can't start, a start opens the dropdown instead
     assert.deepEqual(plain(tr.toggleEntry(["text"], 0, "3:30pm", -1, false)), { pick: true });
 });
 
-test("a task's own timers are the ones under it, not its sub-tasks'", () => {
+test("a sub-task's timer is its task's: the clock runs under the top of the nest, and the dropdown lists top lines only (OBS-193, rule 5)", () => {
     const lines = ["- [ ] Chores", "\t- 2:35pm - 2:36pm", "\t- [/] Laundry", "\t\t- 2:57pm - 2:58pm", "\t- [/] Espresso", "\t\t- 3:20pm - ", "- [ ] Next"];
-    // the parent is offered, and so is the sub-task's timer; the sub-task with a running timer isn't listed as a task
-    assert.deepEqual(plain(tr.toggleChoices(lines)).map((c) => c.label), ["⏱ Stop 3:20pm: Espresso", "Chores", "Laundry", "Next"]);
-    // picking the parent starts its own timer, above its first sub-task, and leaves the sub-task's running
-    const start = tr.toggleEntry(lines, 0, "3:50pm");
+    // the running clock under Espresso is Chores', so Chores isn't offered as a task; the sub-tasks never are
+    assert.deepEqual(plain(tr.toggleChoices(lines)).map((c) => c.label), ["⏱ Stop 3:20pm: Chores", "Next"]);
+    // ⌘T on Chores, or on either sub-task, stops that one clock
+    for (const cursor of [0, 2, 4, 3]) assert.deepEqual([tr.toggleEntry(lines, cursor, "3:50pm").action, tr.toggleEntry(lines, cursor, "3:50pm").edit.line], ["stop", 5], `cursor on ${cursor}`);
+    assert.match(tr.startEntry(lines, 4, "3:50pm").error, /since 3:20pm/, "no second clock under the task");
+    // stopped, ⌘T on a sub-task starts the task's clock, above its first sub-task
+    const stopped = edit(lines, tr.toggleEntry(lines, 4, "3:50pm").edit);
+    const start = tr.toggleEntry(stopped, 4, "4:00pm");
     assert.equal(start.action, "start");
-    assert.deepEqual(edit(lines, start.edit).slice(0, 4), ["- [ ] Chores", "\t- 2:35pm - 2:36pm", "\t- 3:50pm - ", "\t- [/] Laundry"]);
-    assert.equal(tr.startEntry(lines, 0, "3:50pm").error, undefined);
-    // with the parent's own timer running too, ⌘T on the parent stops the parent's
-    const both = edit(lines, start.edit);
-    const stop = tr.toggleEntry(both, 0, "4:00pm");
-    assert.equal(stop.action, "stop");
-    assert.equal(stop.edit.line, 2);
-    // and the sub-task's own timer still stops from the sub-task
-    assert.equal(tr.toggleEntry(both, 5, "4:00pm").edit.line, 6);
-    // the dropdown lists both timers, each with its own task
-    assert.deepEqual(plain(tr.runningChoices(both)).map((c) => c.label), ["⏱ Stop 3:50pm: Chores", "⏱ Stop 3:20pm: Espresso"]);
+    assert.deepEqual(edit(stopped, start.edit).slice(0, 4), ["- [ ] Chores", "\t- 2:35pm - 2:36pm", "\t- 4:00pm - ", "\t- [/] Laundry"]);
+    assert.deepEqual(plain(start.status), { line: 0, text: "- [/] Chores" });
+    assert.equal(start.summary, "Started 4:00pm: Chores");
 });
 
 test("startEntry: a task's own entry goes above its first sub-task, after its end time, entries and notes", () => {
@@ -1483,8 +1484,8 @@ test("startEntry: a task's own entry goes above its first sub-task, after its en
     // with only sub-tasks, the entry is the first line under the task
     const only = ["- [ ] Chores", "\t- [ ] Laundry", "\t\t- note"];
     assert.deepEqual(edit(only, tr.startEntry(only, 0, "3:00pm")), ["- [ ] Chores", "\t- 3:00pm - ", "\t- [ ] Laundry", "\t\t- note"]);
-    // the sub-task's own entry still goes under the sub-task
-    assert.deepEqual(edit(lines, tr.startEntry(lines, 3, "3:00pm")).slice(3, 6), ["\t- [/] Laundry", "\t\t- 2:37pm - 2:37pm", "\t\t- 3:00pm - "]);
+    // from a sub-task, the entry is the task's too, in the same place (OBS-193)
+    assert.deepEqual(edit(lines, tr.startEntry(lines, 3, "3:00pm")), edit(lines, start.edit));
     // once stopped, the report reads the new entry as the parent's
     const started = edit(lines, start.edit);
     const stopped = edit(started, tr.toggleEntry(started, 0, "3:30pm").edit).join("\n");
@@ -1503,9 +1504,41 @@ test("lineCursor: after the dash on a running entry, else the end of the line", 
     assert.deepEqual(plain(tr.lineCursor(["- 9:00am - %%billable%%"], 0)), { line: 0, ch: "- 9:00am - ".length });
 });
 
-test("review (OBS-14): checkboxes nested under an entry aren't offered, since time there wouldn't count", () => {
-    const lines = ["- [ ] Parent", "\t- 9:00am - 9:30am", "\t\t- [ ] follow up", "\t- [ ] Subtask"];
-    assert.deepEqual(plain(tr.toggleChoices(lines)).map((c) => c.label), ["Parent", "Subtask"]);
+test("taskChoices offers top lines only: a sub-task, or a checkbox nested under an entry, is its task's (OBS-14, OBS-193)", () => {
+    const lines = ["- [ ] Parent", "\t- 9:00am - 9:30am", "\t\t- [ ] follow up", "\t- [ ] Subtask", "- Plain", "\t- [ ] Under a plain bullet only"];
+    assert.deepEqual(plain(tr.toggleChoices(lines)).map((c) => c.label), ["Parent", "Under a plain bullet only"], "a checklist line under nothing but plain bullets is top-level");
+});
+
+test("the timer on a sub-task: the clock starts under its task, above the sub-task, and the task is marked [/]; on the sub-task again it stops (OBS-193)", () => {
+    const lines = ["- [ ] Test the timer", "\t- [ ] A sub-step"];
+    const start = tr.toggleEntry(lines, 1, "9:01am");
+    assert.equal(start.action, "start");
+    assert.deepEqual(plain(start.status), { line: 0, text: "- [/] Test the timer" });
+    assert.equal(start.summary, "Started 9:01am: Test the timer");
+    const running = edit(lines, start.edit);
+    assert.deepEqual(running, ["- [ ] Test the timer", "\t- 9:01am - ", "\t- [ ] A sub-step"]);
+    assert.deepEqual(plain(tr.taskChoices(lines)), [{ line: 0, label: "Test the timer" }], "the dropdown lists the task, not the sub-step");
+    assert.deepEqual(plain(tr.taskChoices(running)), [], "and not a task whose clock is running");
+    const stop = tr.toggleEntry(running, 2, "9:30am");
+    assert.equal(stop.action, "stop");
+    assert.deepEqual(edit(running, stop.edit)[1], "\t- 9:01am - 9:30am");
+    assert.equal(stop.summary, "Stopped 9:01am - 9:30am: Test the timer");
+    // Under an event, the entry goes under the event, after its end line and above the sub-task
+    const event = ["- [<] 9:00am\tStandup", "\t- 9:20am", "\t- [ ] Bring the sitemap"];
+    const under = tr.toggleEntry(event, 2, "9:05am");
+    assert.equal(under.status, undefined, "an event's box never changes");
+    assert.deepEqual(edit(event, under.edit), ["- [<] 9:00am\tStandup", "\t- 9:20am", "\t- 9:05am - ", "\t- [ ] Bring the sitemap"]);
+    // Under a meeting line in the form used before August 2025, the same
+    const meeting = ["11:00am [[Team Meeting]]", "\t- [ ] Action item"];
+    assert.deepEqual(edit(meeting, tr.toggleEntry(meeting, 1, "11:05am").edit), ["11:00am [[Team Meeting]]", "\t- 11:05am - ", "\t- [ ] Action item"]);
+});
+
+test("anchorLine: the top of the nest for any line under a task or event; -1 off any (OBS-193)", () => {
+    const lines = ["- [ ] Task", "\t- [ ] Sub", "\t\t- 9:00am - ", "\t\t- note", "- Plain", "\t- note", "\t- [ ] Box", "Text", "", "11:00am [[Team Meeting]]", "\t- 11:00am - 11:30am"];
+    assert.deepEqual([0, 1, 2, 3].map((i) => tr.anchorLine(lines, i)), [0, 0, 0, 0]);
+    assert.deepEqual([4, 5, 7, 8, 99].map((i) => tr.anchorLine(lines, i)), [-1, -1, -1, -1, -1]);
+    assert.equal(tr.anchorLine(lines, 6), 6, "a checklist line under nothing but plain bullets is its own top");
+    assert.deepEqual([9, 10].map((i) => tr.anchorLine(lines, i)), [9, 9], "an older meeting line anchors its entries");
 });
 
 test("foldsAfterInsert: a folded task takes in its new entry; a folded note above it and folds below don't", () => {
@@ -3015,4 +3048,86 @@ test("OBS-185: the open-twice Problem for a sent line a click turned into [ ] sa
     const w = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n", [DAY]: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n", [`${PLANNER}/days/2026-09-18.md`]: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n" } });
     const copy = w.check().find((c) => c.rule === "open");
     for (const text of Object.values(said(copy))) assert.match(text, /a line copied by hand keeps its ID \(\^k3x9m2\): take it off the copy$/);
+});
+
+// ------------------------------------------------------------------ the top of a line's nest (OBS-193)
+
+test("nestTop: the outermost checklist line a line sits under, plain bullets and indented text skipped; a top-level line is its own (OBS-193)", () => {
+    const lines = [
+        "- [ ] Task [[K|⭕]]",            // 0
+        "\t- 9:00am - 9:30am",            // 1: a time entry
+        "\t- [ ] Sub",                    // 2
+        "\t\t- [x] Deep",                 // 3
+        "\t\t\t- 10:00am - 10:30am",      // 4
+        "\t- note",                       // 5: a plain bullet
+        "\t\t- [ ] Under a note",         // 6
+        "",                               // 7
+        "\t- [ ] After a blank",          // 8
+        "- Plain",                        // 9
+        "\t- [ ] Under plain only",       // 10: top-level, since plain bullets above are skipped
+        "Paragraph",                      // 11
+        "\t- [ ] Under text",             // 12
+        "- [<] 9:00am\tStandup",          // 13
+        "\t- 9:30am",                     // 14
+        "\t- [ ] Bring the sitemap",      // 15
+        "## Heading",                     // 16
+        "\t- [ ] Under a heading",        // 17
+        "11:00am [[Team Meeting]]",       // 18: a meeting line in the form used before August 2025
+        "\t- 11:00am - 11:45am",          // 19
+        "\t- [ ] Action item",            // 20
+        "- [ ] Top",                      // 21
+        "%% hidden %%",                   // 22: a comment-only line is skipped
+        "\t- [ ] Under a comment",        // 23
+        "\t\t<!-- note -->",              // 24
+        "\t\t\tcontinuation text",        // 25
+        "\t\t\t\t- [ ] Deeper",           // 26
+        "\t- 11:00am - 11:30am",          // 27
+        "\t\t- [ ] Under an entry",       // 28
+    ];
+    const top = (i) => tr.nestTop((n) => lines[n], i);
+    assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 8].map(top), [0, 0, 0, 0, 0, 0, 0, 0], "everything nested under Task, a time entry and a plain bullet's children included");
+    assert.equal(top(9), 9);
+    assert.equal(top(10), 10, "a checklist line under nothing but plain bullets is top-level");
+    assert.equal(top(12), 12, "a paragraph at the left edge ends the nest");
+    assert.deepEqual([13, 14, 15].map(top), [13, 13, 13], "an event is a top too");
+    assert.equal(top(17), 17, "and so does a heading");
+    assert.deepEqual([18, 19, 20].map(top), [18, 18, 18], "an older meeting line is an event, and the top of its nest");
+    assert.deepEqual([21, 23, 26, 28].map(top), [21, 21, 21, 21], "comment-only lines and indented text are skipped");
+    assert.equal(tr.nestTop((n) => ["\t- [ ] Nested first line"][n], 0), 0, "nothing above: its own top");
+});
+
+test("topOf: the top of a line's nest, with its box and whether it's an event, told by its form (OBS-193, rule 1)", () => {
+    const lines = [
+        "- [ ] Task", "\t- [ ] Sub",
+        "- [<] 9:00am\tStandup", "\t- [ ] Bring the sitemap",
+        "- [>] [[2026-09-18|9/18]] 10:00am\tMoved event", "\t- note",
+        "- [-] 1:00pm\tCanceled event", "\t- [ ] x",
+        "11:00am [[Team Meeting]]", "\t- [ ] Action item",
+        "- [>] Forwarded task ^abc123", "\t- [ ] y",
+        "- [-] Canceled task", "- [x] Done task",
+        "Text", "- plain", "11:00am - 12:00pm a stray range",
+    ];
+    const top = (i) => plain(tr.topOf(lines, i));
+    assert.deepEqual(top(1), { at: 0, line: "- [ ] Task", box: " ", event: null });
+    assert.deepEqual(top(3), { at: 2, line: "- [<] 9:00am\tStandup", box: "<", event: "event" });
+    assert.deepEqual(top(5), { at: 4, line: "- [>] [[2026-09-18|9/18]] 10:00am\tMoved event", box: ">", event: "forwarded" });
+    assert.deepEqual(top(7), { at: 6, line: "- [-] 1:00pm\tCanceled event", box: "-", event: "canceled" });
+    assert.deepEqual(top(9), { at: 8, line: "11:00am [[Team Meeting]]", box: null, event: "meeting" });
+    assert.deepEqual(top(11), { at: 10, line: "- [>] Forwarded task ^abc123", box: ">", event: null }, "a forwarded task isn't an event");
+    assert.deepEqual([top(12).event, top(13).event], [null, null], "nor a canceled or done task");
+    assert.deepEqual(top(14), { at: 14, line: "Text", box: null, event: null });
+    assert.deepEqual(top(15), { at: 15, line: "- plain", box: null, event: null });
+    assert.deepEqual(top(16).event, null, "a stray range at the left edge isn't a meeting line");
+    assert.equal(tr.topOf((n) => lines[n], 1).at, 0, "an editor's lines, read one at a time");
+});
+
+test("subtreeEnd: a comment-only line inside a task's sub-bullets is skipped like a blank one (OBS-193)", () => {
+    const lines = ["- [ ] T", "\t- a", "%% c %%", "\t- b", "", "\t- d", "<!-- x -->", "- [ ] N"];
+    assert.equal(tr.subtreeEnd(lines, 0), 5);
+    assert.equal(tr.subtreeEnd(lines, 7), 7);
+});
+
+test("review (OBS-193): subtreeEnd keeps a comment indented under the task; taskChoices still leaves out a checkbox under a loose entry", () => {
+    assert.equal(tr.subtreeEnd(["- [ ] T", "\t- a", "\t%% c %%", "- [ ] N"], 0), 2);
+    assert.deepEqual(plain(tr.taskChoices(["- 9:00am - 10:00am: loose entry", "\t- [ ] follow up on it", "- [ ] Real task"])).map((c) => c.label), ["Real task"]);
 });

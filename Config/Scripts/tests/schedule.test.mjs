@@ -10,6 +10,7 @@ const code = src("schedule");
 const statics = vm.createContext({ customJS: {} });
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
 statics.customJS.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
+statics.customJS.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
 // Values made in the vm, as plain ones, so deepEqual doesn't trip on the vm's own Array
 const plainOf = (x) => JSON.parse(JSON.stringify(x));
 const file = (path) => ({ basename: path.split("/").pop().replace(/\.md$/, ""), parent: { path: path.slice(0, path.lastIndexOf("/")) } });
@@ -269,32 +270,40 @@ test("Schedule: a task scheduled into the note it's in stays put (OBS-96)", asyn
     assert.deepEqual(week.notices, ["Already in this note"]);
 });
 
-test("leaveBehind: an untouched line goes with its sub-bullets; a worked-on one in a daily note stays as [>] (OBS-181)", () => {
-    const lines = ["- [ ] A ^aaaaaa", "\t- note", "- [/] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"];
-    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 0, { daily: true })), { lines: ["- [/] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"], outgoing: ["- [ ] A ^aaaaaa", "\t- note"], moved: "moved" });
-    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 2, { daily: true })), { lines: ["- [ ] A ^aaaaaa", "\t- note", "- [>] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"], outgoing: ["- [/] B ^bbbbbb"], moved: "forwarded" });
-    assert.equal(Schedule.leaveBehind(lines, 2, { daily: false }).moved, "moved", "a weekly note's task moves whole, worked on or not");
+test("leaveBehind: from a day, with time logged under it, the line stays [>] with its time, finished sub-tasks and notes, and a [/] copy goes with its open sub-tasks; otherwise, or from a week, it moves whole (OBS-181, OBS-193, OBS-210)", () => {
+    const lines = ["- [ ] A ^aaaaaa", "\t- note", "- [ ] B ^bbbbbb", "\t- 9:00am - 9:30am", "\t- [x] b1", "\t- [ ] b2", "\t\t- [x] under b2", "\t- a note", "", "\t- [/] b3", "\t- [ ] b4 with time", "\t\t- 10:00am - 10:15am", "- [ ] C"];
+    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 0, { daily: true })), { lines: lines.slice(2), outgoing: ["- [ ] A ^aaaaaa", "\t- note"], moved: "moved", end: 1, kept: [] });
+    const b = plainOf(Schedule.leaveBehind(lines, 2, { daily: true }));
+    assert.deepEqual(b.kept, ["- [>] B ^bbbbbb", "\t- 9:00am - 9:30am", "\t- [x] b1", "\t- a note", "\t- [ ] b4 with time", "\t\t- 10:00am - 10:15am"]);
+    assert.deepEqual(b.lines, ["- [ ] A ^aaaaaa", "\t- note", ...b.kept, "- [ ] C"]);
+    assert.deepEqual([b.outgoing, b.moved, b.end], [["- [/] B ^bbbbbb", "\t- [ ] b2", "\t\t- [x] under b2", "\t- [/] b3"], "forwarded", 11]);
+    // From a week everything goes, time included, blank lines aside
+    assert.deepEqual(plainOf(Schedule.leaveBehind(lines, 2, { daily: false })).outgoing, ["- [ ] B ^bbbbbb", ...lines.slice(3, 12).filter((l) => l).map((l) => l)]);
+    // An event nested under a task (against the rules) is its note like anything else, and goes with it
+    assert.deepEqual(plainOf(Schedule.leaveBehind(["- [ ] Prep", "\t- [<] 2:00pm\tReview call", "\t- [ ] open"], 0, { daily: true })).outgoing, ["- [ ] Prep", "\t- [<] 2:00pm\tReview call", "\t- [ ] open"]);
+    // A finished line reopens: [/] with time logged under it or elsewhere (`started`), else [ ]
+    const done = ["- [x] D ^dddddd", "\t- [ ] d1", "- [-] E ^eeeeee"];
+    assert.deepEqual(plainOf(Schedule.leaveBehind(done, 0, { daily: true })).outgoing, ["- [ ] D ^dddddd", "\t- [ ] d1"]);
+    assert.deepEqual(plainOf(Schedule.leaveBehind(done, 0, { daily: true, started: true })).outgoing, ["- [/] D ^dddddd", "\t- [ ] d1"]);
+    assert.deepEqual(plainOf(Schedule.leaveBehind(["- [x] F ^ffffff", "\t- 9:00am - 9:30am"], 0, { daily: true })).outgoing, ["- [/] F ^ffffff"]);
+    // A CRLF note keeps its line endings, and what goes leaves without them
+    const crlf = plainOf(Schedule.leaveBehind(["- [/] T ^abc123\r", "\t- 9:00am - 9:30am\r", "\t- [ ] open\r", ""], 0, { daily: true }));
+    assert.deepEqual([crlf.lines, crlf.outgoing], [["- [>] T ^abc123\r", "\t- 9:00am - 9:30am\r", ""], ["- [/] T ^abc123", "\t- [ ] open"]]);
 });
 
-test("reopenIn: the moving line takes the [>] line's place as [/], keeping what it gained; sub-bullets follow (OBS-181)", () => {
+test("reopenIn: the moving line takes the place of the day's [>], done or canceled line, keeping what it gained; its box is [/] with time logged, else [ ]; sub-bullets follow (OBS-181, OBS-193)", () => {
     const text = ["- [>] B ^bbbbbb", "\t- 9:00am - 9:30am", "- [ ] C"].join("\n");
     assert.equal(Schedule.reopenIn(text, "bbbbbb", ["- [ ] B, reworded [[2026-09-25|🚩 9/25]] ^bbbbbb", "\t- call first"]),
         ["- [/] B, reworded [[2026-09-25|🚩 9/25]] ^bbbbbb", "\t- 9:00am - 9:30am", "\t- call first", "- [ ] C"].join("\n"));
-});
-
-test("reopenIn keeps the [>] line's own ⭕ or 🗃️ and its note link, each when the moving line has none (OBS-185)", () => {
-    const old = "- [>] B [[2026-09-20|🚩 9/20]] [[Studio|⭕]] [[B|🗒️]] ^bbbbbb";
-    // Its 🗒️ is kept, last before the ID; its 🚩 isn't: the moving line's lack of one is newer
-    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Studio|⭕]] ^bbbbbb"]), "- [/] B [[Studio|⭕]] [[B|🗒️]] ^bbbbbb");
-    // Its ⭕ too, ahead of the note link, when the moving line has none: it pins that day's time; the
-    // moving line's 🚩 and 🆓 stay
-    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[2026-09-25|🚩 9/25]] 🆓 ^bbbbbb"]), "- [/] B [[2026-09-25|🚩 9/25]] 🆓 [[Studio|⭕]] [[B|🗒️]] ^bbbbbb");
-    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Other|🗒️]] ^bbbbbb"]), "- [/] B [[Studio|⭕]] [[Other|🗒️]] ^bbbbbb", "before the moving line's own note link");
-    // An older 🔗 counts as the note link too; an 🗃️ as the project link
-    assert.equal(Schedule.reopenIn("- [>] B [[Home|🗃️]] [[B|🔗]] ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [/] B [[Home|🗃️]] [[B|🔗]] ^bbbbbb");
-    // The moving line's own ⭕ and note link win; with none on the old line, the line as it moved
-    assert.equal(Schedule.reopenIn(old, "bbbbbb", ["- [ ] B [[Kestrel|⭕]] [[Other|🗒️]] ^bbbbbb"]), "- [/] B [[Kestrel|⭕]] [[Other|🗒️]] ^bbbbbb");
-    assert.equal(Schedule.reopenIn("- [>] B [[2026-09-20|🚩 9/20]] ^bbbbbb", "bbbbbb", ["- [ ] B  [[Studio|⭕]] ^bbbbbb"]), "- [/] B  [[Studio|⭕]] ^bbbbbb");
+    // A done line with no time reopens as [ ]; as [/] when the task has time logged elsewhere, or the moving line is [/]
+    const done = ["- [x] B ^bbbbbb", "\t- [x] b1", "- [ ] C"].join("\n");
+    assert.equal(Schedule.reopenIn(done, "bbbbbb", ["- [ ] B ^bbbbbb", "\t- [ ] b2"]), ["- [ ] B ^bbbbbb", "\t- [x] b1", "\t- [ ] b2", "- [ ] C"].join("\n"));
+    assert.equal(Schedule.reopenIn(done, "bbbbbb", ["- [ ] B ^bbbbbb"], { started: true }), ["- [/] B ^bbbbbb", "\t- [x] b1", "- [ ] C"].join("\n"));
+    assert.equal(Schedule.reopenIn(done, "bbbbbb", ["- [/] B ^bbbbbb"]), ["- [/] B ^bbbbbb", "\t- [x] b1", "- [ ] C"].join("\n"));
+    assert.equal(Schedule.reopenIn("- [-] B ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] B ^bbbbbb", "a canceled line too");
+    // An open line with the ID isn't reopened, nor a nested one: a sub-task's ID counts for nothing
+    assert.equal(Schedule.reopenIn("- [ ] B ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] B ^bbbbbb");
+    assert.equal(Schedule.reopenIn("- [ ] A\n\t- [>] B ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] A\n\t- [>] B ^bbbbbb");
 });
 
 test("Schedule writes 🗒️ as a task's note link (OBS-87); it reads one through AddTaskNote", () => {
@@ -368,6 +377,8 @@ test("sentLine: a line sent from a project or area links it before any note link
     // A block ID stays last
     assert.equal(schedule.sentLine("- [ ] Send the notes ^a1b2", file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md")),
         "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]] ^a1b2");
+    // No line takes the ⭕ of a line it was nested under: none is sent on its own now (OBS-193)
+    assert.equal(schedule.sentLine.length, 2, "sentLine(line, src)");
 });
 
 test("Schedule: ISO weekly notes (GGGG-[W]WW): a week's name is that week, labeled from its Monday", async () => {
@@ -383,4 +394,24 @@ test("Schedule: when the note it goes to can't be made, the line stays where it 
     const r = await scheduleIn({ notes: { [DAY]: DAY_TEXT }, open: DAY, at: 4, failCreate: true, pick: (dp) => dp.result("2026-10-01", "month") });
     assert.equal(r.editor, DAY_TEXT);
     assert.deepEqual(r.notices, ["Couldn't make the monthly note, so nothing was scheduled — check console"]);
+});
+
+// ------------------------------------------------------------------ review fixes (OBS-193)
+
+test("appending, PR 54 review: lines go into a CRLF note with its line ending; placeInPeriod too", () => {
+    const r = Schedule.placeInPeriod("## This week\r\n- [ ] One\r\n\r\n## Time Report\r\n", ["- [ ] Two", "\t- note"]);
+    assert.equal(r.content, "## This week\r\n- [ ] One\r\n- [ ] Two\r\n\t- note\r\n\r\n## Time Report\r\n");
+    assert.equal(Schedule.placeInPeriod("## A\n- [ ] One\n", ["- [ ] Two"]).content, "## A\n- [ ] One\n- [ ] Two\n", "an LF note stays LF");
+});
+
+test("reopenIn: 🆓 follows the moving line, added or taken off, as its 🚩 does (Brian, 2026-10-26)", () => {
+    assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] ^bbbbbb\n\t- 9:00am - 9:30am", "bbbbbb", ["- [ ] B 🆓 [[Studio|⭕]] ^bbbbbb"]), "- [/] B 🆓 [[Studio|⭕]] ^bbbbbb\n\t- 9:00am - 9:30am");
+    assert.equal(Schedule.reopenIn("- [>] B 🆓 [[Studio|⭕]] ^bbbbbb", "bbbbbb", ["- [ ] B [[Studio|⭕]] ^bbbbbb"]), "- [ ] B [[Studio|⭕]] ^bbbbbb");
+    assert.equal(Schedule.reopenIn("- [>] B ^bbbbbb", "bbbbbb", ["- [ ] B, 🆓 reworded ^bbbbbb"]), "- [ ] B, 🆓 reworded ^bbbbbb", "a 🆓 in the text stays where it was typed");
+});
+
+test("reopenIn: the reopened line takes everything from the moving line, its ⭕ included; only its entries and, when the moving line has none, its 🗒️ are the day's (Brian, 2026-10-26)", () => {
+    assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] [[B|🗒️]] ^bbbbbb\n\t- 9:00am - 9:30am", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] ^bbbbbb"]), "- [/] B [[Kestrel|⭕]] [[B|🗒️]] ^bbbbbb\n\t- 9:00am - 9:30am");
+    assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] B ^bbbbbb", "a ⭕ the moving line doesn't have comes off");
+    assert.equal(Schedule.reopenIn("- [>] B [[Old|🗒️]] ^bbbbbb", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] [[New|🗒️]] ^bbbbbb"]), "- [ ] B [[Kestrel|⭕]] [[New|🗒️]] ^bbbbbb");
 });

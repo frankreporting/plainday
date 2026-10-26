@@ -117,20 +117,45 @@ class TaskIds {
             .replace(/\s+/g, " ").trim().toLowerCase();
     }
 
-    // `text` (a note) with the forward date on each checklist line ending in `id` set to `link`, and an older
-    // breadcrumb in front of it taken off: { text, changed }. Line endings are kept.
-    static setForwardIn(text, id, link) {
+    // Whether line `i` of `lines` is at the top of its nest (rule 5): a line nested under a checklist line
+    // is a sub-task, and nothing on it counts, its ID included. TimeReport.nestTop decides, plain bullets
+    // skipped; loaded alone (the statics in tests), a line with no indent.
+    static isTop(lines, i) {
+        const tr = globalThis.customJS?.TimeReport;
+        return tr ? tr.nestTop((n) => lines[n], i) === i : !/^\s/.test(lines[i]);
+    }
+
+    // `text` (a note) with the forward date on each top-level checklist line ending in `id` set to `link`,
+    // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
+    // too, since the task is open elsewhere now (rule 13). { text, changed }. Line endings are kept.
+    static setForwardIn(text, id, link, { reopen = false } = {}) {
         let changed = false;
-        const lines = text.split("\n").map((l) => {
+        const all = text.split("\n");
+        const lines = all.map((l, i) => {
             const cr = l.endsWith("\r") ? "\r" : "";
             const bare = cr ? l.slice(0, -1) : l;
             // Only a sent line ([>], or [x] or [-] once finished): an open line with the same ID is a copy
             const box = bare.match(TaskIds.CHECKBOX);
-            if (!box || !">x-".includes(box[1]) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase()) return l;
-            const next = TaskIds.withForward(TaskIds.oldForward(bare)?.line ?? bare, link);
+            if (!box || !">xX-".includes(box[1]) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
+            let next = TaskIds.withForward(TaskIds.oldForward(bare)?.line ?? bare, link);
+            if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
             if (next === bare) return l;
             changed = true;
             return next + cr;
+        });
+        return { text: lines.join("\n"), changed };
+    }
+
+    // `text` with each top-level done or canceled checklist line ending in `id` set to [>], nothing else on
+    // it touched: the task is open elsewhere now (rule 13). { text, changed }
+    static reopenIn(text, id) {
+        let changed = false;
+        const all = text.split("\n");
+        const lines = all.map((l, i) => {
+            const box = l.match(TaskIds.CHECKBOX);
+            if (!box || !"xX-".includes(box[1]) || TaskIds.idOf(l.replace(/\r$/, ""))?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
+            changed = true;
+            return l.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
         });
         return { text: lines.join("\n"), changed };
     }
@@ -184,9 +209,10 @@ class TaskIds {
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
-    // A task's checklist lines as they are now: [{ file, line, task, text }]. The notes the cache names
-    // for `id`, every note open in an editor, and `also` (files a caller knows of, such as the note a
-    // forward date points at), each read through readNow, so a line written a moment ago isn't missed.
+    // A task's checklist lines as they are now, top-level lines only (rule 5): [{ file, line, task, text }].
+    // The notes the cache names for `id`, every note open in an editor, and `also` (files a caller knows of,
+    // such as the note a forward date points at), each read through readNow, so a line written a moment
+    // ago isn't missed.
     async gather(id, also = []) {
         const want = id.toLowerCase();
         const files = new Map();
@@ -204,10 +230,11 @@ class TaskIds {
         const out = [];
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
-            (await this.readNow(file)).split("\n").forEach((raw, line) => {
+            const ls = (await this.readNow(file)).split("\n");
+            ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
-                if (box && TaskIds.idOf(text)?.toLowerCase() === want) out.push({ file, line, task: box[1], text });
+                if (box && TaskIds.idOf(text)?.toLowerCase() === want && TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
             });
         }
         return out;

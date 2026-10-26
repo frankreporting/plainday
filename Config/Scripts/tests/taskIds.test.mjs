@@ -95,6 +95,25 @@ test("setForwardIn: the line ending in the ID gets the forward date; an older br
     assert.equal(TaskIds.setForwardIn("- [>] Book it [[2026-10-06#^k3x9m2|➡️ 10/6]] ^k3x9m2", "k3x9m2", F).text, `- [>] Book it ${F} ^k3x9m2`, "one with a ➡️ is rewritten without it");
 });
 
+test("setForwardIn: top-level lines only, and with `reopen` a done or canceled line becomes [>] too (OBS-193, rules 5 and 13)", () => {
+    assert.equal(TaskIds.setForwardIn("- [ ] Errands\n\t- [>] Book it ^k3x9m2\n", "k3x9m2", F).changed, false, "a nested line is a sub-task: its ID counts for nothing");
+    const text = ["- [x] Book it [[2026-10-06#^k3x9m2|10/6]] ^k3x9m2", "- [-] Book it again ^k3x9m2", "- [>] Sent ^k3x9m2", "- [ ] Open ^k3x9m2", "\t- [x] Nested ^k3x9m2"].join("\n");
+    assert.equal(TaskIds.setForwardIn(text, "k3x9m2", F).text, [`- [x] Book it ${F} ^k3x9m2`, `- [-] Book it again ${F} ^k3x9m2`, `- [>] Sent ${F} ^k3x9m2`, "- [ ] Open ^k3x9m2", "\t- [x] Nested ^k3x9m2"].join("\n"), "without reopen the boxes stay");
+    assert.equal(TaskIds.setForwardIn(text, "k3x9m2", F, { reopen: true }).text, [`- [>] Book it ${F} ^k3x9m2`, `- [>] Book it again ${F} ^k3x9m2`, `- [>] Sent ${F} ^k3x9m2`, "- [ ] Open ^k3x9m2", "\t- [x] Nested ^k3x9m2"].join("\n"));
+});
+
+test("setForwardIn, review: a capital [X] source line is a finished one too (OBS-193)", () => {
+    assert.equal(TaskIds.setForwardIn("- [X] Book it ^k3x9m2", "k3x9m2", F, { reopen: true }).text, `- [>] Book it ${F} ^k3x9m2`);
+});
+
+test("reopenIn: a task's done or canceled lines become [>], top-level lines only, nothing else on them touched (OBS-193, rule 13)", () => {
+    const text = ["- [x] Book it [[K|⭕]]  ^k3x9m2", "\t- 9:00am - 9:30am", "\t- [x] Nested ^k3x9m2", "- [-] Again ^k3x9m2\r", "- [>] Sent ^k3x9m2", "- [ ] Open ^k3x9m2", "- [x] Other ^other1"].join("\n");
+    const out = TaskIds.reopenIn(text, "K3X9M2");
+    assert.equal(out.text, ["- [>] Book it [[K|⭕]]  ^k3x9m2", "\t- 9:00am - 9:30am", "\t- [x] Nested ^k3x9m2", "- [>] Again ^k3x9m2\r", "- [>] Sent ^k3x9m2", "- [ ] Open ^k3x9m2", "- [x] Other ^other1"].join("\n"));
+    assert.equal(out.changed, true);
+    assert.equal(TaskIds.reopenIn(out.text, "k3x9m2").changed, false, "nothing left to reopen");
+});
+
 import { standIn, PLANNER } from "./standInVault.mjs";
 
 const D8 = `${PLANNER}/days/2026-10-08.md`;
@@ -130,6 +149,12 @@ test("gather: lines as they are now: open editors, and a note the caller names t
     assert.doesNotMatch(await v.app.vault.cachedRead(v.app.vault.getFileByPath(D8)), /newid1/, "nor is it on disk");
     assert.deepEqual(at(await t.gather("newid1")), [`${D8}:0: `], "gather reads the open editor");
     assert.deepEqual(at(await t.gather("k3x9m2", [v.app.vault.getFileByPath(W)])), [`${KES}:5:>`, `${D8}:1:/`, `${W}:0: `]);
+});
+
+test("gather: top-level lines only; a nested line ending in the ID is a sub-task of the line it's under (OBS-193, rule 5)", async () => {
+    const D9 = `${PLANNER}/days/2026-10-09.md`;
+    const v = standIn({ notes: { ...LOOK, [D9]: "- [ ] Errands\n\t- [ ] Book the photographer ^k3x9m2\n- Plain\n\t- [ ] Under a plain bullet ^k3x9m2\n" } });
+    assert.deepEqual(at(await v.customJS.TaskIds.gather("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `, `${D9}:3: `], "a checklist line under nothing but plain bullets is top-level");
 });
 
 test("readNow: the open note's editor text, ahead of disk under lag", async () => {

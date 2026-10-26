@@ -170,7 +170,8 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.match(days, /^- \[<\] [^\n]*\|⭕\]\]\n\t- \d{1,2}:\d{2}[ap]m - /m, "event with a ⭕ link and a time entry");
     assert.ok(entries.some((e) => e.free), "🆓 entry");
     assert.ok(entries.some((e) => !e.free && e.note), "entry with a note");
-    assert.ok(entries.some((e) => e.context.length > 1 && /^\[.\]/.test(e.context[1].body)), "sub-task with its own entries");
+    // A sub-task has no time of its own (OBS-181 rule 5): every entry sits right under its task or event
+    assert.ok(!entries.some((e) => e.context.length > 1 && /^\[.\]/.test(e.context[1].body)), "no time under a sub-task");
     // One task note threads entries on two days through its 🗒️ link, which ends the line, after the ⭕ for the note's project (OBS-90)
     const threaded = new Map();
     for (const e of entries) {

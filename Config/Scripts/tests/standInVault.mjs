@@ -121,11 +121,11 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     const flush = () => { if (editing && vault.has(editing)) disk.set(editing, vault.get(editing)); };
     const tick = () => { flush(); seen = started; started = new Map(disk); };
     const notices = [], left = [];
-    let editing = open, cursor = at, lines = (vault.get(open) ?? "").split("\n");
+    let editing = open, cursor = at, cursorCh = null, placed = null, lines = (vault.get(open) ?? "").split("\n");
     const save = () => { if (editing) { vault.set(editing, lines.join("\n")); if (!lag) disk.set(editing, vault.get(editing)); } };
     const offset = (p) => lines.slice(0, p.line).reduce((s, l) => s + l.length + 1, 0) + p.ch;
     const editor = {
-        getCursor: () => ({ line: cursor, ch: 0 }), setCursor() {},
+        getCursor: () => ({ line: cursor, ch: cursorCh ?? lines[cursor]?.length ?? 0 }), setCursor(c) { placed = { line: c.line, ch: c.ch }; }, getSelection: () => "",
         getLine: (n) => lines[n], lineCount: () => lines.length, getValue: () => lines.join("\n"),
         offsetToPos(o) { let line = 0; while (line < lines.length - 1 && o > lines[line].length) { o -= lines[line].length + 1; line++; } return { line, ch: o }; },
         replaceRange(text, from, to = from) {
@@ -176,12 +176,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     Object.assign(customJS, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
+        AddProjectLink: make("addProjectLink", "AddProjectLink"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
     let n = 0;
     customJS.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);
     return {
         app, customJS, notices, left, tick,
+        // Where a command last put the cursor (setCursor), or null
+        placed: () => placed,
         notes: () => Object.fromEntries(vault),
         open(p, line) { flush(); editing = p; cursor = line; lines = (vault.get(p) ?? "").split("\n"); view.file = fileOf(p); },
         lineOf: (p, text) => (vault.get(p) ?? "").split("\n").findIndex((l) => l.includes(text)),

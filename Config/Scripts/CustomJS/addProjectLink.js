@@ -7,8 +7,10 @@ class AddProjectLink {
     // template wrote a log's line before the calendar sync brought its event:
     // "- [<] [[2026-09-18 Printer call|Printer call]]". A log's name starts with its date, which
     // keeps a title that merely starts with a link ("[[Rafe Oakes|@Rafe]] lunch") from reading as
-    // one. Captures up to the link's target.
-    static LOG_TITLE = /^(\s*[-*+]\s+(?:\[.\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+|\[<\]\s+))\[\[((?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} [^\]|#]*)/iu;
+    // one. A meeting line in the form days used before August 2025, with no bullet or checkbox, its time
+    // first ("11:00am [[2025-03-04 Team meeting|Team meeting]]"), is one too (rule 1, OBS-193). Captures up
+    // to the link's target.
+    static LOG_TITLE = /^(\s*[-*+]\s+(?:\[.\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+|\[<\]\s+)|(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)\[\[((?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} [^\]|#]*)/iu;
 
     // On a task or event line: pick a project or area from the menu and link it at the end of the
     // line as [[Project|⭕]] or [[Area|🗃️]], the forms the time report and the calendar sync read.
@@ -29,9 +31,13 @@ class AddProjectLink {
         const source = app.workspace.getActiveFile();
         if (!helper || !editor || !source) return;
 
-        const line = editor.getCursor("from").line;
+        // On a sub-task, or any line under a task or event, the project is the task's or event's: the line at
+        // the top of the nest (rule 5, OBS-193), whose note moves along as it would from that line
+        const cursor = editor.getCursor("from");
+        const line = customJS.TimeReport ? customJS.TimeReport.topOf((n) => editor.getLine(n), cursor.line).at : cursor.line;
         const lineText = editor.getLine(line);
-        if (!helper.constructor.CHECKBOX.test(lineText)) {
+        // A meeting line in the form used before August 2025 is an event too (rule 1)
+        if (!helper.constructor.CHECKBOX.test(lineText) && customJS.TimeReport?.eventKind(lineText) !== "meeting") {
             new Notice("Not on a checklist item");
             return;
         }
@@ -99,7 +105,8 @@ class AddProjectLink {
         if (linked !== before) {
             editor.replaceRange(linked, { line, ch: 0 }, { line, ch: before.length });
         }
-        editor.setCursor({ line, ch: helper.afterCheckbox(editor.getLine(line)) });
+        // Run from a line under the task or event, the cursor stays where it was
+        editor.setCursor(line !== cursor.line ? cursor : { line, ch: helper.afterCheckbox(editor.getLine(line)) });
     }
 
     // The line with `link` as its one ⭕ or 🗃️, before the note link that ends it, or at the end

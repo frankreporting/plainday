@@ -2034,35 +2034,86 @@ class TimeReport {
     // Used by the ToggleTimeEntry command (toggleTimeEntry.js).
 
     // The task or event (a checkbox line) the cursor is on or under, or -1
+    // The task or event line `cursorLine` is on or under: the top of its nest (nestTop; rule 5, OBS-193), when
+    // that's a checklist line or a meeting line in the form used before August 2025, else -1. A sub-task's
+    // clock is its task's.
     anchorLine(lines, cursorLine) {
-        const isBox = (l) => /^\s*[-*+]\s+\[.\]/.test(l);
-        if (lines[cursorLine] === undefined) return -1;
-        if (isBox(lines[cursorLine])) return cursorLine;
-        if (lines[cursorLine].trim() === "") return -1;
-        let limit = this.indentWidth(lines[cursorLine]);
-        for (let j = cursorLine - 1; j >= 0 && limit > 0; j--) {
-            if (lines[j].trim() === "") continue;
-            const w = this.indentWidth(lines[j]);
-            if (w >= limit) continue;
-            if (isBox(lines[j])) return j;
-            limit = w;
-        }
-        return -1;
+        const line = lines[cursorLine];
+        if (line === undefined || line.trim() === "") return -1;
+        const top = this.nestTop((n) => lines[n], cursorLine);
+        const t = lines[top];
+        return /^\s*[-*+]\s+\[.\]/.test(t) || this.classify(t).kind === "event" ? top : -1;
     }
 
-    // Last line of a task's sub-bullets, across blank lines between them
+    // Last line of a task's sub-bullets, across blank lines between them, and comment-only lines no deeper
+    // than the task (one indented under it is part of it)
     subtreeEnd(lines, anchor) {
         const w = this.indentWidth(lines[anchor]);
         let k = anchor;
         for (let j = anchor + 1; j < lines.length; j++) {
-            if (lines[j].trim() === "") continue;
+            if (lines[j].trim() === "" || (this.commentOnly(lines[j]) && this.indentWidth(lines[j]) <= w)) continue;
             if (this.indentWidth(lines[j]) <= w) break;
             k = j;
         }
         return k;
     }
 
-    // A task's own running entries: under it, but not under one of its sub-tasks
+    // A line that shows nothing: only a %% %% or <!-- --> comment, or whitespace
+    commentOnly(line) {
+        return /^\s*(?:%%[^%]*%%|<!--[\s\S]*?-->)\s*$/.test(line);
+    }
+
+    // The top of the nest line `i` sits in (rule 5, OBS-193): the outermost checklist line that `i` is
+    // nested under, an event included, and a meeting line in the form days used before August 2025 too
+    // (rule 1: an event is told by its form), else `i`. Plain bullets and indented text between are
+    // skipped, as parseNote skips them, and so are blank and comment-only lines; a paragraph or heading
+    // at the left edge ends the walk. `lineAt(n)` gives line n, so an editor's lines are read one at a
+    // time, never the whole note. Pure.
+    nestTop(lineAt, i) {
+        const isBox = (l) => /^\s*[-*+]\s+\[.\]/.test(l);
+        let top = i, width = this.indentWidth(lineAt(i));
+        for (let j = i - 1; j >= 0 && width > 0; j--) {
+            const l = lineAt(j);
+            if (l === undefined) break;
+            if (!l.trim() || this.commentOnly(l)) continue;
+            const w = this.indentWidth(l);
+            if (w >= width) continue;
+            width = w;
+            if (isBox(l)) top = j;
+            else if (w === 0) {
+                if (this.classify(l).kind === "event") top = j;
+                break;
+            }
+        }
+        return top;
+    }
+
+    // Line `i` through nestTop, for every command (rule 5): { at, line, box, event }, the top's index and
+    // text, its checkbox character (null for a line with none) and what kind of event it is (eventKind;
+    // null for a task). `lines` is an array, or a function giving line n.
+    topOf(lines, i) {
+        const lineAt = typeof lines === "function" ? lines : (n) => lines[n];
+        const at = this.nestTop(lineAt, i);
+        const line = lineAt(at);
+        return { at, line, box: line.match(/^\s*[-*+]\s+\[(.)\]/)?.[1] ?? null, event: this.eventKind(line) };
+    }
+
+    // What kind of event a line is, told by its form (rule 1), or null for a task or anything else:
+    // "event" for a [<] line; "forwarded" for a [>] line the calendar sync wrote when the event moved,
+    // its date in front and then the event's time and a tab; "canceled" for a [-] line it wrote, the
+    // event's time and a tab first; "meeting" for a line in the form days used before August 2025, at
+    // the left edge with no bullet and its time first (classify's "event").
+    eventKind(line) {
+        const m = line.match(/^\s*[-*+]\s+\[(.)\]\s*(.*)$/);
+        if (!m) return this.classify(line).kind === "event" ? "meeting" : null;
+        const [, box, body] = m;
+        if (box === "<") return "event";
+        if (box === ">" && /^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(body)) return "forwarded";
+        if (box === "-" && /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(body)) return "canceled";
+        return null;
+    }
+
+    // A task's running entries: every one under it, a sub-task's included (rule 5, OBS-193)
     ownOpenLines(lines, anchor, all = this.openLines(lines)) {
         const last = this.subtreeEnd(lines, anchor);
         return all.filter((i) => i > anchor && i <= last && this.anchorLine(lines, i) === anchor);
@@ -2099,7 +2150,7 @@ class TimeReport {
             const entry = `${empty[1]}- ${now} - `;
             return { from: { line: cursorLine, ch: 0 }, to: { line: cursorLine, ch: lines[cursorLine].length }, text: entry, cursor: { line: cursorLine, ch: entry.length } };
         }
-        const child = lines.slice(anchor + 1, last + 1).find((l) => l.trim() !== "");
+        const child = lines.slice(anchor + 1, last + 1).find((l) => l.trim() !== "" && !this.commentOnly(l));
         const indent = child ? child.match(/^\s*/)[0] : lines[anchor].match(/^\s*/)[0] + "\t";
         const entry = `${indent}- ${now} - `;
         // The task's own entries read best above its sub-tasks: the entry goes just before the
@@ -2230,11 +2281,13 @@ class TimeReport {
         return this.openLines(lines).map((i) => ({ line: i, label: `⏱ Stop ${this.timerLabel(lines, visible, i)}${day ? " · " + day : ""}` }));
     }
 
-    // Open tasks and events with no running entry. Done [x], cancelled [-] and forwarded [>] items
-    // are left out; [<] is an event, so it stays.
+    // Open tasks and events with no running entry, top lines only (rule 5, OBS-193): a sub-task's clock is
+    // its task's, so a nested line isn't offered. Done [x], cancelled [-] and forwarded [>] items are left
+    // out; [<] is an event, so it stays.
     taskChoices(lines) {
         const { visible, hidden, blocks } = this.scan(lines);
         const all = this.openLines(lines);
+        const lineAt = (n) => lines[n];
         // Under an entry, a checkbox is a note about that entry, and time logged under it wouldn't count
         const underEntry = (i) => {
             let w = this.indentWidth(lines[i]);
@@ -2249,7 +2302,7 @@ class TimeReport {
         for (let i = 0; i < lines.length; i++) {
             if (hidden[i] || blocks.some((b) => i >= b.start && i <= b.end)) continue;
             const box = lines[i].match(/^\s*[-*+]\s+\[(.)\]/);
-            if (!box || /[xX>-]/.test(box[1]) || underEntry(i)) continue;
+            if (!box || /[xX>-]/.test(box[1]) || this.nestTop(lineAt, i) !== i || underEntry(i)) continue;
             if (this.ownOpenLines(lines, i, all).length) continue;
             const label = this.itemLabel(visible[i]);
             if (label) items.push({ line: i, label });
