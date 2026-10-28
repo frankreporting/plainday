@@ -332,6 +332,7 @@ class Invoice {
             free: "now 🆓",
             unassigned: "now on no project",
             project: `now on [[${tr.basename(c.entry?.project ?? "")}]]`,
+            disputed: "now on a line with two projects, so it isn't counted",
             gone: "gone from its daily note",
             wording: "reads differently now (not a change in what's billed)",
         })[c.kind];
@@ -389,6 +390,8 @@ class Invoice {
             const index = tr.appIndex();
             if (!this.ready(tr, index)) return;
             const project = file && tr.counts(file.path, index) ? file.path : await this.pickProject(tr, billing, index);
+            // An archived project's time is never invoiced (OBS-213)
+            if (project && tr.isArchived(project)) { new Notice(`${tr.basename(project)} is archived, so it isn't invoiced`); return; }
             if (project) await this.create(project, tr, billing, index);
         } catch (e) {
             console.error("Invoice failed", e);
@@ -422,7 +425,7 @@ class Invoice {
         const candidates = new Set();
         const money = new Map();
         const moneyOf = (p) => { if (!money.has(p)) money.set(p, tr.moneyOf(p, index).money); return money.get(p); };
-        for (const e of model.entries) {
+        for (const e of billing.entries(model)) {
             if (!e.project || tr.isArchived(e.project)) continue;
             if (model.money.get(e.project)?.type === "flat") {
                 // Every flat fee its time is part of that isn't earned yet: its own, and any set above it
@@ -436,7 +439,7 @@ class Invoice {
             if (billing.standing(e, model.billing.ledger).kind !== "open") continue;
             candidates.add(e.project);
             for (let up = model.parent.get(e.project); up; up = model.parent.get(up)) {
-                if (billing.scope(up, model, tr, index).has(e.project)) candidates.add(up);
+                if (!tr.isArchived(up) && billing.scope(up, model, tr, index).has(e.project)) candidates.add(up);
             }
         }
         if (!candidates.size) { new Notice("Nothing unbilled on any project"); return null; }
@@ -976,6 +979,7 @@ class Invoice {
     async rebuild(file, invoice, text, tr, billing, index) {
         if (!invoice.periodEnd) { new Notice(`${invoice.name} has no period_end to rebuild through; set it first`); return; }
         if (!invoice.project) { new Notice(`${invoice.name} has no project`); return; }
+        if (tr.isArchived(invoice.project)) { new Notice(`${tr.basename(invoice.project)} is archived, so it isn't invoiced`); return; }
         const settings = await this.settings(tr);
         if (!settings) return;
         const client = this.readClient(invoice.project, tr, index);
@@ -1015,7 +1019,8 @@ class Invoice {
         const { model } = await tr.currentModel({ index });
         const result = billing.changes(invoice, model, tr, index, model.billing.ledger);
         const stale = result.changes.filter((c) => c.kind !== "wording").length + result.late.length;
-        if (stale) {
+        // An archived project's draft can't be rebuilt (OBS-213), so it isn't offered
+        if (stale && !tr.isArchived(invoice.project)) {
             const pick = await this.choose(`${invoice.name} is out of date`, [
                 `${stale} ${stale === 1 ? "entry has" : "entries have"} changed or been logged in its period since the draft was made.`,
                 "Rebuild it first, so it bills what the daily notes say now?",
@@ -1056,7 +1061,7 @@ class Invoice {
 
     // Writes what changed since the invoice was made into its check block
     async check(file, invoice, tr, billing, index) {
-        if (tr.isArchived(file.path) || tr.isArchived(invoice.project)) { new Notice(`${invoice.name} is archived; not checked`); return; }
+        if (tr.isArchived(invoice.project)) { new Notice(`${invoice.name} is archived; not checked`); return; }
         if (invoice.problem) { new Notice(`${invoice.name} ${invoice.problem}; fix it first`, 0); return; }
         const { model } = await tr.currentModel({ index });
         const result = billing.changes(invoice, model, tr, index, model.billing.ledger);

@@ -472,3 +472,37 @@ test("pickProject: lists the projects with unbilled time; a leftover billed_thro
         assert.deepEqual(plain(items), [PHOTO, WEB], String(value));
     }
 });
+
+test("pickProject: an archived project with unbilled time isn't offered (OBS-213)", async () => {
+    const items = [];
+    const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
+    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    const ARCH = "Archive/Work/Harbor Stills/Harbor Stills.md";
+    const idx = tr.makeIndex([...INDEX_NOTES, { path: ARCH, tags: ["project"], props: { rate: 100, rate_type: "hourly" } }]);
+    const m = tr.attachBilling(tr.build([
+        day("2026-09-01", "- [x] Site map [[Harbor Web|⭕]]\n\t- 1:00pm - 2:30pm: first pass"),
+        day("2026-09-02", "- [x] Stills [[Harbor Stills|⭕]]\n\t- 1:00pm - 2:00pm"),
+    ], idx), [], idx, billing);
+    assert.ok(m.entries.some((e) => e.project === ARCH), "its time is in the model");
+    const current = Object.assign(Object.create(tr), { currentModel: async () => ({ model: m }) });
+    assert.equal(await invoice.pickProject(current, billing, idx), null, "nothing picked");
+    assert.deepEqual(plain(items), [WEB]);
+});
+
+test("pickProject: a live project under an archived parent is offered on its own, never through the parent (OBS-213)", async () => {
+    const items = [];
+    const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
+    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../CustomJS/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    const OLD = "Archive/Work/Old Client/Old Client.md", KID = "Projects/Work/Kid/Kid.md";
+    const idx = tr.makeIndex([...INDEX_NOTES,
+        { path: OLD, tags: ["project"], props: { rate: 100, rate_type: "hourly", include_subprojects: true } },
+        { path: KID, tags: ["project"], parent: "[[Old Client]]", props: { rate: 100, rate_type: "hourly" } }]);
+    const m = tr.attachBilling(tr.build([day("2026-09-01", "- [x] Kid work [[Kid|⭕]]\n\t- 1:00pm - 2:00pm")], idx), [], idx, billing);
+    assert.equal(m.parent.get(KID), null, "its chain is cut where it enters Archive");
+    const current = Object.assign(Object.create(tr), { currentModel: async () => ({ model: m }) });
+    assert.equal(await invoice.pickProject(current, billing, idx), null, "nothing picked");
+    assert.deepEqual(plain(items), [KID]);
+    assert.equal(billing.select(m, tr, idx, { project: OLD, through: "2026-09-30", ledger: billing.ledger([]) }).entries.length, 0, "the archived parent bills none of it");
+});

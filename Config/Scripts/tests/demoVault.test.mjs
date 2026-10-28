@@ -66,9 +66,10 @@ test("demo vault: the reports in the notes are exactly what TimeReport would wri
     assert.deepEqual(withBlock, [...plan.blocks.keys()].sort());
 });
 
-test("demo vault: reports go to every live project with time and every period with entries", () => {
+test("demo vault: reports go to every project with time, archived ones too (OBS-213), and every period with entries", () => {
     const P = "Projects/Freelance";
     assert.deepEqual(plan.targets.project.slice().sort(), [
+        "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md",
         `${P}/Kestrel Outfitters 2026/Kestrel Fall Catalog/Kestrel Fall Catalog.md`,
         `${P}/Kestrel Outfitters 2026/Kestrel Outfitters 2026.md`,
         `${P}/Pinecrest Library Brochure/Pinecrest Library Brochure.md`,
@@ -143,14 +144,21 @@ test("demo vault: no running clocks, and nothing that hasn't ended by the last d
     assert.ok(plan.model.entries.every((e) => e.date <= "2026-09-18"), "entries after 9/18 would drop out of a report run before they end");
 });
 
-test("demo vault: the archived project's entries are in the daily notes but left out of every report", () => {
+test("demo vault: the archived project's entries count in the August, week 35 and 2026 reports, and its note and timesheet are written (OBS-213)", () => {
     const archived = "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md";
     const index = plan.index;
     const logged = dailyNotes(vault).flatMap((n) => tr.parseNote(n.text, n.date).entries.map((e) => ({ ...e, path: n.path })))
         .filter((e) => tr.resolve(e.context, e.path, index) === archived);
     assert.equal(logged.length, 2);
-    assert.ok(!plan.model.entries.some((e) => e.project === archived));
-    for (const block of plan.blocks.values()) assert.ok(!block.includes("Marlowe"));
+    const counted = plan.model.entries.filter((e) => e.project === archived);
+    assert.equal(counted.length, 2);
+    assert.ok(counted.every((e) => e.archived), "marked archived, so the Invoice command leaves them out");
+    for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.month}/2026-08.md`, `${FOLDERS.year}/2026.md`]) {
+        assert.ok(plan.blocks.get(p).includes("| [[Marlowe Bakery Rebrand]] |"), p);
+    }
+    assert.ok(plan.blocks.get(`${FOLDERS.month}/2026-08.md`).includes("| [[Marlowe Bakery Rebrand]] | 1.50 | $80/hr | $120.00 |"));
+    assert.ok(plan.targets.project.includes(archived) && plan.blocks.get(archived).includes("**Earned:**\t\t$120.00"));
+    assert.ok(plan.targets.sheet.includes("Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand timesheet.md"));
 });
 
 test("demo vault: every convention the README describes shows up at least once", () => {

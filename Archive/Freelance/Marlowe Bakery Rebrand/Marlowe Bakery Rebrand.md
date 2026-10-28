@@ -12,6 +12,24 @@ rate: 80
 rate_type: hourly
 status: Done
 ---
-Logo and signage refresh for a neighborhood bakery. Finished and paid on 8/28, then moved here whole.
+Logo and signage refresh for a neighborhood bakery. Finished on 8/28, then moved here whole.
 
-Its daily note entries (8/27 and 8/28) still link here, but projects in Archive are left out of every time report, so this note has no report and those hours don't appear in the August reports.
+Its daily note entries (8/27 and 8/28) still link here. A finished project's time stays in every time report after it moves to Archive, so those hours are in the August reports, and this note keeps its own report and timesheet.
+
+## Time Report
+
+%% time:start %%
+[[Marlowe Bakery Rebrand timesheet|Timesheet]] | *Updated 2026-09-16 9:00pm*
+
+**Hours:**		1.50 used
+**Earned:**		$120.00 | $120.00 unpaid
+**Eff. rate:**		$60.00/hr
+
+### By Week
+
+| Week | Exact | Total | 🆓 | Billable | Earned |
+| ---- | ----: | ----: | -: | -------: | -----: |
+| [[2026w35\|8/23-8/29]] | 1.83 | 2.00 | 0.50 | 1.50 | $120.00 |
+| **Total** | **1.83** | **2.00** | **0.50** | **1.50** | **$120.00** |
+
+%% time:end %%

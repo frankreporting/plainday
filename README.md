@@ -31,7 +31,7 @@ Nothing here backs your vault up. Use Obsidian Sync's version history, Time Mach
 The sample notes use this layout. Area and project names are yours to choose; only the top-level folders and `Planner` are fixed.
 
 ```
-Archive/                           finished projects, moved here whole; excluded from search and reports
+Archive/                           finished projects, moved here whole; excluded from search, kept in reports
 Config/                            the system
   Bases/                           Bases views (and the Invoices base, in a vault with no invoice folder)
   Scripts/                         CustomJS, Templater user scripts, Calendar, tests

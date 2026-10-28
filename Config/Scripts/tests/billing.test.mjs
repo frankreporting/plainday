@@ -645,14 +645,143 @@ test("final review: a retime is held back only when it's the task's one entry th
     assert.deepEqual(plain(sel.changed.map((c) => c.change.kind)), ["gone"], "it's under Fix first instead");
 });
 
-test("final review: rows for a project archived since are left alone", () => {
-    const ARCH = "Archive/Work/Harbor Web/Harbor Photos/Harbor Photos.md";
+test("final review, reversed by OBS-213: rows for a project archived since are checked like any other", () => {
+    const ARCH = "Archive/Work/Harbor Web/Harbor Stills/Harbor Stills.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: ARCH, tags: ["project"], props: { rate: 100, rate_type: "hourly" } }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 10000, project: ARCH, task: "Shoot", note: "" }];
     const inv = billing.readInvoice({ path: `${INV}/1001-HBR.md`, props: { status: "paid", project: "[[Harbor Web]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
     assert.equal(inv.rows[0].projectPath, ARCH);
-    const m = tr.build([], idx);
-    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, billing.ledger([inv])).changes), []);
+    const logged = tr.build([day("2026-09-02", "- [x] Shoot [[Harbor Stills|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.ok(logged.entries[0].archived);
+    assert.deepEqual(plain(billing.changes(inv, logged, tr, idx, billing.ledger([inv])).changes), [], "its entry is still there, unchanged");
+    assert.deepEqual(plain(billing.changes(inv, tr.build([], idx), tr, idx, billing.ledger([inv])).changes.map((c) => c.kind)), ["gone"], "and an entry that's gone is said, as for a live project");
+});
+
+test("OBS-213: an archived sub-project stays under its live parent, whose hours cap counts it (Brian, 2026-10-28), but out of its scope and invoices", () => {
+    const ARCH = "Archive/Work/Harbor Stills/Harbor Stills.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: ARCH, tags: ["project"], parent: "[[Harbor Web]]", props: { rate: 100, rate_type: "hourly" } }]);
+    const m = tr.build([...NOTES, day("2026-09-02", "- [x] Stills [[Harbor Stills|⭕]]\n\t- 3:00pm - 4:00pm")], idx);
+    const stills = m.entries.find((e) => e.project === ARCH);
+    assert.ok(stills.archived && stills.billable, "archived, and billable time like any");
+    assert.equal(m.parent.get(ARCH), WEB, "it stays under its live parent");
+    assert.ok(!billing.scope(WEB, m, tr, idx).has(ARCH), "but out of what Harbor Web invoices");
+    // Harbor Web's invoice bills just what it does without the archived sub-project; its cap counts the hour
+    const opts = { project: WEB, through: "2026-09-30", ledger: emptyLedger() };
+    const sel = billing.select(m, tr, idx, opts), base = billing.select(model, tr, index, opts);
+    assert.deepEqual(plain(sel.entries.map((e) => billing.key(e))), plain(base.entries.map((e) => billing.key(e))));
+    assert.deepEqual(plain([base.cap, sel.cap]), [{ used: 435, cap: 180 }, { used: 495, cap: 180 }]);
+    assert.ok(tr.render(m, { kind: "project", path: WEB }, "s").includes("**Hours:**\t\t8.25 used | 5.25 over"), "and so does its note");
+    assert.equal(billing.select(m, tr, idx, { ...opts, project: ARCH }).entries.length, 0, "Invoice on its own note bills nothing");
+    // Nor is it ever late on an invoice, its own included
+    const own = billing.readInvoice({ path: `${INV}/1003-HBR.md`, props: { status: "sent", period_start: "2026-09-01", period_end: "2026-09-30", project: "[[Harbor Stills]]" }, text: "---\n---\n# Invoice No. 1003-HBR" }, tr, idx);
+    assert.equal(own.project, ARCH);
+    assert.ok(!billing.changes(own, m, tr, idx, emptyLedger()).late.includes(stills));
+});
+
+test("OBS-213: a live row whose old times an archived entry now has still finds its moved entry, and holds it back", () => {
+    const KELP = "Archive/Work/Kelp/Kelp.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: KELP, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Weekly call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/1004-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const ledger = billing.ledger([inv]);
+    const m = tr.build([
+        day("2026-09-02", "- [x] Old call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm"),
+        day("2026-09-04", "- [x] Weekly call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm"),
+    ], idx);
+    const moved = m.entries.find((e) => e.date === "2026-09-04");
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.date])), [["moved", "2026-09-04"]]);
+    assert.ok(billing.holds(m, tr, idx, ledger).held.has(moved));
+    assert.ok(!billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger }).entries.includes(moved), "so it isn't billed twice");
+    // With nothing of its own left, the archived entry at its times says where the time went (not held: nothing is billed twice)
+    const only = tr.build([day("2026-09-02", "- [x] Old call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.deepEqual(plain(billing.changes(inv, only, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", KELP]]);
+});
+
+test("OBS-213: an archived ⭕ under a live one counts toward the archived project, as it would if live, and is never billed, but still counts as a move candidate, as before (round-3 review)", () => {
+    const OLD = "Archive/Work/Old/Old.md", ACME = "Projects/Work/Acme/Acme.md", BETA = "Projects/Work/Beta/Beta.md";
+    const idx = tr.makeIndex([...NOTES_INDEX,
+        { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } },
+        { path: ACME, tags: ["project"], props: { rate: 50, rate_type: "hourly" } },
+        { path: BETA, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-04", start: 540, end: 600, minutes: 60, billed: 60, cents: 5000, project: BETA, task: "Call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/1005-BET.md`, props: { status: "sent", project: "[[Beta]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const ledger = billing.ledger([inv]);
+    const m = tr.build([
+        day("2026-09-03", "- [ ] Work [[Acme|⭕]]\n\t- [x] Call [[Old|⭕]]\n\t\t- 9:00am - 10:00am"),
+        day("2026-09-04", "- [x] Call [[Beta|⭕]]\n\t- 10:00am - 11:00am"),
+        day("2026-09-06", "- [x] Call [[Acme|⭕]]\n\t- 9:00am - 10:00am"),
+    ], idx);
+    const retimed = m.entries.find((e) => e.date === "2026-09-04");
+    assert.equal(m.entries.find((e) => e.date === "2026-09-03").project, OLD, "the report counts the 9/3 call toward Old");
+    assert.ok(!billing.entries(m).some((e) => e.date === "2026-09-03"), "so no invoice bills it");
+    assert.equal(billing.byDate(m).live.get("2026-09-03")[0].project, ACME, "a billed row still matches among the entries as read before");
+    // Two move candidates, so not a move: the retimed entry is held back, and isn't billed again
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.date])), [["times", "2026-09-04"]]);
+    assert.ok(!billing.select(m, tr, idx, { project: BETA, through: "2026-09-30", ledger }).entries.includes(retimed));
+});
+
+test("OBS-213: billed time whose line now also names an archived project shows on its invoice as moved there, and isn't billed again", () => {
+    const OLD = "Archive/Work/Old/Old.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/1006-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const ledger = billing.ledger([inv]);
+    // Billed on Dune Books; a ⭕ for the archived Old added to the line since
+    const m = tr.build([day("2026-09-02", "- [ ] Calls [[Dune Books|⭕]]\n\t- [x] Call [[Old|⭕]]\n\t\t- 1:00pm - 2:00pm")], idx);
+    const entry = m.entries[0];
+    assert.equal(entry.project, OLD);
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", OLD]]);
+    assert.equal(billing.holds(m, tr, idx, ledger).held.size, 0);
+    assert.equal(billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger }).entries.length, 0);
+});
+
+test("a line whose ⭕ and note name different projects counts toward neither, isn't billed, and is listed on both and on the invoice that billed it (Brian, 2026-10-28)", () => {
+    const OLD = "Archive/Work/Old/Old.md";
+    for (const [lineProject, filed] of [["Old", "Projects/Work/Dune Books/Brief.md"], ["Dune Books", "Archive/Work/Old/Brief.md"], ["Harbor Web", "Projects/Work/Dune Books/Brief.md"]]) {
+        const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }, { path: filed, tags: ["task"] }]);
+        const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
+        const inv = billing.readInvoice({ path: `${INV}/1007-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+        const ledger = billing.ledger([inv]);
+        const m = tr.attachBilling(tr.build([day("2026-09-02", `- [x] Call [[${lineProject}|⭕]] [[Brief|🗒️]]\n\t- 1:00pm - 2:00pm`)], idx), [inv].map((i) => ({ path: i.path, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") })), idx, billing);
+        assert.deepEqual(plain(m.entries), [], `${lineProject}: counted on neither`);
+        const named = m.projectProblems.filter((p) => p.conflict).map((p) => tr.basename(p.project)).sort();
+        assert.equal(named.length, 2, `${lineProject}: listed on both (${named})`);
+        assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => c.kind)), ["disputed"], `${lineProject}: the invoice that billed it says so`);
+        assert.equal(billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger }).entries.length, 0, `${lineProject}: and nothing bills it`);
+    }
+});
+
+test("OBS-213: an archived project's billed row whose line now disagrees with its note says so, as a live one's does", () => {
+    const OLD = "Archive/Work/Old/Old.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }, { path: "Projects/Work/Dune Books/Brief.md", tags: ["task"] }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 5000, project: OLD, task: "Call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/0701-OLD.md`, props: { status: "paid", project: "[[Old]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const m = tr.build([day("2026-09-02", "- [x] Call [[Old|⭕]] [[Brief|🗒️]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, billing.ledger([inv])).changes.map((c) => c.kind)), ["disputed"]);
+});
+
+test("OBS-213: a billed row whose entry now counts toward an archived project says so, instead of gone", () => {
+    const OLD = "Archive/Work/Old/Old.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/1008-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const m = tr.build([day("2026-09-02", "- [x] Call [[Old|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, billing.ledger([inv])).changes.map((c) => [c.kind, c.entry?.project])), [["project", OLD]]);
+});
+
+test("OBS-213: an archived invoice's row looks for its moved entry among archived entries only, so it never holds back live work", () => {
+    const KELP = "Archive/Work/Kelp/Kelp.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: KELP, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 5000, project: KELP, task: "Weekly call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/0700-KLP.md`, props: { status: "paid", project: "[[Kelp]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const ledger = billing.ledger([inv]);
+    // A live entry with the same task and times two days on isn't taken for it
+    const live = tr.build([day("2026-09-04", "- [x] Weekly call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.deepEqual(plain(billing.changes(inv, live, tr, idx, ledger).changes.map((c) => c.kind)), ["gone"]);
+    assert.equal(billing.holds(live, tr, idx, ledger).held.size, 0);
+    // Its own entry, moved the same way, still is
+    const moved = tr.build([day("2026-09-04", "- [x] Weekly call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    assert.deepEqual(plain(billing.changes(inv, moved, tr, idx, ledger).changes.map((c) => c.kind)), ["moved"]);
 });
 
 test("final review: an invoice that lost its tag, or whose frontmatter doesn't read, stays billed and blocks invoicing", () => {

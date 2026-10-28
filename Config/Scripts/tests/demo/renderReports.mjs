@@ -247,7 +247,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     // writeProjectNotes, and each project's timesheet note (writeTimesheet)
     const projects = tr.projectTargets(model);
     for (const p of vault.notes.keys()) {
-        if (!projects.has(p) && !tr.isArchived(p) && tr.counts(p, index) && hasBlock(p)) projects.add(p);
+        if (!projects.has(p) && tr.counts(p, index) && hasBlock(p)) projects.add(p);
     }
     const sheets = new Map();
     for (const [p, { fm }] of vault.notes) {
@@ -258,7 +258,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     }
     targets.sheet = [];
     for (const p of projects) {
-        if (!vault.notes.has(p) || tr.isArchived(p)) continue;
+        if (!vault.notes.has(p)) continue;
         targets.project.push(p);
         const sheetPath = sheets.get(p) ?? tr.sheetPath(p);
         const block = tr.render(model, { kind: "timesheet", path: p }, stamp, link);

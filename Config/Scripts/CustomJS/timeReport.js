@@ -18,7 +18,8 @@ class TimeReport {
     // same weeks Notebook Navigator names gggg[w]ww.
     // Each report sits between %% time:start %% and %% time:end %%; running it again replaces only
     // that block, and only when the numbers changed (the "Updated" line says when they last did). Summaries
-    // only, except the timesheet notes, which hold entry-by-entry detail. Projects in Archive are left out.
+    // only, except the timesheet notes, which hold entry-by-entry detail. Projects in Archive count like
+    // any other (OBS-213).
     //
     // A time entry is a bullet one level under a task or event: `- 9:01am - 9:40am`, optionally
     // `: note`. 🆓 at the start of the note doesn't bill it (`- 5:00pm - 5:30pm: 🆓 not billing`);
@@ -50,8 +51,10 @@ class TimeReport {
     //      project folder note (Folder/Folder.md tagged #project), or its `parent`. An event whose
     //      title is wrapped in a link, the way lines were written before OBS-57, has that note.
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
-    // sub-project: its hours also count toward the parent. Entries of archived projects (in
-    // Archive) are left out of every report.
+    // sub-project: its hours also count toward the parent. An archived project (in Archive) counts
+    // like any other, an archived sub-project into its live parent too, but a live project is never
+    // under an archived one, and an archived project's time is never billed (OBS-213). A line whose
+    // ⭕ and its own note name different projects counts toward neither, and is listed on both.
     // An area (a folder note tagged exactly #area) counts like a project in all three, as a row of
     // its own, but is never a parent and never has one: the projects inside it don't add up into it.
     // Its note gets a report the way a project's does, and with no `rate` or `rate_type` of its own
@@ -510,7 +513,7 @@ class TimeReport {
     // line's note, 🆓 from the end line or the event line, and the title as its task
     eventEntry(ev) {
         return {
-            date: ev.date, line: ev.line, path: ev.path, project: ev.project, start: ev.start, end: ev.end, minutes: ev.minutes,
+            date: ev.date, line: ev.line, path: ev.path, project: ev.project, ...(ev.archived ? { archived: true } : {}), start: ev.start, end: ev.end, minutes: ev.minutes,
             crossesMidnight: !!ev.crossesMidnight, free: ev.endFree || ev.lineFree, note: ev.endNote,
             task: this.taskText(ev.context[0].body), context: ev.context, startText: ev.startText, endText: ev.endText, text: ev.text,
             taskWritten: this.taskText(ev.context[0].body, { keepFree: true }), noteWritten: ev.endNoteWritten ?? ev.endNote,
@@ -676,9 +679,11 @@ class TimeReport {
     }
 
     // The project or area line `i` of `note` ({ path, kind }) counts toward, as resolve reads a line;
-    // a line outside the periodic notes falls back to the project or area its note is in (OBS-181)
-    lineProject(note, i, lines, index) {
-        const own = this.resolve(this.lineContext(lines, i), note.path, index, true);
+    // a line outside the periodic notes falls back to the project or area its note is in (OBS-181).
+    // With `live`, for a command, an archived ⭕ is passed over; the task checks read the line as
+    // the report counts it, archived projects included (OBS-213).
+    lineProject(note, i, lines, index, live = true) {
+        const own = this.resolve(this.lineContext(lines, i), note.path, index, live);
         return own ?? (note.kind === "other" ? this.projectOfNote(note.path, index) : null);
     }
 
@@ -712,20 +717,20 @@ class TimeReport {
     }
 
     // A task line that ends in a ⭕ for a project and also a 🗒️ task note filed under a different
-    // live project, or an event line whose 🗒️ log is (OBS-57). The line's ⭕ decides where its time
-    // counts (see resolve), so the note's project never sees that time: a note moved by hand, say,
-    // until OBS-93 updates its lines. Checks the first context line with a live ⭕, the one resolve
-    // uses. { lineProject, note, noteProject, event } or null.
+    // project, or an event line whose 🗒️ log is (OBS-57), archived projects included (OBS-213): a
+    // note moved by hand, say, until OBS-93 updates its lines. Nothing decides between the two, so
+    // the line's time counts toward neither (Brian, 2026-10-28; see build). Checks the first context
+    // line with a ⭕, the one the report's resolve uses. { lineProject, note, noteProject, event } or null.
     conflict(context, fromPath, index) {
         for (const c of context) {
             const { marks, notes } = this.lineLinks(c.body);
             const withDest = (l) => ({ ...l, dest: TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, fromPath) });
-            const direct = marks.map(withDest).find((l) => l.dest && this.counts(l.dest, index) && !this.isArchived(l.dest));
+            const direct = marks.map(withDest).find((l) => l.dest && this.counts(l.dest, index));
             if (!direct) continue;
             for (const l of notes.map(withDest)) {
                 if (!l.dest) continue;
                 const noteProject = this.projectOfNote(l.dest, index);
-                if (noteProject && noteProject !== direct.dest && !this.isArchived(noteProject)) {
+                if (noteProject && noteProject !== direct.dest) {
                     return { lineProject: direct.dest, note: l.dest, noteProject, event: /^\[<\]/.test(c.body) };
                 }
             }
@@ -792,32 +797,42 @@ class TimeReport {
     // that haven't ended yet are left out, and don't overlap anything; without it everything counts.
     build(notes, index, { now = null } = {}) {
         const entries = [];
-        const archived = [];     // entries whose only project is archived: out of the report, but still checked for overlaps
+        const billed = [];       // the entries as Billing read them before OBS-213, for matching billed rows (see below)
         const events = [];       // every timed event line
         const problems = [];
         const day = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
         const ended = (e) => !now || day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
-        // The first live project wins; an entry that only resolves to archived projects is archived work
+        // The first project wins, archived or not: an archived project's time stays in every report, and
+        // its Problems are listed like any project's (OBS-213); `archived` marks its entries, which are
+        // never billed. `live` is the line as it was read before OBS-213, an archived ⭕ passed over for
+        // a live project further on.
         const place = (context, path) => {
-            const live = context.length ? this.resolve(context, path, index, true) : null;
-            if (live) return { project: live, archived: false };
-            return { project: null, archived: context.length > 0 && this.isArchived(this.resolve(context, path, index)) };
+            const project = context.length ? this.resolve(context, path, index) : null;
+            const archived = this.isArchived(project);
+            return { project, archived, live: archived ? this.resolve(context, path, index, true) : project };
         };
+        // `billingEntries` are the entries as read before OBS-213: Billing matches a billed row to the
+        // entry it billed among them, so a billed entry is held back exactly as it always was. An
+        // archived entry with a live project further on is there as a copy on that project, `report`
+        // naming the report's entry; one with no live project isn't there.
+        const forBilling = (e, where) => (!where.archived ? e : where.live ? { ...e, project: where.live, report: e } : null);
         for (const n of notes) {
             const parsed = this.parseNote(n.text, n.date);
             for (const e of parsed.entries) {
                 e.path = n.path;
                 const where = place(e.context, n.path);
                 e.project = where.project;
-                (where.archived ? archived : entries).push(e);
+                const b = forBilling(e, where);
+                if (where.archived) e.archived = true;
+                entries.push(e);
+                if (b) billed.push(b);
             }
             for (const p of parsed.problems) {
                 // The sync writes events months ahead: what's wrong with one waits until it has started
                 if (p.start !== undefined && now && day(p.date) * 1440 + p.start > day(now.date) * 1440 + now.minutes) continue;
                 p.path = n.path;
-                const where = place(p.context, n.path);
-                p.projects = [where.project];
-                if (!where.archived) problems.push(p);
+                p.projects = [place(p.context, n.path).project];
+                problems.push(p);
             }
             // A busy event with an end line and no entries of its own counts once it has ended: its
             // span is an entry like any other, on the project its line resolves to, else Unassigned
@@ -827,17 +842,35 @@ class TimeReport {
                 ev.project = where.project;
                 ev.archived = where.archived;
                 events.push(ev);
-                if (ev.end !== null && !ev.free && !ev.ranges && ended(ev)) (ev.archived ? archived : entries).push(this.eventEntry(ev));
+                if (ev.end !== null && !ev.free && !ev.ranges && ended(ev)) {
+                    const entry = this.eventEntry(ev);
+                    entries.push(entry);
+                    const b = where.archived ? (where.live ? { ...this.eventEntry({ ...ev, project: where.live, archived: false }), report: entry } : null) : entry;
+                    if (b) billed.push(b);
+                }
             }
         }
 
+        // A line whose ⭕ and its own note (a task's note, an event's log) name different projects has two
+        // projects, which the Rules don't allow. Nothing decides between them (Brian, 2026-10-28): its time
+        // counts toward neither and isn't billed, and the line is listed on both projects, wherever the
+        // time would show. OBS-34 listed it too, but let the ⭕ decide. Archived or not, the same, so
+        // archiving a project never moves time.
+        const disputed = new Map();   // entry → its conflict
+        for (const e of entries) {
+            const c = e.project ? this.conflict(e.context, e.path, index) : null;
+            if (c && c.lineProject === e.project) disputed.set(e, c);
+        }
+        for (const e of disputed.keys()) e.disputed = true;
+        for (const b of billed) if (disputed.has(b.report ?? b)) b.disputed = true;
+
         // Overlaps, across every project and across midnight; an event's span overlaps like an entry's
-        const liveSet = new Set(entries);
-        const timeline = [...entries, ...archived].map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
+        // A tie keeps note order, archived or not, so archiving a project rewords no overlap
+        const timeline = entries.map((e) => ({ e, from: day(e.date) * 1440 + e.start, to: day(e.date) * 1440 + e.end }))
             .sort((a, b) => a.from - b.from || a.to - b.to);
         let latest = null;
         for (const t of timeline) {
-            if (latest && t.from < latest.to && (liveSet.has(t.e) || liveSet.has(latest.e))) {
+            if (latest && t.from < latest.to) {
                 const other = latest.e;
                 const where = other.date === t.e.date ? `line ${other.line}` : `${this.shortDate(other.date)} line ${other.line}`;
                 problems.push({
@@ -859,7 +892,10 @@ class TimeReport {
             const path = [];
             while (p && !parent.has(p)) {
                 let up = this.parentProject(p, index);
-                if (this.isArchived(up)) up = null;
+                // An archived project is never a live one's parent (OBS-213). An archived sub-project stays
+                // under its live parent, whose total and hours cap count it (Brian, 2026-10-28); Billing's
+                // scope leaves it out, so it's never invoiced.
+                if (up && this.isArchived(up) && !this.isArchived(p)) up = null;
                 if (up && (up === p || path.includes(up))) {
                     parent.set(p, null);
                     projectProblems.push({ project: p, parent: up });
@@ -870,16 +906,16 @@ class TimeReport {
                 p = up;
             }
         };
-        for (const e of entries) addChain(e.project);
+        // The entries that count: every one but a disputed line's
+        const kept = entries.filter((e) => !disputed.has(e));
+        for (const e of kept) addChain(e.project);
+        for (const e of billed) addChain(e.project);
         for (const p of problems) p.projects.forEach(addChain);
 
         // Time on a task line whose ⭕ project and 🗒️ task note disagree, or an event line whose ⭕
         // and log do: said on both project notes, once per note and pair of projects (OBS-34)
         const conflicts = new Map();
-        for (const e of entries) {
-            if (!e.project) continue;
-            const c = this.conflict(e.context, e.path, index);
-            if (!c || c.lineProject !== e.project) continue;
+        for (const [e, c] of disputed) {
             const key = `${c.note}\n${c.lineProject}\n${c.noteProject}`;
             const had = conflicts.get(key)?.entries ?? [];
             conflicts.set(key, { ...c, count: had.length + 1, entries: [...had, e] });
@@ -913,11 +949,13 @@ class TimeReport {
         }
 
         // Entries that haven't ended yet aren't work yet: out of hours and Earned alike
-        const counted = now ? entries.filter((e) => day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes) : entries;
+        const over = (e) => day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
+        const counted = now ? kept.filter(over) : kept;
+        const billingEntries = now ? billed.filter(over) : billed;
 
         // Billable or not, decided once here rather than in `totals`, which is also called without a
         // `money` map. `free` stays exactly what it always was: the 🆓 typed on the entry.
-        for (const e of counted) e.billable = !e.free && !!e.project && money.get(e.project)?.type !== "non-billable";
+        for (const e of [...counted, ...billingEntries]) e.billable = !e.free && !!e.project && money.get(e.project)?.type !== "non-billable";
 
         // A project with time on it and no `rate_type` anywhere up its chain bills by default, since
         // the alternative is invoicing nothing and never noticing. Say so, so it's set rather than assumed.
@@ -940,7 +978,7 @@ class TimeReport {
         problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
         // Areas, whose notes report by month (OBS-133)
         const areas = new Set([...parent.keys()].filter((p) => this.isAreaOnly(p, index)));
-        return { entries: counted, problems, parent, projectProblems, money, events, areas };
+        return { entries: counted, billingEntries, disputed: [...disputed.keys()], problems, parent, projectProblems, money, events, areas };
     }
 
     // A project's money: `rate` and `rate_type`, each from the project or else its nearest parent that
@@ -1024,7 +1062,7 @@ class TimeReport {
         const { held, byInvoice } = billing.holds(model, this, index, ledger);
         model.billing = { billing, invoices, ledger, index, held, byInvoice };
         for (const invoice of invoices) {
-            if (invoice.status === "canceled" || !invoice.project || this.isArchived(invoice.path) || this.isArchived(invoice.project)) continue;
+            if (invoice.status === "canceled" || !invoice.project) continue;
             // A table that can't be read would let its entries look unbilled; the Invoice command refuses
             // to invoice the project until it's fixed, and says so here
             if (invoice.problem) {
@@ -1083,7 +1121,8 @@ class TimeReport {
             if (p.only === "project") continue;
             if (p.conflict) {
                 // Said once, by the project the time counts on, with the period's own entries
-                const count = p.conflict.side === "line" ? p.conflict.entries.filter((e) => mine.has(e)).length : 0;
+                // Its entries count nowhere (Brian, 2026-10-28), so the period's are found by their day
+                const count = p.conflict.side === "line" ? p.conflict.entries.filter((e) => want(e.date)).length : 0;
                 if (count) projectProblems.push({ ...p, conflict: { ...p.conflict, count } });
             } else if (worked.has(p.project) || (p.parent && worked.has(p.parent))) {
                 projectProblems.push(p);
@@ -1129,10 +1168,10 @@ class TimeReport {
         return out;
     }
 
-    // The flat fees with an `earned` day: [{ project, date, cents }], archived projects left out. A day
-    // still to come counts now, in its period: a fee invoiced ahead (Brian, 2026-10-11).
+    // The flat fees with an `earned` day: [{ project, date, cents }], archived projects' included
+    // (OBS-213). A day still to come counts now, in its period: a fee invoiced ahead (Brian, 2026-10-11).
     earnedFees(model) {
-        return [...(model.money ?? new Map())].filter(([p, m]) => m.fee && m.earned && !this.isArchived(p))
+        return [...(model.money ?? new Map())].filter(([, m]) => m.fee && m.earned)
             .map(([project, m]) => ({ project, date: m.earned, cents: Math.round(m.fee * 100) }));
     }
 
@@ -1597,8 +1636,8 @@ class TimeReport {
                 const noteLink = `[[${note.replace(/\.md$/, "")}|${this.basename(note)}]]`;
                 const [line, kind, it] = event ? ["event line", "log", "log"] : ["task line", "task note", "note"];
                 out.push(side === "line"
-                    ? `- ${link(p.project)} has time (${n}) from ${event ? "an" : "a"} ${line} whose ${kind} ${noteLink} is filed under ${link(other)}; move the ${it} here, or change the line's project link`
-                    : `- ${link(p.project)} has a ${kind}, ${noteLink}, whose ${line} links ${link(other)}, so its time (${n}) counts there; move the ${it}, or change the line's project link`);
+                    ? `- ${link(p.project)} has time (${n}) from ${event ? "an" : "a"} ${line} whose ${kind} ${noteLink} is filed under ${link(other)}, so the time isn't counted on either; move the ${it} here, or change the line's project link`
+                    : `- ${link(p.project)} has a ${kind}, ${noteLink}, whose ${line} links ${link(other)}, so its time (${n}) isn't counted on either; move the ${it}, or change the line's project link`);
                 continue;
             }
             out.push(p.message ? `- ${link(p.project)} ${p.message}`
@@ -1635,9 +1674,11 @@ class TimeReport {
             : c.kind === "free" ? "now 🆓"
             : c.kind === "unassigned" ? "now on no project"
             : c.kind === "project" ? `now on ${link(c.entry.project)}`
+            : c.kind === "disputed" ? "now on a line with two projects, so it isn't counted"
             : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${c.entry.date}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
             : "gone from its daily note";
-        const fix = invoice.status === "draft" && c.kind !== "overlap" ? "; rebuild it" : "";
+        // An archived project's draft can't be rebuilt: Invoice never bills its time (OBS-213)
+        const fix = invoice.status === "draft" && c.kind !== "overlap" && !this.isArchived(invoice.project) ? "; rebuild it" : "";
         return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${when(c.row)} was billed, ${now}${fix}`;
     }
 
@@ -1702,7 +1743,7 @@ class TimeReport {
         const mine = (p) => !!p && on.has(p);
         const out = [], explained = new Set();
         for (const invoice of b.invoices) {
-            if (invoice.status === "canceled" || this.isArchived(invoice.path) || (invoice.project && this.isArchived(invoice.project))) continue;
+            if (invoice.status === "canceled") continue;
             if (invoice.problem) {
                 if (mine(invoice.project)) out.push(this.invoiceProblem({ invoice, problem: invoice.problem }, link));
                 continue;
@@ -2429,7 +2470,7 @@ class TimeReport {
                 .filter((e) => ["sent", "paid"].includes(b.billing.standing(e, b.ledger).invoice?.status))
                 .map((e) => `${e.path}:${e.context?.[0]?.line}`) : []);
             if (billed.has(`${note.path}:${i + 1}`)) return "invoiced";
-            const p = this.lineProject(note, i, note.text.split("\n"), index);
+            const p = this.lineProject(note, i, note.text.split("\n"), index, false);
             const f = p ? globalThis.app?.vault?.getFileByPath(p) : null;
             const helper = globalThis.customJS?.AddTaskNote;
             return f && helper?.isLiveHome && !helper.isLiveHome(f) ? "finished" : null;
@@ -2482,14 +2523,14 @@ class TimeReport {
         if (!T?.check || !notes.length) return;
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const violations = T.check(notes, {
-            projectOf: (note, i, lines) => this.lineProject(note, i, lines, index),
+            projectOf: (note, i, lines) => this.lineProject(note, i, lines, index, false),
             exempt: this.keepsProject(model, index),
             resolve: (linkpath, from) => index.linkDest(linkpath.split("#")[0], from),
         });
         for (const v of violations) {
             const first = v.lines.find((l) => byPath.get(l.path)?.kind !== "other") ?? v.lines[0];
             const firstNote = byPath.get(first.path);
-            const taskProject = this.lineProject(firstNote, first.line, firstNote.text.split("\n"), index);
+            const taskProject = this.lineProject(firstNote, first.line, firstNote.text.split("\n"), index, false);
             // A project disagreement changes what's billed, so it shows on every project the task's lines
             // count toward; any other rule, on the task's own project
             const projects = v.rule === "project" ? [...new Set(v.detail.projects.filter(Boolean))] : taskProject ? [taskProject] : [];
@@ -2800,7 +2841,7 @@ class TimeReport {
     async writeProjectNotes(model, index, stamp, link, linkTarget) {
         const targets = this.projectTargets(model);
         for (const f of app.vault.getMarkdownFiles()) {
-            if (!targets.has(f.path) && !this.isArchived(f.path) && this.counts(f.path, index) && this.hasBlock(await this.textOf(f))) targets.add(f.path);
+            if (!targets.has(f.path) && this.counts(f.path, index) && this.hasBlock(await this.textOf(f))) targets.add(f.path);
         }
         let updated = 0;
         const broken = [];
@@ -2809,7 +2850,7 @@ class TimeReport {
         const created = [];
         for (const path of targets) {
             const file = app.vault.getFileByPath(path);
-            if (!file || this.isArchived(path)) continue;
+            if (!file) continue;
             // An area's timesheet made before OBS-131 is left as it was, and no longer linked
             const sheet = this.takesTimesheet(path, index, model) ? await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created) : null;
             try {

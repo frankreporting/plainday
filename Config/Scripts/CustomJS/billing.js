@@ -390,9 +390,15 @@ class Billing {
 
     // The projects a project's invoices and timesheet cover: itself, and every project below it when
     // its `include_subprojects` checkbox is on
+    // A live project's leave out its archived sub-projects, which are never invoiced (OBS-213).
     scope(project, model, tr, index) {
         const on = this.truthy(tr.prop(index.props?.(project) ?? {}, "include_subprojects"));
-        return on ? tr.subtree(project, model.parent) : new Set([project]);
+        return on ? new Set([...tr.subtree(project, model.parent)].filter((p) => tr.isArchived(p) === tr.isArchived(project))) : new Set([project]);
+    }
+
+    // The entries Billing can bill: every one but an archived project's (OBS-213)
+    entries(model) {
+        return model.entries.filter((e) => !e.archived);
     }
 
     hourly(project, model) {
@@ -400,14 +406,21 @@ class Billing {
         return !!m && m.type === "hourly" && !!m.rate;
     }
 
-    // Entries by date, for changes(); built once and passed in when checking many invoices
+    // Entries by date, for changes(); built once and passed in when checking many invoices. `live`, for
+    // every row but an archived project's: the entries as read before OBS-213 (TimeReport.build's
+    // billingEntries), so a billed row finds its entry, or holds one back, exactly as it always did;
+    // `archived`, the report's archived entries, for an archived project's rows (OBS-213).
     byDate(model) {
-        const out = new Map();
-        for (const e of model.entries) {
-            if (!out.has(e.date)) out.set(e.date, []);
-            out.get(e.date).push(e);
-        }
-        return out;
+        const group = (list) => {
+            const out = new Map();
+            for (const e of list) {
+                if (!out.has(e.date)) out.set(e.date, []);
+                out.get(e.date).push(e);
+            }
+            return out;
+        };
+        // A disputed line's archived entries too, so its billed row says it has two projects
+        return { live: group(model.billingEntries ?? this.entries(model)), archived: group([...model.entries, ...(model.disputed ?? [])].filter((e) => e.archived)) };
     }
 
     // Whether an invoice touches `scope`: its project, or a row's project, is in it (or can't be told)
@@ -456,14 +469,15 @@ class Billing {
     //   cap        { used, cap } in minutes when billable time through `through` passes the cap
     select(model, tr, index, { project, through, ledger }) {
         if (!this.isoDate(through)) throw new Error(`Billing.select: "${through}" isn't a date`);
-        const scope = this.scope(project, model, tr, index);
+        // An archived project's time is never invoiced (OBS-213)
+        const scope = new Set([...this.scope(project, model, tr, index)].filter((p) => !tr.isArchived(p)));
         const entries = [], heldBack = [], notHourly = new Set(), bad = [];
         let first = null;
         for (const invoice of ledger.invoices ?? []) {
             if (invoice.problem && this.touches(invoice, scope)) bad.push({ invoice, problem: invoice.problem });
         }
         const keys = new Set();
-        for (const e of model.entries) {
+        for (const e of this.entries(model)) {
             if (!scope.has(e.project) || e.date > through || !e.billable) continue;
             if (!this.hourly(e.project, model)) { notHourly.add(e.project); continue; }
             const s = this.standing(e, ledger);
@@ -538,15 +552,23 @@ class Billing {
     //   moved       the only unbilled entry with its task and times within three days, on another day
     //   gone        none of these (with several candidates for a move or a retime, a recurring meeting
     //               say, it's gone rather than a guess)
-    // A row for a project that's been archived since is left alone: its entries are out of the model.
-    // late: entries in the invoice's scope and period, billable and hourly, on no invoice.
+    // A row for an archived project is checked against the report's archived entries, and any other
+    // against the entries as Billing reads them, as before OBS-213, so neither holds back the other's work.
+    // late: entries in the invoice's scope and period, billable and hourly, on no invoice; never for an
+    // archived project, whose time is never invoiced.
     changes(invoice, model, tr, index, ledger, { byDate = this.byDate(model), late: wantLate = true } = {}) {
         const abs = (x) => [this.day(x.date) * 1440 + x.start, this.day(x.date) * 1440 + x.end];
         const out = [];
         const open = (e) => !ledger.byKey.has(this.key(e));
         for (const row of invoice.rows) {
-            if (row.projectPath && tr.isArchived(row.projectPath)) continue;
-            const same = (byDate.get(row.date) ?? []).find((e) => e.start === row.start && e.end === row.end);
+            const pool = row.projectPath && tr.isArchived(row.projectPath) ? byDate.archived : byDate.live;
+            const exact = (pool.get(row.date) ?? []).filter((e) => e.start === row.start && e.end === row.end);
+            // A live entry first: a copy at the same times is an archived or disputed line's
+            const same = exact.find((e) => !e.report && !e.disputed) ?? exact[0];
+            // Billed time whose line now names two projects, so it isn't counted (Brian, 2026-10-28)
+            if (same?.disputed) { out.push({ row, kind: "disputed", entry: same.report ?? same }); continue; }
+            // Billed time whose line's ⭕ now names an archived project
+            if (same?.report) { out.push({ row, kind: "project", entry: same.report }); continue; }
             if (same) {
                 if (!same.project) out.push({ row, kind: "unassigned", entry: same });
                 else if (!same.billable) out.push({ row, kind: "free", entry: same });
@@ -555,22 +577,27 @@ class Billing {
                 continue;
             }
             const [rf, rt] = abs(row);
-            const near = [-1, 0, 1].flatMap((d) => byDate.get(this.date(this.day(row.date) + d)) ?? []);
+            const near = [-1, 0, 1].flatMap((d) => pool.get(this.date(this.day(row.date) + d)) ?? []);
             const over = near.find((e) => {
                 const [f, t] = abs(e);
                 return f < rt && rf < t && ((row.projectPath && e.project === row.projectPath) || this.stored(tr, e.task) === row.task);
             });
-            if (over) { out.push({ row, kind: "times", entry: over }); continue; }
+            if (over) { out.push({ row, kind: "times", entry: over.report ?? over }); continue; }
             // Exact times on another day are the stronger sign, so a move is looked for first
-            const moved = [-3, -2, -1, 1, 2, 3].flatMap((d) => byDate.get(this.date(this.day(row.date) + d)) ?? [])
+            const moved = [-3, -2, -1, 1, 2, 3].flatMap((d) => pool.get(this.date(this.day(row.date) + d)) ?? [])
                 .filter((e) => e.start === row.start && e.end === row.end && open(e) && this.stored(tr, e.task) === row.task);
-            if (moved.length === 1) { out.push({ row, kind: "moved", entry: moved[0] }); continue; }
-            const retimed = (byDate.get(row.date) ?? []).filter((e) => open(e) && e.billable && row.projectPath && e.project === row.projectPath
+            if (moved.length === 1) { out.push({ row, kind: "moved", entry: moved[0].report ?? moved[0] }); continue; }
+            const retimed = (pool.get(row.date) ?? []).filter((e) => open(e) && e.billable && row.projectPath && e.project === row.projectPath
                 && this.stored(tr, e.task) === row.task);
-            out.push(retimed.length === 1 ? { row, kind: "times", entry: retimed[0] } : { row, kind: "gone" });
+            if (retimed.length === 1) { out.push({ row, kind: "times", entry: retimed[0].report ?? retimed[0] }); continue; }
+            // Not found among the entries it could be: one with its times that counts toward an archived
+            // project now says where the time went
+            const archivedNow = row.projectPath && !tr.isArchived(row.projectPath)
+                ? (byDate.archived.get(row.date) ?? []).find((e) => e.start === row.start && e.end === row.end) : null;
+            out.push(archivedNow ? { row, kind: "project", entry: archivedNow } : { row, kind: "gone" });
         }
         const scope = wantLate && invoice.project ? this.scope(invoice.project, model, tr, index) : new Set();
-        const late = !wantLate || !invoice.periodStart || !invoice.periodEnd ? [] : model.entries.filter((e) => scope.has(e.project) && e.billable
+        const late = !wantLate || !invoice.periodStart || !invoice.periodEnd || tr.isArchived(invoice.project) ? [] : this.entries(model).filter((e) => scope.has(e.project) && e.billable
             && this.hourly(e.project, model) && e.date >= invoice.periodStart && e.date <= invoice.periodEnd
             && this.standing(e, ledger).kind === "open");
         return { changes: out, late };
