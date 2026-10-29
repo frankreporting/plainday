@@ -1,7 +1,9 @@
-// A line's link to its own note (a task's note, an event's log) is written 🗒️ and read as 🗒️ or
-// 🔗, the symbol before OBS-87, with or without the U+FE0F a phone may add or drop. Each script
-// keeps its own pattern (TimeReport has to stand alone for the Raycast timer), so this checks
-// they all read the same four spellings, and all write the same mark. Run from the vault root:
+// A line's link to its own note (a task's note, an event's log) is written ⋯, and the link to the note
+// Schedule sent it from ↗ (OBS-208); until OBS-196 and OBS-186 tell them apart, every script reads either
+// as the line's note link, the ↗ with or without the U+FE0F a phone may add. 🗒️ and 🔗, the marks before,
+// and a typed … mean nothing. Each script keeps its own pattern (TimeReport has to stand alone for the
+// Raycast timer), so this checks they all read the same spellings, and all write the same marks. Run from
+// the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,10 +24,12 @@ const CalendarSync = load("calendarSync.js", "CalendarSync");
 const recordEvent = createRequire(import.meta.url)("../Templater/recordEvent.js");
 const [linker, report, sync] = [new AddProjectLink(), new TimeReport(), new CalendarSync()];
 
-const SPELLINGS = { "🗒️": "🗒️", "🗒 (no U+FE0F)": "🗒", "🔗": "🔗", "🔗 + U+FE0F": "🔗️" };
+const SPELLINGS = { "⋯": "⋯", "↗": "↗", "↗ + U+FE0F": "↗\uFE0F" };
+// The marks before OBS-208, which the one-time conversion replaced, and the ellipsis a phone types
+const NOTHING = { "🗒️": "🗒️", "🗒 (no U+FE0F)": "🗒", "🔗": "🔗", "🔗 + U+FE0F": "🔗\uFE0F", "… (U+2026)": "…" };
 const once = (re) => new RegExp(re.source, re.flags.replace("g", ""));
 
-test("every script reads 🗒️, 🗒, 🔗 and 🔗 + U+FE0F as a line's note link", () => {
+test("every script reads ⋯, ↗ and ↗ + U+FE0F as a line's note link (OBS-208)", () => {
     for (const [name, mark] of Object.entries(SPELLINGS)) {
         const link = `[[Draft the brief|${mark}]]`;
         assert.ok(AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${name}`);
@@ -40,6 +44,19 @@ test("every script reads 🗒️, 🗒, 🔗 and 🔗 + U+FE0F as a line's note 
     }
 });
 
+test("🗒️, 🔗 and … are a note link to none of them now (OBS-208)", () => {
+    for (const [name, mark] of Object.entries(NOTHING)) {
+        const link = `[[Draft the brief|${mark}]]`;
+        assert.ok(!AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${name}`);
+        assert.ok(!AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${name}`);
+        assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), null, `AddProjectLink.taskLinkpath: ${name}`);
+        assert.ok(!once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
+        assert.ok(!once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
+        assert.ok(!report.isNoteAlias(mark), `TimeReport.isNoteAlias: ${name}`);
+        assert.equal(sync.splitTail(`Planning [[2026-09-16 Planning|${mark}]]`, true).log, null, `CalendarSync: ${name}`);
+    }
+});
+
 test("a ⭕ or 🗃️ isn't a note link to any of them", () => {
     for (const link of ["[[Studio|⭕]]", "[[Home|🗃️]]", "[[2026-09-30|🚩 9/30]]", "[[Draft the brief|Brief]]"]) {
         assert.ok(!AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${link}`);
@@ -49,8 +66,10 @@ test("a ⭕ or 🗃️ isn't a note link to any of them", () => {
     assert.ok(!report.isNoteAlias("⭕") && !report.isNoteAlias("Brief"));
 });
 
-test("every writer writes the same mark, 🗒️", () => {
-    assert.equal(AddTaskNote.NOTE_MARK, "🗒️");
+test("every writer writes the same marks, ⋯ for a line's own note and ↗ for the note it was sent from (OBS-208)", () => {
+    assert.equal(AddTaskNote.NOTE_MARK, "⋯");
     assert.equal(Schedule.NOTE_MARK, AddTaskNote.NOTE_MARK);
     assert.equal(CalendarSync.NOTE_MARK, AddTaskNote.NOTE_MARK);
+    assert.equal(Schedule.FROM_MARK, "↗");
+    assert.equal(AddTaskNote.FROM_MARK, Schedule.FROM_MARK);
 });

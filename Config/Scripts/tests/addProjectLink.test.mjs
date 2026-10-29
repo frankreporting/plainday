@@ -17,7 +17,7 @@ const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
 const cmd = new AddProjectLink();
 const P = "[[Hawk Ledger|⭕]]";
 
-test("placed: the ⭕ ends a line that has no 🔗, with no trailing space", () => {
+test("placed: the ⭕ ends a line that has no ⋯, with no trailing space", () => {
     assert.equal(cmd.placed("- [ ] Order toner", P), "- [ ] Order toner [[Hawk Ledger|⭕]]");
     assert.equal(cmd.placed("- [ ] Order toner   ", P), "- [ ] Order toner [[Hawk Ledger|⭕]]", "trailing spaces closed up");
     assert.equal(cmd.placed("\t- [/] Order toner [[2026-09-30|🚩 9/30]]", P), "\t- [/] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]]", "after a due date, indent kept");
@@ -34,12 +34,12 @@ test("placed: on an event line the ⭕ ends the line, after the title, a log lin
 });
 
 test("placed: with a note link at the end the ⭕ goes before it, so the note link stays last (OBS-90)", () => {
-    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|🔗]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]]");
-    assert.equal(cmd.placed("- [ ] Order toner [[Tin Works|⭕]] [[Order toner|🗒️]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
-    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|🗒️]] [[Tin Works|⭕]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "the older order comes out in the new one");
-    assert.equal(cmd.placed("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|🗒️]]", P), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "after a due date");
-    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call ℹ️ [[2026-09-15 Kickoff call|🗒️]]", P), "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-15 Kickoff call|🗒️]]", "an event's log");
-    const same = "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]";
+    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|⋯]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]");
+    assert.equal(cmd.placed("- [ ] Order toner [[Tin Works|⭕]] [[Order toner|⋯]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]");
+    assert.equal(cmd.placed("- [ ] Order toner [[Order toner|⋯]] [[Tin Works|⭕]]", P), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]", "the older order comes out in the new one");
+    assert.equal(cmd.placed("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|⋯]]", P), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|⋯]]", "after a due date");
+    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call ℹ️ [[2026-09-15 Kickoff call|⋯]]", P), "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-15 Kickoff call|⋯]]", "an event's log");
+    const same = "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]";
     assert.equal(cmd.placed(same, P), same, "already so: unchanged");
 });
 
@@ -64,11 +64,11 @@ test("placed: an area gets its own suffix, 🗃️, and either kind replaces the
     assert.equal(cmd.label("- [<] 7:30am\tRun [[Household|🗃️]]"), "Run");
 });
 
-test("taskLinkpath: the first 🔗 link's target; a heading is dropped; other links aren't task notes", () => {
-    assert.equal(cmd.taskLinkpath("- [ ] Order toner [[Order toner|🔗]]"), "Order toner");
-    assert.equal(cmd.taskLinkpath("- [ ] A [[Projects/Hawk/Order toner|🔗]] [[B|🔗]]"), "Projects/Hawk/Order toner");
-    assert.equal(cmd.taskLinkpath("- [ ] A [[Order toner#Notes|🔗]]"), "Order toner");
-    assert.equal(cmd.taskLinkpath("- [ ] A [[Order toner|🔗️]]"), "Order toner", "with U+FE0F");
+test("taskLinkpath: the first ⋯ link's target; a heading is dropped; other links aren't task notes", () => {
+    assert.equal(cmd.taskLinkpath("- [ ] Order toner [[Order toner|⋯]]"), "Order toner");
+    assert.equal(cmd.taskLinkpath("- [ ] A [[Projects/Hawk/Order toner|⋯]] [[B|⋯]]"), "Projects/Hawk/Order toner");
+    assert.equal(cmd.taskLinkpath("- [ ] A [[Order toner#Notes|⋯]]"), "Order toner");
+    assert.equal(cmd.taskLinkpath("- [ ] A [[Order toner|↗\uFE0F]]"), "Order toner", "a ↗ with U+FE0F, on a line with no ⋯");
     assert.equal(cmd.taskLinkpath("- [ ] A [[Hawk Ledger|⭕]] [[2026-09-30|🚩 9/30]]"), null);
     // An event's title link is its meeting log, the event's own note (OBS-36)
     assert.equal(cmd.taskLinkpath("- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "2026-09-15 Kickoff call");
@@ -82,15 +82,15 @@ test("taskLinkpath: the first 🔗 link's target; a heading is dropped; other li
     // A log is named with its date first; a title that only starts with a link isn't a log's
     assert.equal(cmd.taskLinkpath("- [<] 12:00pm\t[[Rafe Oakes|@Rafe]] lunch"), null);
     assert.equal(cmd.taskLinkpath("- [<] [[Rafe Oakes|@Rafe]] lunch"), null);
-    assert.equal(cmd.taskLinkpath("- [x] 9:00am [[Hawk Ledger|⭕]] call about it [[Call notes|🔗]]"), "Call notes", "a task with a time in its text keeps its 🔗");
+    assert.equal(cmd.taskLinkpath("- [x] 9:00am [[Hawk Ledger|⭕]] call about it [[Call notes|⋯]]"), "Call notes", "a task with a time in its text keeps its ⋯");
     assert.equal(cmd.taskLinkpath("- [ ] [[Some note|Some]] task"), null, "a task starting with a link isn't an event");
     assert.ok(cmd.sameButTaskLink("- [<] 1:30pm\t[[Projects/Hawk/logs/2026-09-15 Kickoff call|Kickoff call]]", "- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "a moved log's rewritten link is the same line");
     assert.ok(!cmd.sameButTaskLink("- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff]]", "- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]]"), "but not an edited title");
-    assert.equal(cmd.taskLinkpath("- [ ] A [[|🔗]]"), null, "an empty link");
+    assert.equal(cmd.taskLinkpath("- [ ] A [[|⋯]]"), null, "an empty link");
 });
 
 test("label: the line's text for the menu, without checkbox, event time or symbol links", () => {
-    assert.equal(cmd.label("- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]] [[2026-09-30|🚩 9/30]]"), "Order toner");
+    assert.equal(cmd.label("- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]] [[2026-09-30|🚩 9/30]]"), "Order toner");
     assert.equal(cmd.label("\t- [/] Order toner"), "Order toner");
     assert.equal(cmd.label("- [<] 9:00am\tTeam standup [[Hawk Ledger|⭕]]"), "Team standup");
     assert.equal(cmd.label("- [<] All day\tConference"), "Conference");
@@ -112,25 +112,25 @@ test("AddProjectLink is registered as a command, and shares AddTaskNote's menu, 
 });
 
 test("relinked: the line's note link points at another note, alias kept (a same-named note already in the picked project)", () => {
-    assert.equal(cmd.relinked("- [ ] Renew the car [[Renew the car|🔗]]", "Projects/Household/Renew the car"), "- [ ] Renew the car [[Projects/Household/Renew the car|🔗]]");
-    assert.equal(cmd.relinked("- [ ] A [[Inbox/A|🔗]] [[2026-09-30|🚩 9/30]]", "A"), "- [ ] A [[A|🔗]] [[2026-09-30|🚩 9/30]]", "a path link back to a plain name");
-    assert.equal(cmd.relinked("- [ ] A [[A|🔗️]]", "P/A"), "- [ ] A [[P/A|🔗️]]", "with U+FE0F");
+    assert.equal(cmd.relinked("- [ ] Renew the car [[Renew the car|⋯]]", "Projects/Household/Renew the car"), "- [ ] Renew the car [[Projects/Household/Renew the car|⋯]]");
+    assert.equal(cmd.relinked("- [ ] A [[Inbox/A|⋯]] [[2026-09-30|🚩 9/30]]", "A"), "- [ ] A [[A|⋯]] [[2026-09-30|🚩 9/30]]", "a path link back to a plain name");
+    assert.equal(cmd.relinked("- [ ] A [[A|↗\uFE0F]]", "P/A"), "- [ ] A [[P/A|↗\uFE0F]]", "a ↗ with U+FE0F, on a line with no ⋯");
     assert.equal(cmd.relinked("- [<] 1:30pm\t[[2026-09-15 Kickoff call|Kickoff call]] [[Hawk Ledger|⭕]]", "P/logs/2026-09-15 Kickoff call"),
         "- [<] 1:30pm\t[[P/logs/2026-09-15 Kickoff call|Kickoff call]] [[Hawk Ledger|⭕]]", "an event's title link keeps its alias");
     assert.equal(cmd.relinked("- [ ] No link here", "A"), "- [ ] No link here");
 });
 
-test("🗒️ (OBS-87), a phone's 🗒 and the 🔗 before it are all a line's note link; an event's log at the end is its note (OBS-57)", () => {
-    for (const mark of ["🗒️", "🗒", "🔗", "🔗️"]) {
+test("⋯ and ↗ (OBS-208), with or without a phone's U+FE0F, are both a line's note link; an event's log at the end is its note (OBS-57)", () => {
+    for (const mark of ["⋯", "↗", "↗\uFE0F"]) {
         assert.equal(cmd.taskLinkpath(`- [ ] Order toner [[Order toner|${mark}]]`), "Order toner", mark);
         assert.equal(cmd.relinked(`- [ ] A [[A|${mark}]]`, "P/A"), `- [ ] A [[P/A|${mark}]]`, mark);
         assert.equal(cmd.label(`- [ ] Order toner [[Order toner|${mark}]] [[Hawk Ledger|⭕]]`), "Order toner", mark);
         assert.ok(cmd.sameButTaskLink(`- [ ] A [[P/A|${mark}]]`, `- [ ] A [[A|${mark}]]`), mark);
     }
-    const ev = "- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]";
+    const ev = "- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|⋯]] [[Hawk Ledger|⭕]]";
     assert.equal(cmd.taskLinkpath(ev), "2026-09-15 Kickoff call");
     assert.equal(cmd.label(ev), "Kickoff call");
-    assert.equal(cmd.relinked(ev, "P/logs/2026-09-15 Kickoff call"), "- [<] 1:30pm\tKickoff call [[P/logs/2026-09-15 Kickoff call|🗒️]] [[Hawk Ledger|⭕]]");
-    assert.equal(cmd.taskLinkpath("- [<] Printer call [[2026-09-18 Printer call|🗒️]]"), "2026-09-18 Printer call", "a log's line with no time yet");
-    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|🗒️]]", P), `- [<] 1:30pm\tKickoff call ${P} [[2026-09-15 Kickoff call|🗒️]]`, "a log not made yet: the ⭕ goes before its link");
+    assert.equal(cmd.relinked(ev, "P/logs/2026-09-15 Kickoff call"), "- [<] 1:30pm\tKickoff call [[P/logs/2026-09-15 Kickoff call|⋯]] [[Hawk Ledger|⭕]]");
+    assert.equal(cmd.taskLinkpath("- [<] Printer call [[2026-09-18 Printer call|⋯]]"), "2026-09-18 Printer call", "a log's line with no time yet");
+    assert.equal(cmd.placed("- [<] 1:30pm\tKickoff call [[2026-09-15 Kickoff call|⋯]]", P), `- [<] 1:30pm\tKickoff call ${P} [[2026-09-15 Kickoff call|⋯]]`, "a log not made yet: the ⭕ goes before its link");
 });

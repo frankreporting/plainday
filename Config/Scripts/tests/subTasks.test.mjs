@@ -67,10 +67,10 @@ test("AddTaskNote on a sub-task links the top's note, named from its text, curso
     const NOTE = "Projects/Household/Test the timer.md";
     const v = standIn({ notes: { ...NOTES, [NOTE]: "---\ntags: [task]\n---\n" }, open: day("2026-09-16"), at: 1 });
     await v.customJS.AddTaskNote.invoke();
-    assert.deepEqual(v.notes()[day("2026-09-16")].split("\n").slice(0, 2), ["- [ ] Test the timer [[Household|🗃️]] [[Test the timer|🗒️]]", "\t- [ ] A sub-step"]);
+    assert.deepEqual(v.notes()[day("2026-09-16")].split("\n").slice(0, 2), ["- [ ] Test the timer [[Household|🗃️]] [[Test the timer|⋯]]", "\t- [ ] A sub-step"]);
     const e = standIn({ notes: NOTES, open: day("2026-09-17"), at: 2 });
     await e.customJS.AddTaskNote.invoke();
-    assert.deepEqual(e.notes()[day("2026-09-17")].split("\n").slice(0, 3), ["- [<] 9:00am\tKestrel standup [[Kestrel|⭕]] [[2026-09-17 Kestrel standup|🗒️]]", "\t- 9:20am", "\t- [ ] Bring the sitemap"]);
+    assert.deepEqual(e.notes()[day("2026-09-17")].split("\n").slice(0, 3), ["- [<] 9:00am\tKestrel standup [[Kestrel|⭕]] [[2026-09-17 Kestrel standup|⋯]]", "\t- 9:20am", "\t- [ ] Bring the sitemap"]);
 });
 
 test("AddProjectLink on a meeting line in the form used before August 2025, or a line under one, links the meeting; its title's log is its note (OBS-193, rules 1 and 5)", async () => {
@@ -94,7 +94,7 @@ test("AddTaskNote, review: on or under a meeting line in the form used before Au
     const notes = { ...NOTES, [MEET]: "10:00am\tWeekly sync\n\t- [ ] Action item\n11:00am [[2025-03-04 Team meeting|Team meeting]]\n\t- [ ] Another\n" };
     let v = standIn({ notes, open: MEET, at: 1 });
     await v.customJS.AddTaskNote.invoke();
-    assert.equal(v.notes()[MEET].split("\n")[0], "10:00am\tWeekly sync [[2025-03-04 Weekly sync|🗒️]]");
+    assert.equal(v.notes()[MEET].split("\n")[0], "10:00am\tWeekly sync [[2025-03-04 Weekly sync|⋯]]");
     v = standIn({ notes, open: MEET, at: 3 });
     await v.customJS.AddTaskNote.invoke();
     assert.equal(v.notes()[MEET], notes[MEET]);
@@ -102,7 +102,7 @@ test("AddTaskNote, review: on or under a meeting line in the form used before Au
     const CANCELED = day("2026-09-19");
     v = standIn({ notes: { ...NOTES, [CANCELED]: "- [-] 1:00pm\tCanceled call\n\t- [ ] x\n" }, open: CANCELED, at: 1 });
     await v.customJS.AddTaskNote.invoke();
-    assert.equal(v.notes()[CANCELED].split("\n")[0], "- [-] 1:00pm\tCanceled call [[2026-09-19 Canceled call|🗒️]]");
+    assert.equal(v.notes()[CANCELED].split("\n")[0], "- [-] 1:00pm\tCanceled call [[2026-09-19 Canceled call|⋯]]");
 });
 
 test("AddTaskNote, review: on a sub-task of a task with no text yet, the empty link goes on the task, not the sub-task (OBS-193)", async () => {
@@ -114,7 +114,7 @@ test("AddTaskNote, review: on a sub-task of a task with no text yet, the empty l
         assert.equal(selection.from.line, 0);
     };
     await v.customJS.AddTaskNote.invoke();
-    assert.deepEqual(v.notes()[day("2026-09-20")].split("\n").slice(0, 2), ["- [ ] [[|🗒️]]", "\t- [ ] sub step"]);
+    assert.deepEqual(v.notes()[day("2026-09-20")].split("\n").slice(0, 2), ["- [ ] [[|⋯]]", "\t- [ ] sub step"]);
 });
 
 test("AddTaskNote, review round 2: on a [>] event line the calendar sync wrote, or under one, it says the log is linked from the event's new day (OBS-193, rule 1)", async () => {

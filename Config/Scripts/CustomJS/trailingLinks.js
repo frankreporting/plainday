@@ -2,7 +2,7 @@ class TrailingLinks {
     // Startup script (OBS-84): draws the links that end a task or event line small, at the right
     // of the line's last row, the way Things shows a deadline. Display only, except that it keeps a
     // task's ID at the end of its line (below): notes never change otherwise.
-    //   - Only Obsidian PM's links move: a 🚩 due date, forward date, 🗒️ (or 🔗) note, ⭕
+    //   - Only Obsidian PM's links move: a 🚩 due date, forward date, ⋯ or ↗ note, ⭕
     //     project or 🗃️ area link at the end of the line, before a task's ID (OBS-181). People, links
     //     in the text and old wrapped event titles stay put.
     //   - On screen: the project or area, drawn as its shortest name (faint, no pill), the note,
@@ -84,11 +84,13 @@ class TrailingLinks {
         --pm-trail-name-size: 1em;
     }
 
-    /* On screen: the project, the note, the due date, then the forward date at the edge */
+    /* On screen: the project, the due date, the forward date, then the notes at the edge, the ⋯ and then
+       the ↗ to the note it was sent from, as in the line's text: the last mark names where the task came
+       from (Brian, 2026-10-28) */
     & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) { order: 1; }
-    & .pm-trail-run > .pm-trail-note { order: 2; }
-    & .pm-trail-run > .pm-trail-due { order: 3; }
-    & .pm-trail-run > .pm-trail-forward { order: 4; }
+    & .pm-trail-run > .pm-trail-due { order: 2; }
+    & .pm-trail-run > .pm-trail-forward { order: 3; }
+    & .pm-trail-run > :is(.pm-trail-note, .pm-trail-from) { order: 4; }
     /* A task's ID, once the cursor at the line's end shows it, comes last, at the right edge after the
        links: the caret sits after it there, and ← moves into the links */
     & .pm-trail-run > .pm-trail-id { order: 5; color: var(--text-faint); }
@@ -139,12 +141,13 @@ class TrailingLinks {
     // A task or event line: a list item with a checkbox
     static TASK_LINE = /^\s*[-*+] \[.\] /;
     // One system link at the end of the text given: [[target|alias]], the alias one of the symbols
-    // (DueDate's 🚩 M/D, a note's 🗒️ or the older 🔗, a project's ⭕, an area's 🗃️); or Schedule's
+    // (DueDate's 🚩 M/D, a line's own note's ⋯, the ↗ to the note Schedule sent it from, a project's ⭕,
+    // an area's 🗃️; OBS-208); or Schedule's
     // forward date, a periodic note's line with a date for its label (TaskIds.FORWARD), drawn as that
     // date (one written with a ➡️ before its date too). A phone may add or drop the U+FE0F on an emoji.
-    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|🗒️?|🔗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
-    static KINDS = { "🚩": "due", "➡": "forward", "🗒": "note", "🔗": "note", "⭕": "project", "🗃": "area" };
+    static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
     // An ID of six letters or digits, the shape Obsidian's and the task IDs have: the one that's
@@ -337,7 +340,7 @@ class TrailingLinks {
         // project link of its own (TimeReport's own rule, so the two never disagree)
         const lookedUp = (doc, line, t, sourcePath, index) => {
             const TR = customJS.TimeReport;
-            if (!index || !t.links.some((l) => l.kind === "note") || t.links.some((l) => l.kind === "project" || l.kind === "area")) return null;
+            if (!index || !t.links.some((l) => l.kind === "note" || l.kind === "from") || t.links.some((l) => l.kind === "project" || l.kind === "area")) return null;
             try {
                 const context = T.reportContext(T.context((n) => doc.line(n).text, line.number));
                 const path = TR.resolve(context, sourcePath, index, true);

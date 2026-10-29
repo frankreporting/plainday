@@ -17,13 +17,13 @@ class TaskIds {
     // written with a ➡️ before its date (before OBS-185's first test round) is read too, the ➡️ left
     // out of its label; a phone may drop the U+FE0F.
     static FORWARD = /^\[\[(?=(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
-    // One item of the run of links that ends a line, with the spaces before it: a 🚩, 🗒️ (or 🔗), ⭕ or
+    // One item of the run of links that ends a line, with the spaces before it: a 🚩, ⋯, ↗, ⭕ or
     // 🗃️ link, a forward date (or one written with a ➡️), or the ℹ️ or 🆓 mark. The same pattern as
     // AddTaskNote.TRAIL_ITEM; TaskIds' statics must load in an empty vm context, so they can't reach
     // AddTaskNote, and this is a copy that taskIds.test.mjs checks against it.
-    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|🗒️?|🔗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)️?)$/u;
+    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)️?)$/u;
     // The items a forward date goes before: a line's ⭕, 🗃️ and note links
-    static HOME_OR_NOTE = /\|\s*(?:⭕|🗃|🗒|🔗)/u;
+    static HOME_OR_NOTE = /\|\s*(?:⭕|🗃|⋯|↗)/u;
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\]/;
     // The breadcrumb a line sent from a note had before OBS-181, in front of its text: a link to a
     // day, week, month or year, by name or path. An event the calendar sync forwarded has a time and a
@@ -171,9 +171,32 @@ class TaskIds {
         for (const [path, at] of this.recent) if (now - at > TaskIds.RECENT_MS) this.recent.delete(path);
     }
 
-    // Notes the system keeps (Config: templates, scripts) never hold a task's lines
+    // The folders the system works in besides the Planner's periodic notes (rule 12, OBS-208): named
+    // once here, a setting later. AddTaskNote's staging folder is the Inbox.
+    static FOLDERS = ["Projects", "Inbox"];
+    static ARCHIVE = "Archive/";
+
+    // Whether a note is in the system: a daily, weekly, monthly or yearly note, or a note in one of
+    // FOLDERS (rule 12). A line anywhere else is a plain checklist line: no command works on it.
+    inSystem(file) {
+        return !!file && (TaskIds.FOLDERS.some((f) => file.path.startsWith(`${f}/`)) || this.kindOf(file) !== "other");
+    }
+
+    // What a command that works on a line says when its note is outside the system, and does nothing (rule 12)
+    outside(file) {
+        return `${file.basename} isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed`;
+    }
+
+    // Whether a command may work on a line of `file`; when not, it says so (rule 12, OBS-208)
+    works(file) {
+        if (this.inSystem(file)) return true;
+        new Notice(this.outside(file));
+        return false;
+    }
+
+    // A note no command finds a task's lines in: one outside the system (OBS-208)
     ignored(file) {
-        return file.path.startsWith("Config/");
+        return !this.inSystem(file);
     }
 
     // Every line in the vault ending in block ID `id`: [{ file, line, task }], line 0-based, task the
@@ -183,10 +206,10 @@ class TaskIds {
     linesOf(id) {
         if (this.index) return this.index.get(id.toLowerCase()) ?? [];
         const out = [];
+        // A note's place is asked only of a note holding the ID, so a vault of many notes costs no more
         for (const file of app.vault.getMarkdownFiles()) {
-            if (this.ignored(file)) continue;
             const hit = this.lineIn(file, id);
-            if (hit) out.push(hit);
+            if (hit && !this.ignored(file)) out.push(hit);
         }
         return out;
     }
@@ -240,14 +263,16 @@ class TaskIds {
         return out;
     }
 
-    // Every list item with a block ID: Map from the ID, lowercased, to its lines, as linesOf gives them
+    // Every list item with a block ID: Map from the ID, lowercased, to its lines, as linesOf gives them.
+    // For the task checks, which also read `Archive`, as before OBS-208, since an archived project's
+    // Problems are listed (Brian, 2026-10-28); no command searches there.
     allIds() {
         if (this.index) return this.index;
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
-            if (this.ignored(file)) continue;
-            for (const li of app.metadataCache.getFileCache(file)?.listItems ?? []) {
-                if (!li.id) continue;
+            const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
+            if (!items.length || (this.ignored(file) && !file.path.startsWith(TaskIds.ARCHIVE))) continue;
+            for (const li of items) {
                 const key = li.id.toLowerCase();
                 if (!out.has(key)) out.set(key, []);
                 out.get(key).push({ file, line: li.position.start.line, task: li.task });
@@ -259,9 +284,12 @@ class TaskIds {
     // A new ID that no block in the vault has: one lookup per draw, and the first draw almost always
     // does
     freshId() {
+        // Taken anywhere in the vault but Config, in the system or not, so a note moved in later can't
+        // bring a second task with the same ID (OBS-208)
+        const taken = (id) => app.vault.getMarkdownFiles().some((f) => !f.path.startsWith("Config/") && this.lineIn(f, id));
         for (;;) {
             const id = TaskIds.newId(new Set(), this.random ?? Math.random);
-            if (!this.linesOf(id).length) return id;
+            if (this.index ? !this.linesOf(id).length : !taken(id)) return id;
         }
     }
 
@@ -343,6 +371,160 @@ class TaskIds {
     // A line as a check reports it
     static where(h) {
         return { path: h.path, line: h.line, text: h.text };
+    }
+
+    // ---------------------------------------------------------------- the one-time conversion (OBS-208)
+
+    // A link in the old marks, which mean nothing since OBS-208: 🗒️, a line's note or Schedule's link
+    // back to the note it was sent from, and 🔗 before OBS-87. A phone may add or drop the U+FE0F.
+    static OLD_ITEM = /(?<![ ])[ ]*\[\[([^\]|]+)\|\s*(?:🗒|🔗)️?\s*\]\]$/u;
+
+    // The old-mark links in the run that ends `line`: [{ from, to, target }] in line order, `target`
+    // the link's text before its `|`
+    static oldMarks(line) {
+        const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
+        const out = [];
+        let at = bare.length;
+        for (;;) {
+            const head = bare.slice(0, at);
+            const old = head.match(TaskIds.OLD_ITEM);
+            const item = old ?? head.match(TaskIds.TRAIL_ITEM);
+            if (!item) break;
+            if (old) out.unshift({ from: item.index + item[0].indexOf("[["), to: at, target: old[1].trim() });
+            at = item.index;
+        }
+        return out;
+    }
+
+    // Replaces every 🗒️ and 🔗 at the end of a line with ⋯ or ↗, once (Brian, 2026-10-26), in every
+    // note the system reads: the system's and Archive's, whose lines the task checks read. A link back
+    // to the note the line was sent from becomes ↗: one whose note holds a line with the line's task ID,
+    // or, from before IDs, a checklist line with its title (`byText`); one found by ID links that line,
+    // `[[Note#^id|↗]]`, as Schedule writes it (Brian, 2026-10-28). Every other one becomes ⋯. A
+    // checklist line at the left edge of a periodic note whose only project link was that link back
+    // gets the linked note's project as its ⭕, finished or archived or not, so its time keeps counting
+    // there; time counts only under such a line (Brian, 2026-10-28), so no other line needs one.
+    // Returns { changes: [{ path, line (1-based), before, after, mark, note, byText, review, home,
+    // moves }] }, the ones to check first first (`review`): text matches, links back by an ID on a line
+    // that was never sent, and lines whose time the report would count differently afterwards (`moves`:
+    // [{ minutes, from, to }], a project path or null for none, as main read the line and as it will).
+    // With `write`, it writes them (each note through its editor when open) and runs again, which must
+    // find nothing, and counts any line still ending in 🗒️ or 🔗, as the time report's guard does:
+    // { changes, left, old }.
+    async linkBackPass({ write = false } = {}) {
+        const helper = customJS.AddTaskNote;
+        const tr = customJS.TimeReport;
+        const index = tr.appIndex();
+        const paths = app.vault.getMarkdownFiles().map((f) => f.path);
+        const texts = new Map();
+        const textOf = async (file) => {
+            if (!texts.has(file.path)) texts.set(file.path, (await this.readNow(file)).split("\n").map((l) => l.replace(/\r$/, "")));
+            return texts.get(file.path);
+        };
+        const reads = (file) => this.inSystem(file) || file.path.startsWith(TaskIds.ARCHIVE);
+        // A line a sent task left behind: [>], or a forward date of either form
+        const sent = (l) => /^\s*[-*+] \[>\]/.test(l) || !!TaskIds.forwardOf(l) || !!TaskIds.oldForward(l);
+        // How the report reads a daily note's entries: entry → its project, or null when disputed
+        const readingOf = (file, lines) => {
+            const date = window.moment(file.basename, customJS.Schedule.dailyOpts().format, true).format("YYYY-MM-DD");
+            const model = tr.build([{ date, path: file.path, text: lines.join("\n") }], index, {});
+            const out = new Map();
+            for (const e of model.entries) out.set(`${e.line}|${e.start}|${e.end}`, { e, project: e.project ?? null });
+            for (const e of model.disputed ?? []) out.set(`${e.line}|${e.start}|${e.end}`, { e, project: null });
+            return out;
+        };
+        const changes = [];
+        for (const file of app.vault.getMarkdownFiles()) {
+            if (!reads(file)) continue;
+            const lines = await textOf(file);
+            const periodic = this.kindOf(file) !== "other";
+            const found = [];
+            for (let i = 0; i < lines.length; i++) {
+                const before = lines[i];
+                if (!tr.convertible(before)) continue;
+                const marks = TaskIds.oldMarks(before);
+                if (!marks.length) continue;
+                const id = TaskIds.idOf(before);
+                // Its title without the old marks, which no longer read as part of the run that ends it
+                const title = TaskIds.title([...marks].reverse().reduce((t, m) => t.slice(0, m.from) + t.slice(m.to), before));
+                let after = before, dots = before, back = null, byText = false, review = false;
+                // Right to left, so the spans before stay where they are
+                for (const m of [...marks].reverse()) {
+                    const dest = app.metadataCache.getFirstLinkpathDest(m.target.split("#")[0].trim(), file.path);
+                    const there = dest ? await textOf(dest) : [];
+                    const byId = !!id && there.find((l) => TaskIds.idOf(l)?.toLowerCase() === id.toLowerCase());
+                    const byTitle = !byId && !!title && there.some((l) => TaskIds.CHECKBOX.test(l) && TaskIds.title(l) === title);
+                    const mark = byId || byTitle ? "↗" : "⋯";
+                    if (mark === "↗") { back = dest; byText = byTitle; review = byTitle || !sent(byId || ""); }
+                    // A link back by ID links the task's line there, as Schedule writes it now
+                    const target = byId && !m.target.includes("#") ? `${m.target}#^${TaskIds.idOf(byId)}` : m.target;
+                    after = after.slice(0, m.from) + `[[${target}|${mark}]]` + after.slice(m.to);
+                    // As main read it: every old mark a note link, as a ⋯ is now
+                    dots = dots.slice(0, m.from) + `[[${m.target}|⋯]]` + dots.slice(m.to);
+                }
+                // The ⭕ a link back gave it, on a checklist line at the left edge of a periodic note
+                // with no project link of its own and no ⋯ note in a project
+                let home = null;
+                const run = TaskIds.splitRun(after).items;
+                const own = run.filter((x) => /\|\s*⋯\s*\]\]$/u.test(x)).map((x) => x.match(/^\[\[([^\]|#]+)/)?.[1].trim());
+                // As the report reads a note's project: its folder, or its `parent`
+                const ownHome = own.some((t) => { const n = t && app.metadataCache.getFirstLinkpathDest(t, file.path); return n && tr.projectOfNote(n.path, index); });
+                if (back && periodic && /^[-*+] \[.\]/.test(before) && !run.some((x) => /\|\s*(?:⭕|🗃)/u.test(x)) && !ownHome) {
+                    home = helper.filedIn(back);
+                    if (home) after = helper.withHome(after, helper.homeLink(home, helper.linktextFor(home, paths)));
+                }
+                found.push({ path: file.path, line: i + 1, before, after, dots, mark: back ? "↗" : "⋯", note: back?.path ?? null, byText, review, home: home?.path ?? null, moves: [] });
+            }
+            if (!found.length) continue;
+            // Where the report counts this day's time before and after, so a line whose time would count
+            // differently is listed with it
+            if (customJS.Schedule.isDailyNote(file)) {
+                const was = lines.slice(), now = lines.slice();
+                for (const c of found) { was[c.line - 1] = c.dots; now[c.line - 1] = c.after; }
+                const a = readingOf(file, was), b = readingOf(file, now);
+                for (const [key, x] of new Map([...b, ...a])) {
+                    const from = a.get(key)?.project ?? null, to = b.get(key)?.project ?? null;
+                    if (from === to) continue;
+                    const at = new Set(x.e.context.map((c) => c.line));
+                    const c = found.find((f) => at.has(f.line));
+                    if (c) { c.moves.push({ minutes: x.e.minutes, from, to }); c.review = true; }
+                }
+            }
+            for (const c of found) {
+                delete c.dots;
+                if (c.after !== c.before) changes.push(c);
+            }
+        }
+        // To check first: time that would count differently, text matches, and links back by an ID on a
+        // line that was never sent
+        changes.sort((a, b) => (b.review - a.review) || ((b.moves.length > 0) - (a.moves.length > 0)) || (b.byText - a.byText) || a.path.localeCompare(b.path) || a.line - b.line);
+        if (!write) return { changes };
+        const byFile = new Map();
+        for (const c of changes) {
+            if (!byFile.has(c.path)) byFile.set(c.path, []);
+            byFile.get(c.path).push(c);
+        }
+        for (const [path, list] of byFile) {
+            const file = app.vault.getFileByPath(path);
+            if (!file) continue;
+            await customJS.Schedule.rewrite(file, (text) => {
+                const ls = text.split("\n");
+                for (const c of list) {
+                    const cr = ls[c.line - 1]?.endsWith("\r") ? "\r" : "";
+                    // Only a line still as it was read: one changed since is left for the next run
+                    if (ls[c.line - 1]?.replace(/\r$/, "") === c.before) ls[c.line - 1] = c.after + cr;
+                }
+                return ls.join("\n");
+            });
+        }
+        const again = await this.linkBackPass();
+        // And a plain count, as the time report's guard counts: a line still ending in a 🗒️ or 🔗 link
+        let old = 0;
+        for (const file of app.vault.getMarkdownFiles()) {
+            if (!reads(file)) continue;
+            for (const l of (await this.readNow(file)).split("\n")) if (tr.convertible(l) && TaskIds.oldMarks(l).length) old++;
+        }
+        return { changes, left: again.changes, old };
     }
 
     // "day", "week", "month" or "year" for a periodic note (Schedule's own test), else "other": a note a

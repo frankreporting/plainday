@@ -26,7 +26,7 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 
 - [x] Proposal and estimate
 - [x] Sitemap and content inventory
-- [x] [[Draft homepage wireframes]]
+- [x] Draft homepage wireframes [[Draft homepage wireframes|⋯]]
 - [ ] Homepage build
 - [ ] Category page templates
 

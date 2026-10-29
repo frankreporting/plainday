@@ -1,9 +1,9 @@
 class DueDate {
-    // Note links end a line (🗒️ task note or log, or 🔗 from before OBS-87, ⭕ project, 🗃️ area), so End reaches the note; the
+    // Note links end a line (⋯ task note or log, ↗ the note it was sent from, ⭕ project, 🗃️ area), so End reaches the note; the
     // due date goes in front of them (OBS-36), and in front of a sent line's forward date (OBS-107): a
     // link to a periodic note's line with a date for its label, `[[2026-10-08#^k3x9m2|10/8]]`, or one
     // written with a ➡️ before its date. A task's ID stays last (OBS-181). A phone may add or drop the U+FE0F on an emoji.
-    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
 
     // Where the due link goes on `lineText`, and the text to insert there: right before the line's
@@ -30,6 +30,7 @@ class DueDate {
         const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         if (!view) { new Notice("Need an active editor"); return; }
+        if (view.file && customJS.TaskIds && !customJS.TaskIds.works(view.file)) return;
 
         const editor = view.editor;
         // On a sub-task, or any line under a task, the deadline is the task's: the line at the top of the nest

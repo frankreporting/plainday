@@ -1,7 +1,7 @@
 // Start and end time of the calendar event a new log was made from, called from the Log
 // template as tp.user.eventTimes(dailyNoteText, logName).
 // Finds the daily note line with a time that links to the log, e.g.
-//     - [<] 1:30pm⇥Intro call with Imogen Fenwick [[2026-09-09 Intro call with Imogen Fenwick|🗒️]]
+//     - [<] 1:30pm⇥Intro call with Imogen Fenwick [[2026-09-09 Intro call with Imogen Fenwick|⋯]]
 //     ⇥- 1:40pm
 // (or, from before OBS-57, `1:30pm⇥[[2026-09-09 Intro call with Imogen Fenwick|…]]`)
 // and returns { time: "1:30pm", endTime: "1:40pm" }. The line under it is the calendar sync's end

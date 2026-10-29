@@ -1,4 +1,4 @@
-// OBS-90's one-off conversion: every checklist line that links its note (🗒️, or 🔗) keeps a link to
+// OBS-90's one-off conversion: every checklist line that links its note (⋯, or ⋯) keeps a link to
 // its project or area too, before the note link, which ends the line. Run it once on a vault, then
 // install the OBS-90 scripts:
 //

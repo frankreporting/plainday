@@ -87,9 +87,10 @@ test("target: with nothing selected, text after the cursor means use the line's 
     assert.equal(name("- [ ] Order toner ^abc123", 8), "Order toner");
     assert.equal(t("- [<] 2:00pm\tReview ^mtg1", 8).name, "Review");
     // Nothing to use
-    for (const mark of ["🗒️", "🗒", "🔗", "🔗\uFE0F"]) assert.ok(t(`- [ ] Call the bank [[Call the bank|${mark}]]`, 8).error, `already linked (${mark})`);
+    // Its own note's ⋯, or the ↗ to the note it was sent from, read alike until OBS-196 (OBS-208)
+    for (const mark of ["⋯", "↗", "↗\uFE0F"]) assert.ok(t(`- [ ] Call the bank [[Call the bank|${mark}]]`, 8).error, `already linked (${mark})`);
     // With the cursor at the end, too: no second, blank link (fix round 6)
-    for (const line of ["- [>] Order paper samples [[Order paper samples|🗒️]]", "- [ ] Order paper samples [[Order paper samples|🗒️]]   ", "- [x] A [[2026-09-30|🚩 9/30]] [[A|🔗]]"]) {
+    for (const line of ["- [>] Order paper samples [[Order paper samples|⋯]]", "- [ ] Order paper samples [[Order paper samples|⋯]]   ", "- [x] A [[2026-09-30|🚩 9/30]] [[A|⋯]]"]) {
         assert.deepEqual(t(line, line.length), { error: "This task already links a note" }, line);
     }
     assert.ok(t("- [ ] [[Hawk Ledger|⭕]]", 7).error, "no task text before the link");
@@ -115,53 +116,53 @@ test("target: on an event line the time is skipped and the title is used", () =>
     // An event never gets a blank link (it would point at the daily note): with no title, it says so
     assert.deepEqual(t("- [<] 3:00pm\t", "- [<] 3:00pm\t".length), { error: "This event has no title to name its log" });
     assert.ok(t("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", 8).error, "title already a log link");
-    for (const mark of ["🗒️", "🗒", "🔗"]) {
+    for (const mark of ["⋯", "↗", "↗\uFE0F"]) {
         assert.equal(t(`- [<] 1:00pm\tStandup [[2026-09-14 Standup|${mark}]] [[Hawk Ledger|⭕]]`, 8).error, "This event already links a log", mark);
     }
 });
 
 test("eventLine: the log link ends the line, after the title, its marks and any ⭕ or 🗃️ links (OBS-57, OBS-90)", () => {
-    assert.equal(add.eventLine("- [<] 9:00am\tStandup", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]]");
-    assert.equal(add.eventLine("- [<] 9:00am\tStandup   ", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]]");
+    assert.equal(add.eventLine("- [<] 9:00am\tStandup", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
+    assert.equal(add.eventLine("- [<] 9:00am\tStandup   ", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
     assert.equal(add.eventLine("- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]]", "Delivery window", "2026-09-14"),
-        "- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]] [[2026-09-14 Delivery window|🗒️]]");
+        "- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]] [[2026-09-14 Delivery window|⋯]]");
     assert.equal(add.eventLine("\t- [<] All day\tOffsite [[Hawk Ledger|⭕]]", "Offsite", "2026-09-14"),
-        "\t- [<] All day\tOffsite [[Hawk Ledger|⭕]] [[2026-09-14 Offsite|🗒️]]");
+        "\t- [<] All day\tOffsite [[Hawk Ledger|⭕]] [[2026-09-14 Offsite|⋯]]");
     // A selected name names the log; the link still goes at the end
     assert.equal(add.eventLine("- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]]", "Weekly sync", "2026-09-14"),
-        "- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]] [[2026-09-14 Weekly sync|🗒️]]");
+        "- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]] [[2026-09-14 Weekly sync|⋯]]");
     // A person linked in the title stays in the title
-    assert.equal(add.eventLine("- [<] 1:00pm\tLunch with [[Rafe Oakes]]", "Lunch with", "2026-09-14"), "- [<] 1:00pm\tLunch with [[Rafe Oakes]] [[2026-09-14 Lunch with|🗒️]]");
+    assert.equal(add.eventLine("- [<] 1:00pm\tLunch with [[Rafe Oakes]]", "Lunch with", "2026-09-14"), "- [<] 1:00pm\tLunch with [[Rafe Oakes]] [[2026-09-14 Lunch with|⋯]]");
     // An existing log's link text (a path, when its name isn't unique)
     assert.equal(add.eventLine("- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]]", "Standup", "2026-09-14", "Projects/Hawk/logs/2026-09-14 Standup"),
-        "- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]] [[Projects/Hawk/logs/2026-09-14 Standup|🗒️]]");
+        "- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]] [[Projects/Hawk/logs/2026-09-14 Standup|⋯]]");
     // Already linked, either way: nothing to add
-    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\tStandup [[2026-09-14 Standup|🔗]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
+    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\tStandup [[2026-09-14 Standup|⋯]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
     assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
 });
 
 test("withHome: the project or area link goes before the note links that end the line, replacing the ones given (OBS-90)", () => {
     const H = "[[Hawk Ledger|⭕]]";
     assert.equal(add.withHome("- [ ] Order toner", H), "- [ ] Order toner [[Hawk Ledger|⭕]]", "no note link: at the end");
-    assert.equal(add.withHome("- [ ] Order toner [[Order toner|🗒️]]", H), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
-    assert.equal(add.withHome("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|🗒️]]", H), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "after a due date");
-    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🗒️]]", "replacing another");
-    assert.equal(add.withHome("- [ ] Order toner [[Order toner|🔗]] [[Tin|⭕]]  ", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]]", "the older order comes out in the new one");
-    assert.equal(add.withHome("- [ ] Sub [[Sub|🗒️]] [[Parent note|🗒️]]", H), "- [ ] Sub [[Hawk Ledger|⭕]] [[Sub|🗒️]] [[Parent note|🗒️]]", "before every note link at the end");
-    assert.equal(add.withHome("- [ ] Read [[Notes|🗒️]] then call", H), "- [ ] Read [[Notes|🗒️]] then call [[Hawk Ledger|⭕]]", "a note link in the text isn't the end");
-    assert.equal(add.withHome("\t- [<] 2:00pm\tReview ℹ️ [[2026-09-14 Review|🗒️]]", "[[Home|🗃️]]"), "\t- [<] 2:00pm\tReview ℹ️ [[Home|🗃️]] [[2026-09-14 Review|🗒️]]", "an event, an area");
-    assert.equal(add.withHome("- [ ] [[Order toner|🗒️]]", H), "- [ ] [[Hawk Ledger|⭕]] [[Order toner|🗒️]]");
+    assert.equal(add.withHome("- [ ] Order toner [[Order toner|⋯]]", H), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]");
+    assert.equal(add.withHome("- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Order toner|⋯]]", H), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]] [[Order toner|⋯]]", "after a due date");
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|⋯]]", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]", "replacing another");
+    assert.equal(add.withHome("- [ ] Order toner [[Order toner|⋯]] [[Tin|⭕]]  ", H, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]", "the older order comes out in the new one");
+    assert.equal(add.withHome("- [ ] Sub [[Sub|⋯]] [[Parent note|⋯]]", H), "- [ ] Sub [[Hawk Ledger|⭕]] [[Sub|⋯]] [[Parent note|⋯]]", "before every note link at the end");
+    assert.equal(add.withHome("- [ ] Read [[Notes|⋯]] then call", H), "- [ ] Read [[Notes|⋯]] then call [[Hawk Ledger|⭕]]", "a note link in the text isn't the end");
+    assert.equal(add.withHome("\t- [<] 2:00pm\tReview ℹ️ [[2026-09-14 Review|⋯]]", "[[Home|🗃️]]"), "\t- [<] 2:00pm\tReview ℹ️ [[Home|🗃️]] [[2026-09-14 Review|⋯]]", "an event, an area");
+    assert.equal(add.withHome("- [ ] [[Order toner|⋯]]", H), "- [ ] [[Hawk Ledger|⭕]] [[Order toner|⋯]]");
     // No link: only what's given comes off
-    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]] ", null), "- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]");
-    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|🗒️]]", null, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Order toner|🗒️]]");
-    // A 🚩 after the 🗒️ stays where it is; the ⭕ goes before the 🗒️ (OBS-90 review)
-    assert.equal(add.withHome("- [x] Pay it [[Pay it|🗒️]] [[2026-09-14|🚩 9/14]]", H), "- [x] Pay it [[Hawk Ledger|⭕]] [[Pay it|🗒️]] [[2026-09-14|🚩 9/14]]");
-    assert.equal(add.withHome("- [x] Pay it 🆓 [[Pay it|🗒️]]", H), "- [x] Pay it 🆓 [[Hawk Ledger|⭕]] [[Pay it|🗒️]]");
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|⋯]] ", null), "- [ ] Order toner [[Tin|⭕]] [[Order toner|⋯]]");
+    assert.equal(add.withHome("- [ ] Order toner [[Tin|⭕]] [[Order toner|⋯]]", null, ["[[Tin|⭕]]"]), "- [ ] Order toner [[Order toner|⋯]]");
+    // A 🚩 after the ⋯ stays where it is; the ⭕ goes before the ⋯ (OBS-90 review)
+    assert.equal(add.withHome("- [x] Pay it [[Pay it|⋯]] [[2026-09-14|🚩 9/14]]", H), "- [x] Pay it [[Hawk Ledger|⭕]] [[Pay it|⋯]] [[2026-09-14|🚩 9/14]]");
+    assert.equal(add.withHome("- [x] Pay it 🆓 [[Pay it|⋯]]", H), "- [x] Pay it 🆓 [[Hawk Ledger|⭕]] [[Pay it|⋯]]");
     // A block ID stays last, where Obsidian reads it
-    assert.equal(add.withHome("- [x] Task [[Task|🗒️]] ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] [[Task|🗒️]] ^abc123");
+    assert.equal(add.withHome("- [x] Task [[Task|⋯]] ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] [[Task|⋯]] ^abc123");
     assert.equal(add.withHome("- [x] Task ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] ^abc123");
     // An event's tab after its time isn't eaten, even with no title before the note link
-    assert.equal(add.withHome("- [<] 9:00am\t[[Task A|🗒️]]", H), "- [<] 9:00am\t [[Hawk Ledger|⭕]] [[Task A|🗒️]]");
+    assert.equal(add.withHome("- [<] 9:00am\t[[Task A|⋯]]", H), "- [<] 9:00am\t [[Hawk Ledger|⭕]] [[Task A|⋯]]");
     // homed: what noteFor found decides
     assert.equal(add.homed("- [ ] A [[Tin|⭕]] [[Other|⭕]]", { homeLink: H, projectLinks: ["[[Tin|⭕]]", "[[Other|⭕]]"] }), "- [ ] A [[Hawk Ledger|⭕]]");
     assert.equal(add.homed("- [ ] A [[Tin|⭕]]", { homeLink: null, projectLinks: ["[[Tin|⭕]]"] }), "- [ ] A [[Tin|⭕]]", "no home to name: the line's own links stay");
@@ -169,44 +170,44 @@ test("withHome: the project or area link goes before the note links that end the
 });
 
 test("trailingNote and endWith: the note link in the run that ends a line; a link added at the end goes before a block ID", () => {
-    assert.equal(add.trailingNote("- [ ] A [[P|⭕]] [[Note A|🗒️]]"), "Note A");
-    assert.equal(add.trailingNote("- [ ] A [[Note A#Notes|🔗]] [[2026-09-30|🚩 9/30]] ^x1"), "Note A");
-    assert.equal(add.trailingNote("- [ ] Sub [[Sub|🗒️]] [[Parent|🗒️]]"), "Sub", "the first of several");
-    assert.equal(add.trailingNote("- [ ] Read [[Note A|🗒️]] then call"), null, "not at the end");
+    assert.equal(add.trailingNote("- [ ] A [[P|⭕]] [[Note A|⋯]]"), "Note A");
+    assert.equal(add.trailingNote("- [ ] A [[Note A#Notes|⋯]] [[2026-09-30|🚩 9/30]] ^x1"), "Note A");
+    assert.equal(add.trailingNote("- [ ] Sub [[Sub|⋯]] [[Parent|⋯]]"), "Sub", "the first of several");
+    assert.equal(add.trailingNote("- [ ] Read [[Note A|⋯]] then call"), null, "not at the end");
     assert.equal(add.trailingNote("- [ ] A [[P|⭕]]"), null);
     // Only the ⭕ links that end a line are its own (OBS-90): one in the text is part of the title
     const own = (line) => JSON.parse(JSON.stringify(add.trailingProjectLinks(line))).map((l) => l.linkpath);
-    assert.deepEqual(own("- [ ] Ask [[Tin|⭕]] about [[Hawk|⭕]] [[Note|🗒️]] ^x1"), ["Hawk"]);
-    assert.deepEqual(own("- [ ] A [[2026-09-30|🚩 9/30]] [[Tin|⭕]] [[Home|🗃️]] [[Note|🗒️]]"), ["Tin", "Home"]);
-    assert.deepEqual(own("- [ ] A [[Tin|⭕ Tin]] [[Note|🗒️]]"), [], "a ⭕ with a name after it isn't one, as the report reads it");
-    assert.equal(add.endWith("- [ ] A [[P|⭕]]  ", "[[A|🗒️]]"), "- [ ] A [[P|⭕]] [[A|🗒️]]");
-    assert.equal(add.endWith("- [ ] A ^x1", "[[A|🗒️]]"), "- [ ] A [[A|🗒️]] ^x1");
+    assert.deepEqual(own("- [ ] Ask [[Tin|⭕]] about [[Hawk|⭕]] [[Note|⋯]] ^x1"), ["Hawk"]);
+    assert.deepEqual(own("- [ ] A [[2026-09-30|🚩 9/30]] [[Tin|⭕]] [[Home|🗃️]] [[Note|⋯]]"), ["Tin", "Home"]);
+    assert.deepEqual(own("- [ ] A [[Tin|⭕ Tin]] [[Note|⋯]]"), [], "a ⭕ with a name after it isn't one, as the report reads it");
+    assert.equal(add.endWith("- [ ] A [[P|⭕]]  ", "[[A|⋯]]"), "- [ ] A [[P|⭕]] [[A|⋯]]");
+    assert.equal(add.endWith("- [ ] A ^x1", "[[A|⋯]]"), "- [ ] A [[A|⋯]] ^x1");
     // With a selection, the name is the selection, and the note link still ends the line (OBS-90 review)
     const line = "- [ ] Draft wireframes for the homepage [[Tin|⭕]]";
     assert.equal(add.lineWithLink(line, { from: 6, to: 22 }, { name: "Draft wireframes", linktext: "Draft wireframes", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Tin|⭕]]"] }),
-        "- [ ] Draft wireframes for the homepage [[Hawk Ledger|⭕]] [[Draft wireframes|🗒️]]");
+        "- [ ] Draft wireframes for the homepage [[Hawk Ledger|⭕]] [[Draft wireframes|⋯]]");
 });
 
-test("lineWithLink: task text without its dates, the note's project in place of the line's ⭕, the 🗒️ link last (OBS-90)", () => {
+test("lineWithLink: task text without its dates, the note's project in place of the line's ⭕, the ⋯ link last (OBS-90)", () => {
     const line = "- [ ] 2026-11-01 Plan the offsite [[Hawk Ledger|⭕]]  ";
     const target = add.target(line, 8);
     const kept = { name: "Plan the offsite", linktext: "Plan the offsite", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Hawk Ledger|⭕]]"] };
-    assert.equal(add.lineWithLink(line, target, kept), "- [ ] Plan the offsite [[Hawk Ledger|⭕]] [[Plan the offsite|🗒️]]");
+    assert.equal(add.lineWithLink(line, target, kept), "- [ ] Plan the offsite [[Hawk Ledger|⭕]] [[Plan the offsite|⋯]]");
     const left = { ...kept, homeLink: "[[Tin Works|⭕]]" };
-    assert.equal(add.lineWithLink(line, target, left), "- [ ] Plan the offsite [[Tin Works|⭕]] [[Plan the offsite|🗒️]]", "the note stayed in Tin Works");
+    assert.equal(add.lineWithLink(line, target, left), "- [ ] Plan the offsite [[Tin Works|⭕]] [[Plan the offsite|⋯]]", "the note stayed in Tin Works");
     const plain = "\t- [/] Order new toner";
     assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
-        "\t- [/] Order new toner [[Household|🗃️]] [[Order new toner|🗒️]]", "a line with no ⭕ gets the note's");
+        "\t- [/] Order new toner [[Household|🗃️]] [[Order new toner|⋯]]", "a line with no ⭕ gets the note's");
     assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: null, projectLinks: [] }),
-        "\t- [/] Order new toner [[Order new toner|🗒️]]", "a note with no project or area");
+        "\t- [/] Order new toner [[Order new toner|⋯]]", "a note with no project or area");
     const date = "- [ ] Pay rent [[2026-10-01|🚩 10/1]]";
     assert.equal(add.lineWithLink(date, add.target(date, 7), { name: "Pay rent", linktext: "Pay rent", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
-        "- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]] [[Pay rent|🗒️]]", "the 🚩, then the ⭕, then the 🗒️");
+        "- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]] [[Pay rent|⋯]]", "the 🚩, then the ⭕, then the ⋯");
 });
 
-test("eventLink: a meeting log named with the day's date, as a 🗒️ note link; blank, it waits for the name", () => {
-    assert.equal(add.eventLink("2026-09-16", "Weekly sync"), "[[2026-09-16 Weekly sync|🗒️]]");
-    assert.equal(add.eventLink("2026-09-16", ""), "[[2026-09-16 |🗒️]]");
+test("eventLink: a meeting log named with the day's date, as a ⋯ note link; blank, it waits for the name", () => {
+    assert.equal(add.eventLink("2026-09-16", "Weekly sync"), "[[2026-09-16 Weekly sync|⋯]]");
+    assert.equal(add.eventLink("2026-09-16", ""), "[[2026-09-16 |⋯]]");
 });
 
 test("isEvent: only `[<]` lines, and the checkbox pattern matches every status", () => {
@@ -229,10 +230,10 @@ test("new notes are staged outside Projects/, so a note left there is unfiled", 
 test("projectLinks: the ⭕ links on a line, with their link paths", () => {
     const links = (line) => JSON.parse(JSON.stringify(add.projectLinks(line)));
     assert.deepEqual(links("- [ ] Order toner [[Hawk Ledger|⭕]]"), [{ raw: "[[Hawk Ledger|⭕]]", linkpath: "Hawk Ledger" }]);
-    assert.deepEqual(links("- [ ] A [[Projects/Freelance/Hawk Ledger/Hawk Ledger|⭕]] [[B|🔗]]").map((l) => l.linkpath), ["Projects/Freelance/Hawk Ledger/Hawk Ledger"]);
+    assert.deepEqual(links("- [ ] A [[Projects/Freelance/Hawk Ledger/Hawk Ledger|⭕]] [[B|⋯]]").map((l) => l.linkpath), ["Projects/Freelance/Hawk Ledger/Hawk Ledger"]);
     assert.deepEqual(links("- [ ] A [[Hawk Ledger#Notes|⭕]]").map((l) => l.linkpath), ["Hawk Ledger"], "a heading link still names the project");
     assert.equal(links("- [ ] A [[One|⭕]] [[Two|⭕]]").length, 2);
-    assert.deepEqual(links("- [ ] A [[Note|🔗]] [[2026-10-25|🚩 10/25]]"), [], "other suffixes aren't project links");
+    assert.deepEqual(links("- [ ] A [[Note|⋯]] [[2026-10-25|🚩 10/25]]"), [], "other suffixes aren't project links");
     assert.deepEqual(links("- [ ] A [[Hawk Ledger|⭕️]] [[Tin| ⭕ ]]").map((l) => l.linkpath), ["Hawk Ledger", "Tin"], "U+FE0F and spaces, as the sync allows");
     assert.deepEqual(links("- [ ] A [[Household|🗃️]] [[Garden|🗃]]").map((l) => l.linkpath), ["Household", "Garden"], "an area's 🗃️ link counts too (OBS-36)");
     assert.equal(AddTaskNote.AREA_MARK, "🗃️");
@@ -243,17 +244,17 @@ test("projectLinks: the ⭕ links on a line, with their link paths", () => {
 });
 
 test("withoutLinks: takes the project link out and closes the gap, keeping indent, checkbox and other links", () => {
-    assert.equal(add.withoutLinks("- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|🔗]]", ["[[Hawk Ledger|⭕]]"]),
-        "- [ ] Order toner [[Order toner|🔗]]");
-    assert.equal(add.withoutLinks("\t\t- [/] Plan it [[Order|🔗]] [[P|⭕]]", ["[[P|⭕]]"]), "\t\t- [/] Plan it [[Order|🔗]]", "at the end: no trailing space");
-    assert.equal(add.withoutLinks("- [ ] [[P|⭕]] Plan it [[Plan it|🔗]]", ["[[P|⭕]]"]), "- [ ] Plan it [[Plan it|🔗]]", "right after the checkbox");
-    assert.equal(add.withoutLinks("- [ ] A [[P|⭕]] [[P|⭕]] [[A|🔗]]", ["[[P|⭕]]", "[[P|⭕]]"]), "- [ ] A [[A|🔗]]", "the same link twice");
-    assert.equal(add.withoutLinks("- [ ] A [[Due|🚩 9/30]] [[P|⭕]] [[A|🔗]]", ["[[P|⭕]]"]), "- [ ] A [[Due|🚩 9/30]] [[A|🔗]]");
+    assert.equal(add.withoutLinks("- [ ] Order toner [[Hawk Ledger|⭕]] [[Order toner|⋯]]", ["[[Hawk Ledger|⭕]]"]),
+        "- [ ] Order toner [[Order toner|⋯]]");
+    assert.equal(add.withoutLinks("\t\t- [/] Plan it [[Order|⋯]] [[P|⭕]]", ["[[P|⭕]]"]), "\t\t- [/] Plan it [[Order|⋯]]", "at the end: no trailing space");
+    assert.equal(add.withoutLinks("- [ ] [[P|⭕]] Plan it [[Plan it|⋯]]", ["[[P|⭕]]"]), "- [ ] Plan it [[Plan it|⋯]]", "right after the checkbox");
+    assert.equal(add.withoutLinks("- [ ] A [[P|⭕]] [[P|⭕]] [[A|⋯]]", ["[[P|⭕]]", "[[P|⭕]]"]), "- [ ] A [[A|⋯]]", "the same link twice");
+    assert.equal(add.withoutLinks("- [ ] A [[Due|🚩 9/30]] [[P|⭕]] [[A|⋯]]", ["[[P|⭕]]"]), "- [ ] A [[Due|🚩 9/30]] [[A|⋯]]");
     assert.equal(add.withoutLinks("- [<] 9:00am\tQ3  review [[P|⭕]]", ["[[P|⭕]]"]), "- [<] 9:00am\tQ3  review", "spacing elsewhere on the line is kept");
-    const untouched = "- [ ] A  [[P|⭕]] [[A|🔗]]";
+    const untouched = "- [ ] A  [[P|⭕]] [[A|⋯]]";
     assert.equal(add.withoutLinks(untouched, []), untouched, "nothing to remove: the line isn't touched at all");
     // Text that touched the link keeps a space from its other side, so a 🆓 stays a word of its own
-    assert.equal(add.withoutLinks("- [x] Do it [[P|⭕]]🆓 [[A|🗒️]]", ["[[P|⭕]]"]), "- [x] Do it 🆓 [[A|🗒️]]");
+    assert.equal(add.withoutLinks("- [x] Do it [[P|⭕]]🆓 [[A|⋯]]", ["[[P|⭕]]"]), "- [x] Do it 🆓 [[A|⋯]]");
     assert.equal(add.withoutLinks("- [x] Do[[P|⭕]]it", ["[[P|⭕]]"]), "- [x] Do it");
     // but none before punctuation or after an opening bracket
     assert.equal(add.withoutLinks("- [ ] Call [[P|⭕]], then", ["[[P|⭕]]"]), "- [ ] Call, then");
@@ -624,48 +625,48 @@ test("invoke on an event line: wherever the cursor is, the log is named from the
     const ev = "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]";
     for (const ch of [ev.length, 8, 0]) {
         const named = await invokeOn(ev, { ch, paths: HAWK });
-        assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]", `cursor at ${ch}`);
+        assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", `cursor at ${ch}`);
         assert.deepEqual(named.notices, [], `cursor at ${ch}`);
     }
     // An event with no title has nothing to name its log after, and the line is left alone
     const untitled = await invokeOn("- [<] 1:30pm\t");
     assert.equal(untitled.text, "- [<] 1:30pm\t");
     assert.deepEqual(untitled.notices, ["This event has no title to name its log"]);
-    for (const linked of ["- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]]", "- [<] 1:30pm\t[[2026-09-14 Kickoff call|Kickoff call]]  ", "- [<] Printer call [[2026-09-18 Printer call|🔗]] [[Hawk Ledger|⭕]]"]) {
+    for (const linked of ["- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|⋯]]", "- [<] 1:30pm\t[[2026-09-14 Kickoff call|Kickoff call]]  ", "- [<] Printer call [[2026-09-18 Printer call|⋯]] [[Hawk Ledger|⭕]]"]) {
         const refused = await invokeOn(linked);
         assert.equal(refused.text, linked, linked);
         assert.deepEqual(refused.notices, ["This event already links a log"], linked);
     }
     // The cursor in the title: the log is named from it, and the cursor goes after the checkbox
     const named = await invokeOn(ev, { ch: 16, paths: HAWK });
-    assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
+    assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
     assert.deepEqual(named.cursor, { line: 0, ch: 6 });
 });
 
 test("invoke on an event line makes the log right away through the Log template, after saving the line (OBS-57)", async () => {
     const ev = "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]]";
     const made = await invokeOn(ev, { ch: 16, paths: HAWK });
-    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]", "the ⭕ stays, and the Log template files the log there");
+    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", "the ⭕ stays, and the Log template files the log there");
     assert.deepEqual(made.calls, ["write line", "save", "template Config/Templates/Log.md in Inbox: 2026-09-14 Kickoff call (open: false)"]);
     // The cursor at the end of the line makes it just the same (fix round 2); a line with no title,
     // or one that's refused, makes nothing
     assert.deepEqual((await invokeOn(ev, { paths: HAWK })).calls, made.calls);
     assert.ok(!(await invokeOn("- [<] 1:30pm\t")).calls.some((c) => c.startsWith("template")));
-    assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|🗒️]]")).calls, ["notice: This event already links a log"]);
+    assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|⋯]]")).calls, ["notice: This event already links a log"]);
 });
 
 test("invoke on an event line whose log exists: nothing is made, and the line and the log agree on its project (OBS-90)", async () => {
     const LOG = "Projects/Freelance/Hawk Ledger/logs/2026-09-14 Kickoff call.md";
     const paths = [...HAWK, [LOG, ["log"]], ["Projects/Freelance/Tin Works/Tin Works.md", ["project"]], ["Inbox/2026-09-14 Printer call.md", ["log"]]];
-    // No ⭕ on the line: it gets the log's project, before the 🗒️
+    // No ⭕ on the line: it gets the log's project, before the ⋯
     const plain = await invokeOn("- [<] 1:30pm\tKickoff call", { paths });
-    assert.equal(plain.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
+    assert.equal(plain.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
     assert.ok(!plain.calls.some((c) => c.startsWith("template") || c === "save"), "the log isn't made again");
     // The line already names the log's project: kept
-    assert.equal((await invokeOn("- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]", { paths })).text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|🗒️]]");
+    assert.equal((await invokeOn("- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]", { paths })).text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
     // A log in the Inbox has no project: the line's ⭕ files it there without asking
     const inbox = await invokeOn("- [<] 11:00am\tPrinter call [[Tin Works|⭕]]", { paths });
-    assert.equal(inbox.text, "- [<] 11:00am\tPrinter call [[Tin Works|⭕]] [[2026-09-14 Printer call|🗒️]]");
+    assert.equal(inbox.text, "- [<] 11:00am\tPrinter call [[Tin Works|⭕]] [[2026-09-14 Printer call|⋯]]");
     assert.ok(inbox.calls.includes("move Inbox/2026-09-14 Printer call.md to Projects/Freelance/Tin Works/›logs/2026-09-14 Printer call.md"), inbox.calls.join("\n"));
 });
 
@@ -681,14 +682,14 @@ test("an event time with nothing after it is a line with no title; a title a fil
     assert.equal(add.logName("Plain title"), "Plain title");
     // The title on the line stays as the calendar wrote it; only the log's name changes
     assert.equal(add.eventLine("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", "Sync: Q3 plan", "2026-09-14"),
-        "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|🗒️]]");
+        "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|⋯]]");
 });
 
-test("invoke with a selection: its spaces stay, so the words around it don't run together; the 🗒️ ends the line (OBS-90 review)", async () => {
+test("invoke with a selection: its spaces stay, so the words around it don't run together; the ⋯ ends the line (OBS-90 review)", async () => {
     const paths = [...HAWK, ["Projects/Freelance/Hawk Ledger/Call the printer.md", ["task"]]];
     const line = "- [ ] Call the printer tomorrow";
     const out = await invokeOn(line, { sel: [6, "- [ ] Call the printer ".length], paths });
-    assert.equal(out.text, "- [ ] Call the printer tomorrow [[Hawk Ledger|⭕]] [[Call the printer|🗒️]]");
+    assert.equal(out.text, "- [ ] Call the printer tomorrow [[Hawk Ledger|⭕]] [[Call the printer|⋯]]");
 });
 
 test("isFinished: a status of Done or Canceled, in any case, finishes a project or area; completed doesn't (OBS-125)", () => {
@@ -742,21 +743,21 @@ test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so 
     const helper = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
     const plain = (v) => JSON.parse(JSON.stringify(v));
     assert.deepEqual(plain(helper.trailingProjectLinks("- [>] Book it [[Kestrel|⭕]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2")), [{ raw: "[[Kestrel|⭕]]", linkpath: "Kestrel" }]);
-    assert.equal(helper.trailingNote("- [>] Book it [[Book it|🗒️]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");
+    assert.equal(helper.trailingNote("- [>] Book it [[Book it|⋯]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");
 });
 
-test("invoke on a task with an ID and nothing after the cursor: the empty 🗒️ link goes in before the ID (OBS-185)", async () => {
+test("invoke on a task with an ID and nothing after the cursor: the empty ⋯ link goes in before the ID (OBS-185)", async () => {
     const out = await invokeOn("- [ ] Book it ^k3x9m2");
-    assert.equal(out.text, "- [ ] Book it [[|🗒️]] ^k3x9m2");
+    assert.equal(out.text, "- [ ] Book it [[|⋯]] ^k3x9m2");
     assert.deepEqual(out.cursor, { line: 0, ch: "- [ ] Book it [[".length });
 });
 
-test("invoke at the visible end of a line with an ID, where a click puts the cursor: the empty 🗒️ link, before the ID (OBS-185)", async () => {
+test("invoke at the visible end of a line with an ID, where a click puts the cursor: the empty ⋯ link, before the ID (OBS-185)", async () => {
     const line = "- [ ] Book it ^k3x9m2";
     for (const ch of ["- [ ] Book it".length, "- [ ] Book it ".length]) {
         assert.deepEqual(JSON.parse(JSON.stringify(add.target(line, ch))), { kind: "task", mode: "blank" }, `at ${ch}`);
         const out = await invokeOn(line, { ch });
-        assert.equal(out.text, "- [ ] Book it [[|🗒️]] ^k3x9m2", `at ${ch}`);
+        assert.equal(out.text, "- [ ] Book it [[|⋯]] ^k3x9m2", `at ${ch}`);
         assert.deepEqual(out.cursor, { line: 0, ch: "- [ ] Book it [[".length }, `at ${ch}`);
     }
     // Text after the cursor still names the note

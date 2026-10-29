@@ -71,7 +71,8 @@ export const parseCache = (text) => {
                 const v = kv[2].trim();
                 if (key === "tags") frontmatter.tags = v.startsWith("[") ? v.slice(1, -1).split(",").map((t) => t.trim()).filter(Boolean) : v ? [v] : [];
                 else frontmatter[key] = v.replace(/^"|"$/g, "");
-            } else if (key === "tags" && /^\s+-\s+/.test(l)) frontmatter.tags.push(l.replace(/^\s+-\s+/, "").trim());
+            // A YAML list item, indented or not, as the demo's notes write `tags:` then `- project`
+            } else if (key === "tags" && /^\s*-\s+/.test(l)) frontmatter.tags.push(l.replace(/^\s*-\s+/, "").trim());
         }
         start = end + 1;
     }
@@ -198,15 +199,16 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         },
         check: () => JSON.parse(JSON.stringify(checkAll())),
     };
-    // Every task's lines over the whole stand-in vault, as the live text says (`vault`, not `disk`: the
-    // notes as you'd see them open, which is what must agree; disk lags by design), projects read as the
-    // time report reads them
+    // Every task's lines over the notes the report's checks read (the system and Archive, OBS-208), as
+    // the live text says (`vault`, not `disk`: the notes as you'd see them open, which is what must agree;
+    // disk lags by design), projects read as the time report reads them
     function checkAll() {
         const tr = customJS.TimeReport, T = customJS.TaskIds.constructor;
         const index = tr.appIndex();
-        const notes = [...vault.keys()].filter((p) => !p.startsWith("Config/")).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
+        const read = (p) => !p.startsWith("Config/") && (customJS.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
+        const notes = [...vault.keys()].filter(read).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
         return T.check(notes, {
-            projectOf: (note, i, lines) => tr.lineProject(note, i, lines, index),
+            projectOf: (note, i, lines) => tr.lineProject(note, i, lines, index, false),
             resolve: (linkpath, from) => app.metadataCache.getFirstLinkpathDest(linkpath, from)?.path ?? null,
         });
     }

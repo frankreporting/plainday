@@ -742,7 +742,7 @@ test("a line whose ⭕ and note name different projects counts toward neither, i
         const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
         const inv = billing.readInvoice({ path: `${INV}/1007-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
         const ledger = billing.ledger([inv]);
-        const m = tr.attachBilling(tr.build([day("2026-09-02", `- [x] Call [[${lineProject}|⭕]] [[Brief|🗒️]]\n\t- 1:00pm - 2:00pm`)], idx), [inv].map((i) => ({ path: i.path, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") })), idx, billing);
+        const m = tr.attachBilling(tr.build([day("2026-09-02", `- [x] Call [[${lineProject}|⭕]] [[Brief|⋯]]\n\t- 1:00pm - 2:00pm`)], idx), [inv].map((i) => ({ path: i.path, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") })), idx, billing);
         assert.deepEqual(plain(m.entries), [], `${lineProject}: counted on neither`);
         const named = m.projectProblems.filter((p) => p.conflict).map((p) => tr.basename(p.project)).sort();
         assert.equal(named.length, 2, `${lineProject}: listed on both (${named})`);
@@ -756,7 +756,7 @@ test("OBS-213: an archived project's billed row whose line now disagrees with it
     const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }, { path: "Projects/Work/Dune Books/Brief.md", tags: ["task"] }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 5000, project: OLD, task: "Call", note: "" }];
     const inv = billing.readInvoice({ path: `${INV}/0701-OLD.md`, props: { status: "paid", project: "[[Old]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
-    const m = tr.build([day("2026-09-02", "- [x] Call [[Old|⭕]] [[Brief|🗒️]]\n\t- 1:00pm - 2:00pm")], idx);
+    const m = tr.build([day("2026-09-02", "- [x] Call [[Old|⭕]] [[Brief|⋯]]\n\t- 1:00pm - 2:00pm")], idx);
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, billing.ledger([inv])).changes.map((c) => c.kind)), ["disputed"]);
 });
 

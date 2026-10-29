@@ -56,10 +56,10 @@ test("forwardLink and forwardOf: the forward date names the note and the task's 
     assert.equal(TaskIds.forwardOf("- [>] Book it [[2026-10-08#^k3x9m2|➡ 10/8]] ^k3x9m2")?.label, "10/8", "a phone may drop the U+FE0F");
 });
 
-test("withForward: after the 🚩, before the ⭕, 🗃️ and 🗒️, the ID last; replaced, never doubled", () => {
+test("withForward: after the 🚩, before the ⭕, 🗃️ and ⋯, the ID last; replaced, never doubled", () => {
     assert.equal(TaskIds.withForward("- [>] Book it ^k3x9m2", F), `- [>] Book it ${F} ^k3x9m2`);
-    assert.equal(TaskIds.withForward("- [>] Book it [[2026-10-01|🚩 10/1]] [[K|⭕]] [[Book it|🗒️]] ^k3x9m2", F),
-        `- [>] Book it [[2026-10-01|🚩 10/1]] ${F} [[K|⭕]] [[Book it|🗒️]] ^k3x9m2`);
+    assert.equal(TaskIds.withForward("- [>] Book it [[2026-10-01|🚩 10/1]] [[K|⭕]] [[Book it|⋯]] ^k3x9m2", F),
+        `- [>] Book it [[2026-10-01|🚩 10/1]] ${F} [[K|⭕]] [[Book it|⋯]] ^k3x9m2`);
     assert.equal(TaskIds.withForward(`- [>] Book it [[K|⭕]] ${F} ^k3x9m2`, "[[2026-10-12#^k3x9m2|10/12]]"),
         "- [>] Book it [[2026-10-12#^k3x9m2|10/12]] [[K|⭕]] ^k3x9m2", "moved into place");
     assert.equal(TaskIds.withForward(`- [ ] Book it ${F} ^k3x9m2`, null), "- [ ] Book it ^k3x9m2", "null takes it off");
@@ -120,18 +120,19 @@ const D8 = `${PLANNER}/days/2026-10-08.md`;
 const KES = "Projects/Freelance/Kestrel/Kestrel.md";
 const LOOK = {
     [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2\n",
-    [D8]: "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n- [ ] Mixed [[Kestrel|⭕]] ^Ab3-x9\n- plain item ^plain1\n",
+    [D8]: "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n- [ ] Mixed [[Kestrel|⭕]] ^Ab3-x9\n- plain item ^plain1\n\nA paragraph with a block. ^para02\n",
     "Reference/Notes/Idea.md": "A paragraph with a block. ^para01\n",
     "Config/Templates/Task.md": "- [ ] From a template ^k3x9m2\n",
 };
 const at = (lines) => plain(lines.map((l) => `${l.file.path}:${l.line}:${l.task}`).sort());
 
-test("linesOf: every line ending in the ID, from the cache, with its checkbox; Config left out", () => {
+test("linesOf: every line ending in the ID, from the cache, with its checkbox; Config and notes outside the system left out (OBS-208)", () => {
     const t = standIn({ notes: LOOK }).customJS.TaskIds;
     assert.deepEqual(at(t.linesOf("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `]);
     assert.deepEqual(at(t.linesOf("Ab3-x9")), [`${D8}:1: `], "a mixed-case ID from Copy link to block");
     assert.equal(t.linesOf("plain1")[0].task, undefined, "a list item with no checkbox");
-    assert.equal(t.linesOf("para01")[0].task, null, "a block that isn't a list item");
+    assert.equal(t.linesOf("para02")[0].task, null, "a block that isn't a list item");
+    assert.equal(t.linesOf("para01").length, 0, "a block in a note outside the system: no task's line is there");
     assert.equal(t.linesOf("nothin").length, 0);
 });
 
@@ -189,10 +190,11 @@ test("gather: a note a command just wrote is read for a few seconds, whatever th
 test("allIds and freshId: every list item's ID; a new one no block has", () => {
     const v = standIn({ notes: { ...LOOK, "Reference/Notes/Taken.md": "- [ ] Taken ^aaaaaa" } });
     const t = v.customJS.TaskIds;
-    assert.deepEqual(plain([...t.allIds().keys()].sort()), ["aaaaaa", "ab3-x9", "k3x9m2", "plain1"]);
+    // The task checks read the notes in the system and Archive; Taken.md is in neither
+    assert.deepEqual(plain([...t.allIds().keys()].sort()), ["ab3-x9", "k3x9m2", "plain1"]);
     let draws = 0;
     t.random = () => (draws++ < 6 ? 0 : 0.99);
-    assert.equal(t.freshId(), "999999", "aaaaaa is taken, so the next draw");
+    assert.equal(t.freshId(), "999999", "aaaaaa is taken, even outside the system, so the next draw");
 });
 
 test("kindOf: daily, weekly, monthly and yearly notes, and any other note", () => {

@@ -24,16 +24,21 @@ class AddTaskNote {
     static LOGS_FOLDER = "›logs";
     // Notebook Navigator's icon for a logs folder the system makes (a Lucide name)
     static LOGS_ICON = "history";
-    // A line's link to its own note: a task's note, or an event's meeting log (OBS-57). 🗒️ is
-    // written (OBS-87); 🔗, the symbol before it, is still read, and a phone may add or drop the
-    // U+FE0F on either.
-    static NOTE_MARK = "🗒️";
-    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
-    // One item of the run that ends a line, with the spaces before it: a 🗒️ (or 🔗), 🚩, ⭕ or 🗃️ link
+    // A line's link to its own note: a task's note, or an event's meeting log (OBS-57), marked ⋯
+    // (OBS-208). FROM_MARK, ↗, links the note Schedule sent the line from (Schedule.FROM_MARK). Until
+    // OBS-196 and OBS-186 tell them apart, a line's note is read as its ⋯, else its ↗ (NOTE_LINK, the
+    // first in the run); OWN_NOTE_LINK and FROM_LINK read one each. A phone may add the U+FE0F to ↗.
+    // 🗒️ and 🔗, the marks before, mean nothing now: the one-time conversion replaced them.
+    static NOTE_MARK = "⋯";
+    static FROM_MARK = "↗";
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗\uFE0F?)\s*\]\]/u;
+    static OWN_NOTE_LINK = /\[\[[^\]]*\|\s*⋯\s*\]\]/u;
+    static FROM_LINK = /\[\[[^\]]*\|\s*↗\uFE0F?\s*\]\]/u;
+    // One item of the run that ends a line, with the spaces before it: a ⋯, ↗, 🚩, ⭕ or 🗃️ link
     // shaped as the time report reads them (TimeReport.TRAIL_LINK), or the ℹ️ or 🆓 mark (OBS-90). And a
     // sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
     // `[[2026-10-08#^k3x9m2|10/8]]`, or one written with a ➡️ before its date.
-    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|🗒\uFE0F?|🔗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
+    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
     // A block ID at the end of a line, ` ^abc123`, with the whitespace before it
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
     // An event title wrapped in a link to its log, the way lines were written before OBS-57, and the way a
@@ -56,6 +61,7 @@ class AddTaskNote {
         const editor = app.workspace.activeLeaf?.view?.editor;
         const source = app.workspace.getActiveFile();
         if (!editor || !source) return;
+        if (customJS.TaskIds && !customJS.TaskIds.works(source)) return;
 
         // On a sub-task, or any line under a task or event, the note is the task's or the event's log: the line
         // at the top of the nest (rule 5, OBS-193), named from its text, the cursor and selection set aside
@@ -148,7 +154,7 @@ class AddTaskNote {
     // through the Task template from the full text, so the template can set `due`.
     //
     // `lineText` is the whole task line. The line and its note agree on where the time counts
-    // (OBS-90): the line keeps a ⭕ (or 🗃️) for the note's project or area, next to its 🗒️. The line's
+    // (OBS-90): the line keeps a ⭕ (or 🗃️) for the note's project or area, next to its ⋯. The line's
     // ⭕ links decide where the note goes first:
     //   - one project or area linked: a new note is filed there, and an existing note with no
     //     project or area (its nearest folder note) is moved there, without asking;
@@ -168,7 +174,7 @@ class AddTaskNote {
     // from now on and `homeLink` its ⭕ or 🗃️ link (both null when there's none to name: the line's
     // own links are then left as they are, unless `clear` says they'd disagree with the note), and
     // `projectLinks` the line's ⭕ link texts, which `homeLink` replaces. Null when no note could be
-    // made or a menu was dismissed. Schedule uses this too, so a 🗒️ link it writes always has a note
+    // made or a menu was dismissed. Schedule uses this too, so a ⋯ link it writes always has a note
     // behind it: a task can have its note before it has a home.
     async noteFor(text, sourcePath, lineText = "") {
         const name = this.withoutDates(text);
@@ -298,14 +304,22 @@ class AddTaskNote {
     }
 
     // `lineText` with `link` ([[Project|⭕]] or [[Area|🗃️]], as homeLink writes it) as its project link
-    // and `drop` (links as written) taken off: `link` goes before the first note link in the run of
-    // links that ends the line (🗒️, 🚩, ⭕, 🗃️, and the ℹ️ and 🆓 marks among them), or at its end when
-    // that run has none, so the 🗒️ stays last (OBS-90). A block ID stays at the very end. With no
+    // and `drop` (links as written) taken off: `link` goes before the first note link (⋯ or ↗) in the
+    // run of links that ends the line (⋯, ↗, 🚩, ⭕, 🗃️, and the ℹ️ and 🆓 marks among them), or at its
+    // end when that run has none, so the note links stay last (OBS-90, OBS-208). A block ID stays at the very end. With no
     // `link`, only `drop` comes off. Trailing spaces go; an event's tab after its time stays.
-    withHome(lineText, link, drop = []) {
-        let bare = this.withoutLinks(lineText, drop).replace(/\s+$/, "");
+    withHome(lineText, link, drop = [], { inRun = false } = {}) {
+        let bare = (inRun ? lineText : this.withoutLinks(lineText, drop)).replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
         bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
+        // With `inRun`, `drop` comes off the run that ends the line only: the same link in the text is
+        // its title's (Schedule's sentLine)
+        if (inRun && drop.length) {
+            let start = bare.length;
+            for (let item; (item = bare.slice(0, start).match(AddTaskNote.TRAIL_ITEM));) start = item.index;
+            const run = this.withoutLinks(bare.slice(start).trim(), drop);
+            bare = [bare.slice(0, start).replace(/\s+$/, ""), run].filter(Boolean).join(" ");
+        }
         if (!link) return bare + block;
         let at = bare.length, before = null;
         for (let item; (item = bare.slice(0, at).match(AddTaskNote.TRAIL_ITEM));) {
@@ -317,7 +331,7 @@ class AddTaskNote {
     }
 
     // A line once it links its note (noteFor's `found`): the note's project or area in place of the
-    // line's ⭕ links, before the 🗒️. A line whose note has no project or area keeps its own, unless
+    // line's ⭕ links, before the ⋯. A line whose note has no project or area keeps its own, unless
     // they'd disagree with where the note was left (`clear`).
     homed(lineText, found) {
         return this.withHome(lineText, found.homeLink, found.homeLink || found.clear ? found.projectLinks : []);
@@ -641,7 +655,7 @@ class AddTaskNote {
     //   { kind, mode: "text", from, to, name }: the task's text (up to its first link), when some text
     //     comes after the cursor; on an event line, its title (after its time), wherever the cursor is
     //   { kind: "task", mode: "blank" }: only whitespace follows the cursor on a task line with no note
-    //     link (a block ID at its end aside), so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |🗒️]]` would point
+    //     link (a block ID at its end aside), so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |⋯]]` would point
     //     at the daily note itself.
     //   { error }: there's no text to use, or the task already links a note, or the event a log
     // `kind` is "task" or "event".
@@ -675,23 +689,44 @@ class AddTaskNote {
     }
 
     // The task line once it links its note: the name without its dates where the task text (or the
-    // selection) was, the note's project or area (see homed), then the 🗒️ link, which ends the line
+    // selection) was, the note's project or area (see homed), then the ⋯ link, which ends the line
     lineWithLink(lineText, target, found) {
         const text = lineText.slice(0, target.from) + found.name + lineText.slice(target.to);
         return this.endWith(this.homed(text, found), `[[${found.linktext}|${AddTaskNote.NOTE_MARK}]]`);
     }
 
     // The target of the note link in the run of links that ends `lineText` (the first, when there are
-    // several), or null when that run has none
-    trailingNote(lineText) {
+    // several: its ⋯, else its ↗), or null when that run has none. `link` picks one mark: OWN_NOTE_LINK
+    // for its own note only (Schedule, OBS-208).
+    trailingNote(lineText, link = AddTaskNote.NOTE_LINK) {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
         let at = bare.length, note = null;
         for (let item; (item = bare.slice(0, at).match(AddTaskNote.TRAIL_ITEM));) {
             at = item.index;
-            if (AddTaskNote.NOTE_LINK.test(item[0])) note = item[0].trim();
+            if (link.test(item[0])) note = item[0].trim();
         }
         return note?.match(/^\[\[([^\]|#^]*)/)?.[1].trim() || null;
+    }
+
+    // `lineText` with `link`, a ↗ to the note it was sent from, in its run (OBS-208): after its ⋯, else
+    // after its ⭕ or 🗃️, else at the end, before a block ID. A ↗ it had already gives way: a line was
+    // sent from one note.
+    withFrom(lineText, link) {
+        let bare = lineText.replace(/\s+$/, "");
+        const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
+        bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
+        const items = [];
+        let at = bare.length;
+        for (let item; (item = bare.slice(0, at).match(AddTaskNote.TRAIL_ITEM));) { items.unshift(item[0].trim()); at = item.index; }
+        const run = items.filter((x) => !AddTaskNote.FROM_LINK.test(x));
+        const after = (test) => run.reduce((last, x, i) => (test(x) ? i : last), -1);
+        let i = after((x) => AddTaskNote.OWN_NOTE_LINK.test(x));
+        if (i < 0) i = after((x) => /\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u.test(x));
+        run.splice(i < 0 ? run.length : i + 1, 0, link);
+        // The text keeps the gap it had before its links (a tab, say)
+        const text = bare.slice(0, at), gap = text.match(/\s*$/)[0] || " ";
+        return `${text.replace(/\s+$/, "")}${gap}${run.join(" ")}${block}`;
     }
 
     // `lineText` with `link` at its end, before a block ID if it ends in one
@@ -768,7 +803,7 @@ class AddTaskNote {
         }
     }
 
-    // The event line with a link to its meeting log, `[[date name|🗒️]]` (or `[[linktext|🗒️]]`): at
+    // The event line with a link to its meeting log, `[[date name|⋯]]` (or `[[linktext|⋯]]`): at
     // the end, after the title, its ℹ️ or 🆓 and any ⭕ or 🗃️ links, so the note link ends the line
     // (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
     eventLine(lineText, name, date, linktext = null) {
@@ -803,7 +838,7 @@ class AddTaskNote {
         return /^\S/.test(followedBy) ? " " : "";
     }
 
-    // "Event name" → "[[2026-05-31 Event name|🗒️]]"
+    // "Event name" → "[[2026-05-31 Event name|⋯]]"
     eventLink(date, name) {
         return `[[${date} ${name}|${AddTaskNote.NOTE_MARK}]]`;
     }

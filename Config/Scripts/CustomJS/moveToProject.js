@@ -293,10 +293,10 @@ class MoveToProject {
         return out;
     }
 
-    // `text` with the ⭕ on every checklist line whose note link (its 🗒️, or an event's log link,
+    // `text` with the ⭕ on every checklist line whose note link (its ⋯, or an event's log link,
     // either way) is `note` set to where the note now is, `home`, whose ⭕ or 🗃️ link is `link`
     // (OBS-90):
-    //   - a ⭕ or 🗃️ for `from`, where the note was, becomes `link`, before the 🗒️;
+    //   - a ⭕ or 🗃️ for `from`, where the note was, becomes `link`, before the ⋯;
     //   - a line with no ⭕ gets `link`, as a note from the Inbox or no project does;
     //   - a ⭕ for anywhere else (or one that's broken) is that line's own choice and stays, and a
     //     link for `from` beside it just comes off: the line keeps counting where its own links say.

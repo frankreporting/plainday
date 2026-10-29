@@ -78,7 +78,7 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|🗒️]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|⋯]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *MoveToProject*; dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *MoveToProject*; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
@@ -105,22 +105,23 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 ```markdown
 - [<] 9:00am	Team standup
 	- 9:30am
-- [<] 1:30pm	Kickoff call [[Kestrel Outfitters 2026|⭕]] [[2026-09-15 Kickoff call|🗒️]]
+- [<] 1:30pm	Kickoff call [[Kestrel Outfitters 2026|⭕]] [[2026-09-15 Kickoff call|⋯]]
 	- 1:30pm - 2:15pm
 - [<] 3:00pm	Delivery window ℹ️
 	- 5:00pm
 - [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
 	- 4:30pm: 🆓 not billing this one
-- [<] Printer call [[Pinecrest Library Brochure|⭕]] [[2026-09-15 Printer call|🗒️]]
-- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft the proposal|🗒️]]
+- [<] Printer call [[Pinecrest Library Brochure|⭕]] [[2026-09-15 Printer call|⋯]]
+- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft the proposal|⋯]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
 - [x] Redo the nav I broke 🆓 [[Kestrel Outfitters 2026|⭕]]
 	- 5:00pm - 5:20pm
-- [>] Send the invoice [[Pinecrest Library Brochure|⭕]] [[Send the invoice|🗒️]]
+- [>] Send the invoice [[Pinecrest Library Brochure|⭕]] [[Send the invoice|⋯]]
+- [ ] Pick the paper stock [[Pinecrest Library Brochure|⭕]] [[Write brochure copy#^p7d2qe|↗]] ^p7d2qe
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `🗒️` the line's own note (a task's note, or an event's meeting log), filed in that project. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `⋯` the line's own note (a task's note, or an event's meeting log), filed in that project, and `↗` the note *Schedule* sent the line from, if any. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
 
 The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
 
@@ -154,7 +155,7 @@ Startup scripts (run when Obsidian starts):
 | SyncArea | Updates `parent` when notes or folders move |
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
 | MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
-| TrailingLinks | Draws the 🚩, forward date, 🗒️, ⭕ and 🗃️ links that end a task or event line small, at the right of the line, and hides a task's ID until the cursor reaches it (Live Preview) |
+| TrailingLinks | Draws the 🚩, forward date, ⭕, 🗃️, ⋯ and ↗ links that end a task or event line small, at the right of the line, and hides a task's ID until the cursor reaches it (Live Preview) |
 | TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian
@@ -199,7 +200,7 @@ What it installs: everything the repository has under `Config/` (the manual incl
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `Config/Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 
-Run it again whenever you want the latest.
+Run it again whenever you want the latest. Some versions change how your notes are written and come with a one-time conversion to run after installing; the manual says when and how (for the line marks: *Links at the end of a line*, *The marks before*). Until it has run, the time report, invoices and the calendar sync write nothing and say why.
 
 ## License
 

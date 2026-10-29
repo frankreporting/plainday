@@ -1,13 +1,16 @@
 class Schedule {
-    // A task's link to its note: 🗒️ is written (OBS-87). Schedule reads a line's note link through
-    // AddTaskNote (trailingNote), whose NOTE_LINK still reads 🔗, the symbol before it.
-    static NOTE_MARK = "🗒️";
+    // A task's link to its own note: ⋯ (OBS-208). Schedule reads a line's note link through AddTaskNote
+    // (trailingNote), whose NOTE_LINK reads its ⋯, else its ↗.
+    static NOTE_MARK = "⋯";
+    // The link to the note a line was sent from (rule 13, OBS-208), after the line's own ⋯
+    static FROM_MARK = "↗";
 
     async invoke() {
         const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         const srcFile = app.workspace.getActiveFile();
         if (!view || !srcFile) { new Notice("Need an active editor"); return; }
+        if (customJS.TaskIds && !customJS.TaskIds.works(srcFile)) return;
         const editor = view.editor;
         const cursor = editor.getCursor().line;
         // Rule 5 (OBS-193): on a sub-task, or any line under a task or event, Schedule acts on the line at the
@@ -348,7 +351,7 @@ class Schedule {
 
     // An older sent line (its date in front): its open line on that day is the one checklist line there,
     // with no ID, with the same title, that names this note (a ⭕ or 🗃️ for a project or area note,
-    // else a 🗒️). With exactly one, both get the task's ID (`own`, the line's own block ID, else a fresh
+    // else a ⋯). With exactly one, both get the task's ID (`own`, the line's own block ID, else a fresh
     // one) and this line its forward date at the end, and the ID comes back. With none open there, the one [>] line
     // there of that title naming this note, when it ends in an ID already (it was worked on and forwarded
     // since), gives this line its ID instead, unless this line has another of its own, and the forward date points
@@ -642,10 +645,15 @@ class Schedule {
     // line now says (the report lists a billed one that changed). The note link stays last before the ID.
     static keepLinks(line, old) {
         const T = customJS.TaskIds.constructor;
-        const note = (i) => /\|\s*(?:🗒|🔗)/u.test(i);
+        // Its own note (its ⋯) stays when the moving line has none; the ↗ is the moving line's (OBS-208)
+        const note = (i) => /\|\s*⋯\s*\]\]$/u.test(i);
+        const from = (i) => /\|\s*↗\uFE0F?\s*\]\]$/u.test(i);
         const { text, items } = T.splitRun(line);
         const oldNote = T.splitRun(old).items.find(note);
-        if (oldNote && !items.some(note)) items.push(oldNote);
+        if (oldNote && !items.some(note)) {
+            const at = items.findIndex(from);
+            items.splice(at === -1 ? items.length : at, 0, oldNote);
+        }
         const id = T.idOf(line);
         return [text, ...items].join(" ") + (id ? ` ^${id}` : "");
     }
@@ -740,33 +748,28 @@ class Schedule {
         return null;
     }
 
-    // A line sent here from `src`, a note that isn't a daily, weekly, monthly or yearly note: it links back to `src`,
-    // as its ⭕ or 🗃️ when `src` is a project or area, else as its 🗒️ note, after that note's own
-    // project or area (OBS-90). A line that already ends in a note link of its own (a sub-task with
-    // its own note) keeps that as its note, named with that note's project, and gets no second one.
-    // A line with a ⭕ or 🗃️ of its own keeps it, and gets no other.
+    // A line sent here from `src`, a note that isn't a daily, weekly, monthly or yearly note (rule 13,
+    // OBS-208): its ⭕ (or 🗃️) is its own note's project when it has a ⋯ filed in one, else the project
+    // of the note it came from, finished or not; a project or area note names itself. A ⭕ it had in that
+    // note gives way, since a line outside a periodic note has no project of its own (rule 4), except
+    // from a note in no project (the Inbox), where nothing takes its place. Then a ↗ to the note it came
+    // from, after its own ⋯, unless that note is a project or area note, which its ⭕ already names. The
+    // ↗ links the task's own line there by its ID, `Source#^id`, the line that keeps the same ID (Brian,
+    // 2026-10-28).
     sentLine(line, src) {
         const helper = customJS.AddTaskNote;
-        const paths = () => app.vault.getMarkdownFiles().map((f) => f.path);
-        // Only the ⭕ links that end the line are its own (OBS-90); one in the text is its title's
-        const own = helper.trailingProjectLinks(line).length > 0;
+        const paths = app.vault.getMarkdownFiles().map((f) => f.path);
         const tagged = this.isProjectNote(src) || this.isAreaNote(src);
-        const srcLink = tagged ? `[[${helper.linktextFor(src, paths())}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]` : null;
-        const srcHome = tagged ? null : helper.lineHome(src);
-        const homeLink = (home) => (home ? helper.homeLink(home, helper.linktextFor(home, paths())) : null);
-        const linked = helper.trailingNote(line);
-        // The 🗒️ back to a source that isn't a project or area note
-        const back = `[[${src.basename}|${Schedule.NOTE_MARK}]]`;
-        if (linked) {
-            if (own) return helper.withHome(line, null);
-            // Named with the note's project; the source's only when the note isn't filed anywhere
-            // (a finished project's note names none: its time counts there)
-            const note = app.metadataCache.getFirstLinkpathDest(linked, src.path);
-            if (note && helper.filedIn(note)) return helper.withHome(line, homeLink(helper.lineHome(note)));
-            return helper.withHome(line, srcLink ?? homeLink(srcHome));
-        }
-        if (tagged) return helper.withHome(line, own ? null : srcLink);
-        return helper.endWith(helper.withHome(line, own ? null : homeLink(srcHome)), back);
+        const own = helper.trailingNote(line, helper.constructor.OWN_NOTE_LINK);
+        const ownNote = own ? app.metadataCache.getFirstLinkpathDest(own, src.path) : null;
+        const ownHome = ownNote ? helper.filedIn(ownNote) : null;
+        const srcHome = tagged ? null : helper.filedIn(src);
+        const homeLink = ownHome ? helper.homeLink(ownHome, helper.linktextFor(ownHome, paths))
+            : tagged ? `[[${helper.linktextFor(src, paths)}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]`
+            : srcHome ? helper.homeLink(srcHome, helper.linktextFor(srcHome, paths)) : null;
+        const sent = homeLink ? helper.withHome(line, homeLink, helper.trailingProjectLinks(line).map((l) => l.raw), { inRun: true }) : line;
+        const id = customJS.TaskIds?.constructor.idOf?.(line);
+        return tagged ? sent : helper.withFrom(sent, `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${Schedule.FROM_MARK}]]`);
     }
 
     isProjectNote(file) {

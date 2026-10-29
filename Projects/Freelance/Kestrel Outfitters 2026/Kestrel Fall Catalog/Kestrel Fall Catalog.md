@@ -16,7 +16,7 @@ Product photos for the fall catalog. A sub-project of [[Kestrel Outfitters 2026|
 
 ## Tasks
 
-- [x] [[Shot list for catalog]]
+- [x] Shot list for catalog [[Shot list for catalog|⋯]]
 - [x] Book the studio space
 - [ ] Shoot day on the 24th
 - [ ] Deliver edited selects

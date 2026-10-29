@@ -394,6 +394,8 @@ class Invoice {
             if (project && tr.isArchived(project)) { new Notice(`${tr.basename(project)} is archived, so it isn't invoiced`); return; }
             if (project) await this.create(project, tr, billing, index);
         } catch (e) {
+            // The time report already said why it waits for the one-time conversion (OBS-208)
+            if (e?.oldMarks) return;
             console.error("Invoice failed", e);
             new Notice(`Invoice failed: ${e.message}`);
         }

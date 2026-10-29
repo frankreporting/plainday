@@ -18,7 +18,7 @@ A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee
 ## Tasks
 
 - [x] Kickoff with Rafe
-- [x] [[Write brochure copy]]
+- [x] Write brochure copy [[Write brochure copy|⋯]]
 - [x] Proof corrections
 - [ ] Final files to the printer by the 22nd
 

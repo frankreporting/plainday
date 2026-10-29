@@ -10,17 +10,17 @@
 // one found present or linked, so the template can read its ⭕ links), or null, and the outcome is
 // one of:
 // - "present":  an event line already links the log (the log was made from it), so nothing
-//               changes but its ⭕: with its note link at the end, `Title [[log|🗒️]]` (🔗 before
-//               OBS-87), or with its title wrapped in the link, the way lines were written before
+//               changes but its ⭕: with its note link at the end, `Title [[log|⋯]]` (or ↗,
+//               OBS-208), or with its title wrapped in the link, the way lines were written before
 //               OBS-57 (any checklist line whose whole title is the link). A link to the log
-//               elsewhere (a task's 🗒️, a mention in prose you clicked to make the note) isn't its
+//               elsewhere (a task's ⋯, a mention in prose you clicked to make the note) isn't its
 //               line.
 // - "linked":   the [<] event line whose title is the log's title, timed or not, gets
-//               ` [[log|🗒️]]` at the end, after the title, its marks and any ⭕, keeping the lines
+//               ` [[log|⋯]]` at the end, after the title, its marks and any ⭕, keeping the lines
 //               under it. Exact title first, then exact but for case, else the one line the title
 //               is a prefix of, as the sync's own adoption goes. A line that already links a log,
 //               or has a link in its title, is never taken.
-// - "inserted": no such line, so `- [<] title [[home|⭕]] [[log|🗒️]]` is added (without the ⭕
+// - "inserted": no such line, so `- [<] title [[home|⭕]] [[log|⋯]]` is added (without the ⭕
 //               when there's no `home`). A log with no time can't sort among the timed events, so
 //               it goes after them, above the tasks. In a note just created from its template
 //               (`fresh`, or text that still opens with the template's `<%`), it goes at the end,
@@ -35,10 +35,10 @@ const LINE = /^(\s*[-*+]\s+\[(.)\]\s+)(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(
 // A ⭕ project or 🗃️ area link, as the sync reads them (a phone may add or drop the U+FE0F)
 const HOME_LINK = /\[\[[^[\]|]+\|\s*(?:⭕|🗃)️?\s*\]\]/gu;
 // A note link
-const NOTE_LINK = /\[\[[^[\]|]+\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]/u;
-// One item of the run that ends a line, with the spaces before it: a 🗒️ (or 🔗), 🚩, ⭕ or 🗃️
+const NOTE_LINK = /\[\[[^[\]|]+\|\s*(?:⋯|↗\uFE0F?)\s*\]\]/u;
+// One item of the run that ends a line, with the spaces before it: a ⋯ or ↗, 🚩, ⭕ or 🗃️
 // link, or the ℹ️ or 🆓 mark (AddTaskNote.TRAIL_ITEM)
-const TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|🗒\uFE0F?|🔗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
+const TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|(?<=\s)(?:ℹ|🆓)\uFE0F?)$/u;
 // A block ID ending a line, which stays last
 const BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
 

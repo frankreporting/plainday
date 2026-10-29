@@ -17,7 +17,7 @@ const DAY = [
     "- [<] 10:00am\t[[2026-09-08 Usability session – Soren and Odile|Beta: Walkthrough]] [[Pinecone Studio|⭕]]",
     "\t- 10:00am - 10:40am: ran long",
     "- [<] All day\t[[2026-09-09 Offsite|Offsite]]",
-    "- [>] Send handoff note [[2026-09-02 Launch retro - wrapup|🔗]]",
+    "- [>] Send handoff note [[2026-09-02 Launch retro - wrapup|⋯]]",
     "\t- 2:57pm - 3:15pm",
     "- [<] 5:00pm\t[[2026-09-09 Board call (Q3)|Board call]]",
     "- [x] Write",
@@ -47,12 +47,12 @@ test("not an event: a task linking the log, an all-day event, a name that only s
     assert.equal(eventTimes(null, "2026-09-09 Intro call with Imogen Fenwick"), null);
 });
 
-test("an event line with its log linked at the end (OBS-57), by 🗒️ or 🔗, gives its times; a task line with 🗒️ doesn't", () => {
+test("an event line with its log linked at the end (OBS-57), by ⋯ or ↗, gives its times; a task line with ⋯ doesn't", () => {
     const day = [
-        "- [ ] Prep the questions [[2026-09-16 Planning|🗒️]]",
-        "- [<] 4:00pm\tPlanning ℹ️ [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]",
+        "- [ ] Prep the questions [[2026-09-16 Planning|⋯]]",
+        "- [<] 4:00pm\tPlanning ℹ️ [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
         "\t- 4:30pm",
-        "- [<] 5:00pm\tRetro [[2026-09-16 Retro|🔗]]",
+        "- [<] 5:00pm\tRetro [[2026-09-16 Retro|↗]]",
         "\t- 5:00pm - 5:40pm",
     ].join("\n");
     assert.deepEqual(eventTimes(day, "2026-09-16 Planning"), { time: "4:00pm", endTime: "4:30pm" });
@@ -60,9 +60,9 @@ test("an event line with its log linked at the end (OBS-57), by 🗒️ or 🔗,
 });
 
 test("an event typed by hand with a space after its time, as Add task note reads it, gives its times too (fix round 5)", () => {
-    const day = ["- [<] 3:00pm Quick sync [[2026-09-27 Quick sync|🗒️]]", "- [<] 4:00pm  Planning [[2026-09-27 Planning|🗒️]]", "\t- 4:45pm"].join("\n");
+    const day = ["- [<] 3:00pm Quick sync [[2026-09-27 Quick sync|⋯]]", "- [<] 4:00pm  Planning [[2026-09-27 Planning|⋯]]", "\t- 4:45pm"].join("\n");
     assert.deepEqual(eventTimes(day, "2026-09-27 Quick sync"), { time: "3:00pm", endTime: "" });
     assert.deepEqual(eventTimes(day, "2026-09-27 Planning"), { time: "4:00pm", endTime: "4:45pm" });
     // A time that's part of the words, not before them, is still no start
-    assert.equal(eventTimes("- [ ] Call at 3:00pm [[2026-09-27 Call|🗒️]]", "2026-09-27 Call"), null);
+    assert.equal(eventTimes("- [ ] Call at 3:00pm [[2026-09-27 Call|⋯]]", "2026-09-27 Call"), null);
 });

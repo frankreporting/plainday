@@ -1,7 +1,7 @@
 // Timings for task lookups inside Obsidian (OBS-185). Run in a throwaway vault, never the dev vault:
 //   obsidian vault=<it> eval code="eval(require('fs').readFileSync('<this file>','utf8'))"
 // Returns JSON: note count, IDs, median ms for one lookup by `blocks` and by `listItems`, one full
-// pass, whether `blocks` keys are lowercased, and whether IDs after ⭕ and 🗒️ links are indexed.
+// pass, whether `blocks` keys are lowercased, and whether IDs after ⭕ and ⋯ links are indexed.
 (() => {
     const cache = app.metadataCache;
     const files = app.vault.getMarkdownFiles();

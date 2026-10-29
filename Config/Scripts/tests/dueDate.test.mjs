@@ -13,31 +13,31 @@ const D = "[[2026-09-30|🚩 9/30]]";
 const apply = (line) => { const { from, to, text } = due.placement(line, D); return line.slice(0, from) + text + line.slice(to); };
 
 test("placement: the due date goes before a trailing note link, so End still reaches the note (OBS-36)", () => {
-    assert.equal(apply("- [ ] Renew the car [[Renew the car|🔗]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🔗]]");
+    assert.equal(apply("- [ ] Renew the car [[Renew the car|⋯]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|⋯]]");
     assert.equal(apply("- [ ] Order toner [[Hawk Ledger|⭕]]"), "- [ ] Order toner [[2026-09-30|🚩 9/30]] [[Hawk Ledger|⭕]]");
     assert.equal(apply("- [ ] Mow [[Household|🗃️]]"), "- [ ] Mow [[2026-09-30|🚩 9/30]] [[Household|🗃️]]");
-    assert.equal(apply("- [ ] A [[P|⭕]] [[A|🔗]]"), "- [ ] A [[2026-09-30|🚩 9/30]] [[P|⭕]] [[A|🔗]]", "before every trailing note link");
-    assert.equal(apply("- [ ] A [[A|🔗️]] "), "- [ ] A [[2026-09-30|🚩 9/30]] [[A|🔗️]] ", "with U+FE0F, trailing space kept");
+    assert.equal(apply("- [ ] A [[P|⭕]] [[A|⋯]]"), "- [ ] A [[2026-09-30|🚩 9/30]] [[P|⭕]] [[A|⋯]]", "before every trailing note link");
+    assert.equal(apply("- [ ] A [[A|⋯]] "), "- [ ] A [[2026-09-30|🚩 9/30]] [[A|⋯]] ", "with U+FE0F, trailing space kept");
 });
 
 test("placement: with no note link at the end, the due date ends the line with a trailing space, as before", () => {
     assert.equal(apply("- [ ] Pay the invoice"), "- [ ] Pay the invoice [[2026-09-30|🚩 9/30]] ");
     assert.equal(apply("- [ ] Pay the invoice "), "- [ ] Pay the invoice [[2026-09-30|🚩 9/30]] ");
     assert.equal(apply("- [ ] Read [[Some note]] later"), "- [ ] Read [[Some note]] later [[2026-09-30|🚩 9/30]] ", "an ordinary link mid-line isn't a note link");
-    assert.equal(apply("- [ ] A [[A|🔗]] and more"), "- [ ] A [[A|🔗]] and more [[2026-09-30|🚩 9/30]] ", "a 🔗 that isn't at the end stays where it is");
+    assert.equal(apply("- [ ] A [[A|⋯]] and more"), "- [ ] A [[A|⋯]] and more [[2026-09-30|🚩 9/30]] ", "a ⋯ that isn't at the end stays where it is");
     assert.equal(apply("- [ ] "), "- [ ] [[2026-09-30|🚩 9/30]] ");
 });
 
-test("placement: a 🗒️ note link (OBS-87), with or without U+FE0F, and an event's log at the end (OBS-57) are note links too", () => {
-    assert.equal(apply("- [ ] Renew the car [[Renew the car|🗒️]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🗒️]]");
-    assert.equal(apply("- [ ] Renew the car [[Renew the car|🗒]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|🗒]]");
-    assert.equal(apply("- [<] 9:00am\tStandup [[2026-09-14 Standup|🗒️]] [[P|⭕]]"), "- [<] 9:00am\tStandup [[2026-09-30|🚩 9/30]] [[2026-09-14 Standup|🗒️]] [[P|⭕]]");
+test("placement: a ⋯ note link (OBS-87), with or without U+FE0F, and an event's log at the end (OBS-57) are note links too", () => {
+    assert.equal(apply("- [ ] Renew the car [[Renew the car|⋯]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|⋯]]");
+    assert.equal(apply("- [ ] Renew the car [[Renew the car|⋯]]"), "- [ ] Renew the car [[2026-09-30|🚩 9/30]] [[Renew the car|⋯]]");
+    assert.equal(apply("- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]] [[P|⭕]]"), "- [<] 9:00am\tStandup [[2026-09-30|🚩 9/30]] [[2026-09-14 Standup|⋯]] [[P|⭕]]");
 });
 
 test("placement: the 🚩 goes ahead of a forward date, and an ID stays last (OBS-107, OBS-185)", () => {
     const F = "[[2026-10-08#^k3x9m2|10/8]]";
     assert.equal(apply(`- [>] Book it ${F} ^k3x9m2`), `- [>] Book it [[2026-09-30|🚩 9/30]] ${F} ^k3x9m2`);
-    assert.equal(apply(`- [>] Book it ${F} [[K|⭕]] [[Book it|🗒️]] ^k3x9m2`), `- [>] Book it [[2026-09-30|🚩 9/30]] ${F} [[K|⭕]] [[Book it|🗒️]] ^k3x9m2`);
+    assert.equal(apply(`- [>] Book it ${F} [[K|⭕]] [[Book it|⋯]] ^k3x9m2`), `- [>] Book it [[2026-09-30|🚩 9/30]] ${F} [[K|⭕]] [[Book it|⋯]] ^k3x9m2`);
     assert.equal(apply("- [ ] Book it [[K|⭕]] ^k3x9m2"), "- [ ] Book it [[2026-09-30|🚩 9/30]] [[K|⭕]] ^k3x9m2");
     assert.equal(apply("- [ ] Book it ^k3x9m2"), "- [ ] Book it [[2026-09-30|🚩 9/30]] ^k3x9m2", "no links: before the ID, not after it");
     assert.equal(apply("- [>] Book it [[2026w41#^k3x9m2|Wk of 10/4]] ^k3x9m2"), "- [>] Book it [[2026-09-30|🚩 9/30]] [[2026w41#^k3x9m2|Wk of 10/4]] ^k3x9m2", "to a week");

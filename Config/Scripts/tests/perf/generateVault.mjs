@@ -43,8 +43,8 @@ for (const d of days) {
     write(`Reference/Planner/days/${day(d)}.md`, lines.join("\n") + "\n");
     count++;
 }
-// An ID after the ⭕ and 🗒️ links, and one in mixed case, for the checks in lookupBench.js
-write("Reference/Planner/days/2026-10-16.md", "- [ ] Probe line [[Project 0|⭕]] [[Probe note|🗒️]] ^pr0be1\n- [ ] Mixed case [[Project 0|⭕]] ^AbC-12\n");
+// An ID after the ⭕ and ⋯ links, and one in mixed case, for the checks in lookupBench.js
+write("Reference/Planner/days/2026-10-16.md", "- [ ] Probe line [[Project 0|⭕]] [[Probe note|⋯]] ^pr0be1\n- [ ] Mixed case [[Project 0|⭕]] ^AbC-12\n");
 count++;
 
 for (const proj of projects) {

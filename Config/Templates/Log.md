@@ -88,12 +88,16 @@ if (!sync || !schedule) {
 	new Notice("CustomJS isn't loaded, so this log wasn't recorded in its daily note");
 } else if (!day.isValid()) {
 	new Notice(logDate + " isn't a date, so this log wasn't recorded in a daily note");
+} else if (dailyFile && customJS.TimeReport?.oldMarkLines?.([{ text: await app.vault.cachedRead(dailyFile) }])) {
+	// Until the one-time conversion has run, a 🗒️ link isn't read as a log's (OBS-208), so the line that
+	// already links this log wouldn't be found, and a second one would be added
+	new Notice(dailyPath + " still has lines ending in a 🗒️ or 🔗 link, so this log wasn't recorded there: run the one-time conversion first (see the manual's Links at the end of a line)", 0);
 } else if (filed) {
 	try {
 		const fresh = !app.vault.getFileByPath(dailyPath);
 		const dailyNote = fresh ? await schedule.ensureDailyNote(dailyPath) : app.vault.getFileByPath(dailyPath);
 		// The line names the project or area the log was filed for, in place of its own ⭕ links, before
-		// its 🗒️ (a project note that isn't its folder's own note can't hold the log, and the line
+		// its ⋯ (a project note that isn't its folder's own note can't hold the log, and the line
 		// still names it, as AddProjectLink does). A log left in Inbox leaves the line's links as they are.
 		const home = pickedFile && tasks ? tasks.homeLink(pickedFile, tasks.linktextFor(pickedFile, app.vault.getMarkdownFiles().map((f) => f.path))) : null;
 		const record = (text) => tp.user.recordEvent(text, { log: logName, title: cleanTitle, home }, sync, fresh);

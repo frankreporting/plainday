@@ -8,10 +8,10 @@ class CalendarSync {
     // end line's note) to the new day. A ⭕ put after a recurring
     // series in the Calendar Sync note reaches every upcoming line of that series. An event the
     // calendar shows as free gets ℹ️ after its title (see FREE_MARK), kept current the same way.
-    // A log's line with no time, `- [<] Title [[log|🗒️]]` (the Log template writes one when the
+    // A log's line with no time, `- [<] Title [[log|⋯]]` (the Log template writes one when the
     // calendar has no event for a meeting, OBS-10), is adopted when the event arrives and given
     // its time, and a log a line links takes the line's times whenever the sync writes the line.
-    // An event links its log at the end, `Title [[log|🗒️]]`, as a task links its note (OBS-57),
+    // An event links its log at the end, `Title [[log|⋯]]`, as a task links its note (OBS-57),
     // after its ⭕ links, so the note link ends the line (OBS-90). Lines from before put the log
     // link ahead of the ⭕, or wrap the title in it, `[[log|Title]]`; they're still read, and
     // written the new way whenever the sync rewrites them.
@@ -51,10 +51,10 @@ class CalendarSync {
     static LOG_LINK = /^\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]$/;
     static LOG_NAME = /^\[\[(?:[^[\]|#]*\/)?\d{4}-\d{2}-\d{2} /;
     // A note link at the end of a line: an event's log, the way a task links its note (OBS-57).
-    // 🗒️ is written; 🔗, its symbol before OBS-87, is still read. A phone may add or drop the
-    // U+FE0F. It needs a space before it, so a title that is only a link keeps it.
-    static NOTE_MARK = "🗒️";
-    static NOTE_LINK = /\s+\[\[[^[\]|]+\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]$/u;
+    // ⋯ is written, and a ↗ is read alike (OBS-208); a phone may add or drop the U+FE0F after ↗. It
+    // needs a space before it, so a title that is only a link keeps it.
+    static NOTE_MARK = "⋯";
+    static NOTE_LINK = /\s+\[\[[^[\]|]+\|\s*(?:⋯|↗\uFE0F?)\s*\]\]$/u;
     // ℹ️ after the title marks an event the calendar says you're free during (Show As: Free): not
     // your time, so TimeReport never counts it or checks it for overlaps (OBS-47). The sync writes
     // it on timed events, before any ⭕ links, and keeps it current with the calendar; an all-day
@@ -81,6 +81,11 @@ class CalendarSync {
     }
 
     async run() {
+        // Until the one-time conversion has run, an event's 🗒️ log link isn't read (OBS-208): the sync
+        // would take the line for one you'd changed, or drop its ⭕ and log when the event moves. It
+        // waits, changing nothing, and the next run after the conversion picks everything up.
+        const old = await customJS.TimeReport?.oldMarksLeft?.();
+        if (old) return `${old} line${old === 1 ? " in the daily notes still ends" : "s in the daily notes still end"} in a 🗒️ or 🔗 link, so the calendar sync waits for the one-time conversion: see the manual's Links at the end of a line`;
         const fetchFailed = await this.fetchNow();
         const feed = await this.readJson(CalendarSync.EVENTS);
         if (!feed) return fetchFailed ? `Couldn't read your calendar: ${fetchFailed}` : "No calendar data yet — run the fetcher, then try again";
@@ -1069,7 +1074,7 @@ class CalendarSync {
         return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2], true).rest) };
     }
 
-    // An event line with no time: `- [<] Title [[log|🗒️]]`, which the Log template writes for a
+    // An event line with no time: `- [<] Title [[log|⋯]]`, which the Log template writes for a
     // meeting the calendar doesn't have (OBS-10). Sorts after the timed events.
     timeless(line) {
         return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);
@@ -1121,7 +1126,7 @@ class CalendarSync {
         return { rest: rest.trim(), projects, free, nonbillable, log };
     }
 
-    // An event's log link as the sync writes it, `[[target|🗒️]]`, from either form (the note link
+    // An event's log link as the sync writes it, `[[target|⋯]]`, from either form (the note link
     // at the end, or a title wrapped in the link), whatever its alias; null for no link
     noteLink(link) {
         const target = link?.match(/^\[\[([^[\]|]+)/)?.[1];
@@ -1142,7 +1147,7 @@ class CalendarSync {
     // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <⭕ links> <log link>`,
     // with the log link before the ⭕ links as it was written before OBS-90, or from before OBS-57
     // with the title wrapped in the log link. `shown` is the title as it
-    // reads, `log` the log link as the sync writes it (`[[log|🗒️]]`, whichever form the line has),
+    // reads, `log` the log link as the sync writes it (`[[log|⋯]]`, whichever form the line has),
     // `free` whether it carries the mark, `nonbillable` whether you've put 🆓 on it, `trail` any
     // whitespace at the end of the line. Null otherwise.
     eventHead(line) {
@@ -1188,7 +1193,7 @@ class CalendarSync {
     }
 
     // The sync's lines for an event with your additions put back: the new start and title, the
-    // free mark as the sync's lines have it, your 🆓, the ⭕ links, the log link (`[[log|🗒️]]`,
+    // free mark as the sync's lines have it, your 🆓, the ⭕ links, the log link (`[[log|⋯]]`,
     // whichever form it was in) last, as every note link ends its line (OBS-90), and the children in
     // their order with the end time updated and its note kept. A rename changes only the title; the log keeps its name. Given only { projects,
     // log, nonbillable } (a moved event, or a series), the links go on the sync's lines as they
@@ -1292,7 +1297,7 @@ class CalendarSync {
     // its event reached the calendar, or whose event was retimed or moved, says when the meeting
     // is. An all-day event says nothing about time, and an event with no end line (it ends on
     // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Only a log
-    // is changed (see isLog): a 🗒️ on an event line can point at any note. Returns whether the
+    // is changed (see isLog): a ⋯ on an event line can point at any note. Returns whether the
     // log changed; checking the cached frontmatter first keeps an unchanged log unread.
     async fillLog(log, lines, date) {
         const target = log.match(/^\[\[([^[\]|#]+)/)?.[1]?.trim();

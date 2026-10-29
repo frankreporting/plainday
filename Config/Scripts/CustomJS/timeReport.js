@@ -47,7 +47,7 @@ class TimeReport {
     // (OBS-90): a link in the text is part of the title, even a link to a project. Looking at the
     // task line and then the lines it's nested under:
     //   1. a ⭕ link to a project note (`[[Orchard Lane Web 2026|⭕]]`);
-    //   2. the note link's note (🗒️, or 🔗 before OBS-87: a task's note, an event's log): its nearest
+    //   2. the line's note (its ⋯, a task's note or an event's log, else its ↗, OBS-208): its nearest
     //      project folder note (Folder/Folder.md tagged #project), or its `parent`. An event whose
     //      title is wrapped in a link, the way lines were written before OBS-57, has that note.
     // Otherwise it's Unassigned. A project folder note inside another project's folder is a
@@ -129,20 +129,20 @@ class TimeReport {
     static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
-    // 🗒️ (or 🔗, before OBS-87), ⭕, 🗃️ and 🚩 links, and a sent line's forward date (FORWARD_LINK),
+    // ⋯, ↗, ⭕, 🗃️ and 🚩 links, and a sent line's forward date (FORWARD_LINK),
     // which say nothing about what a line is
-    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:🗒|🔗|⭕|🗃|🚩|➡)[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:⋯|↗|⭕|🗃|🚩|➡)[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
     // A sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
     // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD); or one written with a ➡️ before its date
     static FORWARD_LINK = /\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
-    // The alias of a line's link to its own note (a task's note, an event's log): 🗒️, or 🔗 from
-    // before OBS-87, compared once U+FE0F and spaces are dropped
-    static NOTE_ALIAS = /^(?:🗒|🔗)$/u;
+    // The alias of a line's note link: ⋯ for its own note (a task's note, an event's log) or ↗ for the
+    // note it was sent from (OBS-208), compared once U+FE0F and spaces are dropped
+    static NOTE_ALIAS = /^(?:⋯|↗)$/u;
     // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
-    // note's 🗒️ (or 🔗), a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
+    // note's ⋯ or ↗, a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
     // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
     // its date. A phone may add or drop the U+FE0F.
-    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|🗒️?|🔗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
     static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
     // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
@@ -640,11 +640,11 @@ class TimeReport {
     }
 
     // What a line's links say about where its time goes (OBS-90): { marks: its ⭕ and 🗃️ links,
-    // notes: its 🗒️ (or 🔗) links, title: the link an old event's title is wrapped in, or null },
-    // each { target, alias }. Only the run of links that ends the line counts, stepping over the
+    // notes: its ⋯ links, else its ↗ ones, title: the link an old event's title is wrapped in, or
+    // null }, each { target, alias }. Only the run of links that ends the line counts, stepping over the
     // free mark and 🆓 among them, and a block ID after them; a link in the text is part of the title.
     lineLinks(body) {
-        const marks = [], notes = [];
+        const marks = [], own = [], from = [];
         let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
         for (;;) {
             const link = rest.match(TimeReport.TRAIL_LINK);
@@ -652,7 +652,8 @@ class TimeReport {
                 const target = link[1].split(/[#^]/)[0].trim();
                 const symbol = link[2].replace(/[️\s]/g, "");
                 if (/^(?:⭕|🗃)$/u.test(symbol)) marks.unshift({ target, alias: link[2] });
-                else if (this.isNoteAlias(symbol)) notes.unshift({ target, alias: link[2] });
+                else if (symbol === "⋯") own.unshift({ target, alias: link[2] });
+                else if (this.isNoteAlias(symbol)) from.unshift({ target, alias: link[2] });
                 rest = rest.slice(0, link.index).trimEnd();
                 continue;
             }
@@ -660,9 +661,12 @@ class TimeReport {
             if (mark && mark.index > 0) { rest = rest.slice(0, mark.index).trimEnd(); continue; }
             break;
         }
+        // A line's note is its ⋯, else the ↗ to the note it was sent from: the two are read alike until
+        // OBS-196 tells them apart (OBS-208), for its project and for whether it disagrees with its ⭕
+        const notes = (own.length ? own : from).filter((l) => l.target);
         const wrapped = notes.length ? null : rest.trim().match(TimeReport.WRAPPED_TITLE);
         const title = wrapped ? { target: wrapped[1].split(/[#^]/)[0].trim(), alias: "" } : null;
-        return { marks: marks.filter((l) => l.target), notes: notes.filter((l) => l.target), title: title?.target ? title : null };
+        return { marks: marks.filter((l) => l.target), notes, title: title?.target ? title : null };
     }
 
     // A line and the list items it's nested under, nearest first, as the report reads an entry's context
@@ -716,8 +720,8 @@ class TimeReport {
         return TimeReport.NOTE_ALIAS.test(alias.replace(/[️\s]/g, ""));
     }
 
-    // A task line that ends in a ⭕ for a project and also a 🗒️ task note filed under a different
-    // project, or an event line whose 🗒️ log is (OBS-57), archived projects included (OBS-213): a
+    // A task line that ends in a ⭕ for a project and also a ⋯ task note filed under a different
+    // project, or an event line whose ⋯ log is (OBS-57), archived projects included (OBS-213): a
     // note moved by hand, say, until OBS-93 updates its lines. Nothing decides between the two, so
     // the line's time counts toward neither (Brian, 2026-10-28; see build). Checks the first context
     // line with a ⭕, the one the report's resolve uses. { lineProject, note, noteProject, event } or null.
@@ -912,7 +916,7 @@ class TimeReport {
         for (const e of billed) addChain(e.project);
         for (const p of problems) p.projects.forEach(addChain);
 
-        // Time on a task line whose ⭕ project and 🗒️ task note disagree, or an event line whose ⭕
+        // Time on a task line whose ⭕ project and ⋯ task note disagree, or an event line whose ⭕
         // and log do: said on both project notes, once per note and pair of projects (OBS-34)
         const conflicts = new Map();
         for (const [e, c] of disputed) {
@@ -1714,11 +1718,11 @@ class TimeReport {
     }
 
     // A timesheet's own Problems (OBS-132): the lines its project's note has about the projects the
-    // timesheet covers (overlaps, 🆓 twice, entries of 12 hours or more, a ⭕ and 🗒️ that disagree, a
+    // timesheet covers (overlaps, 🆓 twice, entries of 12 hours or more, a ⭕ and ⋯ that disagree, a
     // project's settings), but not its invoices', which sheetProblems says. { lines, flagged }: flagged
     // holds every entry a line is about, for its row's ⚠️: the entry on the line, both sides of an
     // overlap, the entries under a task or event line a Problem is on (a stray 🆓 there, say), and a
-    // ⭕ and 🗒️ disagreement's entries. Running clocks and malformed lines aren't counted, so they
+    // ⭕ and ⋯ disagreement's entries. Running clocks and malformed lines aren't counted, so they
     // have no row; only their line says so.
     sheetEntryProblems(model, on, root, entries, link) {
         const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)) && this.changesBilling(p));
@@ -2419,6 +2423,8 @@ class TimeReport {
                 if (!quiet) new Notice("Time report: no project notes found yet; try again in a moment");
                 return;
             }
+            // Nothing is written while a daily note is still in the marks before OBS-208: currentModel
+            // says so (oldMarksNotice) and throws
             const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
             const stamp = window.moment().format("YYYY-MM-DD h:mma");
             // Project and area links by name (tables escape the | themselves)
@@ -2451,8 +2457,10 @@ class TimeReport {
             if (trouble.length) new Notice(`Time report: ${trouble.join(" · ")}`, 0);
             else if (!quiet) new Notice(done.length ? `Time report updated: ${done.join(", ")}` : "Time report is already up to date");
         } catch (e) {
-            console.error("TimeReport failed", e);
-            new Notice("Time report failed — check the console");
+            if (!e?.oldMarks) {
+                console.error("TimeReport failed", e);
+                new Notice("Time report failed — check the console");
+            }
         } finally {
             working?.hide();
             window.timeReportRunning = false;
@@ -2486,8 +2494,9 @@ class TimeReport {
         if (!tasks?.allIds) return [];
         const T = tasks.constructor;
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
+        // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
         const add = async (file) => {
-            if (!byPath.has(file.path) && !tasks.ignored(file)) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
+            if (!byPath.has(file.path) && (!tasks.ignored(file) || file.path.startsWith(T.ARCHIVE ?? "Archive/"))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
         };
         for (const lines of tasks.allIds().values()) for (const { file } of lines) await add(file);
         // A forward date is only checked on a line outside the periodic notes (TaskIds.check)
@@ -2619,6 +2628,7 @@ class TimeReport {
     async currentModel({ index = this.appIndex(), schedule = customJS.Schedule, billing = customJS.Billing } = {}) {
         const clock = window.moment();
         const daily = await this.readDailyNotes(schedule);
+        if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
         const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
         this.attachBilling(model, await this.readInvoices(billing), index, billing);
         this.addTaskProblems(model, index, await this.taskNotes(daily));
@@ -2806,6 +2816,48 @@ class TimeReport {
     textOf(file) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor);
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
+    }
+
+    // A line the one-time conversion reads (TaskIds.linkBackPass): a list line, or a meeting line in the
+    // form days used before August 2025
+    convertible(line) {
+        return /^\s*[-*+] /.test(line) || this.eventKind(line) === "meeting";
+    }
+
+    // How many lines of `daily` ([{ text }]) the one-time conversion would change (TaskIds.linkBackPass):
+    // a convertible line whose run ends in a 🗒️ or 🔗 link, the marks before OBS-208
+    oldMarkLines(daily) {
+        const T = globalThis.customJS?.TaskIds?.constructor;
+        const old = (l) => (T?.oldMarks ? T.oldMarks(l).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
+        let n = 0;
+        for (const d of daily) {
+            if (!/🗒|🔗/u.test(d.text)) continue;
+            for (const l of d.text.split("\n")) if (this.convertible(l) && old(l)) n++;
+        }
+        return n;
+    }
+
+    // How many lines in all the daily notes, timed or not, the one-time conversion would still change:
+    // the calendar sync and the Log template wait while there are any (OBS-208)
+    async oldMarksLeft(schedule = customJS.Schedule) {
+        let n = 0;
+        for (const f of app.vault.getMarkdownFiles()) {
+            if (!schedule.isDailyNote(f)) continue;
+            const text = await this.textOf(f);
+            if (/🗒|🔗/u.test(text)) n += this.oldMarkLines([{ text }]);
+        }
+        return n;
+    }
+
+    // Until the one-time conversion has run, a line with a 🗒️ reads wrong: the dead link hides the ⭕
+    // before it, so its time would count toward nothing. A run that would write a report or an invoice
+    // stops instead, with a notice that stays: true when it did.
+    oldMarksNotice(daily) {
+        const n = this.oldMarkLines(daily);
+        if (!n) return false;
+        console.warn(`TimeReport: ${n} line(s) still end in 🗒️ or 🔗; nothing written until TaskIds.linkBackPass runs`);
+        new Notice(`${n} line${n === 1 ? " in the daily notes still ends" : "s in the daily notes still end"} in a 🗒️ or 🔗 link, so the time report, invoices and the calendar sync wait for the one-time conversion: see the manual's Links at the end of a line.`, 0);
+        return true;
     }
 
     async readDailyNotes(schedule = this.schedule) {

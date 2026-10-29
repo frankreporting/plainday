@@ -180,7 +180,7 @@ const DAY_TEXT = [
     "---", "aliases: 9/16/26 Wednesday", "---",
     "- [<] 10:00am\tStandup",
     "- [ ] Order fabric swatches", "\t- ask for the linen",
-    "- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]]", "\t- 9:00am - 10:00am",
+    "- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]]", "\t- 9:00am - 10:00am",
     "- [ ] Water the plants",
     "", "## Notes", "",
 ].join("\n");
@@ -218,8 +218,8 @@ test("Schedule: an untouched task moves into next month's note, which is made fo
 
 test("Schedule: a worked-on task is forwarded to a week, its time entries staying where they were logged (OBS-96)", async () => {
     const r = await scheduleIn({ notes: { [DAY]: DAY_TEXT, [WEEK]: WEEK_TEXT }, open: DAY, at: 6, pick: (dp) => dp.result("2026-09-23", "week") });
-    assert.equal(r.editor, DAY_TEXT.replace("- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]]", "- [>] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]] ^k3x9m2"));
-    assert.equal(r.notes[WEEK], WEEK_TEXT.replace("\t- 2:00pm - 3:00pm\n", "\t- 2:00pm - 3:00pm\n- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|🗒️]] ^k3x9m2\n"));
+    assert.equal(r.editor, DAY_TEXT.replace("- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]]", "- [>] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]] ^k3x9m2"));
+    assert.equal(r.notes[WEEK], WEEK_TEXT.replace("\t- 2:00pm - 3:00pm\n", "\t- 2:00pm - 3:00pm\n- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]] ^k3x9m2\n"));
     assert.deepEqual(r.notices, ["Forwarded to Wk of 9/20"]);
 });
 
@@ -306,13 +306,14 @@ test("reopenIn: the moving line takes the place of the day's [>], done or cancel
     assert.equal(Schedule.reopenIn("- [ ] A\n\t- [>] B ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] A\n\t- [>] B ^bbbbbb");
 });
 
-test("Schedule writes 🗒️ as a task's note link (OBS-87); it reads one through AddTaskNote", () => {
+test("Schedule writes ↗ back to the note a line was sent from (OBS-208); it reads a line's ⋯ through AddTaskNote", () => {
     const Schedule = vm.runInContext(code + "\n;Schedule", vm.createContext({}));
-    assert.equal(Schedule.NOTE_MARK, "🗒️");
+    assert.equal(Schedule.NOTE_MARK, "⋯");
+    assert.equal(Schedule.FROM_MARK, "↗");
     assert.equal(Schedule.NOTE_LINK, undefined, "AddTaskNote.NOTE_LINK is the pattern (noteLink.test.mjs)");
-    // The link it writes (a line sent from another note) uses the mark, and none is written with 🔗
-    assert.equal((code.match(/Schedule\.NOTE_MARK/g) ?? []).length, 1);
-    assert.doesNotMatch(code, /\|🔗\]\]`/);
+    // The link it writes (a line sent from another note) uses the mark, and none is written by hand
+    assert.equal((code.match(/Schedule\.FROM_MARK/g) ?? []).length, 1);
+    assert.doesNotMatch(code, /\|(?:⋯|↗)\]\]`/);
 });
 
 // Schedule beside AddTaskNote, on a stand-in vault of notes at `paths` ([path, tags]), whose folders
@@ -349,35 +350,33 @@ const DEMO = [
     ["Inbox/Loose idea.md", []],
 ];
 
-test("sentLine: a line sent from a project or area links it before any note link; from a note, that note's project, then the note (OBS-90)", () => {
+test("sentLine (rule 13, OBS-208): its own note's project, else the source's, finished or not; a ↗ back to a note, after its ⋯", () => {
     const { schedule, file } = withVault(DEMO);
     const project = file("Projects/Freelance/Kestrel/Kestrel.md");
+    const wireframes = file("Projects/Freelance/Kestrel/Draft wireframes.md");
+    const log = file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md");
+    // From a project or area note: its ⭕ or 🗃️, and no ↗, since that already names the note
     assert.equal(schedule.sentLine("- [ ] Sign-off call", project), "- [ ] Sign-off call [[Kestrel|⭕]]", "no trailing space");
-    assert.equal(schedule.sentLine("- [ ] Shot list [[Shot list|🗒️]]", project), "- [ ] Shot list [[Kestrel|⭕]] [[Shot list|🗒️]]", "before the line's own note");
+    assert.equal(schedule.sentLine("- [ ] Shot list [[Shot list|⋯]]", project), "- [ ] Shot list [[Kestrel|⭕]] [[Shot list|⋯]]", "before the line's own note, which doesn't exist yet");
     assert.equal(schedule.sentLine("- [ ] Mow", file("Projects/Household/Household.md")), "- [ ] Mow [[Household|🗃️]]");
-    assert.equal(schedule.sentLine("- [ ] Sign-off call [[Household|🗃️]]", project), "- [ ] Sign-off call [[Household|🗃️]]", "a line with its own ⭕ or 🗃️ keeps it");
-    // From a task note or a log: its project, then the link back to it
-    assert.equal(schedule.sentLine("- [/] Mobile layout ", file("Projects/Freelance/Kestrel/Draft wireframes.md")),
-        "- [/] Mobile layout [[Kestrel|⭕]] [[Draft wireframes|🗒️]]");
-    assert.equal(schedule.sentLine("- [ ] Send the notes", file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md")),
-        "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]]");
-    assert.equal(schedule.sentLine("- [ ] Send the notes [[Household|🗃️]]", file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md")),
-        "- [ ] Send the notes [[Household|🗃️]] [[2026-09-14 Homepage review|🗒️]]", "its own ⭕ or 🗃️ instead");
-    assert.equal(schedule.sentLine("- [ ] Think it over", file("Inbox/Loose idea.md")), "- [ ] Think it over [[Loose idea|🗒️]]", "a note in no project");
-    // A sub-task with a note of its own keeps it as its note, named with its own project, and gets no second note link
-    assert.equal(schedule.sentLine("- [ ] Fix the gate [[Fix the gate|🗒️]]", file("Projects/Freelance/Kestrel/Draft wireframes.md")),
-        "- [ ] Fix the gate [[Household|🗃️]] [[Fix the gate|🗒️]]");
-    assert.equal(schedule.sentLine("- [ ] Fix the gate [[Fix the gate|🗒️]]", project), "- [ ] Fix the gate [[Household|🗃️]] [[Fix the gate|🗒️]]", "from a project note too");
-    assert.equal(schedule.sentLine("- [ ] New idea [[Not made yet|🗒️]]", project), "- [ ] New idea [[Kestrel|⭕]] [[Not made yet|🗒️]]", "a note that doesn't exist yet: the source's project");
-    // A note in a finished project names none: its time counts there, not in the source's project
-    assert.equal(schedule.sentLine("- [ ] Old sub [[Old sub|🗒️]]", project), "- [ ] Old sub [[Old sub|🗒️]]");
-    // A ⭕ in the text is the title's, not the line's: the line still gets its own
-    assert.equal(schedule.sentLine("- [ ] Talk to [[Household|🗃️]] about it", file("Projects/Freelance/Kestrel/Draft wireframes.md")),
-        "- [ ] Talk to [[Household|🗃️]] about it [[Kestrel|⭕]] [[Draft wireframes|🗒️]]");
+    // A ⭕ or 🗃️ the line had in its note gives way: outside a periodic note a line has no project of its own (rule 4)
+    assert.equal(schedule.sentLine("- [ ] Sign-off call [[Household|🗃️]]", project), "- [ ] Sign-off call [[Kestrel|⭕]]");
+    // From a task note or a log: its project, then a ↗ back to it
+    assert.equal(schedule.sentLine("- [/] Mobile layout ", wireframes), "- [/] Mobile layout [[Kestrel|⭕]] [[Draft wireframes|↗]]");
+    assert.equal(schedule.sentLine("- [ ] Send the notes", log), "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|↗]]");
+    assert.equal(schedule.sentLine("- [ ] Send the notes [[Household|🗃️]]", log), "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|↗]]", "its own 🗃️ gives way here too");
+    assert.equal(schedule.sentLine("- [ ] Think it over", file("Inbox/Loose idea.md")), "- [ ] Think it over [[Loose idea|↗]]", "a note in no project: a ↗ and no ⭕");
+    // A step with its own note: that note's project, its ⋯, then the ↗ (today it got no link back)
+    assert.equal(schedule.sentLine("- [ ] Fix the gate [[Fix the gate|⋯]]", wireframes), "- [ ] Fix the gate [[Household|🗃️]] [[Fix the gate|⋯]] [[Draft wireframes|↗]]");
+    assert.equal(schedule.sentLine("- [ ] Fix the gate [[Fix the gate|⋯]]", project), "- [ ] Fix the gate [[Household|🗃️]] [[Fix the gate|⋯]]", "from a project note: no ↗");
+    assert.equal(schedule.sentLine("- [ ] New idea [[Not made yet|⋯]]", project), "- [ ] New idea [[Kestrel|⭕]] [[Not made yet|⋯]]", "a note that doesn't exist yet: the source's project");
+    // A note in a finished project names it too: its time counts there (rule 13; today it named none)
+    assert.equal(schedule.sentLine("- [ ] Old sub [[Old sub|⋯]]", project), "- [ ] Old sub [[Old Job|⭕]] [[Old sub|⋯]]");
+    // A ⭕ in the text is the title's, not the line's: it stays, and the line still gets its own
+    assert.equal(schedule.sentLine("- [ ] Talk to [[Household|🗃️]] about it", wireframes),
+        "- [ ] Talk to [[Household|🗃️]] about it [[Kestrel|⭕]] [[Draft wireframes|↗]]");
     // A block ID stays last
-    assert.equal(schedule.sentLine("- [ ] Send the notes ^a1b2", file("Projects/Freelance/Kestrel/logs/2026-09-14 Homepage review.md")),
-        "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|🗒️]] ^a1b2");
-    // No line takes the ⭕ of a line it was nested under: none is sent on its own now (OBS-193)
+    assert.equal(schedule.sentLine("- [ ] Send the notes ^a1b2", log), "- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Homepage review|↗]] ^a1b2");
     assert.equal(schedule.sentLine.length, 2, "sentLine(line, src)");
 });
 
@@ -410,8 +409,8 @@ test("reopenIn: 🆓 follows the moving line, added or taken off, as its 🚩 do
     assert.equal(Schedule.reopenIn("- [>] B ^bbbbbb", "bbbbbb", ["- [ ] B, 🆓 reworded ^bbbbbb"]), "- [ ] B, 🆓 reworded ^bbbbbb", "a 🆓 in the text stays where it was typed");
 });
 
-test("reopenIn: the reopened line takes everything from the moving line, its ⭕ included; only its entries and, when the moving line has none, its 🗒️ are the day's (Brian, 2026-10-26)", () => {
-    assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] [[B|🗒️]] ^bbbbbb\n\t- 9:00am - 9:30am", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] ^bbbbbb"]), "- [/] B [[Kestrel|⭕]] [[B|🗒️]] ^bbbbbb\n\t- 9:00am - 9:30am");
+test("reopenIn: the reopened line takes everything from the moving line, its ⭕ included; only its entries and, when the moving line has none, its ⋯ are the day's (Brian, 2026-10-26)", () => {
+    assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] [[B|⋯]] ^bbbbbb\n\t- 9:00am - 9:30am", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] ^bbbbbb"]), "- [/] B [[Kestrel|⭕]] [[B|⋯]] ^bbbbbb\n\t- 9:00am - 9:30am");
     assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] ^bbbbbb", "bbbbbb", ["- [ ] B ^bbbbbb"]), "- [ ] B ^bbbbbb", "a ⭕ the moving line doesn't have comes off");
-    assert.equal(Schedule.reopenIn("- [>] B [[Old|🗒️]] ^bbbbbb", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] [[New|🗒️]] ^bbbbbb"]), "- [ ] B [[Kestrel|⭕]] [[New|🗒️]] ^bbbbbb");
+    assert.equal(Schedule.reopenIn("- [>] B [[Old|⋯]] ^bbbbbb", "bbbbbb", ["- [ ] B [[Kestrel|⭕]] [[New|⋯]] ^bbbbbb"]), "- [ ] B [[Kestrel|⭕]] [[New|⋯]] ^bbbbbb");
 });

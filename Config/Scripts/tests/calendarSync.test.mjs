@@ -164,10 +164,10 @@ test("title turned into a log link (before OBS-57), then the time changes: the l
     const before = note("- [<] 4:00pm\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]", "\t- 4:30pm");
     const retimed = run(before, replace(["- [<] 3:00pm\tPlanning", "\t- 3:30pm"]));
     assert.equal(retimed.outcome, "replaced");
-    assert.equal(retimed.text, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 3:30pm"));
+    assert.equal(retimed.text, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 3:30pm"));
 
     const renamed = run(before, replace(["- [<] 4:00pm\tQ3 planning", "\t- 4:30pm"]));
-    assert.equal(renamed.text, note("- [<] 4:00pm\tQ3 planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    assert.equal(renamed.text, note("- [<] 4:00pm\tQ3 planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("the sync's end line replaced by a time entry isn't written back", () => {
@@ -189,7 +189,7 @@ test("all day ↔ timed: the end line comes and goes, annotations stay", () => {
 test("a line with other hand edits is still yours", () => {
     const edited = [
         ["a renamed title", ["- [<] 4:00pm\tPlanning with Quincy", "\t- 4:30pm"]],
-        ["a second note link", ["- [<] 4:00pm\tPlanning [[Agenda|🗒️]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"]],
+        ["a second note link", ["- [<] 4:00pm\tPlanning [[Agenda|⋯]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"]],
         ["a note under it", ["- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm", "\t- bring the draft"]],
         ["a changed end time", ["- [<] 4:00pm\tPlanning", "\t- 4:45pm"]],
         ["a checked box", ["- [x] 4:00pm\tPlanning", "\t- 4:30pm"]],
@@ -266,7 +266,7 @@ test("an insert carries the links it's given, but never time entries", () => {
     };
     const { text: after, outcome, result } = run(note("- [ ] A task"), op);
     assert.equal(outcome, "inserted");
-    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"));
     assert.deepEqual(plain(result.lines), ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], "the ledger keeps the sync's own lines");
 });
 
@@ -356,7 +356,7 @@ test("run: a ⭕ added since the last run moves with the event, and the old line
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]"));
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
     assert.equal(body(map.get(day("2026-09-16"))), "");
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("run: canceled is marked [-] and reported; back in the calendar, it's [<] again and kept current", async () => {
@@ -546,7 +546,7 @@ test("run: moved and renamed to a title with a | in it: the log link goes along 
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\t[[2026-09-16 Planning|Planning]]"));
     assert.equal(await sync(map, [moved({ title: "Planning | Q3" })]), "Calendar sync: 1 added, 1 removed");
     assert.equal(body(map.get(day("2026-09-16"))), "");
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning | Q3 [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning | Q3 [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("run: moved after you deleted its line: the new line is still recorded", async () => {
@@ -953,10 +953,10 @@ test("run: free → busy keeps the log link, the ⭕ and the time entry; the mar
     await sync(map, [event({ availability: "free" })]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️\n\t- 4:30pm", "\t[[2026-09-16 Planning|Planning]] ℹ️ [[Pinecone Studio|⭕]]\n\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ availability: "free", title: "Planning call" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:00pm - 4:30pm"));
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ title: "Planning call" })]), "Calendar sync: 1 updated");
     assert.match(map.get(NOTE), /Planning call \(now busy\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:00pm - 4:30pm"));
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
 });
 
 test("run: the mark is the sync's: taken off or added by hand, the line is yours, and it's still found", async () => {
@@ -1022,10 +1022,10 @@ test("insert adopts a log's timeless line from before OBS-57: the sync's shape w
     const { text: after, outcome, result } = run(before, insert(["- [<] 4:00pm\tPlanning", "\t- 4:30pm"]));
     assert.equal(outcome, "adopted");
     assert.deepEqual(plain(result.changed), ["time added"]);
-    assert.equal(after, note("- [<] 9:00am\tStandup", "\t- 9:15am", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
+    assert.equal(after, note("- [<] 9:00am\tStandup", "\t- 9:15am", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
     // A free event brings its mark, before the ⭕
     const free = run(before, insert(["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"])).text;
-    assert.equal(free.split("\n")[5], "- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]");
+    assert.equal(free.split("\n")[5], "- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]");
     // Another title isn't it: the timed line goes above the timeless one, which stays
     const other = run(before, insert(["- [<] 4:00pm\tRetro", "\t- 4:30pm"]));
     assert.equal(other.outcome, "inserted");
@@ -1046,11 +1046,11 @@ test("run: a log's timeless line is adopted when its event arrives, remembered, 
     const map = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Planning|Planning]]", "- [ ] A task") });
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 adopted");
     assert.match(map.get(NOTE), /Planning \(time added\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "- [ ] A task"));
-    assert.equal(ledger(map).events.E1.log, "[[2026-09-16 Planning|🗒️]]");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.equal(ledger(map).events.E1.log, "[[2026-09-16 Planning|⋯]]");
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[2026-09-16 Planning|🗒️]]", "\t- 5:30pm", "- [ ] A task"));
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 5:30pm", "- [ ] A task"));
 });
 
 test("adopting a timeless line for a moved event: its ⭕ comes along, the old day's log link can't, so the old line stays", () => {
@@ -1059,10 +1059,10 @@ test("adopting a timeless line for a moved event: its ⭕ comes along, the old d
     const { text: after, outcome, result } = run(before, { kind: "insert", key: "E1", event: event({ date: "2026-09-17" }), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], move: true, carry });
     assert.equal(outcome, "adopted");
     assert.equal(result.droppedLog, true);
-    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-17 Planning|🗒️]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-17 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"));
     // A series mapping's ⭕ too, and the mapping is remembered
     const series = run(before, { kind: "insert", key: "E1", event: event({ recurring: true }), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"], series: { links: ["[[Studio|⭕]]"], key: "[[Studio|⭕]]" } });
-    assert.equal(series.text.split("\n")[3], "- [<] 4:00pm\tPlanning [[Studio|⭕]] [[2026-09-17 Planning|🗒️]]");
+    assert.equal(series.text.split("\n")[3], "- [<] 4:00pm\tPlanning [[Studio|⭕]] [[2026-09-17 Planning|⋯]]");
     assert.equal(series.result.series, "[[Studio|⭕]]");
 });
 
@@ -1094,53 +1094,53 @@ test("run: a log a line links takes the line's times: on adoption, on a retime, 
     // An all-day event adopts a timeless line too, and says nothing about time; a log that isn't there is no error
     const map2 = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Offsite|Offsite]]") });
     assert.equal(await sync(map2, [event({ key: "E2", id: "E2", title: "Offsite", allDay: true })]), "Calendar sync: 1 adopted");
-    assert.equal(body(map2.get(day("2026-09-16"))), "- [<] All day\tOffsite [[2026-09-16 Offsite|🗒️]]");
+    assert.equal(body(map2.get(day("2026-09-16"))), "- [<] All day\tOffsite [[2026-09-16 Offsite|⋯]]");
     assert.match(map2.get(NOTE), /Offsite \(time added\)/);
 });
 
 // ------------------------------------------------------------------ the event's note link at the end (OBS-57, OBS-87)
 
 test("splitTail: without the flag a trailing note link stays in the title (CalNav reads it that way); with it, it comes off in any order", () => {
-    assert.deepEqual(plain(cs.splitTail("Planning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]")),
-        { rest: "Planning [[2026-09-16 Planning|🗒️]]", projects: ["[[Pinecone Studio|⭕]]"], free: false, nonbillable: false, log: null });
+    assert.deepEqual(plain(cs.splitTail("Planning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]")),
+        { rest: "Planning [[2026-09-16 Planning|⋯]]", projects: ["[[Pinecone Studio|⭕]]"], free: false, nonbillable: false, log: null });
     // In the order written since OBS-90 the note link ends the line, so without the flag nothing comes off
-    assert.deepEqual(plain(cs.splitTail("Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]")),
-        { rest: "Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", projects: [], free: false, nonbillable: false, log: null });
+    assert.deepEqual(plain(cs.splitTail("Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]")),
+        { rest: "Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", projects: [], free: false, nonbillable: false, log: null });
     for (const tail of [
-        "Planning ℹ️ 🆓 [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]",
-        "Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]] 🆓 ℹ️",
-        "Planning ℹ️ [[2026-09-16 Planning|🗒]] 🆓 [[Pinecone Studio|⭕]]",
-        "Planning ℹ️ 🆓 [[2026-09-16 Planning|🔗]] [[Pinecone Studio|⭕]]",
-        "Planning ℹ️ 🆓 [[2026-09-16 Planning| 🔗️ ]] [[Pinecone Studio|⭕]]",
+        "Planning ℹ️ 🆓 [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
+        "Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]] 🆓 ℹ️",
+        "Planning ℹ️ [[2026-09-16 Planning|⋯]] 🆓 [[Pinecone Studio|⭕]]",
+        "Planning ℹ️ 🆓 [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
+        "Planning ℹ️ 🆓 [[2026-09-16 Planning| ⋯ ]] [[Pinecone Studio|⭕]]",
     ]) {
         assert.deepEqual(plain(cs.splitTail(tail, true)),
             { rest: "Planning", projects: ["[[Pinecone Studio|⭕]]"], free: true, nonbillable: true, log: tail.match(/\[\[2026[^\]]*\]\]/)[0] }, tail);
     }
-    assert.equal(cs.splitTail("[[2026-09-16 Planning|🗒️]]", true).rest, "[[2026-09-16 Planning|🗒️]]", "a line that's only a link keeps it as its title");
+    assert.equal(cs.splitTail("[[2026-09-16 Planning|⋯]]", true).rest, "[[2026-09-16 Planning|⋯]]", "a line that's only a link keeps it as its title");
 });
 
-test("head, eventHead and logLine read the note link and the old wrapped title alike, and hold the log as [[target|🗒️]]", () => {
-    for (const line of ["- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "- [<] 4:00pm\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]"]) {
+test("head, eventHead and logLine read the note link and the old wrapped title alike, and hold the log as [[target|⋯]]", () => {
+    for (const line of ["- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]", "- [<] 4:00pm\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]"]) {
         assert.deepEqual(plain(cs.head(line)), { start: "4:00pm", title: "Planning" }, line);
         const head = cs.eventHead(line);
         assert.equal(head.shown, "Planning", line);
-        assert.equal(head.log, "[[2026-09-16 Planning|🗒️]]", line);
+        assert.equal(head.log, "[[2026-09-16 Planning|⋯]]", line);
         assert.deepEqual(plain(head.projects), ["[[Pinecone Studio|⭕]]"], line);
     }
-    for (const line of ["- [<] Printer call [[2026-09-18 Printer call|🗒️]]", "- [<] [[2026-09-18 Printer call|Printer call]]", "- [<] Printer call [[2026-09-18 Printer call|🔗]]"]) {
-        assert.deepEqual(plain(cs.logLine(line)), { log: "[[2026-09-18 Printer call|🗒️]]", shown: "Printer call", projects: [], free: false, nonbillable: false }, line);
+    for (const line of ["- [<] Printer call [[2026-09-18 Printer call|⋯]]", "- [<] [[2026-09-18 Printer call|Printer call]]", "- [<] Printer call [[2026-09-18 Printer call|⋯]]"]) {
+        assert.deepEqual(plain(cs.logLine(line)), { log: "[[2026-09-18 Printer call|⋯]]", shown: "Printer call", projects: [], free: false, nonbillable: false }, line);
     }
     assert.equal(cs.logLine("- [<] Printer call"), null, "a timeless line with no log isn't a log's line");
 });
 
 test("a line with its log at the end: a retime keeps it, a rename changes only the plain title", () => {
-    const before = note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "\t- 4:30pm");
+    const before = note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]", "\t- 4:30pm");
     const retimed = run(before, replace(["- [<] 3:00pm\tPlanning", "\t- 3:30pm"]));
     assert.equal(retimed.outcome, "replaced");
-    assert.equal(retimed.text, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 3:30pm"));
+    assert.equal(retimed.text, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 3:30pm"));
     const renamed = run(before, replace(["- [<] 4:00pm\tPlanning | Q3", "\t- 4:30pm"]));
     assert.equal(renamed.outcome, "replaced", "a title with a | no longer has to fit inside a link");
-    assert.equal(renamed.text, note("- [<] 4:00pm\tPlanning | Q3 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"));
+    assert.equal(renamed.text, note("- [<] 4:00pm\tPlanning | Q3 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("an old wrapped line is written in the new form when the sync rewrites it, and left alone when it doesn't", () => {
@@ -1148,27 +1148,27 @@ test("an old wrapped line is written in the new form when the sync rewrites it, 
     const entry = { ...ENTRY, lines: ["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"] };
     const retimed = run(before, replace(["- [<] 5:00pm\tPlanning ℹ️", "\t- 5:30pm"], entry));
     assert.equal(retimed.outcome, "replaced");
-    assert.equal(retimed.text, note("- [<] 5:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:00pm - 4:20pm"));
+    assert.equal(retimed.text, note("- [<] 5:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:20pm"));
     const checked = run(before, { kind: "verify", key: "E1", entry, event: event(), lines: entry.lines });
     assert.equal(checked.outcome, "present");
     assert.equal(checked.text, before);
 });
 
-test("a phone's spelling or the older order of the links (🗒️ before ⭕): still the sync's line, written back in the usual order", () => {
+test("a phone's spelling or the older order of the links (⋯ before ⭕): still the sync's line, written back in the usual order", () => {
     for (const line of [
-        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]",
-        "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒]]",
-        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒]] [[Pinecone Studio|⭕]]",
-        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🔗]] [[Pinecone Studio|⭕]]",
+        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
+        "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]",
+        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
+        "- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]",
     ]) {
         const { text: after, outcome } = run(note(line, "\t- 4:30pm"), replace(["- [<] 3:00pm\tPlanning", "\t- 3:30pm"]));
         assert.equal(outcome, "replaced", line);
-        assert.equal(after, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 3:30pm"), line);
+        assert.equal(after, note("- [<] 3:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 3:30pm"), line);
     }
 });
 
 test("an insert carrying a log link, in either form, writes it at the end, after the ⭕ (OBS-90)", () => {
-    for (const log of ["[[2026-09-16 Planning|Planning]]", "[[2026-09-16 Planning|🗒️]]"]) {
+    for (const log of ["[[2026-09-16 Planning|Planning]]", "[[2026-09-16 Planning|⋯]]"]) {
         const op = {
             kind: "insert", key: "E1", event: event({ date: "2026-09-18" }), move: true,
             lines: ["- [<] 4:00pm\tPlanning | Q3", "\t- 4:30pm"],
@@ -1176,7 +1176,7 @@ test("an insert carrying a log link, in either form, writes it at the end, after
         };
         const { text: after, outcome, result } = run(note("- [ ] A task"), op);
         assert.equal(outcome, "inserted", log);
-        assert.equal(after, note("- [<] 4:00pm\tPlanning | Q3 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "- [ ] A task"), log);
+        assert.equal(after, note("- [<] 4:00pm\tPlanning | Q3 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"), log);
         assert.ok(!result.droppedLog, log);
     }
 });
@@ -1184,45 +1184,34 @@ test("an insert carrying a log link, in either form, writes it at the end, after
 test("a moved line whose log link is in the old form still goes once the new line has it", () => {
     const before = note("- [<] 4:00pm\t[[2026-09-16 Planning|Planning]]", "\t- 4:30pm", "- [ ] A task");
     const moveOut = { kind: "moveOut", key: "E1", entry: ENTRY, event: event({ date: "2026-09-18" }), lines: ENTRY.lines };
-    const carry = { projects: [], log: "[[2026-09-16 Planning|🗒️]]" };
+    const carry = { projects: [], log: "[[2026-09-16 Planning|⋯]]" };
     assert.equal(run(before, { ...moveOut, carry, landed: { asIntended: true } }).outcome, "removed");
     const oldCarry = { projects: [], log: "[[2026-09-16 Planning|Planning]]" };
-    assert.equal(run(note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"), { ...moveOut, carry: oldCarry, landed: { asIntended: true } }).outcome, "removed");
+    assert.equal(run(note("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"), { ...moveOut, carry: oldCarry, landed: { asIntended: true } }).outcome, "removed");
 });
 
 test("insert adopts a log's timeless line written with the note link at the end, in either order", () => {
-    for (const line of ["- [<] Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "- [<] Planning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]"]) {
+    for (const line of ["- [<] Planning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "- [<] Planning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]"]) {
         const { text: after, outcome } = run(note(line, "\t- 4:00pm - 4:20pm", "- [ ] A task"), { kind: "insert", key: "E1", event: event(), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] });
         assert.equal(outcome, "adopted", line);
-        assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"), line);
+        assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"), line);
     }
 });
 
 test("insert adopts a log's timeless line written with the note link at the end", () => {
-    const before = note("- [<] Planning [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm", "- [ ] A task");
+    const before = note("- [<] Planning [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm", "- [ ] A task");
     const { text: after, outcome } = run(before, { kind: "insert", key: "E1", event: event(), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] });
     assert.equal(outcome, "adopted");
-    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
+    assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
 });
 
-test("run: a 🗒️ typed on a phone without U+FE0F is kept through a retime, and the line isn't yours", async () => {
-    const LOG = "Projects/Studio/logs/2026-09-16 Planning.md";
-    const map = vault({ [LOG]: "---\ntags: log\ntime: \nendTime: \n---\n" });
-    await sync(map, [event()]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\tPlanning [[2026-09-16 Planning|🗒]]"));
-    assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[2026-09-16 Planning|🗒️]]", "\t- 5:30pm"));
-    assert.equal(ledger(map).events.E1.log, "[[2026-09-16 Planning|🗒️]]");
-    assert.match(map.get(LOG), /time: 5:00pm/);
-});
-
-test("run: only a log takes the line's times: a 🗒️ pointing at a task note leaves that note alone", async () => {
+test("run: only a log takes the line's times: a ⋯ pointing at a task note leaves that note alone", async () => {
     const TASK = "Projects/Studio/Prep the deck.md";
     const LOG = "Projects/Studio/Notes/2026-09-16 Retro.md";
     const map = vault({
         [TASK]: "---\ntags: task\n---\n",
         [LOG]: "---\ntags: log\n---\n",
-        [day("2026-09-16")]: note("- [<] Planning [[Prep the deck|🗒️]]", "- [<] Retro [[2026-09-16 Retro|🗒️]]"),
+        [day("2026-09-16")]: note("- [<] Planning [[Prep the deck|⋯]]", "- [<] Retro [[2026-09-16 Retro|⋯]]"),
     });
     assert.equal(await sync(map, [event(), event({ key: "E2", id: "E2", title: "Retro" })]), "Calendar sync: 2 adopted");
     assert.equal(map.get(TASK), "---\ntags: task\n---\n", "a task note gets no times");
@@ -1239,14 +1228,14 @@ test("only a title wrapped in a link to a dated log is the event's log: any othe
         assert.equal(after, before, title);
     }
     assert.equal(cs.logLine("- [<] [[Rafe Oakes|Planning]]"), null);
-    assert.equal(cs.eventHead("- [<] 4:00pm\t[[Projects/Studio/logs/2026-09-16 Planning|Planning]]").log, "[[Projects/Studio/logs/2026-09-16 Planning|🗒️]]", "a log's path still counts");
+    assert.equal(cs.eventHead("- [<] 4:00pm\t[[Projects/Studio/logs/2026-09-16 Planning|Planning]]").log, "[[Projects/Studio/logs/2026-09-16 Planning|⋯]]", "a log's path still counts");
 });
 
 test("adopting a log's timeless line keeps its 🆓, in either form", () => {
-    for (const line of ["- [<] Planning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "- [<] Planning 🆓 [[2026-09-16 Planning|🗒️]] [[Pinecone Studio|⭕]]", "- [<] [[2026-09-16 Planning|Planning]] 🆓 [[Pinecone Studio|⭕]]"]) {
+    for (const line of ["- [<] Planning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "- [<] Planning 🆓 [[2026-09-16 Planning|⋯]] [[Pinecone Studio|⭕]]", "- [<] [[2026-09-16 Planning|Planning]] 🆓 [[Pinecone Studio|⭕]]"]) {
         const { text: after, outcome } = run(note(line), { kind: "insert", key: "E1", event: event(), lines: ["- [<] 4:00pm\tPlanning", "\t- 4:30pm"] });
         assert.equal(outcome, "adopted", line);
-        assert.equal(after, note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|🗒️]]", "\t- 4:30pm"), line);
+        assert.equal(after, note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"), line);
     }
 });
 
