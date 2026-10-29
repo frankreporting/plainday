@@ -408,8 +408,9 @@ class Billing {
 
     // Entries by date, for changes(); built once and passed in when checking many invoices. `live`, for
     // every row but an archived project's: the entries as read before OBS-213 (TimeReport.build's
-    // billingEntries), so a billed row finds its entry, or holds one back, exactly as it always did;
-    // `archived`, the report's archived entries, for an archived project's rows (OBS-213).
+    // billingEntries); `archived`, the report's archived entries (OBS-213); `all`, for an archived
+    // project's rows: the archived entries, then the live ones, so its billed time now on a live
+    // project's line at its day and times says so (OBS-215).
     byDate(model) {
         const group = (list) => {
             const out = new Map();
@@ -419,8 +420,11 @@ class Billing {
             }
             return out;
         };
+        const live = model.billingEntries ?? this.entries(model);
         // A disputed line's archived entries too, so its billed row says it has two projects
-        return { live: group(model.billingEntries ?? this.entries(model)), archived: group([...model.entries, ...(model.disputed ?? [])].filter((e) => e.archived)) };
+        const archived = [...model.entries, ...(model.disputed ?? [])].filter((e) => e.archived);
+        // Each line once: a live copy of an archived entry (`report` set) is there already as itself
+        return { live: group(live), archived: group(archived), all: group([...archived, ...live.filter((e) => !e.report)]) };
     }
 
     // Whether an invoice touches `scope`: its project, or a row's project, is in it (or can't be told)
@@ -428,37 +432,28 @@ class Billing {
         return !invoice.project || scope.has(invoice.project) || invoice.rows.some((r) => !r.projectPath || scope.has(r.projectPath));
     }
 
-    // Billed entries that changed without overlapping their billed times, so they look unbilled:
-    // held: Map(entry → { invoice, row, why }), why "moved" (to another day) or "retimed" (new times on
-    // the same day); changed: [{ invoice, change }], every change that isn't wording; byInvoice:
-    // Map(invoice → its changes). Worked out once for all live invoices, for the timesheets and a new
-    // invoice alike, so the two never disagree.
-    holds(model, tr, index, ledger, { byDate = this.byDate(model) } = {}) {
-        const held = new Map(), changed = [], byInvoice = new Map();
+    // Every live invoice's changes, worked out once, for the timesheets and a new invoice alike, so the
+    // two never disagree: changed: [{ invoice, change }], every change that isn't wording; byInvoice:
+    // Map(invoice → its changes). Nothing is held back on a guess (OBS-215): a billed entry that isn't
+    // at its day and times, or overlapping them, is gone.
+    invoiceChanges(model, tr, index, ledger, { byDate = this.byDate(model) } = {}) {
+        const changed = [], byInvoice = new Map();
         for (const invoice of ledger.invoices ?? []) {
             const list = this.changes(invoice, model, tr, index, ledger, { byDate, late: false }).changes;
             byInvoice.set(invoice, list);
-            for (const change of list) {
-                if (change.kind === "wording") continue;
-                changed.push({ invoice, change });
-                const e = change.entry;
-                if (!e || held.has(e) || this.standing(e, ledger).kind !== "open") continue;
-                if (change.kind === "moved") held.set(e, { invoice, row: change.row, why: "moved" });
-                if (change.kind === "times") held.set(e, { invoice, row: change.row, why: "retimed" });
-            }
+            for (const change of list) if (change.kind !== "wording") changed.push({ invoice, change });
         }
-        return { held, changed, byInvoice };
+        return { changed, byInvoice };
     }
 
     // What a new invoice for `project` would bill, through `through` (YYYY-MM-DD):
     //   entries    billable, ended, hourly, unbilled entries in scope, oldest first
     //   heldBack   [{ entry, invoice, row, why }], why one of:
     //                changed    it overlaps a billed row, or has a billed row's key on another project
-    //                moved      a billed row's task and times, now on another day
-    //                retimed    a billed row's day, project and task, whose billed times are gone
     //                duplicate  the same day and times as an entry already on this invoice
     //   changed    [{ invoice, change }]: billed entries in scope that changed since their invoice
-    //              (drafts included), for the confirmation's Fix first
+    //              (drafts included), and every gone billed entry on any invoice, since its time could
+    //              be anywhere now (OBS-215), for the confirmation's Fix first
     //   notHourly  projects in scope with billable time that isn't billed by the hour
     //   problems   the model's Problems in scope, from the first entry considered (running clocks from
     //              any day) through `through`, running clocks first
@@ -488,14 +483,8 @@ class Billing {
             keys.add(this.key(e));
             entries.push(e);
         }
-        // Billed rows that moved or were retimed without overlapping: their entries look open, but
-        // they were billed. Hold them back and say which invoice has them.
-        const { held, changed: all } = this.holds(model, tr, index, ledger);
-        for (let i = entries.length - 1; i >= 0; i--) {
-            const h = held.get(entries[i]);
-            if (h) heldBack.push({ entry: entries.splice(i, 1)[0], ...h });
-        }
-        const changed = all.filter(({ invoice }) => this.touches(invoice, scope));
+        const { changed: all } = this.invoiceChanges(model, tr, index, ledger);
+        const changed = all.filter(({ invoice, change }) => this.touches(invoice, scope) || change.kind === "gone");
         const order = (a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end;
         entries.sort(order);
         heldBack.sort((a, b) => order(a.entry, b.entry));
@@ -547,21 +536,18 @@ class Billing {
     //   unassigned  same times, now on no project
     //   project     same times, now on another project
     //   wording     same times, the task or note reads differently (not a change in billing)
-    //   times       an entry of the same project or task overlaps it (across midnight too), or the only
-    //               unbilled entry of its project and task that day has new times
-    //   moved       the only unbilled entry with its task and times within three days, on another day
-    //   gone        none of these (with several candidates for a move or a retime, a recurring meeting
-    //               say, it's gone rather than a guess)
-    // A row for an archived project is checked against the report's archived entries, and any other
-    // against the entries as Billing reads them, as before OBS-213, so neither holds back the other's work.
+    //   times       an entry of the same project or task overlaps it (across midnight too)
+    //   gone        none of these. Nothing on another day or at other times is taken for it: without
+    //               evidence in the notes that's a guess, so the row is gone, a Problem (OBS-215)
+    // A row for an archived project is checked against the archived entries, then the live ones; any
+    // other against the entries as Billing reads them, as before OBS-213.
     // late: entries in the invoice's scope and period, billable and hourly, on no invoice; never for an
     // archived project, whose time is never invoiced.
     changes(invoice, model, tr, index, ledger, { byDate = this.byDate(model), late: wantLate = true } = {}) {
         const abs = (x) => [this.day(x.date) * 1440 + x.start, this.day(x.date) * 1440 + x.end];
         const out = [];
-        const open = (e) => !ledger.byKey.has(this.key(e));
         for (const row of invoice.rows) {
-            const pool = row.projectPath && tr.isArchived(row.projectPath) ? byDate.archived : byDate.live;
+            const pool = row.projectPath && tr.isArchived(row.projectPath) ? byDate.all : byDate.live;
             const exact = (pool.get(row.date) ?? []).filter((e) => e.start === row.start && e.end === row.end);
             // A live entry first: a copy at the same times is an archived or disputed line's
             const same = exact.find((e) => !e.report && !e.disputed) ?? exact[0];
@@ -583,13 +569,6 @@ class Billing {
                 return f < rt && rf < t && ((row.projectPath && e.project === row.projectPath) || this.stored(tr, e.task) === row.task);
             });
             if (over) { out.push({ row, kind: "times", entry: over.report ?? over }); continue; }
-            // Exact times on another day are the stronger sign, so a move is looked for first
-            const moved = [-3, -2, -1, 1, 2, 3].flatMap((d) => pool.get(this.date(this.day(row.date) + d)) ?? [])
-                .filter((e) => e.start === row.start && e.end === row.end && open(e) && this.stored(tr, e.task) === row.task);
-            if (moved.length === 1) { out.push({ row, kind: "moved", entry: moved[0].report ?? moved[0] }); continue; }
-            const retimed = (pool.get(row.date) ?? []).filter((e) => open(e) && e.billable && row.projectPath && e.project === row.projectPath
-                && this.stored(tr, e.task) === row.task);
-            if (retimed.length === 1) { out.push({ row, kind: "times", entry: retimed[0].report ?? retimed[0] }); continue; }
             // Not found among the entries it could be: one with its times that counts toward an archived
             // project now says where the time went
             const archivedNow = row.projectPath && !tr.isArchived(row.projectPath)

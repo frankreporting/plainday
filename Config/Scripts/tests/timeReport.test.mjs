@@ -2640,7 +2640,7 @@ test("timesheet: Problems say why each ⚠️ entry is ⚠️, as the project's 
     assert.equal(block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).length, 2, block);
     assert.deepEqual(section(block, "### Problems"), [
         "- [[1001-ORC]] (paid 9/15): [[2026-09-01|9/1/26]] 9:00am - 9:50am was billed, now 🆓",
-        "- [[1001-ORC]] (paid 9/15): [[2026-09-02|9/2/26]] 3:00pm - 3:30pm was billed, gone from its daily note",
+        "- [[1001-ORC]] (paid 9/15): 9/2/26 3:00pm - 3:30pm `Charts` was billed, but now it's missing from [[2026-09-02|the daily note]]; put it back there to settle it",
         "- [[1002-ORC]] (draft): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm; rebuild it",
     ]);
     assert.ok(block.startsWith(`%% time:start %%\n*Updated s*\n\n${PROBLEMS}\n> - `), "Problems come first, as a callout (OBS-167)");
@@ -2834,14 +2834,14 @@ test("OBS-167: a timesheet's report has no heading; the one above an existing ti
     assert.equal(tr.blockEdits(sheet("Notes"), BLOCK).reduce(apply, sheet("Notes")), sheet(`Notes\n\n## Time Report\n\n${BLOCK}`));
 });
 
-test("final review: the timesheet marks a billed entry moved to another day ⚠️, as Invoice holds it back", () => {
+test("OBS-215, reversing a final review: a billed entry moved to another day isn't guessed at; its row is missing, and the entry isn't marked", () => {
     const idx = orcIndex();
     const inv = orcInvoice("1001-ORC", "sent", [["2026-09-02", "3:00pm", "3:30pm"]], { invoice_date: "2026-09-04" });
     const moved = [ORC_NOTES[0], note("2026-09-02", "- [x] Other [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:15am"), note("2026-09-03", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 3:00pm - 3:30pm")];
     const m = tr.attachBilling(tr.build(moved, idx), [inv], idx, billing);
     const row = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").find((l) => l.includes("3:00pm - 3:30pm"));
-    assert.match(row, /^\| ⚠️ \|  \| 3:00pm - 3:30pm \| .* \| \[\[1001-ORC\]\] \|$/);
-    assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] (sent 9/4): [[2026-09-02|9/2/26]] 3:00pm - 3:30pm was billed, now on [[2026-09-03|9/3/26]]"));
+    assert.match(row, /^\|  \|  \| 3:00pm - 3:30pm \| /, "not ⚠️: nothing ties it to the billed row");
+    assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] (sent 9/4): 9/2/26 3:00pm - 3:30pm `Charts` was billed, but now it's missing from [[2026-09-02|the daily note]]; put it back there to settle it"));
 });
 
 // writeTimesheet against a stub of the little of `app` it uses

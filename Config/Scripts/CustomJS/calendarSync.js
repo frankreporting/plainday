@@ -112,6 +112,7 @@ class CalendarSync {
         ledger.updatedAt = feed.generatedAt ?? new Date().toISOString();
         await this.writeJson(CalendarSync.LEDGER, ledger);
         await this.writeReport(report, feed);
+        await this.logProblems(report);
         const summary = this.summary(report);
         return fetchFailed ? `${summary} — from the last fetch (${fetchFailed})` : summary;
     }
@@ -1401,6 +1402,21 @@ class CalendarSync {
         if (!app.vault.getFileByPath(CalendarSync.NOTE)) return;
         const body = lines.join("\n").trimEnd() + "\n";
         await this.updateNote(CalendarSync.NOTE, (text) => this.replaceSection(text, "## Last run", body));
+    }
+
+    // The error log's calendar section (OBS-218): changes held back and lines it couldn't write, which
+    // want you; the Last run report in the Calendar Sync note has the detail
+    async logProblems(report) {
+        const log = customJS.ErrorLog;
+        if (!log) return;
+        try {
+            const name = CalendarSync.NOTE.split("/").pop().replace(/\.md$/, "");
+            const at = { link: `[[${name}]]`, name };
+            const groups = log.group([...report.held.map(() => ({ kind: "Held back changes", ...at })), ...report.skipped.map(() => ({ kind: "Skipped lines", ...at }))]);
+            log.toast("Calendar sync", await log.write("Calendar sync", groups, { create: !app.isMobile }));
+        } catch (e) {
+            console.error("CalendarSync: couldn't update the error log", e);
+        }
     }
 
     summary(report) {

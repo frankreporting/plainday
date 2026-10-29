@@ -483,7 +483,7 @@ test("rows: a row per date and rate, rounded entries added up, amounts to the ce
 
 // ------------------------------------------------------------------ changed since invoiced
 
-test("changes: times, moved, gone, 🆓, another project, wording; entries logged late", () => {
+test("changes: times, gone, 🆓, another project, wording; entries logged late", () => {
     const rows = billing.snapshot(billing.select(model, tr, index, { project: WEB, through: "2026-09-02", ledger: emptyLedger() }).entries, model, tr);
     const invoice = read(invoiceNote("1001-HBR", "sent", rows));
     const ledger = billing.ledger([invoice]);
@@ -497,7 +497,7 @@ test("changes: times, moved, gone, 🆓, another project, wording; entries logge
     assert.deepEqual(kinds([NOTES[0], { ...NOTES[1], text: NOTES[1].text.replace("9:50am\n", "9:50am: 🆓\n") }]), [["2026-09-02", "9:00am", "free"]]);
     assert.deepEqual(kinds([NOTES[0], { ...NOTES[1], text: NOTES[1].text.replace("Build pages [[Harbor Web|⭕]]", "Build pages [[Dune Books|⭕]]") }]), [["2026-09-02", "9:00am", "project"]]);
     const moved = NOTES[1].text.replace("- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am\n", "");
-    assert.deepEqual(kinds([NOTES[0], { ...NOTES[1], text: moved }, day("2026-09-04", "- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am")]), [["2026-09-02", "9:00am", "moved"]]);
+    assert.deepEqual(kinds([NOTES[0], { ...NOTES[1], text: moved }, day("2026-09-04", "- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am")]), [["2026-09-02", "9:00am", "gone"]], "moved to another day: nothing ties it to the row (OBS-215)");
     assert.deepEqual(kinds([NOTES[0], { ...NOTES[1], text: NOTES[1].text.replace("- [x] Shoot [[Harbor Photos|⭕]]\n\t- 1:00pm - 2:00pm\n", "") }]), [["2026-09-02", "1:00pm", "gone"]]);
     const late = tr.build([NOTES[0], { ...NOTES[1], text: NOTES[1].text + "\n- [x] Extra [[Harbor Web|⭕]]\n\t- 5:00pm - 5:30pm" }], index);
     assert.deepEqual(plain(billing.changes(invoice, late, tr, index, ledger).late.map((e) => [e.date, tr.formatTime(e.start)])), [["2026-09-02", "5:00pm"]]);
@@ -508,24 +508,23 @@ test("changes: times, moved, gone, 🆓, another project, wording; entries logge
 const ledgerOf = (...notes) => billing.ledger(notes.map(read));
 const billedAll = () => billing.snapshot(billing.select(model, tr, index, { project: WEB, through: "2026-09-02", ledger: emptyLedger() }).entries, model, tr);
 
-test("review: a billed entry moved to another day is held back, not billed again", () => {
+test("OBS-215, reversing a review: a billed entry moved to another day isn't guessed at: its row is gone, under Fix first, and nothing is held back", () => {
     const ledger = ledgerOf(invoiceNote("1001-HBR", "sent", billedAll()));
     const moved = NOTES[1].text.replace("- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am\n", "- [x] Build pages [[Harbor Web|⭕]]\n");
     const m = tr.build([NOTES[0], { ...NOTES[1], text: moved }, day("2026-09-04", "- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am")], index);
     const sel = billing.select(m, tr, index, { project: WEB, through: "2026-09-04", ledger });
-    assert.deepEqual(picked(sel), []);
-    assert.deepEqual(plain(sel.heldBack.map((h) => [h.entry.date, h.why, h.invoice.name])), [["2026-09-04", "moved", "1001-HBR"]]);
-    assert.deepEqual(plain(sel.changed.map((c) => c.change.kind)), ["moved"]);
+    assert.deepEqual(picked(sel), [["2026-09-04", "9:00am", "Harbor Web"]]);
+    assert.deepEqual(plain(sel.heldBack), []);
+    assert.deepEqual(plain(sel.changed.map((c) => [c.change.kind, c.change.row.date])), [["gone", "2026-09-02"]]);
 });
-
-test("review: a billed entry retimed without overlapping (a typo fix, a synced event) is held back", () => {
+test("OBS-215, reversing a review: a billed entry retimed without overlapping isn't guessed at either", () => {
     const ledger = ledgerOf(invoiceNote("1001-HBR", "sent", billedAll()));
     const m = tr.build([{ ...NOTES[0], text: NOTES[0].text.replace("1:00pm - 2:30pm", "3:00pm - 4:30pm") }, NOTES[1]], index);
     const sel = billing.select(m, tr, index, { project: WEB, through: "2026-09-02", ledger });
-    assert.deepEqual(picked(sel), []);
-    assert.deepEqual(plain(sel.heldBack.map((h) => [h.entry.date, tr.formatTime(h.entry.start), h.why])), [["2026-09-01", "3:00pm", "retimed"]]);
+    assert.deepEqual(picked(sel), [["2026-09-01", "3:00pm", "Harbor Web"]]);
+    assert.deepEqual(plain(sel.heldBack), []);
+    assert.deepEqual(plain(sel.changed.map((c) => [c.change.kind, tr.formatTime(c.change.row.start)])), [["gone", "1:00pm"]]);
 });
-
 test("review: the same times on another project aren't taken for a billed entry", () => {
     const ledger = ledgerOf(invoiceNote("1001-HBR", "sent", billedAll()));
     const m = tr.build([NOTES[0], { ...NOTES[1], text: NOTES[1].text + "\n- [x] Dune copy [[Dune Books|⭕]]\n\t- 9:00am - 9:50am" }], index);
@@ -612,39 +611,34 @@ test("review: Fix first starts at the first entry being billed, except a running
 
 // ------------------------------------------------------------------ from the branch review (2026-09-28)
 
-test("final review: a recurring meeting isn't taken for a moved entry; one far away isn't either", () => {
+test("final review, OBS-215: nothing on another day is taken for a billed entry, a recurring meeting or a single one nearby", () => {
     const standup = (d) => day(d, "- [<] 9:00am\tStandup [[Harbor Web|⭕]]\n\t- 9:20am");
     const m0 = tr.build([standup("2026-09-07"), standup("2026-09-08"), standup("2026-09-09")], index);
     const billed = billing.snapshot(m0.entries.filter((e) => e.date === "2026-09-08"), m0, tr);
     const inv = read(invoiceNote("1001-HBR", "sent", billed));
     const l = billing.ledger([inv]);
-    // 9/8's end line dropped: two other standups at the same times, so it's gone, not a guess
+    // 9/8's end line dropped: other standups at the same times aren't it
     const m = tr.build([standup("2026-09-07"), day("2026-09-08", "- [<] 9:00am\tStandup [[Harbor Web|⭕]]"), standup("2026-09-09")], index);
     assert.deepEqual(plain(billing.changes(inv, m, tr, index, l).changes.map((c) => c.kind)), ["gone"]);
-    assert.equal(billing.holds(m, tr, index, l).held.size, 0, "and nothing is held back");
-    // A single candidate a week away is a different meeting, not a move
     const far = tr.build([day("2026-09-08", "- [<] 9:00am\tStandup [[Harbor Web|⭕]]"), standup("2026-09-15")], index);
     assert.deepEqual(plain(billing.changes(inv, far, tr, index, l).changes.map((c) => c.kind)), ["gone"]);
-    // One candidate within three days is a move
+    // Even one candidate within three days is a guess (OBS-215)
     const near = tr.build([day("2026-09-08", "- [<] 9:00am\tStandup [[Harbor Web|⭕]]"), standup("2026-09-10")], index);
-    assert.deepEqual(plain(billing.changes(inv, near, tr, index, l).changes.map((c) => [c.kind, c.entry?.date])), [["moved", "2026-09-10"]]);
+    assert.deepEqual(plain(billing.changes(inv, near, tr, index, l).changes.map((c) => [c.kind, c.entry?.date ?? null])), [["gone", null]]);
+    assert.deepEqual(picked(billing.select(near, tr, index, { project: WEB, through: "2026-09-30", ledger: l })), [["2026-09-10", "9:00am", "Harbor Web"]]);
 });
-
-test("final review: a retime is held back only when it's the task's one entry that day", () => {
+test("final review, OBS-215: new times on the same day are a guess too, the task's one entry or not", () => {
     const billed = billing.snapshot([entry(model, "2026-09-01", "1:00pm")], model, tr);
     const inv = read(invoiceNote("1001-HBR", "sent", billed));
     const l = billing.ledger([inv]);
     const one = tr.build([{ ...NOTES[0], text: NOTES[0].text.replace("1:00pm - 2:30pm", "3:00pm - 4:30pm") }], index);
-    assert.deepEqual(plain(billing.changes(inv, one, tr, index, l).changes.map((c) => [c.kind, tr.formatTime(c.entry?.start ?? 0)])), [["times", "3:00pm"]]);
-    assert.deepEqual(plain([...billing.holds(one, tr, index, l).held.values()].map((h) => h.why)), ["retimed"]);
-    // Retimed, and new work on the same task logged the same day: nothing is guessed, nothing held
+    assert.deepEqual(plain(billing.changes(inv, one, tr, index, l).changes.map((c) => c.kind)), ["gone"]);
     const more = tr.build([{ ...NOTES[0], text: NOTES[0].text.replace("1:00pm - 2:30pm: first pass", "3:00pm - 4:30pm: first pass\n\t- 5:00pm - 6:00pm") }], index);
     assert.deepEqual(plain(billing.changes(inv, more, tr, index, l).changes.map((c) => c.kind)), ["gone"]);
     const sel = billing.select(more, tr, index, { project: WEB, through: "2026-09-01", ledger: l });
     assert.deepEqual(picked(sel), [["2026-09-01", "3:00pm", "Harbor Web"], ["2026-09-01", "5:00pm", "Harbor Web"]]);
     assert.deepEqual(plain(sel.changed.map((c) => c.change.kind)), ["gone"], "it's under Fix first instead");
 });
-
 test("final review, reversed by OBS-213: rows for a project archived since are checked like any other", () => {
     const ARCH = "Archive/Work/Harbor Web/Harbor Stills/Harbor Stills.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: ARCH, tags: ["project"], props: { rate: 100, rate_type: "hourly" } }]);
@@ -678,7 +672,7 @@ test("OBS-213: an archived sub-project stays under its live parent, whose hours 
     assert.ok(!billing.changes(own, m, tr, idx, emptyLedger()).late.includes(stills));
 });
 
-test("OBS-213: a live row whose old times an archived entry now has still finds its moved entry, and holds it back", () => {
+test("OBS-213, OBS-215: a live row whose times an archived entry now has says where the time went; nothing on another day is taken for it", () => {
     const KELP = "Archive/Work/Kelp/Kelp.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: KELP, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Weekly call", note: "" }];
@@ -688,16 +682,10 @@ test("OBS-213: a live row whose old times an archived entry now has still finds 
         day("2026-09-02", "- [x] Old call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm"),
         day("2026-09-04", "- [x] Weekly call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm"),
     ], idx);
-    const moved = m.entries.find((e) => e.date === "2026-09-04");
-    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.date])), [["moved", "2026-09-04"]]);
-    assert.ok(billing.holds(m, tr, idx, ledger).held.has(moved));
-    assert.ok(!billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger }).entries.includes(moved), "so it isn't billed twice");
-    // With nothing of its own left, the archived entry at its times says where the time went (not held: nothing is billed twice)
-    const only = tr.build([day("2026-09-02", "- [x] Old call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
-    assert.deepEqual(plain(billing.changes(inv, only, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", KELP]]);
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", KELP]]);
+    assert.deepEqual(picked(billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger })), [["2026-09-04", "1:00pm", "Dune Books"]]);
 });
-
-test("OBS-213: an archived ⭕ under a live one counts toward the archived project, as it would if live, and is never billed, but still counts as a move candidate, as before (round-3 review)", () => {
+test("OBS-213: an archived ⭕ under a live one counts toward the archived project, as it would if live, and is never billed", () => {
     const OLD = "Archive/Work/Old/Old.md", ACME = "Projects/Work/Acme/Acme.md", BETA = "Projects/Work/Beta/Beta.md";
     const idx = tr.makeIndex([...NOTES_INDEX,
         { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } },
@@ -709,18 +697,15 @@ test("OBS-213: an archived ⭕ under a live one counts toward the archived proje
     const m = tr.build([
         day("2026-09-03", "- [ ] Work [[Acme|⭕]]\n\t- [x] Call [[Old|⭕]]\n\t\t- 9:00am - 10:00am"),
         day("2026-09-04", "- [x] Call [[Beta|⭕]]\n\t- 10:00am - 11:00am"),
-        day("2026-09-06", "- [x] Call [[Acme|⭕]]\n\t- 9:00am - 10:00am"),
     ], idx);
-    const retimed = m.entries.find((e) => e.date === "2026-09-04");
     assert.equal(m.entries.find((e) => e.date === "2026-09-03").project, OLD, "the report counts the 9/3 call toward Old");
     assert.ok(!billing.entries(m).some((e) => e.date === "2026-09-03"), "so no invoice bills it");
     assert.equal(billing.byDate(m).live.get("2026-09-03")[0].project, ACME, "a billed row still matches among the entries as read before");
-    // Two move candidates, so not a move: the retimed entry is held back, and isn't billed again
-    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.date])), [["times", "2026-09-04"]]);
-    assert.ok(!billing.select(m, tr, idx, { project: BETA, through: "2026-09-30", ledger }).entries.includes(retimed));
+    // The billed 9/4 row's times are nowhere now: gone, and Beta's 10:00am entry is billed (OBS-215)
+    assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => c.kind)), ["gone"]);
+    assert.deepEqual(picked(billing.select(m, tr, idx, { project: BETA, through: "2026-09-30", ledger })), [["2026-09-04", "10:00am", "Beta"]]);
 });
-
-test("OBS-213: billed time whose line now also names an archived project shows on its invoice as moved there, and isn't billed again", () => {
+test("OBS-213: billed time whose line now also names an archived project shows on its invoice as on that project, and isn't billed again", () => {
     const OLD = "Archive/Work/Old/Old.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
@@ -731,7 +716,6 @@ test("OBS-213: billed time whose line now also names an archived project shows o
     const entry = m.entries[0];
     assert.equal(entry.project, OLD);
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", OLD]]);
-    assert.equal(billing.holds(m, tr, idx, ledger).held.size, 0);
     assert.equal(billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger }).entries.length, 0);
 });
 
@@ -769,21 +753,50 @@ test("OBS-213: a billed row whose entry now counts toward an archived project sa
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, billing.ledger([inv])).changes.map((c) => [c.kind, c.entry?.project])), [["project", OLD]]);
 });
 
-test("OBS-213: an archived invoice's row looks for its moved entry among archived entries only, so it never holds back live work", () => {
+test("OBS-215: an archived invoice's row takes nothing on another day for its entry, archived or live, the same as a live invoice's row", () => {
     const KELP = "Archive/Work/Kelp/Kelp.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: KELP, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 5000, project: KELP, task: "Weekly call", note: "" }];
     const inv = billing.readInvoice({ path: `${INV}/0700-KLP.md`, props: { status: "paid", project: "[[Kelp]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
     const ledger = billing.ledger([inv]);
-    // A live entry with the same task and times two days on isn't taken for it
+    for (const line of ["- [x] Weekly call [[Dune Books|⭕]]", "- [x] Weekly call [[Kelp|⭕]]"]) {
+        const m = tr.build([day("2026-09-04", `${line}\n\t- 1:00pm - 2:00pm`)], idx);
+        assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => c.kind)), ["gone"], line);
+    }
+    // Dune Books's 9/4 call is billed, and Kelp's gone row is under Dune Books's Fix first
     const live = tr.build([day("2026-09-04", "- [x] Weekly call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
-    assert.deepEqual(plain(billing.changes(inv, live, tr, idx, ledger).changes.map((c) => c.kind)), ["gone"]);
-    assert.equal(billing.holds(live, tr, idx, ledger).held.size, 0);
-    // Its own entry, moved the same way, still is
-    const moved = tr.build([day("2026-09-04", "- [x] Weekly call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
-    assert.deepEqual(plain(billing.changes(inv, moved, tr, idx, ledger).changes.map((c) => c.kind)), ["moved"]);
+    const sel = billing.select(live, tr, idx, { project: OTHER, through: "2026-09-30", ledger });
+    assert.deepEqual(picked(sel), [["2026-09-04", "1:00pm", "Dune Books"]]);
+    assert.deepEqual(plain(sel.changed.map((c) => [c.invoice.name, c.change.kind])), [["0700-KLP", "gone"]]);
 });
 
+test("OBS-215: an archived invoice's row whose day and times are now on a live project's line says so, instead of gone, and that entry is held back", () => {
+    const KELP = "Archive/Work/Kelp/Kelp.md";
+    const idx = tr.makeIndex([...NOTES_INDEX, { path: KELP, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
+    const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 5000, project: KELP, task: "Call", note: "" }];
+    const inv = billing.readInvoice({ path: `${INV}/0700-KLP.md`, props: { status: "paid", project: "[[Kelp]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
+    const ledger = billing.ledger([inv]);
+    const kinds = (text) => plain(billing.changes(inv, tr.build([day("2026-09-02", text)], idx), tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project, tr.formatTime(c.entry?.end ?? 0)]));
+    assert.deepEqual(kinds("- [x] Call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm"), [["project", OTHER, "2:00pm"]], "now on Dune Books");
+    assert.deepEqual(kinds("- [x] Call [[Dune Books|⭕]]\n\t- 1:00pm - 2:45pm"), [["times", OTHER, "2:45pm"]], "now 1:00pm - 2:45pm");
+    // Its own archived line at the same times comes first, before a live one
+    assert.deepEqual(kinds("- [x] Call [[Kelp|⭕]]\n\t- 1:00pm - 2:00pm"), []);
+    const m = tr.build([day("2026-09-02", "- [x] Call [[Dune Books|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
+    const sel = billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger });
+    assert.deepEqual(plain([picked(sel), sel.heldBack.map((h) => [h.why, h.invoice.name])]), [[], [["changed", "0700-KLP"]]]);
+    assert.deepEqual(plain(sel.changed), [], "only a gone row from another project's invoice is listed");
+});
+
+test("OBS-215: Fix first lists every invoice's gone rows, whatever project is invoiced, and no other project's other changes", () => {
+    const rows = billing.snapshot(billing.select(model, tr, index, { project: WEB, through: "2026-09-02", ledger: emptyLedger() }).entries, model, tr);
+    const ledger = billing.ledger([read(invoiceNote("1001-HBR", "sent", rows))]);
+    // Harbor Web's 9/2 Build pages line deleted; its 9/1 entry now 🆓
+    const m = tr.build([{ ...NOTES[0], text: NOTES[0].text.replace("1:00pm - 2:30pm: first pass", "1:00pm - 2:30pm: 🆓 first pass") },
+        { ...NOTES[1], text: NOTES[1].text.replace("- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am\n", "- [x] Build pages [[Harbor Web|⭕]]\n") }], index);
+    const kinds = (project) => plain(billing.select(m, tr, index, { project, through: "2026-09-30", ledger }).changed.map((c) => c.change.kind).sort());
+    assert.deepEqual(kinds(WEB), ["free", "gone"]);
+    assert.deepEqual(kinds(OTHER), ["gone"], "Dune Books sees the gone row, not the 🆓 one");
+});
 test("final review: an invoice that lost its tag, or whose frontmatter doesn't read, stays billed and blocks invoicing", () => {
     const note = invoiceNote("1001-HBR", "sent", ROWS().slice(0, 1));
     for (const [flags, why] of [[{ tagged: false }, /isn't tagged `invoice` any more/], [{ error: "bad yaml" }, /frontmatter that doesn't read/]]) {

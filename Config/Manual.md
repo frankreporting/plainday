@@ -27,6 +27,7 @@ Every configuration file lives in one `Config` folder; the other top-level folde
 Archive/                         finished projects, moved here whole
 Config/                          the system: templates, scripts, bases, this manual
   Bases/                         Bases views (and the Invoices base, in a vault with no invoice folder)
+  Error Log.md                   every Problem in one place (see The error log)
   Invoice Settings.md            your details for invoices, and where they go (see Invoices)
   Scripts/                       CustomJS, Templater, Calendar, tests
   Templates/
@@ -249,7 +250,27 @@ Weeks run Sunday to Saturday, the same weeks Notebook Navigator names `2026w38`.
 
 Only a task's ID is checked: a block ID on a line that was never sent is just a link target. A disagreement on a project shows on every project the task names, and only that kind marks timesheet entries ⚠️ or appears in Invoice's *Fix first?*. The others show on the day they're on and the task's project. A line that is on no day and counts toward no project (a task kept in an Inbox note, say) shows in the weekly, monthly and yearly notes, with a link to its note, under its week's, month's or year's first day, the day its forward date names, or else today. Quoted lines stop at 80 characters. Malformed and running entries are listed but not counted. Code blocks and `%%` / `<!-- -->` comments are skipped. Problems come first in every report, right under the *Updated* line, in a `[!warning]` callout (orange in the default theme), so they aren't missed below a long table. With nothing to say, a report has no Problems callout. The demo has one of each kind on purpose: the 9/16 note has a mistyped entry (`2:30 - 3:45pm`), and Block Party Poster, a volunteer project whose `rate_type` was never filled in, is listed on its own note and on `2026w38`, `2026-09` and `2026`.
 
-A project's own note also lists what's wrong with its invoices (see *Invoices*), and so does its timesheet, but no weekly, monthly or yearly note: a billed entry changed since its invoice was made (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`; a draft's line ends `; rebuild it`, since *Rebuild* fixes it), an entry on two invoices, and an invoice whose Billed entries can't be read. The demo's Kestrel Outfitters 2026 shows the first.
+A project's own note also lists what's wrong with its invoices (see *Invoices*), and so does its timesheet, but no weekly, monthly or yearly note: a billed entry changed since its invoice was made (`- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`; a draft's line ends `; rebuild it`, since *Rebuild* fixes it), an entry on two invoices, and an invoice whose Billed entries can't be read. The demo's Kestrel Outfitters 2026 shows the first. A billed entry is missing when nothing is at its day and times and no entry of its project or task overlaps them; its line links the daily note: `` - [[1001-KES]] (paid 9/15): 8/27/26 1:00pm - 3:10pm `Kestrel Outfitters proposal: scope and estimate` was billed, but now it's missing from [[2026-08-27|the daily note]]; put it back there to settle it ``. It quotes the task and note the invoice recorded, so you can tell what to put back.
+
+#### The error log
+
+Every Problem the time report finds, and the calendar sync's own (changes it held back, lines it couldn't write), is also listed in one note, `Config/Error Log.md`: one line per kind of Problem per note, with a count when a note has more than one, linking the note to start from: a billing Problem links the invoice's project, whose Problems callout names the invoice and links the daily note. The detail is in the reports' Problems callouts (the project's note, its timesheet, the weekly, monthly and yearly notes), or for the calendar sync in the Calendar Sync note's *Last run*. An invoice's own problem shows when you run *Invoice* on it, and every missing billed row in *Invoice*'s *Fix first?*. Open it with *View Error Logs*, and open the notes it names beside it. The demo's log:
+
+```
+## Time report
+
+Updated 9/16 9:00pm · 3 open
+
+- Billed times changed · [[Kestrel Outfitters 2026]]
+- Bad formatting · [[2026-09-16]]
+- No rate_type · [[Block Party Poster]]
+```
+
+- **Each run rewrites its own section, whole:** the time report its section, the calendar sync its own. A Problem you fix leaves the log the next time that command runs. A section is only written when its list changed, so *Updated* says when it last changed.
+- **The order:** billing first, then time entries, then projects' settings, then tasks; within a kind, by note name, so daily notes go by date.
+- **A toast** after a run that finds a line the log didn't have, or more of one, names the new lines (the first three) and links the log. Startup's run shows it too. A Problem already in the log doesn't toast again. A line with several new ones says how many: `Bad formatting ×3 (2026-09-16)`.
+- **Not listed:** time with no project, which the reports count but errands have on purpose. A task's Problem is listed once, under the note its line is in.
+- **Its own to each vault:** only the desktop creates the note, and a phone updates it when it's there. Git ignores it, and *UpdateObsidianPM* never installs it.
 
 #### Timesheets
 
@@ -264,10 +285,10 @@ A project's own note also lists what's wrong with its invoices (see *Invoices*),
 	- both blank: not invoiced yet. The invoice note has its dates.
 	- In 🆓 time, an entry on an invoice was billed before it was made 🆓, so it's ⚠️. Invoices don't show 🆓 time yet.
 - **🆓 as written:** in 🆓 time, a 🆓 on the task line stays in Task and one on the entry stays at the start of Notes, so each row says why it isn't billed.
-- **⚠️** also marks a billed entry moved or retimed since (the Invoice command holds it back), and any entry a Problem is about: both entries of an overlap, an entry with 🆓 twice or of 12 hours or more, the entries under a task or event line with a Problem (a 🆓 stuck to its text, say), and the entries of a ⭕ and ⋯ that disagree. A project that isn't billed by the hour gets the first column only when a row is ⚠️.
+- **⚠️** also marks any entry a Problem is about: both entries of an overlap, an entry with 🆓 twice or of 12 hours or more, the entries under a task or event line with a Problem (a 🆓 stuck to its text, say), and the entries of a ⭕ and ⋯ that disagree. A project that isn't billed by the hour gets the first column only when a row is ⚠️.
 - **Problems** close the timesheet when there's anything to say, so every ⚠️ says why. The lines are the project note's:
 	- **First, its entries' and projects':** the Problems above, for the projects whose time the timesheet shows. Running clocks and malformed lines aren't counted, so they have no row; only their line says so. With `include_subprojects` off, a sub-project's are on its own timesheet, though the parent's note lists them too.
-	- **Then its invoices':** `- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`, and billed time that's gone from its daily note.
+	- **Then its invoices':** `- [[1001-KES]] (paid 9/15): [[2026-09-11|9/11/26]] 1:00pm - 2:30pm was billed, now 1:00pm - 2:45pm`, and billed time that's missing from its daily note.
 	- An entry added on top of billed time whose own entry is still there gets a line of its own, after the overlap's: `… 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it`.
 	- With nothing to say, there's no Problems callout. In the demo, Kestrel Outfitters 2026's timesheet has an invoice's line, Pinecrest Library Brochure's the mistyped 9/16 entry, and Block Party Poster's its missing `rate_type`.
 
@@ -468,12 +489,12 @@ Run *Invoice* on a project note (anywhere else, it asks which project has time t
 1. **Bill through:** a date in words, starting at `today` (see *Typing a date*). A month and day without a year is the closer one, this year's or next year's, since you bill work behind you as often as a few days ahead: in October, `9/16` is last month's. The dates *Mark sent* and *Mark paid* ask for work the same way.
 2. **What it would bill:** the project's ended, billable time on no invoice yet, through that date, for a project billed by the hour (a `rate`, with `rate_type` `hourly` or empty, its own or its parent's). With `include_subprojects` on, its sub-projects' time too. When there's none, it says so, and when the next unbilled time is: `Nothing unbilled on Kestrel Outfitters 2026 through 9/6. The next unbilled time is on 9/14.` Time held back (below) isn't unbilled time, so the demo's changed 9/11 entry is skipped.
 3. **The confirmation** shows:
-	- **Fix first?** the Problems in that time (running clocks first), and billed entries that changed since their invoice;
+	- **Fix first?** the Problems in that time (running clocks first), billed entries that changed since their invoice, and every billed entry missing from its daily note on any invoice, whatever project you're invoicing, since nothing says where that time went. One whose project isn't the one you're invoicing names its project (the row's own, so a sub-project's time on its parent's invoice names the sub-project): `Kestrel Outfitters 2026's 1001-KES (paid 9/15): 8/27/26 1:00pm - 3:10pm 'Kestrel Outfitters proposal: scope and estimate' was billed, but now it's missing from the daily note; put it back there to settle it`. A link here closes the confirmation without making the draft, and opens its note;
 	- **Held back:** entries it won't bill, and why (below);
 	- **Not billed by the hour:** sub-projects left out;
 	- **To bill:** the dates, entries, hours and total, and a warning when it takes the project past its `max_hours` or `contract_max`.
-   *Create draft* (or *Create anyway* when there's something to fix) writes it; Cancel doesn't.
-4. **The draft** goes into the invoice folder (below), named with its number and the client's code: `1001-KES`. Its number is one past the highest ever given in the vault, so a number is never used twice, even after its note is deleted.
+   *Create draft* (or *Create anyway* when there's something to fix) writes it; Cancel doesn't. The confirmation's text can be selected and copied, so a missing entry's task and note can go straight back into its daily note.
+4. **The draft** goes into the invoice folder (below), named with its number and the client's code: `1001-KES`. A *Before sending* callout at its top, which doesn't print, lists its entries' Problems, its project's billed entries that changed or are missing, and what was held back. Another project's missing rows stay in *Fix first?* only: they're about another client's invoice. Its number is one past the highest ever given in the vault, so a number is never used twice, even after its note is deleted.
 
 **A flat fee** can't be invoiced yet. Run on a flat-fee project, *Invoice* asks the day the fee was earned instead, in words like *Bill through*, and sets `earned` on the project's note; the time report then counts the fee in that week's, month's and year's Earnings (see *Earnings in weekly and monthly notes*). Run again, it changes the day. A day still to come is fine, for a fee invoiced ahead: it counts at once, in its period, and the project's summary shows the date, so a year read wrong (`2/1` typed in October is next year's) is easy to spot. On a sub-project that's part of a flat fee set above it, it names that project and writes nothing; on a flat project that invoices its sub-projects' time (`include_subprojects`), it asks which you mean.
 
@@ -532,9 +553,8 @@ Run *Invoice* on the invoice note for what fits its status:
 - **Held back:** an entry the invoice won't bill, because it:
 	- overlaps a billed entry without matching it (a billed entry you extended: split the new time into an entry of its own to bill it);
 	- has a billed entry's times on another project;
-	- is a billed entry moved to another day (the only entry with its task and times within three days), or retimed on the same day (its task's only entry that day);
 	- repeats another entry at the same times.
-- **Changed since invoiced:** a billed entry whose times changed, that moved or is gone, that's 🆓 now or on another project now. Wording changes are shown but aren't billing changes. Entries logged in an invoice's period after it was made are listed too; they go on the next invoice.
+- **Changed since invoiced:** a billed entry whose times changed (an entry of its project or task overlaps them), that's 🆓 now or on another project now, or that's missing: nothing is at its day and times, and no entry of its project or task overlaps them. Billing never guesses that an entry on another day, or at other times, is a billed one moved: nothing in the notes says so. The missing entry stays listed, in every Invoice's *Fix first?* and the error log, until you put it back where it was billed; there's no way yet to set one aside. Wording changes are shown but aren't billing changes. Entries logged in an invoice's period after it was made are listed too; they go on the next invoice.
 
 ### The PDF
 
@@ -653,11 +673,15 @@ Turns the selected text into a project: a note of that name from the Project tem
 
 ### CalendarSync and CalendarSyncRange
 
-*CalendarSync* fetches (on the Mac) and writes the ticked calendars' events into daily notes; *CalendarSyncRange* first asks how far ahead (1 week to 6 months, number keys or Enter), saves the choice to the note's `Sync range:` line, then syncs. See *Calendar sync*.
+*CalendarSync* fetches (on the Mac) and writes the ticked calendars' events into daily notes; *CalendarSyncRange* first asks how far ahead (1 week to 6 months, number keys or Enter), saves the choice to the note's `Sync range:` line, then syncs. Changes it held back and lines it couldn't write also go in the error log, with a toast when they're new (see *The error log*). See *Calendar sync*.
 
 ### TimeReport
 
-Refreshes every time report where the numbers changed, in the note you're on too, and each project's timesheet note. See *The time report*.
+Refreshes every time report where the numbers changed, in the note you're on too, and each project's timesheet note, then the error log, with a toast when it found new Problems. See *The time report* and *The error log*.
+
+### ViewErrorLogs
+
+Opens the error log, `Config/Error Log.md`, in the pane you're in: every Problem the time report and the calendar sync found, one line per kind per note (see *The error log*). Before the first time report on the desktop there's none yet, and it says so.
 
 ### Invoice
 
@@ -687,7 +711,7 @@ These run on their own when Obsidian starts, and again whenever a script file ch
 - ***RefoldOnOpen*** refolds each daily note as it opens, on every device. See *Folding*.
 - ***MoveToProjectMenu*** puts *Move to project…* (*MoveToProject*) in the file menus: Notebook Navigator's menu for a note, for several selected, and for a project or area's folder; a tab's **⋯** menu; a link's right-click menu (for notes, not the project a ⭕ points at); and the core file explorer's. The item appears only for what *MoveToProject* moves.
 - ***TrailingLinks*** draws the links that end a task or event line small, at the right of the line, on every device, and hides a task's ID until the cursor reaches the end of the line (see *Links at the end of a line*). It only looks at the lines on screen, and while you type only at the line you're on and the lines nested under it. It uses Obsidian's own editor code, which CustomJS scripts can reach; if they ever can't, it logs a warning and lines stay as they are.
-- ***TimeReportOnStartup*** refreshes the time reports on the desktop once the vault is indexed. It needs the *TaskIds* script too (for the task checks); if CustomJS is still reloading its scripts, it waits a few seconds for them and otherwise skips with a console warning. A report already running finishes with the scripts it started with, so saving a script part-way through doesn't break it.
+- ***TimeReportOnStartup*** refreshes the time reports and the error log on the desktop once the vault is indexed, with a toast when there are new Problems. It needs the *TaskIds* script too (for the task checks); if CustomJS is still reloading its scripts, it waits a few seconds for them and otherwise skips with a console warning. A report already running finishes with the scripts it started with, so saving a script part-way through doesn't break it.
 
 ## Templates
 

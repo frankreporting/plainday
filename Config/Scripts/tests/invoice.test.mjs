@@ -266,6 +266,33 @@ test("changeItems and beforeSendingItems: plain lines for the check block", () =
     ]);
 });
 
+test("OBS-215: a gone billed row says it's missing from the daily note, linked; under Fix first, another project's names that project", () => {
+    const row = { ...billed[0] };
+    assert.deepEqual(plain(inv.changeItems({ changes: [{ row, kind: "gone" }], late: [] }, tr)), [
+        "9/1/26 1:00pm - 2:30pm `Site map: first pass` was billed, but now it's missing from [[2026-09-01|the daily note]]; put it back there to settle it",
+    ]);
+    const invoice = { name: "1001-HBR", status: "paid", paid: "2026-09-15", project: WEB };
+    const items = (scope) => plain(inv.beforeSendingItems({ problems: [], heldBack: [], scope: new Set(scope), changed: [{ invoice, change: { row, kind: "gone" } }] }, tr));
+    assert.deepEqual(items([WEB]), ["[[1001-HBR]] (paid 9/15): 9/1/26 1:00pm - 2:30pm `Site map: first pass` was billed, but now it's missing from [[2026-09-01|the daily note]]; put it back there to settle it"]);
+    assert.deepEqual(items(["Projects/Work/Dune Books/Dune Books.md"]), ["Harbor Web's [[1001-HBR]] (paid 9/15): 9/1/26 1:00pm - 2:30pm `Site map: first pass` was billed, but now it's missing from [[2026-09-01|the daily note]]; put it back there to settle it"]);
+    // A sub-project's row on its parent's invoice is the sub-project's time: no name when invoicing it
+    const sub = (scope) => plain(inv.beforeSendingItems({ problems: [], heldBack: [], scope: new Set(scope), changed: [{ invoice, change: { row: { ...row, projectPath: PHOTO }, kind: "gone" } }] }, tr));
+    assert.ok(!sub([PHOTO])[0].includes("'s [[1001-HBR]]"));
+    assert.ok(sub(["Projects/Work/Dune Books/Dune Books.md"])[0].startsWith("Harbor Photos's [[1001-HBR]]"));
+    // The draft's Before sending callout keeps this project's missing rows and leaves out another's
+    const sel = (scope) => ({ problems: [], heldBack: [], scope: new Set(scope), changed: [{ invoice, change: { row, kind: "gone" } }] });
+    assert.match(inv.beforeSending(sel([WEB]), tr).join("\n"), /\[\[1001-HBR\]\] \(paid 9\/15\): 9\/1\/26 1:00pm - 2:30pm `Site map: first pass` was billed, but now it's missing/);
+    assert.equal(inv.beforeSending(sel(["Projects/Work/Dune Books/Dune Books.md"]), tr), null, "nothing of Harbor Web's in Dune Books's draft");
+});
+
+test("OBS-215: linkParts splits a confirmation item around its links, so each can be clicked", () => {
+    assert.deepEqual(plain(inv.linkParts("Harbor Web's [[1001-HBR]] (paid 9/15): missing from [[2026-09-01|the daily note]]")), [
+        { text: "Harbor Web's " }, { link: "1001-HBR", text: "1001-HBR" }, { text: " (paid 9/15): missing from " }, { link: "2026-09-01", text: "the daily note" },
+    ]);
+    assert.deepEqual(plain(inv.linkParts("no links")), [{ text: "no links" }]);
+    assert.deepEqual(plain(inv.linkParts("[[a]][[b|c]]")), [{ link: "a", text: "a" }, { link: "b", text: "c" }]);
+});
+
 test("setProps, placeCheck and split keep a note's CRLF line endings, and a key doesn't match a longer one", () => {
     const text = "---\r\nstatus: draft\r\npaid_by: x\r\npaid:\r\n---\r\n# Invoice No. 1\r\n";
     assert.equal(inv.setProps(text, { status: "sent", paid: "2026-09-15" }), "---\r\nstatus: sent\r\npaid_by: x\r\npaid: 2026-09-15\r\n---\r\n# Invoice No. 1\r\n");

@@ -816,7 +816,7 @@ class TimeReport {
             return { project, archived, live: archived ? this.resolve(context, path, index, true) : project };
         };
         // `billingEntries` are the entries as read before OBS-213: Billing matches a billed row to the
-        // entry it billed among them, so a billed entry is held back exactly as it always was. An
+        // entry it billed among them, so a billed row reads exactly as it always did. An
         // archived entry with a live project further on is there as a copy on that project, `report`
         // naming the report's entry; one with no live project isn't there.
         const forBilling = (e, where) => (!where.archived ? e : where.live ? { ...e, project: where.live, report: e } : null);
@@ -1061,10 +1061,8 @@ class TimeReport {
         const invoices = notes.map((n) => billing.readInvoice(n, this, index))
             .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.path.localeCompare(b.path));
         const ledger = billing.ledger(invoices);
-        // Billed entries moved or retimed since, which look unbilled: the timesheets mark them ⚠️, as the
-        // Invoice command holds them back
-        const { held, byInvoice } = billing.holds(model, this, index, ledger);
-        model.billing = { billing, invoices, ledger, index, held, byInvoice };
+        const { byInvoice } = billing.invoiceChanges(model, this, index, ledger);
+        model.billing = { billing, invoices, ledger, index, byInvoice };
         for (const invoice of invoices) {
             if (invoice.status === "canceled" || !invoice.project) continue;
             // A table that can't be read would let its entries look unbilled; the Invoice command refuses
@@ -1673,17 +1671,27 @@ class TimeReport {
         const { invoice, change: c } = p;
         // A sent invoice's date is the day it was sent
         const on = invoice.status === "paid" ? invoice.paid : invoice.status === "sent" ? invoice.invoiceDate : null;
+        // A gone row links its daily note in the words, where you'd look for it (Brian, 2026-10-29)
         const now = c.kind === "times" ? `now ${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)}`
-            : c.kind === "moved" ? `now on [[${c.entry.date}|${this.shortDate(c.entry.date)}]]`
             : c.kind === "free" ? "now 🆓"
             : c.kind === "unassigned" ? "now on no project"
             : c.kind === "project" ? `now on ${link(c.entry.project)}`
             : c.kind === "disputed" ? "now on a line with two projects, so it isn't counted"
             : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${c.entry.date}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
-            : "gone from its daily note";
-        // An archived project's draft can't be rebuilt: Invoice never bills its time (OBS-213)
-        const fix = invoice.status === "draft" && c.kind !== "overlap" && !this.isArchived(invoice.project) ? "; rebuild it" : "";
-        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${when(c.row)} was billed, ${now}${fix}`;
+            : `but now it's missing from [[${c.row.date}|the daily note]]`;
+        const at = c.kind === "gone" ? this.missingRow(c.row) : when(c.row);
+        // An archived project's draft can't be rebuilt: Invoice never bills its time (OBS-213). A
+        // missing entry is settled by putting it back as billed.
+        const fix = invoice.status === "draft" && c.kind !== "overlap" && !this.isArchived(invoice.project) ? "; rebuild it"
+            : c.kind === "gone" ? "; put it back there to settle it" : "";
+        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${at} was billed, ${now}${fix}`;
+    }
+
+    // A missing billed row as its invoice recorded it, so you can tell what to put back (Brian,
+    // 2026-10-29): its day and times, then its task and note, quoted
+    missingRow(row) {
+        const what = [row.task, row.note].filter(Boolean).join(": ").replace(/`/g, "'");
+        return `${this.shortDate(row.date)} ${this.formatTime(row.start)} - ${this.formatTime(row.end)}${what ? ` \`${what}\`` : ""}`;
     }
 
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
@@ -1739,7 +1747,7 @@ class TimeReport {
 
     // A timesheet's Problems (OBS-143), so every ⚠️ in it says why: what changed since an invoice billed
     // time in it, and an entry on two invoices. The lines are the project note's, from the same changes
-    // (Billing.holds). An entry that's ⚠️ for no change of its own, such as one that overlaps a billed
+    // (Billing.invoiceChanges). An entry that's ⚠️ for no change of its own, such as one that overlaps a billed
     // row whose entry is still there, gets a line of its own. Empty when there's nothing to say.
     sheetProblems(model, on, entries, link) {
         const b = model.billing;
@@ -1779,16 +1787,11 @@ class TimeReport {
         return m?.type === "hourly" && m.rate ? Math.round(m.rate * 100) : null;
     }
 
-    // How a timesheet's entries stand with the invoices: (entry) → Billing.standing, with a billed entry
-    // that moved or was retimed since (`held`) as changed. Only an hourly project's entries are invoiced.
+    // How a timesheet's entries stand with the invoices: (entry) → Billing.standing. Only an hourly
+    // project's entries are invoiced.
     sheetStanding(model) {
         const b = model.billing;
-        return (e) => {
-            if (!b || this.hourlyCents(model, e) === null) return { kind: "open" };
-            const s = b.billing.standing(e, b.ledger);
-            const h = s.kind === "open" && b.held?.get(e);
-            return h ? { kind: "changed", ...h } : s;
-        };
+        return (e) => (!b || this.hourlyCents(model, e) === null ? { kind: "open" } : b.billing.standing(e, b.ledger));
     }
 
     // Whether an entry is ⚠️: changed since it was billed, or billed and now 🆓
@@ -2405,6 +2408,7 @@ class TimeReport {
         // looking them up on the global part-way through (OBS-41)
         this.schedule = customJS.Schedule;
         const billing = customJS.Billing;
+        const errorLog = customJS.ErrorLog;
         const working = quiet ? null : new Notice("Building the time report…", 0);
 
         try {
@@ -2453,6 +2457,17 @@ class TimeReport {
             broken.push(...periods.broken);
             trouble.push(...periods.trouble);
             if (broken.length) trouble.push(`couldn't update ${broken.join(", ")} (check its time:start/end markers, or an unclosed code block or comment)`);
+
+            // The error log (OBS-218): this run's Problems, one line per kind per note, and a toast
+            // for the new ones, at startup too
+            if (errorLog) {
+                try {
+                    errorLog.toast("Time report", await errorLog.write("Time report", errorLog.fromModel(model, link), { create: customJS.obsidian.Platform.isDesktop }));
+                } catch (e) {
+                    console.error("TimeReport: couldn't update the error log", e);
+                    trouble.push(`couldn't update ${errorLog.constructor.PATH} (${e.message})`);
+                }
+            } else console.warn("TimeReport: customJS.ErrorLog isn't registered (CustomJS still reloading?); the error log wasn't updated");
 
             if (trouble.length) new Notice(`Time report: ${trouble.join(" · ")}`, 0);
             else if (!quiet) new Notice(done.length ? `Time report updated: ${done.join(", ")}` : "Time report is already up to date");
@@ -2549,7 +2564,7 @@ class TimeReport {
                 if (note.kind === "day") {
                     model.problems.push({ date: note.date ?? this.dailyDate(l.path), line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });
                 } else if (projects.length) {
-                    for (const project of projects) model.projectProblems.push({ project, kind: "task", rule: v.rule, message: `has a task line in [[${this.basename(l.path)}]] (line ${l.line + 1}) that ${message}` });
+                    for (const project of projects) model.projectProblems.push({ project, kind: "task", rule: v.rule, path: l.path, line: l.line + 1, message: `has a task line in [[${this.basename(l.path)}]] (line ${l.line + 1}) that ${message}` });
                 } else {
                     // On no day and no project: the periodic notes list it under a day, linking the note it's in
                     model.problems.push({ date: this.problemDate(note, l, byPath, index, T), note: l.path, line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });

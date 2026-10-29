@@ -328,32 +328,40 @@ class Invoice {
         const when = (r) => `[[${r.date}|${tr.shortDate(r.date)}]] ${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`;
         const now = (c) => ({
             times: `now ${tr.formatTime(c.entry?.start)} - ${tr.formatTime(c.entry?.end)}`,
-            moved: `now on [[${c.entry?.date}|${c.entry ? tr.shortDate(c.entry.date) : ""}]]`,
             free: "now 🆓",
             unassigned: "now on no project",
             project: `now on [[${tr.basename(c.entry?.project ?? "")}]]`,
             disputed: "now on a line with two projects, so it isn't counted",
-            gone: "gone from its daily note",
+            gone: `but now it's missing from [[${c.row.date}|the daily note]]; put it back there to settle it`,
             wording: "reads differently now (not a change in what's billed)",
         })[c.kind];
         return [
-            ...result.changes.map((c) => `${when(c.row)} was billed, ${now(c)}`),
+            ...result.changes.map((c) => `${c.kind === "gone" ? tr.missingRow(c.row) : when(c.row)} was billed, ${now(c)}`),
             ...result.late.map((e) => `Logged in this period after the invoice, not billed: ${when(e)} ${tr.tableText(e.task)}`),
         ];
     }
 
-    // What a draft needs before it's sent: the Problems and held-back entries select() found
-    beforeSendingItems(sel, tr) {
+    // What a draft needs before it's sent: the Problems and held-back entries select() found. A gone
+    // billed entry reads as on its project's note, and one on another project's invoice names that
+    // project, since its time could be on this one now (OBS-215).
+    // `others: false` leaves out another project's missing rows: the confirmation warns about them, as
+    // the time being billed may be one, but a draft's note is no place for another client's invoice.
+    beforeSendingItems(sel, tr, { others = true } = {}) {
         const when = (e) => `[[${e.date}|${tr.shortDate(e.date)}]] ${tr.formatTime(e.start)} - ${tr.formatTime(e.end)}`;
         const why = {
             changed: (h) => `overlaps ${tr.formatTime(h.row.start)} - ${tr.formatTime(h.row.end)}, billed on [[${h.invoice.name}]]`,
-            moved: (h) => `is ${this.md(h.row.date)}'s billed entry, moved here (on [[${h.invoice.name}]])`,
-            retimed: (h) => `is ${tr.formatTime(h.row.start)} - ${tr.formatTime(h.row.end)}, billed on [[${h.invoice.name}]], with new times`,
             duplicate: () => "repeats another entry at the same times",
+        };
+        // Named by the row's own project, else its invoice's: a parent's invoice bills its sub-projects' time
+        const whose = ({ invoice, change }) => change.row.projectPath ?? invoice.project;
+        const other = (c) => c.change.kind === "gone" && !!whose(c) && !sel.scope?.has(whose(c));
+        const gone = (c) => {
+            const line = tr.invoiceProblem(c, (p) => `[[${tr.basename(p)}]]`).replace(/^- /, "");
+            return other(c) ? `${tr.basename(whose(c))}'s ${line}` : line;
         };
         return [
             ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `[[${p.date}|${tr.shortDate(p.date)}]] line ${p.line}: \`${String(p.text).replace(/`/g, "'")}\` ${p.message}`),
-            ...sel.changed.map(({ invoice, change }) => `${when(change.row)} on [[${invoice.name}]] changed since it was billed (${change.kind})`),
+            ...sel.changed.filter((c) => others || !other(c)).map((c) => (c.change.kind === "gone" ? gone(c) : `${when(c.change.row)} on [[${c.invoice.name}]] changed since it was billed (${c.change.kind})`)),
             ...sel.heldBack.map((h) => `Held back: ${when(h.entry)} ${why[h.why](h)}`),
         ];
     }
@@ -636,7 +644,7 @@ class Invoice {
 
     // The draft's check block, when there's anything to fix before it's sent
     beforeSending(sel, tr) {
-        const items = this.beforeSendingItems(sel, tr);
+        const items = this.beforeSendingItems(sel, tr, { others: false });
         return items.length ? this.checkLines("Before sending", items) : null;
     }
 
@@ -788,6 +796,20 @@ class Invoice {
         }
     }
 
+    // A confirmation item's text around its links: [{ text }] and [{ link, text }], a [[link|alias]]
+    // showing its alias
+    linkParts(text) {
+        const s = String(text), out = [], re = /\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g;
+        let at = 0, m;
+        while ((m = re.exec(s))) {
+            if (m.index > at) out.push({ text: s.slice(at, m.index) });
+            out.push({ link: m[1], text: m[2] ?? m[1] });
+            at = m.index + m[0].length;
+        }
+        if (at < s.length) out.push({ text: s.slice(at) });
+        return out;
+    }
+
     // Shows what an invoice would bill, and asks. Resolves true to create it.
     confirm(project, through, sel, model, tr, billing) {
         const { Modal, ButtonComponent } = customJS.obsidian;
@@ -795,20 +817,47 @@ class Invoice {
         const rows = billing.rows(billing.snapshot(sel.entries, model, tr));
         const cents = rows.reduce((s, r) => s + r.amount, 0);
         const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems.filter((p) => tr.changesBilling(p)), [], (p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
-        const plain = (s) => String(s).replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2").replace(/\[\[([^\]]*)\]\]/g, "$1");
         return new Promise((resolve) => {
-            let go = false;
+            let go = false, opening = null;
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(go), 0); }
+                onClose() {
+                    setTimeout(() => {
+                        resolve(go);
+                        if (!opening) return;
+                        // Only a note that's there: opening a missing one would make it, outside its
+                        // folder. A heading or block after # is kept for opening, not for finding it.
+                        const path = opening.split("#")[0];
+                        if (!path) return;
+                        if (app.metadataCache.getFirstLinkpathDest(path, "")) app.workspace.openLinkText(opening, "", false);
+                        else new Notice(`There's no note ${path} in the vault`);
+                    }, 0);
+                }
                 // Focused once the modal is open, a frame later (OBS-50): Cancel when something needs fixing
                 onOpen() { requestAnimationFrame(() => (fix.length ? cancel : create).buttonEl.focus()); }
             })(app);
             modal.titleEl.setText(`Invoice ${tr.basename(project)} through ${this.md(through)}?`);
+            // Selectable, so a missing entry's task and note can be copied back into its daily note
+            modal.contentEl.style.userSelect = "text";
             const section = (title, items) => {
                 if (!items.length) return;
                 modal.contentEl.createEl("h4", { text: title });
                 const ul = modal.contentEl.createEl("ul");
-                for (const i of items) ul.createEl("li", { text: plain(i) });
+                for (const i of items) {
+                    const li = ul.createEl("li");
+                    for (const part of this.linkParts(i)) {
+                        if (!part.link) {
+                            // Quoted text, a line or a billed task, shows as code, as in a note
+                            part.text.split(/`([^`]*)`/).forEach((t, n) => (n % 2 ? li.createEl("code", { text: t }) : li.appendText(t)));
+                            continue;
+                        }
+                        // A link closes this without making the draft, and opens its note (OBS-215)
+                        li.createEl("a", { text: part.text, cls: "internal-link" }).addEventListener("click", (ev) => {
+                            ev.preventDefault();
+                            opening = part.link;
+                            modal.close();
+                        });
+                    }
+                }
             };
             section("Fix first?", fix);
             section("Held back", this.beforeSendingItems({ problems: [], changed: [], heldBack: sel.heldBack }, tr).map((i) => i.replace(/^Held back: /, "")));

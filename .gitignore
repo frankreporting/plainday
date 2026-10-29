@@ -23,6 +23,9 @@
 /Config/Scripts/Calendar/calendar-events.json
 /Config/Scripts/Calendar/calendar-sync.json
 
+# The error log the time report and the calendar sync write (OBS-218)
+/Config/Error Log.md
+
 # Written by the Update Obsidian PM command in a vault that installed the system: where the
 # clone is, and what it installed
 /Config/Scripts/update-source
