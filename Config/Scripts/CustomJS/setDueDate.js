@@ -5,10 +5,20 @@ class DueDate {
     // written with a ➡️ before its date. A task's ID stays last (OBS-181). A phone may add or drop the U+FE0F on an emoji.
     static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
+    // A due date, with any whitespace before it: a link to a day's note with a 🚩 for its label. A link
+    // to a day with no 🚩 isn't one, and neither is a 🚩 on a link to any other note.
+    static DUE_LINK = /(\s*)\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2}\|\s*🚩\uFE0F?[^\]]*\]\]/gu;
 
-    // Where the due link goes on `lineText`, and the text to insert there: right before the line's
-    // trailing note links and forward date (with one space either side), else at the end, ahead of an ID
+    // Where the due link goes on `lineText`, and the text to insert there: over the 🚩 the line has, the
+    // first one if there are more, which go (OBS-65); else right before the line's trailing note links
+    // and forward date (with one space either side), else at the end, ahead of an ID
     placement(lineText, dueLink) {
+        const flags = [...lineText.matchAll(DueDate.DUE_LINK)];
+        if (flags.length) {
+            const [first, last] = [flags[0], flags[flags.length - 1]];
+            const from = first.index + first[1].length, to = last.index + last[0].length;
+            return { from, to, text: dueLink + lineText.slice(from, to).replace(DueDate.DUE_LINK, "") };
+        }
         const id = lineText.match(DueDate.BLOCK_ID);
         const trimmed = lineText.slice(0, id ? id.index : lineText.length).trimEnd();
         let at = trimmed.length;
@@ -24,6 +34,12 @@ class DueDate {
         }
         const before = trimmed.slice(0, at).trimEnd();
         return { from: before.length, to: at, text: ` ${dueLink} ` };
+    }
+
+    // Where a cursor at `ch` ends up after that change: on the same words, ahead of a 🚩 added right
+    // where it is. One inside a replaced 🚩 goes to the start of the new one.
+    cursorAfter(ch, { from, to, text }) {
+        return ch <= from ? ch : ch < to ? from : ch + text.length - (to - from);
     }
 
     async invoke() {
@@ -60,12 +76,12 @@ class DueDate {
                 new Notice("The line changed while the date box was open, so no deadline was set");
                 return;
             }
-            const { from, to, text } = this.placement(lineText, `[[${m.format("YYYY-MM-DD")}|🚩 ${m.format("M/D")}]]`);
+            const change = this.placement(lineText, `[[${m.format("YYYY-MM-DD")}|🚩 ${m.format("M/D")}]]`);
 
             // Insert while the modal is still open — same order NLD uses
-            editor.replaceRange(text, { line: lineNum, ch: from }, { line: lineNum, ch: to });
-            // Run from a line under the task, the cursor stays where it was
-            editor.setCursor(lineNum !== cursor.line ? cursor : { line: lineNum, ch: editor.getLine(lineNum).length });
+            editor.replaceRange(change.text, { line: lineNum, ch: change.from }, { line: lineNum, ch: change.to });
+            // The cursor stays where it was, on the line or under it
+            editor.setCursor(lineNum !== cursor.line ? cursor : { line: lineNum, ch: this.cursorAfter(cursor.ch, change) });
             modal.close();
 
             // Safety net: if the fold got dropped anyway, restore the pre-edit fold map

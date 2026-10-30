@@ -132,7 +132,7 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
 | Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; on a sub-task it moves the task. One already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line; a finished task reopens |
-| DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link |
+| DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link, or replaces the one on the line |
 | AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and keeps the line's ⭕ for it; on an event line, links a meeting log |
 | AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
 | MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `›logs/`, a project with its whole folder. The lines that link a moved note get its new ⭕. Also *Move to project…* in the file menus |

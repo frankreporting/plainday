@@ -605,7 +605,9 @@ What the words mean, typed on Sunday 9/27/26:
 
 Asks for a date (see *Typing a date*) and adds ` [[2026-09-30|🚩 9/30]] ` before the links that end the line (the forward date, ⭕, 🗃️, ⋯ or ↗), or else at the end. The task's ID stays last: the 🚩 goes in ahead of it.
 
-- **On a sub-task,** or any line under a task, the 🚩 goes on the task: the line at the top of the nest. The cursor stays where it was.
+- **A line that already has a 🚩** gets the new date in its place, so running DueDate again changes the deadline instead of adding a second one. It changes only that line: the task's lines on other days, and its note's `due`, keep the date they have.
+- **On a sub-task,** or any line under a task, the 🚩 goes on the task: the line at the top of the nest.
+- **The cursor stays where it was,** on the same words, whichever line the 🚩 goes on.
 - **An event has no deadline:** on an event line, or a line under one, DueDate does nothing and says so.
 - If the line changes while the date box is open, nothing is written, and a notice says so.
 

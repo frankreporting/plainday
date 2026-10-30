@@ -16,12 +16,14 @@ const NOTES = {
     [CAT]: "---\ntags: [project]\n---\n## Tasks\n\n- [ ] Deliver edited selects\n\t- [ ] Order the prop rentals\n",
     [day("2026-09-16")]: "- [ ] Test the timer\n\t- [ ] A sub-step\n\t\t- a note\n",
     [day("2026-09-17")]: "- [<] 9:00am\tKestrel standup [[Kestrel|⭕]]\n\t- 9:20am\n\t- [ ] Bring the sitemap\n",
+    [day("2026-09-18")]: "- [ ] Renew the car [[2026-09-20|🚩 9/20]] [[Household|⋯]]\n\t- [ ] Find the form\n",
     "Projects/Freelance/Kestrel/Draft wireframes.md": "---\ntags: [task]\n---\n- [ ] Mobile layout\n\t- [ ] Nav first\n",
 };
 
-// DueDate on line `at` of `path`, the date box handing on 9/25/26
-const dueDate = async (path, at) => {
+// DueDate on line `at` of `path`, column `ch`, the date box handing on 9/25/26
+const dueDate = async (path, at, ch = null) => {
     const v = standIn({ notes: NOTES, open: path, at });
+    v.open(path, at, ch);
     let picked = false;
     v.customJS.DatePrompt.open = (title, onPick) => { picked = true; onPick({ m: { format: (f) => ({ "YYYY-MM-DD": "2026-09-25", "M/D": "9/25" })[f] } }, { close() {} }); return {}; };
     await v.customJS.DueDate.invoke();
@@ -35,6 +37,13 @@ test("DueDate on a sub-task puts the 🚩 on the top of its nest, in a day, a pr
         assert.equal(lines.filter((l) => l.includes("🚩")).length, 1, `${path} ${at}: only the top gets it`);
         assert.deepEqual(v.notices, []);
     }
+});
+
+test("DueDate on a task with a 🚩 replaces it, from the task or a sub-task, and the cursor stays where it was (OBS-65, Brian, 2026-10-30)", async () => {
+    const want = "- [ ] Renew the car [[2026-09-25|🚩 9/25]] [[Household|⋯]]";
+    for (const at of [0, 1]) assert.equal((await dueDate(day("2026-09-18"), at)).lines[0], want, `from line ${at}`);
+    assert.deepEqual((await dueDate(day("2026-09-18"), 0, 11)).v.placed(), { line: 0, ch: 11 }, "in the title");
+    assert.deepEqual((await dueDate(day("2026-09-16"), 0, 11)).v.placed(), { line: 0, ch: 11 }, "on a line that gets its first 🚩");
 });
 
 test("DueDate on an event, or a line under one, does nothing and says an event has no deadline (OBS-193, rule 14)", async () => {

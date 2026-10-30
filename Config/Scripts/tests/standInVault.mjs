@@ -187,7 +187,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         // Where a command last put the cursor (setCursor), or null
         placed: () => placed,
         notes: () => Object.fromEntries(vault),
-        open(p, line) { flush(); editing = p; cursor = line; lines = (vault.get(p) ?? "").split("\n"); view.file = fileOf(p); },
+        open(p, line, ch = null) { flush(); editing = p; cursor = line; cursorCh = ch; lines = (vault.get(p) ?? "").split("\n"); view.file = fileOf(p); },
         lineOf: (p, text) => (vault.get(p) ?? "").split("\n").findIndex((l) => l.includes(text)),
         async schedule(date, unit = "day") {
             tick();
