@@ -11,15 +11,17 @@ class TrailingLinks {
     //     link on the line) shows the project the time report counts it toward, in faint italics:
     //     a name only, not a link.
     //   - A task's ID (^ and six letters or digits, ending the line) is hidden until the cursor
-    //     reaches the end of the line: End shows it. Shown on a line with links, it's drawn last, after
-    //     them at the right edge, where the caret then is; ← moves back into the links.
+    //     reaches the end of the line: a second End shows it. Shown on a line with links, it's drawn
+    //     last, after them at the right edge, where the caret then is; ← moves back into the links.
     //   - Typing at the ID's edge never moves it off the end: text typed just after the ID goes in at
-    //     the end of the text, ahead of the links (spec default 11). Enter is Obsidian's own: End, then
-    //     Enter, starts a new line after the ID.
+    //     the end of the text, ahead of the links (spec default 11). Enter is Obsidian's own, from the
+    //     end of the line when the cursor is at the end of the text: End, then Enter, starts a new
+    //     task below, and the links and the ID stay on their line (OBS-221).
     //   - Only the text's last word wraps with the links; the other rows keep their full width.
     //   - Live Preview only. While a link shows its brackets, the line reads as its markdown.
-    //   - End and Cmd-→ go to the end of the line, after the note link and the ID: by default
-    //     they'd stop at the far right of the row, inside the moved links.
+    //   - In Live Preview, End and Cmd-→ stop at the end of the text, and a second press goes to the
+    //     end of the line, after the note link and the ID (OBS-221). By default they'd stop at the far
+    //     right of the row, inside the moved links.
     //   - A click on one of them opens that link. Obsidian finds a clicked link from where the
     //     click lands in the text, which the moved, reordered links throw off.
     // It only draws the lines on screen, and while you type only the edited line and the lines
@@ -163,6 +165,24 @@ class TrailingLinks {
         return m ? { from: m.index, to: m.index + m[0].trimEnd().length } : null;
     }
 
+    // Where a task or event line's text ends, ahead of the links and the hidden ID that end it, or null
+    // when nothing does. A task with no text yet ends right after its checkbox, where the cursor rests.
+    static textEnd(text) {
+        const head = text.match(TrailingLinks.TASK_LINE);
+        if (!head) return null;
+        const end = TrailingLinks.trail(text)?.textEnd ?? TrailingLinks.blockId(text, { strict: true })?.from;
+        return end === undefined ? null : Math.max(end, head[0].length);
+    }
+
+    // Where End and Cmd-→ go from `ch` on a line with a textEnd: the end of the text, then, from there or
+    // past it, the end of the line. Null on any other line, and on an upper row of one that wraps, which
+    // ends at `rowEnd`, ahead of the text's end.
+    static endStop(text, ch, rowEnd = text.length) {
+        const end = TrailingLinks.textEnd(text);
+        if (end === null || Math.max(ch, rowEnd) < end) return null;
+        return ch < end ? end : text.length;
+    }
+
     // The run of system links that ends a task or event line, before a task's ID: { bodyFrom
     // (where the text starts, after the checkbox), textEnd (where it ends, before the space ahead
     // of the run), runFrom, runTo, links: [{ from, to, kind, target, alias }] in line order }. Null
@@ -266,7 +286,7 @@ class TrailingLinks {
     //     before any break goes in at the end of the line's text, ahead of its links, since text between
     //     them and the ID breaks their run; on a line with no links, just before the ID.
     //   - On a task with no text yet (`- [ ] ^id`, the checkbox's space and the ID's are one), text typed
-    //     there or after the ID gets a space of its own after the checkbox.
+    //     on either side of that space or after the ID gets a space of its own after the checkbox.
     // Enter, and any other text with a line break put in before the ID, is left as it is: Enter is
     // Obsidian's own (fix round 1). The start the old and new text share is left out (an edit may
     // replace the character before the cursor with itself), and an edit that takes text off is left
@@ -289,7 +309,7 @@ class TrailingLinks {
         // Where `before` goes; `after` goes at the end of the line
         let at;
         if (before && !taken && from >= id.to) at = TrailingLinks.trail(text)?.textEnd ?? id.from;
-        else if (boxOnly(id.from) && !taken && !after && from === id.from) at = id.from;
+        else if (boxOnly(id.from) && !taken && !after && (from === id.from || from === id.from + 1)) at = id.from;
         else return null;
         const pad = boxOnly(at) ? " " : "";
         const cursor = Math.max(0, Math.min(insert.length, edit.cursor - same));
@@ -367,7 +387,7 @@ class TrailingLinks {
                 for (let pos = from; pos <= to;) {
                     const line = doc.lineAt(pos);
                     pos = line.to + 1;
-                    // A task's ID (OBS-181) is hidden unless the cursor is at it: End shows it. The
+                    // A task's ID (OBS-181) is hidden unless the cursor is at it: a second End shows it. The
                     // cursor at the end of the text (just before the space ahead of the ID) keeps it
                     // hidden, so typing there doesn't show it; one past that space, or at the line's
                     // end, shows it
@@ -548,30 +568,44 @@ class TrailingLinks {
         const outer = EditorView.outerDecorations.of((v) => v.plugin(plugin)?.outer ?? Decoration.none);
 
         // End and Cmd-→: where the default would stop in the moved links (or past the text, on the
-        // line's last row), go to the end of the line instead. A hidden ID (OBS-181) counts as one:
-        // the default can stop just before it, and End is what shows it.
+        // line's last row), go where endStop says, or straight to the end of the line in Source mode.
+        // A hidden ID (OBS-181) counts as a link: the default can stop just before it.
         const toEnd = (extend) => (v) => {
             const { state: s } = v;
+            const live = s.field(editorLivePreviewField, false);
             let hit = false;
             const ranges = s.selection.ranges.map((r) => {
                 const line = s.doc.lineAt(r.head);
-                const t = T.trail(line.text);
-                const id = !t && T.TASK_LINE.test(line.text) ? T.blockId(line.text, { strict: true }) : null;
-                const textEnd = t ? t.textEnd : id?.from;
                 let head = v.moveToLineBoundary(r, true, true).head;
-                if (textEnd !== undefined && head >= line.from + textEnd) {
+                const stop = T.endStop(line.text, r.head - line.from, head - line.from);
+                if (stop !== null) {
                     hit = true;
-                    head = line.to;
+                    head = live ? line.from + stop : line.to;
                 }
-                return EditorSelection.range(extend ? r.anchor : head, head);
+                // Leaning left, as the default does: on a folded line, it would be drawn beside the "…"
+                return extend ? EditorSelection.range(r.anchor, head) : EditorSelection.cursor(head, -1);
             });
             if (!hit) return false;
             v.dispatch({ selection: EditorSelection.create(ranges, s.selection.mainIndex), scrollIntoView: true, userEvent: "select" });
             return true;
         };
+        // Enter at the end of the text, where End now stops, acts as at the end of the line, so End, then
+        // Enter, still leaves the links and the ID on their line. It only moves the cursor, and returns
+        // false: the Enter itself stays Obsidian's own.
+        const enter = (v) => {
+            const { state: s } = v;
+            const { ranges, main } = s.selection;
+            if (ranges.length > 1 || !main.empty || !s.field(editorLivePreviewField, false)) return false;
+            const line = s.doc.lineAt(main.head);
+            const textEnd = T.textEnd(line.text);
+            if (textEnd === null || main.head !== line.from + textEnd) return false;
+            v.dispatch({ selection: { anchor: line.to }, userEvent: "select" });
+            return false;
+        };
         const keys = Prec.highest(keymap.of([
             { key: "End", run: toEnd(false), shift: toEnd(true) },
             { mac: "Mod-ArrowRight", run: toEnd(false), shift: toEnd(true) },
+            { key: "Enter", run: enter },
         ]));
 
         // A click on a moved link opens that link. Caught on the way down, before CodeMirror and

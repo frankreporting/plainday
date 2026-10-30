@@ -144,6 +144,66 @@ test("blockId: strict takes only an ID of six letters or digits, the one that's 
     assert.deepEqual(plain(TrailingLinks.blockId(spaced, { strict: true })), { from: at(spaced, " ^"), to: spaced.length - 2 }, "spaces after it aren't part of it");
 });
 
+// ---------------------------------------------------------------- textEnd, endStop
+
+test("textEnd: where the text stops, ahead of the links and the ID (OBS-221)", () => {
+    const linked = "- [ ] Send final copy [[Pinecrest|⭕]] [[Write copy#^p7d2qe|↗]] ^p7d2qe";
+    assert.equal(TrailingLinks.textEnd(linked), at(linked, " [[Pinecrest"));
+    const id = "- [ ] Plain task ^p7d2qe";
+    assert.equal(TrailingLinks.textEnd(id), at(id, " ^"), "an ID and no links");
+    const event = "- [<] 10:00am\tKickoff call ℹ️ [[Kickoff call|⋯]] [[Kestrel|⭕]]";
+    assert.equal(TrailingLinks.textEnd(event), at(event, " [[Kickoff"), "an event line");
+});
+
+test("textEnd: a line with nothing trailing has none, so End is left to Obsidian (OBS-221)", () => {
+    for (const line of ["", "Plain text", "- Plain bullet", "- Plain bullet [[P|⭕]]", "- [ ] A task", "- [ ] A task [[Rafe Oakes]]", "- [ ] Book it ^3", "- [ ] Book it ^Ab3-x9"]) {
+        assert.equal(TrailingLinks.textEnd(line), null, line);
+    }
+});
+
+test("textEnd: a task with no text yet ends right after its checkbox, where the cursor rests (OBS-221)", () => {
+    assert.equal(TrailingLinks.textEnd("- [ ] [[Kestrel|⭕]]"), "- [ ] ".length);
+    assert.equal(TrailingLinks.textEnd("- [ ] ^k3x9m2"), "- [ ] ".length);
+    assert.equal(TrailingLinks.textEnd("\t- [ ] [[Kestrel|⭕]] ^k3x9m2"), "\t- [ ] ".length);
+});
+
+test("endStop: the first press stops at the end of the text, a second goes to the end of the line (OBS-221)", () => {
+    const line = "- [ ] Send final copy [[Pinecrest|⭕]] ^p7d2qe";
+    const textEnd = at(line, " [[");
+    assert.equal(TrailingLinks.endStop(line, at(line, "final")), textEnd, "in the text");
+    assert.equal(TrailingLinks.endStop(line, "- [ ] ".length), textEnd, "at the start of the text");
+    assert.equal(TrailingLinks.endStop(line, textEnd), line.length, "at the end of the text");
+    assert.equal(TrailingLinks.endStop(line, at(line, "⭕")), line.length, "inside the links");
+    assert.equal(TrailingLinks.endStop(line, line.length), line.length, "already at the end of the line");
+});
+
+test("endStop: a line with an ID and no links stops before the ID (OBS-221)", () => {
+    const line = "- [ ] Plain task ^p7d2qe";
+    assert.equal(TrailingLinks.endStop(line, at(line, "task")), at(line, " ^"));
+    assert.equal(TrailingLinks.endStop(line, at(line, " ^")), line.length);
+});
+
+test("endStop: on a task with no text yet the first press goes to the end of the line, with nothing to stop at first (OBS-221)", () => {
+    const line = "- [ ] [[Kestrel|⭕]]";
+    assert.equal(TrailingLinks.endStop(line, "- [ ] ".length), line.length);
+});
+
+test("endStop: no stop on a line with nothing trailing (OBS-221)", () => {
+    assert.equal(TrailingLinks.endStop("- [ ] A task", 3), null);
+});
+
+test("endStop: on an upper row of a line that wraps, the row's end comes first, so End is left to Obsidian (OBS-221)", () => {
+    const line = "- [ ] Send final copy [[Pinecrest|⭕]]";
+    assert.equal(TrailingLinks.endStop(line, 8, 14), null, "the row ends before the text does");
+    assert.equal(TrailingLinks.endStop(line, 18, at(line, " [[") + 4), at(line, " [["), "the row the text ends on");
+});
+
+test("endStop: a cursor at the end of the text is on its last row, wherever the row's end is measured (OBS-221)", () => {
+    // A task with no text draws only its checkbox on the row, and the link floats: the row can end before the text starts
+    const line = "- [ ] [[Kestrel|⭕]]";
+    assert.equal(TrailingLinks.endStop(line, "- [ ] ".length, 5), line.length);
+});
+
 // ---------------------------------------------------------------- keepIdAtEnd
 
 // An edit on one line, as the transaction filter sees it ({ from, to, insert, cursor: an offset into
@@ -202,9 +262,11 @@ test("keepIdAtEnd: on a task with no text yet, what's typed goes after the check
     const empty = "- [ ] ^k3x9m2";
     assert.equal(kept(empty, typed(empty.length, "x")), "- [ ] x| ^k3x9m2", "typed after the ID");
     assert.equal(kept(empty, typed(at(empty, " ^"), "x")), "- [ ] x| ^k3x9m2", "typed where a click at the end of the visible text puts the cursor");
+    assert.equal(kept(empty, typed("- [ ] ".length, "x")), "- [ ] x| ^k3x9m2", "typed where the cursor rests on a list line (OBS-221)");
     assert.equal(kept(empty, typed(empty.length, "a\nb")), "- [ ] a ^k3x9m2\nb|", "pasted lines");
     assert.equal(kept(empty, typed(empty.length, " ")), "- [ ] | ^k3x9m2", "a space needs no other");
     assert.equal(kept(empty, typed(at(empty, " ^"), " ")), null, "nor typed before the ID");
+    assert.equal(kept(empty, typed("- [ ] ".length, " ")), null, "nor typed where the cursor rests");
 });
 
 test("keepIdAtEnd: lines pasted just after the ID: the first goes where typed text would, the rest after the ID; pasted at the end of the text, as they come (OBS-185)", () => {
