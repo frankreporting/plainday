@@ -21,10 +21,12 @@ class TimeReport {
     // only, except the timesheet notes, which hold entry-by-entry detail. Projects in Archive count like
     // any other (OBS-213).
     //
-    // A time entry is a bullet one level under a task or event: `- 9:01am - 9:40am`, optionally
-    // `: note`. 🆓 at the start of the note doesn't bill it (`- 5:00pm - 5:30pm: 🆓 not billing`);
-    // 🆓 as a word of its own on the task or event line, or a line it's nested under, doesn't bill
-    // any entry under it, and an entry marked both ways is 🆓 and listed under Problems (OBS-24).
+    // A time entry is a bullet directly under a top-level task or event line, one at the left edge
+    // (rule 7): `- 9:01am - 9:40am`, optionally `: note`. 🆓 at the start of the note doesn't bill it
+    // (`- 5:00pm - 5:30pm: 🆓 not billing`); 🆓 as a word of its own on the task or event line doesn't
+    // bill any entry under it, and an entry marked both ways is 🆓 and listed under Problems (OBS-24).
+    // One under a sub-task isn't counted and is listed (rule 5); one anywhere else is nothing the system
+    // defines, and isn't read.
     // `- 3:00pm - ` is a running clock. An end earlier than a pm start past midnight
     // (`10:30pm - 5:51am`) runs into the next day. Lines nested under an entry are notes about
     // it, not entries. Old daily notes (to August 2025) list meetings as `3:15pm⇥[[log|title]]`
@@ -43,20 +45,17 @@ class TimeReport {
     // that one ending when it starts is quietly nothing. All-day, canceled ([-]) and forwarded ([>])
     // events, and any marker but [<], are never counted.
     //
-    // The project an entry belongs to, first match wins. Only the links that end a line count
-    // (OBS-90): a link in the text is part of the title, even a link to a project. Looking at the
-    // task line and then the lines it's nested under:
-    //   1. a ⭕ link to a project note (`[[Orchard Lane Web 2026|⭕]]`);
-    //   2. the line's note (its ⋯, a task's note or an event's log, else its ↗, OBS-208): its nearest
-    //      project folder note (Folder/Folder.md tagged #project), or its `parent`. An event whose
-    //      title is wrapped in a link, the way lines were written before OBS-57, has that note.
-    // Otherwise it's Unassigned. A project folder note inside another project's folder is a
-    // sub-project: its hours also count toward the parent. An archived project (in Archive) counts
-    // like any other, an archived sub-project into its live parent too, but a live project is never
-    // under an archived one, and an archived project's time is never billed (OBS-213). A line whose
-    // ⭕ and its own note name different projects counts toward neither, and is listed on both.
-    // An area (a folder note tagged exactly #area) counts like a project in all three, as a row of
-    // its own, but is never a parent and never has one: the projects inside it don't add up into it.
+    // The project an entry belongs to is the ⭕ or 🗃️ on its top-level line, or Unassigned (rule 4,
+    // resolve). Only the links that end a line count (OBS-90): a link in the text is part of the title,
+    // even a link to a project. Nothing else says where time goes: not a ⋯, a ↗ or a log, not `parent`,
+    // not another line. A line that disagrees with itself (two project links, or a ⭕ against the project
+    // its own note is filed in) counts toward neither, and is listed on both. A project folder note inside
+    // another project's folder is a sub-project: its hours also count toward the parent. An archived
+    // project (in Archive) counts like any other, an archived sub-project into its live parent too, through
+    // its `parent` when no folder says, but a live project is never under an archived one, and an archived
+    // project's time is never billed (OBS-213).
+    // An area (a folder note tagged exactly #area) counts like a project, as a row of its own, but is
+    // never a parent and never has one: the projects inside it don't add up into it.
     // Its note gets a report the way a project's does, and with no `rate` or `rate_type` of its own
     // its time is non-billable (OBS-51).
     //
@@ -91,6 +90,8 @@ class TimeReport {
     // A project note's By Week table turns into By Month once its entries span more weeks than this
     static WEEKS_MAX = 13;
     static ARCHIVE = "Archive/";
+    // What each of the Planner's folders holds, for makeIndex
+    static PLANNER_KIND = { days: "day", weeks: "week", months: "month", years: "year" };
     static QUOTE_MAX = 80;
     static CREATED_KEY = "time-report-created-notes";
     // A project's timesheet note sits beside it, named after it: "Kestrel Outfitters 2026 timesheet"
@@ -99,6 +100,9 @@ class TimeReport {
     static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
+    // Time under a sub-task isn't counted, only listed (Brian, 2026-10-30): counting it too would leave
+    // no reason to fix the line
+    static SUB_TIME = "is under a nested task, so it isn't counted; move it up to the task at the left edge, or outdent the nested task";
 
     static TIME = String.raw`\d{1,2}:\d{2}\s?[ap]m`;
     // `9:01am - 9:40am: note`, or `3:00pm - ` still running. En and em dashes count too, since
@@ -135,9 +139,6 @@ class TimeReport {
     // A sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
     // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD); or one written with a ➡️ before its date
     static FORWARD_LINK = /\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
-    // The alias of a line's note link: ⋯ for its own note (a task's note, an event's log) or ↗ for the
-    // note it was sent from (OBS-208), compared once U+FE0F and spaces are dropped
-    static NOTE_ALIAS = /^(?:⋯|↗)$/u;
     // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
     // note's ⋯ or ↗, a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
     // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
@@ -296,20 +297,26 @@ class TimeReport {
         return { free, stray: !free && text.includes("🆓") };
     }
 
-    // Reads one daily note. Returns { entries, problems, events }; each carries `context`, the task
-    // line and the lines it's nested under (nearest first), for working out its project later.
+    // Reads one daily note. Returns { entries, problems, events, visible }; each entry, problem and
+    // event carries `context`, the task line and the lines it's nested under (nearest first), and `top`,
+    // the number of the top-level line at the top of its nest (null with none), where resolve reads
+    // its project. `visible` is the note's lines as scan shows them.
+    // Only time directly under a top-level task or event counts (rule 7). An entry under a sub-task has
+    // `subTask`: it's listed, and build counts it nowhere (rule 5). An entry anywhere else is dropped.
     // `events` are the timed event lines: { line, start, end (from the end-time line under it, or
     // null), endText, endNote, endFree (🆓 after the end line's colon), lineFree (🆓 on the event
-    // line), free (ℹ️), ranges (time entries under it), minutes, text }. Once an event has ended,
-    // build() counts a busy one with an end line as an entry (OBS-24).
+    // line), free (ℹ️), ranges (time entries under it), minutes, text, top, subTask (nested under a
+    // task or event, so its span is time under a sub-task) }. Once an event has ended, build() counts
+    // a busy one with an end line as an entry (OBS-24). An event under nothing but plain bullets isn't
+    // defined in the system, and isn't read.
     parseNote(text, date) {
         const lines = this.lines(text);
         const entries = [];
         const problems = [];
         const events = [];
         const { visible, hidden, starts, blocks, unclosed } = this.scan(lines);
-        const problem = (i, kind, message, context = []) =>
-            problems.push({ date, line: i + 1, kind, message, text: (visible[i].trim() || lines[i].trim()), context });
+        const problem = (i, kind, message, context = [], top = null) =>
+            problems.push({ date, line: i + 1, kind, message, text: (visible[i].trim() || lines[i].trim()), context, top });
         const inBlock = new Array(lines.length).fill(false);
         for (const b of blocks) for (let j = b.start; j <= b.end; j++) inBlock[j] = true;
         for (const s of starts) {
@@ -319,13 +326,20 @@ class TimeReport {
 
         const stack = [];        // open ancestors: { width, kind, body, line }
         const strayFlagged = new Set();   // lines with a 🆓 that isn't a word, said once each
-        const stray = (c) => {
+        const stray = (c, top) => {
             if (strayFlagged.has(c.line)) return;
             strayFlagged.add(c.line);
-            problem(c.line, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it", [{ body: c.body, line: c.line + 1 }]);
+            problem(c.line, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it", [{ body: c.body, line: c.line + 1 }], top);
         };
         let oldEvent = null;     // an old-style meeting line still collecting bullets at its own level
         const timedKinds = ["entry", "open", "rangeish"];
+        // A checklist or event line, the only lines a nest has a top among
+        const isLine = (c) => c.box || c.kind === "event";
+        // The outermost of `chain` (nearest first) that's one, and its line number when it's at the left edge
+        const topOf = (chain) => {
+            const node = chain.filter(isLine).at(-1) ?? null;
+            return { node, line: node?.width === 0 ? node.line : null };
+        };
 
         for (let i = 0; i < lines.length; i++) {
             if (hidden[i]) continue;
@@ -344,13 +358,15 @@ class TimeReport {
             const head = node.kind === "item" && node.box && node.body.match(TimeReport.EVENT_HEAD);
             if (head) {
                 const mark = this.freeLine(node.body);
+                const chain = [node, ...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))];
+                const top = topOf(chain);
                 node.event = {
                     date, line: i + 1, start: this.minutes(head[1]), startText: head[1], end: null, endText: null, endBare: false,
                     endNote: "", endFree: false, endStray: false, lineFree: mark.free, lineStray: mark.stray,
                     free: this.freeEvent(node.body), ranges: false, minutes: 0, text: raw.trim().replace(/\t+/g, " "),
-                    context: [node, ...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))].map((c) => ({ body: c.body, line: c.line + 1 })),
+                    context: chain.map((c) => ({ body: c.body, line: c.line + 1 })), top: top.line, subTask: top.node !== node,
                 };
-                if (node.event.start !== null) events.push(node.event);
+                if (node.event.start !== null && top.line !== null) events.push(node.event);
             }
             // Entries directly under the event are its time; a sub-task's entries are the sub-task's
             const under = ancestors.find((a) => a.event)?.event;
@@ -359,7 +375,8 @@ class TimeReport {
             } else if (under && ancestors[0].event && node.kind === "item" && !node.box) {
                 const end = node.body.match(TimeReport.END_LINE);
                 if (end && this.minutes(end[1]) === null) {
-                    problem(i, "format", "isn't a real time, so it isn't the event's end", [...ancestors.filter((a) => !(a.kind === "text" && a.width > 0))].map((c) => ({ body: c.body, line: c.line + 1 })));
+                    const chain = ancestors.filter((a) => !(a.kind === "text" && a.width > 0));
+                    problem(i, "format", "isn't a real time, so it isn't the event's end", chain.map((c) => ({ body: c.body, line: c.line + 1 })), topOf(chain).line);
                     continue;
                 }
                 if (end) {
@@ -389,8 +406,10 @@ class TimeReport {
             let context = ancestors.filter((a) => !(a.kind === "text" && a.width > 0));
             if (!context.length && oldEvent) context = [oldEvent];
             // Plain bullets (not checkboxes) and what's under them are never entries: an itinerary,
-            // a list of notes. Only a task or event (or no parent at all, flagged below) can hold time.
+            // a list of notes. Only a task or event can hold time.
             const plainParent = context.length > 0 && context[0].kind === "item" && !context[0].box;
+            // The top of the nest: the outermost task or event line this sits under
+            const top = topOf(context);
 
             if (!timed) {
                 // Flag what looks like a time range where an entry could have been meant: a checkbox
@@ -402,28 +421,23 @@ class TimeReport {
                 if (candidate && TimeReport.LOOSE_RANGE.test(node.body) && !/^\[[<>]\]/.test(node.body)
                     && !/^\[-\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(node.body)) {
                     problem(i, "format", "looks like a time range but isn't a `- h:mmam - h:mmpm` bullet, so it isn't counted",
-                        context.map((c) => ({ body: c.body, line: c.line + 1 })));
+                        context.map((c) => ({ body: c.body, line: c.line + 1 })), top.line);
                 }
                 continue;
             }
-            if (plainParent) {
-                // Under a task or event further up, it was probably meant as time; say so
-                if (context.some((c) => c.box || c.kind === "event")) {
-                    problem(i, "plain", "is under a plain bullet, not directly under a task or event, so it isn't counted",
-                        context.map((c) => ({ body: c.body, line: c.line + 1 })));
-                }
-                continue;
-            }
+            // A list under a plain bullet with no task or event above it: an itinerary, never time
+            if (plainParent && !top.node) continue;
 
-            const anchored = context.length > 0 && (context[0].box || context[0].kind === "event");
             const ctx = context.map((c) => ({ body: c.body, line: c.line + 1 }));
 
+            // What looks like time with its format off is listed wherever it could have been meant as
+            // time; a well-formed entry is read only where it counts, below
             if (node.kind === "rangeish") {
-                problem(i, "format", "doesn't match `h:mmam - h:mmpm`, so it isn't counted", ctx);
+                problem(i, "format", "doesn't match `h:mmam - h:mmpm`, so it isn't counted", ctx, top.line);
                 continue;
             }
             if (node.kind === "open") {
-                problem(i, "open", "clock still running (no end time), so it isn't counted", ctx);
+                problem(i, "open", "clock still running (no end time), so it isn't counted", ctx, top.line);
                 continue;
             }
 
@@ -431,7 +445,7 @@ class TimeReport {
             const start = this.minutes(startText);
             let end = this.minutes(endText);
             if (start === null || end === null) {
-                problem(i, "format", "isn't a real time, so it isn't counted", ctx);
+                problem(i, "format", "isn't a real time, so it isn't counted", ctx, top.line);
                 continue;
             }
             let crossesMidnight = false;
@@ -440,14 +454,20 @@ class TimeReport {
                     end += 1440;
                     crossesMidnight = true;
                 } else {
-                    problem(i, "order", "ends before it starts, so it isn't counted", ctx);
+                    problem(i, "order", "ends before it starts, so it isn't counted", ctx, top.line);
                     continue;
                 }
             }
             if (end === start) {
-                problem(i, "zero", "starts and ends at the same time", ctx);
+                problem(i, "zero", "starts and ends at the same time", ctx, top.line);
                 continue;
             }
+
+            // Only time directly under a top-level task or event counts (rule 7). Under a sub-task it's
+            // listed (rule 5); anywhere else it's nothing the system defines, and isn't read at all.
+            const direct = top.line !== null && context[0] === top.node;
+            const subTask = !direct && top.line !== null && isLine(context[0]);
+            if (!direct && !subTask) continue;
 
             const note = (noteRaw ?? "").trim();
             const own = /^🆓/u.test(note);
@@ -458,19 +478,24 @@ class TimeReport {
             const entry = {
                 date, line: i + 1, start, end, minutes: end - start, crossesMidnight, free,
                 note: free ? note.replace(/^🆓\uFE0F?\s*/u, "") : note,
-                task: anchored ? this.taskText(context[0].body) : "",
+                task: this.taskText(context[0].body),
                 // As written, 🆓 and all, for the timesheet's 🆓 time
-                taskWritten: anchored ? this.taskText(context[0].body, { keepFree: true }) : "",
+                taskWritten: this.taskText(context[0].body, { keepFree: true }),
                 noteWritten: note,
                 context: ctx,
+                top: top.line,
+                ...(subTask ? { subTask } : {}),
             };
             entries.push(entry);
+            if (subTask) {
+                problem(i, "subtime", TimeReport.SUB_TIME, ctx, top.line);
+                continue;
+            }
 
-            if (!anchored) problem(i, "anchor", "isn't under a task or event", ctx);
-            if (!own && note.includes("🆓")) problem(i, "free", "has 🆓 after other text, so it doesn't count; put 🆓 right after the colon", ctx);
-            if (own && above) problem(i, "free", "has 🆓 here and on the line above; one is enough", ctx);
-            if (!above) context.filter((c, k) => marks[k].stray).forEach(stray);
-            if (entry.minutes >= TimeReport.LONG_MINUTES) problem(i, "long", `is ${this.hours(entry.minutes)} hours long`, ctx);
+            if (!own && note.includes("🆓")) problem(i, "free", "has 🆓 after other text, so it doesn't count; put 🆓 right after the colon", ctx, top.line);
+            if (own && above) problem(i, "free", "has 🆓 here and on the line above; one is enough", ctx, top.line);
+            if (!above) context.filter((c, k) => marks[k].stray).forEach((c) => stray(c, top.line));
+            if (entry.minutes >= TimeReport.LONG_MINUTES) problem(i, "long", `is ${this.hours(entry.minutes)} hours long`, ctx, top.line);
         }
         // What each timed event is worth. A free one (ℹ️) is never counted and never a Problem.
         // Entries under a busy one are its time, so its end line is ignored, and a 🆓 left there is
@@ -478,10 +503,10 @@ class TimeReport {
         // reads pm → am; a busy event with no usable end is a Problem like a running clock, except
         // that a zero-length one (a reminder) is quietly nothing.
         // Each carries the event's start, so build() can hold it back until the event has begun
-        const eventProblem = (ev, kind, message) => problems.push({ date, line: ev.line, kind, message, text: ev.text, context: ev.context, start: ev.start });
+        const eventProblem = (ev, kind, message) => problems.push({ date, line: ev.line, kind, message, text: ev.text, context: ev.context, start: ev.start, top: ev.top });
         for (const ev of events) {
             if (ev.free) continue;
-            if (ev.lineStray) stray({ line: ev.line - 1, body: ev.context[0].body });
+            if (ev.lineStray) stray({ line: ev.line - 1, body: ev.context[0].body }, ev.top);
             if (ev.ranges) {
                 if (ev.endFree) eventProblem(ev, "free", "has 🆓 on its end line, but the entries under it are its time, so it doesn't apply; put 🆓 on the entries or the event line");
                 ev.end = null;
@@ -502,18 +527,19 @@ class TimeReport {
                 continue;
             }
             ev.minutes = ev.end - ev.start;
+            if (ev.subTask) { eventProblem(ev, "subtime", TimeReport.SUB_TIME); continue; }
             if (ev.lineFree && ev.endFree) eventProblem(ev, "free", "has 🆓 on the event line and on its end line; one is enough");
             if (ev.endStray) eventProblem(ev, "free", "has 🆓 after other text on its end line, so it doesn't count; put 🆓 right after the colon");
             if (ev.minutes >= TimeReport.LONG_MINUTES) eventProblem(ev, "long", `is ${this.hours(ev.minutes)} hours long`);
         }
-        return { entries, problems, events };
+        return { entries, problems, events, visible };
     }
 
     // An ended busy event with its end line, as the entry the report counts: its span, the end
     // line's note, 🆓 from the end line or the event line, and the title as its task
     eventEntry(ev) {
         return {
-            date: ev.date, line: ev.line, path: ev.path, project: ev.project, ...(ev.archived ? { archived: true } : {}), start: ev.start, end: ev.end, minutes: ev.minutes,
+            date: ev.date, line: ev.line, path: ev.path, project: ev.project, ...(ev.archived ? { archived: true } : {}), ...(ev.subTask ? { subTask: true } : {}), start: ev.start, end: ev.end, minutes: ev.minutes,
             crossesMidnight: !!ev.crossesMidnight, free: ev.endFree || ev.lineFree, note: ev.endNote,
             task: this.taskText(ev.context[0].body), context: ev.context, startText: ev.startText, endText: ev.endText, text: ev.text,
             taskWritten: this.taskText(ev.context[0].body, { keepFree: true }), noteWritten: ev.endNoteWritten ?? ev.endNote,
@@ -548,8 +574,10 @@ class TimeReport {
 
     // ---------------------------------------------------------------- projects
     // `index` answers questions about notes: { linkDest(linktext, fromPath) → path | null,
-    // isProject(path), isArea(path), parentLink(path) → "[[link]]" | null, exists(path) }. makeIndex
-    // builds one from plain data (tests); appIndex from Obsidian's metadata cache.
+    // isProject(path), isArea(path), isInvoice(path), isTimesheet(path), parentLink(path) → "[[link]]" |
+    // null, exists(path), kind(path) ("day", "week", "month", "year" or "other": Schedule's test, kept for
+    // the run), inSystem(path) (rule 12, OBS-208), inInbox(path), paths() (every note) }. makeIndex builds
+    // one from plain data (tests); appIndex from Obsidian's metadata cache.
     //
     // Time counts toward a project or an area (OBS-51). An area (#area) takes time linked to it, or to
     // a note filed straight under it, as its own row, but it's never a parent: projects inside it
@@ -583,16 +611,17 @@ class TimeReport {
         return path.split("/").pop().replace(/\.md$/, "");
     }
 
-    // What a note's `parent` points at, when `want` says yes to it
+    // What a note's `parent` points at, when `want` says yes to it. Read only for an archived project
+    // (parentProject); parentProblems compares it with the folder.
     areaProject(path, index, want = (p) => index.isProject(p)) {
         const target = index.parentLink(path)?.match(/\[\[([^\]|#]+)/)?.[1]?.trim();
         const dest = target ? index.linkDest(target, path) : null;
         return dest && dest !== path && want(dest) ? dest : null;
     }
 
-    // `parent` links a note to the project or area it's filed under, or an invoice to the project it
-    // bills (OBS-175). Older notes call it `area`, which is read when a note has no `parent`, so a
-    // vault works before its notes are renamed.
+    // `parent` links a note to the project or area it's filed under, a copy of what its folder says that
+    // decides nothing (rule 3), or an invoice to the project it bills (OBS-175). Older notes call it
+    // `area`, which is read when a note has no `parent`, so a vault works before its notes are renamed.
     // A note's `parent` link from its frontmatter (`area` on older notes), or null. One pass over
     // the keys, since the report asks for every note's
     parentValue(fm) {
@@ -622,29 +651,31 @@ class TimeReport {
     }
 
     // The project or area a note belongs to: itself if it's one, else the nearest project or area
-    // folder note above it, else whatever its `parent` points at if that's one
+    // folder note above it. Its `parent` says nothing (rule 3).
     projectOfNote(path, index) {
         const counts = (p) => this.counts(p, index);
         if (counts(path)) return path;
-        return this.nearestProjectFolder(this.dirname(path), path, index, counts) ?? this.areaProject(path, index, counts);
+        return this.nearestProjectFolder(this.dirname(path), path, index, counts);
     }
 
-    // The project a project sits inside: the nearest project folder note above its own folder, else
-    // its `parent` if that's a project. Never an area, and an area has none: time doesn't roll up into
-    // an area, and an area filed inside a project isn't a sub-project billed at its rate.
+    // The project a project sits inside: the nearest project folder note above its own folder. Never an
+    // area, and an area has none: time doesn't roll up into an area, and an area filed inside a project
+    // isn't a sub-project billed at its rate. A sub-project's folder can be moved into Archive alone, so
+    // a project there reads its `parent` when no folder gives it one (Brian, 2026-10-28); that's the
+    // one place a project's `parent` is read (rule 3).
     parentProject(path, index) {
         if (this.isAreaOnly(path, index)) return null;
         let dir = this.dirname(path);
         if (this.basename(dir) === this.basename(path)) dir = this.dirname(dir);
-        return this.nearestProjectFolder(dir, path, index) ?? this.areaProject(path, index);
+        return this.nearestProjectFolder(dir, path, index) ?? (this.isArchived(path) ? this.areaProject(path, index) : null);
     }
 
-    // What a line's links say about where its time goes (OBS-90): { marks: its ⭕ and 🗃️ links,
-    // notes: its ⋯ links, else its ↗ ones, title: the link an old event's title is wrapped in, or
-    // null }, each { target, alias }. Only the run of links that ends the line counts, stepping over the
-    // free mark and 🆓 among them, and a block ID after them; a link in the text is part of the title.
+    // The links that end a line (OBS-90): { marks: its ⭕ and 🗃️ links, notes: its ⋯ links, from: its ↗
+    // links, due: its 🚩 links, title: the link an old event's title is wrapped in, or null }, each
+    // { target, alias }. Only the run of links that ends the line counts, stepping over the free mark
+    // and 🆓 among them, and a block ID after them; a link in the text is part of the title.
     lineLinks(body) {
-        const marks = [], own = [], from = [];
+        const marks = [], own = [], from = [], due = [];
         let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
         for (;;) {
             const link = rest.match(TimeReport.TRAIL_LINK);
@@ -653,7 +684,8 @@ class TimeReport {
                 const symbol = link[2].replace(/[️\s]/g, "");
                 if (/^(?:⭕|🗃)$/u.test(symbol)) marks.unshift({ target, alias: link[2] });
                 else if (symbol === "⋯") own.unshift({ target, alias: link[2] });
-                else if (this.isNoteAlias(symbol)) from.unshift({ target, alias: link[2] });
+                else if (symbol === "↗") from.unshift({ target, alias: link[2] });
+                else if (symbol.startsWith("🚩")) due.unshift({ target, alias: link[2] });
                 rest = rest.slice(0, link.index).trimEnd();
                 continue;
             }
@@ -661,92 +693,186 @@ class TimeReport {
             if (mark && mark.index > 0) { rest = rest.slice(0, mark.index).trimEnd(); continue; }
             break;
         }
-        // A line's note is its ⋯, else the ↗ to the note it was sent from: the two are read alike until
-        // OBS-196 tells them apart (OBS-208), for its project and for whether it disagrees with its ⭕
-        const notes = (own.length ? own : from).filter((l) => l.target);
+        const notes = own.filter((l) => l.target);
         const wrapped = notes.length ? null : rest.trim().match(TimeReport.WRAPPED_TITLE);
         const title = wrapped ? { target: wrapped[1].split(/[#^]/)[0].trim(), alias: "" } : null;
-        return { marks: marks.filter((l) => l.target), notes, title: title?.target ? title : null };
+        return { marks: marks.filter((l) => l.target), notes, from, due, title: title?.target ? title : null };
     }
 
-    // A line and the list items it's nested under, nearest first, as the report reads an entry's context
-    lineContext(lines, i) {
-        const item = /^\s*(?:[-*+]|\d+[.)])\s+/;
-        const out = [{ body: lines[i].replace(item, "").trim() }];
-        let width = this.indentWidth(lines[i]);
-        for (let j = i - 1; j >= 0 && width > 0; j--) {
-            if (!lines[j].trim() || !item.test(lines[j])) continue;
-            const w = this.indentWidth(lines[j]);
-            if (w < width) { out.push({ body: lines[j].replace(item, "").trim() }); width = w; }
+    // Where a line's project is read when the line isn't one a top-level line can be: { project: null, … }
+    static NO_PLACE = { project: null, archived: false, live: null, conflict: null };
+
+    // The one project lookup (rules 4 and 18): where the time at line `i` of the note at `path` counts.
+    // `lineAt(n)` gives line n, as it shows. `top` is the top of the line's nest when the caller knows it
+    // (nestTop can't see a bullet at the left edge under a meeting line in the form used before August
+    // 2025, which is that meeting's time; parseNote can), else nestTop finds it. { project, archived,
+    // live, conflict }:
+    //   project   the top line's ⭕ or 🗃️, or null. Nothing else on any line says where time goes.
+    //   archived  whether that project is in Archive.
+    //   live      what a command and Billing read: `project`, or for an archived one the live project
+    //             the line's other link names, else null (OBS-213).
+    //   conflict  null, or what the line disagrees with: nothing decides, and `project` holds the ⭕ the
+    //             line names first. { links: [paths] } for two project links that name different projects,
+    //             or { note, noteProject } for a ⭕ against the project its own note is filed in. Each with
+    //             `lineProject`, and `event` for an event line, as the Problem is worded for one.
+    // In a note that isn't a daily, weekly, monthly or yearly note a line has no project of its own, and
+    // a line whose top isn't a checklist or event line at the left edge isn't defined in the system.
+    resolve(lineAt, i, path, index, top = this.nestTop(lineAt, i)) {
+        if (index.kind(path) === "other") return TimeReport.NO_PLACE;
+        const line = lineAt(top);
+        if (!line || this.indentWidth(line) > 0) return TimeReport.NO_PLACE;
+        const read = this.classify(line);
+        if (read.kind !== "event" && !read.box) return TimeReport.NO_PLACE;
+        const links = this.lineLinks(read.body);
+        const named = this.named(links, path, index);
+        const project = named[0] ?? null;
+        if (!project) return TimeReport.NO_PLACE;
+        const archived = this.isArchived(project);
+        const event = this.eventKind(line) !== null;
+        // Its own note is read only to compare with the ⭕, never in its place
+        const own = this.ownNote(links, path, index);
+        const noteProject = own.map((note) => ({ note, noteProject: this.projectOfNote(note, index) })).find((n) => n.noteProject && n.noteProject !== project) ?? null;
+        const conflict = named.length > 1 ? { links: named, lineProject: project, event }
+            : noteProject ? { ...noteProject, lineProject: project, event } : null;
+        const live = !archived ? project : named.find((p) => !this.isArchived(p)) ?? (noteProject && !this.isArchived(noteProject.noteProject) ? noteProject.noteProject : null);
+        return { project, archived, live, conflict };
+    }
+
+    // The projects and areas a line's ⭕ and 🗃️ links (lineLinks) name, each once
+    named(links, path, index) {
+        const dest = (l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, path));
+        return [...new Set(links.marks.map(dest))].filter((d) => d && this.counts(d, index));
+    }
+
+    // A line's own notes, as `links` (lineLinks) gives them: what its ⋯ links, and the log an older
+    // event's title is wrapped in, when that note is in the system or in Archive. A ⋯ to any other note
+    // is a reference, which nothing compares, and a ↗ is read by nobody (rule 4, *Words*).
+    ownNote(links, path, index) {
+        return [...links.notes, ...(links.title ? [links.title] : [])]
+            .map((l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, path)))
+            .filter((p) => p && (index.inSystem(p) || this.isArchived(p)));
+    }
+
+    // The project or area line `i` of `note` ({ path }) counts toward, as resolve reads it; outside the
+    // periodic notes, the one its note is in (rule 4). With `live`, for a command, an archived ⭕ is passed
+    // over; the task checks read the line as the report counts it, archived projects included (OBS-213).
+    // Where the line disagrees with itself it's the ⭕, so the checks don't list the line a second time.
+    lineProject(note, i, lines, index, live = true) {
+        if (index.kind(note.path) === "other") return this.projectOfNote(note.path, index);
+        const where = this.resolve((n) => lines[n], i, note.path, index);
+        return live ? where.live : where.project;
+    }
+
+    // A note's lines as the checks read them: what Obsidian shows (scan), with the report's own blocks
+    // left out, as parseNote leaves them out. Kept on `note`, since each check reads the same ones.
+    shown(note) {
+        if (note.shown) return note.shown;
+        const { visible, blocks } = this.scan(this.lines(note.text));
+        for (const b of blocks) visible.fill("", b.start, b.end + 1);
+        return (note.shown = visible);
+    }
+
+    // The day a line in a periodic note (`kind`) is listed under: its own, or a week's, month's or year's first
+    noteDate(note, kind) {
+        return kind === "day" ? note.date ?? this.dailyDate(note.path) : this.periodStart(note.path, kind) ?? this.today();
+    }
+
+    // Every top-level line in the periodic notes among `notes` that disagrees with itself or its own note
+    // (rule 15), with or without time under it: a ⭕ against the project its own note is filed in, two
+    // project links that name different projects, and a ⭕ while its own note waits in the Inbox. One record
+    // per line on each project it names, { project, conflict: { side, kind, date, path, line, text, event,
+    // lineProject, and note and noteProject, or links, or note and inbox } }. Both sides say the same, so a
+    // period's report shows `side` "line" only (inScope). Plain, so the report, renderReports.mjs and the
+    // private test run the same code.
+    ownNoteProblems(notes, index) {
+        const out = [];
+        for (const note of notes) {
+            const kind = index.kind(note.path);
+            if (kind === "other" || !/⭕|🗃/u.test(note.text)) continue;
+            const lines = this.shown(note);
+            const lineAt = (n) => lines[n];
+            lines.forEach((text, i) => {
+                if (!/^\S/.test(text) || !/⭕|🗃/u.test(text)) return;
+                const { project, conflict } = this.resolve(lineAt, i, note.path, index, i);
+                if (!project) return;
+                const at = { kind, date: this.noteDate(note, kind), path: note.path, line: i + 1, text: text.trim(), event: this.eventKind(text) !== null, lineProject: project };
+                if (conflict?.links) conflict.links.forEach((p, k) => out.push({ project: p, conflict: { ...at, side: k ? "note" : "line", links: conflict.links } }));
+                else if (conflict) {
+                    const { note: own, noteProject } = conflict;
+                    out.push({ project, conflict: { ...at, side: "line", note: own, noteProject } }, { project: noteProject, conflict: { ...at, side: "note", note: own, noteProject } });
+                } else {
+                    const waiting = this.ownNote(this.lineLinks(this.classify(text).body), note.path, index).find((n) => index.inInbox(n));
+                    if (waiting) out.push({ project, conflict: { ...at, side: "line", note: waiting, inbox: true } });
+                }
+            });
         }
         return out;
     }
 
-    // The project or area line `i` of `note` ({ path, kind }) counts toward, as resolve reads a line;
-    // a line outside the periodic notes falls back to the project or area its note is in (OBS-181).
-    // With `live`, for a command, an archived ⭕ is passed over; the task checks read the line as
-    // the report counts it, archived projects included (OBS-213).
-    lineProject(note, i, lines, index, live = true) {
-        const own = this.resolve(this.lineContext(lines, i), note.path, index, live);
-        return own ?? (note.kind === "other" ? this.projectOfNote(note.path, index) : null);
-    }
-
-    // The project for an entry's context lines, or null
-    // With `live`, archived projects are passed over and the search goes on.
-    resolve(context, fromPath, index, live = false) {
-        const lines = context.map((c) => this.lineLinks(c.body));
-        const dest = (l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, fromPath));
-        const ok = (p) => p && !(live && this.isArchived(p));
-        // A ⭕ (or 🗃️) says where the line's time goes, on the line or on one it's nested under
-        for (const { marks } of lines) {
-            for (const l of marks) {
-                const d = dest(l);
-                if (d && this.counts(d, index) && ok(d)) return d;
+    // Every mark on a sub-task (rules 5 and 15): a ⭕, 🗃️, 🚩, ⋯, ↗ or task ID on a checklist line nested
+    // under a task or event at the left edge. [{ path, line, text, message }], line counted from 0. A block
+    // ID counts only when it's a task's, which a sent line ([>], or one with a forward date) makes it.
+    subTaskProblems(notes, T) {
+        const tasks = new Set(), out = [];
+        for (const note of notes) {
+            for (const line of this.shown(note)) {
+                const box = line.match(T.CHECKBOX), id = box ? T.idOf(line) : null;
+                if (id && (box[1] === ">" || T.forwardOf(line))) tasks.add(id.toLowerCase());
             }
         }
-        // Then the line's own note: where it's filed
-        for (const { notes, title } of lines) {
-            for (const l of title ? [...notes, title] : notes) {
-                const d = dest(l);
-                const project = d ? this.projectOfNote(d, index) : null;
-                if (ok(project)) return project;
-            }
+        for (const note of notes) {
+            const lines = this.shown(note);
+            const lineAt = (n) => lines[n];
+            lines.forEach((text, i) => {
+                if (!/^\s/.test(text) || !T.CHECKBOX.test(text)) return;
+                const top = this.nestTop(lineAt, i);
+                if (top === i || this.indentWidth(lines[top]) > 0) return;
+                const { marks, notes: own, from, due } = this.lineLinks(this.classify(text).body);
+                const id = T.idOf(text);
+                const home = (symbol) => marks.some((l) => l.alias.startsWith(symbol));
+                const found = [...(home("⭕") ? ["⭕"] : []), ...(home("🗃") ? ["🗃️"] : []), ...(due.length ? ["🚩"] : []), ...(own.length ? ["⋯"] : []), ...(from.length ? ["↗"] : []),
+                    ...(id && tasks.has(id.toLowerCase()) ? ["task ID"] : [])];
+                if (!found.length) return;
+                const list = found.length > 1 ? `${found.slice(0, -1).join(", ")} and ${found.at(-1)}` : found[0];
+                out.push({ path: note.path, line: i, text: text.trim(), message: `is nested, so its ${list} count${found.length > 1 ? "" : "s"} for nothing: only a task at the left edge can carry ${found.length > 1 ? "them" : "it"}; outdent it, or take ${found.length > 1 ? "them" : "it"} off` });
+            });
         }
-        return null;
+        return out;
     }
 
-    // Whether a link's alias marks a line's own note (NOTE_ALIAS)
-    isNoteAlias(alias) {
-        return TimeReport.NOTE_ALIAS.test(alias.replace(/[️\s]/g, ""));
+    // The project or area a note's folder puts it in: for a project or area's own note, the one above
+    folderProject(path, index) {
+        let dir = this.dirname(path);
+        if (this.basename(dir) === this.basename(path)) dir = this.dirname(dir);
+        return this.nearestProjectFolder(dir, path, index, (p) => this.counts(p, index));
     }
 
-    // A task line that ends in a ⭕ for a project and also a ⋯ task note filed under a different
-    // project, or an event line whose ⋯ log is (OBS-57), archived projects included (OBS-213): a
-    // note moved by hand, say, until OBS-93 updates its lines. Nothing decides between the two, so
-    // the line's time counts toward neither (Brian, 2026-10-28; see build). Checks the first context
-    // line with a ⭕, the one the report's resolve uses. { lineProject, note, noteProject, event } or null.
-    conflict(context, fromPath, index) {
-        for (const c of context) {
-            const { marks, notes } = this.lineLinks(c.body);
-            const withDest = (l) => ({ ...l, dest: TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, fromPath) });
-            const direct = marks.map(withDest).find((l) => l.dest && this.counts(l.dest, index));
-            if (!direct) continue;
-            for (const l of notes.map(withDest)) {
-                if (!l.dest) continue;
-                const noteProject = this.projectOfNote(l.dest, index);
-                if (noteProject && noteProject !== direct.dest) {
-                    return { lineProject: direct.dest, note: l.dest, noteProject, event: /^\[<\]/.test(c.body) };
-                }
-            }
-            return null;
+    // Every note in Projects or the Inbox whose `parent` names another project or area than its folder does
+    // (rule 15), on the notes of both: { project, kind: "parent", only: "project", path, named, folder }. A
+    // note with no `parent` isn't compared, nor is one that names no project, an invoice, a timesheet
+    // or anything in Archive, where a note's `parent` is left as it was on purpose.
+    parentProblems(index) {
+        const out = [];
+        for (const path of index.paths()) {
+            const named = this.isArchived(path) ? null : this.areaProject(path, index, (p) => this.counts(p, index));
+            if (!named || index.isInvoice(path) || index.isTimesheet(path) || index.kind(path) !== "other" || !index.inSystem(path)) continue;
+            const folder = this.folderProject(path, index);
+            if (named === folder) continue;
+            for (const project of [folder, named]) if (project) out.push({ project, kind: "parent", only: "project", path, named, folder });
         }
-        return null;
+        return out;
     }
 
     // Same answers as appIndex, from [{ path, tags, parent, props }] (tags as Obsidian collects them,
     // frontmatter and inline; props is the frontmatter, for rate and caps). `area` stands in for
-    // `parent` on a note that has none, as in an older note's frontmatter.
-    makeIndex(notes) {
+    // `parent` on a note that has none, as in an older note's frontmatter. `kind`, `inSystem` and `inInbox`
+    // say what a path is; by default a note in the Planner's folders is periodic, every note is in the
+    // system, and an `Inbox` folder is the Inbox.
+    makeIndex(notes, {
+        kind = (path) => TimeReport.PLANNER_KIND[path.match(/(?:^|\/)Planner\/(days|weeks|months|years)\/[^/]+$/)?.[1]] ?? "other",
+        inSystem = () => true,
+        inInbox = (path) => path.startsWith("Inbox/"),
+    } = {}) {
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const byLower = new Map();
         for (const n of notes) {
@@ -758,6 +884,12 @@ class TimeReport {
             exists: (path) => byPath.has(path),
             isProject: (path) => tagged(path, "project"),
             isArea: (path) => tagged(path, "area"),
+            isInvoice: (path) => tagged(path, "invoice"),
+            isTimesheet: (path) => tagged(path, "timesheet"),
+            kind,
+            inSystem,
+            inInbox,
+            paths: () => notes.map((n) => n.path),
             parentLink: (path) => {
                 const n = byPath.get(path);
                 return n ? this.firstLink(n.parent) ?? this.firstLink(n.area) : null;
@@ -799,22 +931,18 @@ class TimeReport {
 
     // notes: [{ date: "YYYY-MM-DD", path, text }]. With `now` ({ date, minutes }), entries and events
     // that haven't ended yet are left out, and don't overlap anything; without it everything counts.
-    build(notes, index, { now = null } = {}) {
+    // `checked` is every note whose lines the own-note check reads (taskNotes), `notes` by default.
+    build(notes, index, { now = null, checked = notes } = {}) {
         const entries = [];
         const billed = [];       // the entries as Billing read them before OBS-213, for matching billed rows (see below)
         const events = [];       // every timed event line
         const problems = [];
         const day = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
         const ended = (e) => !now || day(e.date) * 1440 + e.end <= day(now.date) * 1440 + now.minutes;
-        // The first project wins, archived or not: an archived project's time stays in every report, and
-        // its Problems are listed like any project's (OBS-213); `archived` marks its entries, which are
-        // never billed. `live` is the line as it was read before OBS-213, an archived ⭕ passed over for
-        // a live project further on.
-        const place = (context, path) => {
-            const project = context.length ? this.resolve(context, path, index) : null;
-            const archived = this.isArchived(project);
-            return { project, archived, live: archived ? this.resolve(context, path, index, true) : project };
-        };
+        // A line that disagrees with itself (resolve's `conflict`), or time under a sub-task: its time
+        // counts nowhere and isn't billed, and a billed row on it says so. Nothing decides between two
+        // projects (Brian, 2026-10-28), archived or not, so archiving a project never moves time.
+        const disputed = new Set();
         // `billingEntries` are the entries as read before OBS-213: Billing matches a billed row to the
         // entry it billed among them, so a billed row reads exactly as it always did. An
         // archived entry with a live project further on is there as a copy on that project, `report`
@@ -822,27 +950,32 @@ class TimeReport {
         const forBilling = (e, where) => (!where.archived ? e : where.live ? { ...e, project: where.live, report: e } : null);
         for (const n of notes) {
             const parsed = this.parseNote(n.text, n.date);
+            // An archived project's time stays in every report, and its Problems are listed like any
+            // project's (OBS-213); `archived` marks its entries, which are never billed
+            const lineAt = (k) => parsed.visible[k];
+            const place = (top) => (top === null ? TimeReport.NO_PLACE : this.resolve(lineAt, top, n.path, index, top));
             for (const e of parsed.entries) {
                 e.path = n.path;
-                const where = place(e.context, n.path);
+                const where = place(e.top);
                 e.project = where.project;
                 const b = forBilling(e, where);
                 if (where.archived) e.archived = true;
                 entries.push(e);
                 if (b) billed.push(b);
+                if (where.conflict || e.subTask) disputed.add(e);
             }
             for (const p of parsed.problems) {
                 // The sync writes events months ahead: what's wrong with one waits until it has started
                 if (p.start !== undefined && now && day(p.date) * 1440 + p.start > day(now.date) * 1440 + now.minutes) continue;
                 p.path = n.path;
-                p.projects = [place(p.context, n.path).project];
+                p.projects = [place(p.top).project];
                 problems.push(p);
             }
             // A busy event with an end line and no entries of its own counts once it has ended: its
             // span is an entry like any other, on the project its line resolves to, else Unassigned
             for (const ev of parsed.events) {
                 ev.path = n.path;
-                const where = place(ev.context, n.path);
+                const where = place(ev.top);
                 ev.project = where.project;
                 ev.archived = where.archived;
                 events.push(ev);
@@ -851,21 +984,11 @@ class TimeReport {
                     entries.push(entry);
                     const b = where.archived ? (where.live ? { ...this.eventEntry({ ...ev, project: where.live, archived: false }), report: entry } : null) : entry;
                     if (b) billed.push(b);
+                    if (where.conflict || ev.subTask) disputed.add(entry);
                 }
             }
         }
-
-        // A line whose ⭕ and its own note (a task's note, an event's log) name different projects has two
-        // projects, which the Rules don't allow. Nothing decides between them (Brian, 2026-10-28): its time
-        // counts toward neither and isn't billed, and the line is listed on both projects, wherever the
-        // time would show. OBS-34 listed it too, but let the ⭕ decide. Archived or not, the same, so
-        // archiving a project never moves time.
-        const disputed = new Map();   // entry → its conflict
-        for (const e of entries) {
-            const c = e.project ? this.conflict(e.context, e.path, index) : null;
-            if (c && c.lineProject === e.project) disputed.set(e, c);
-        }
-        for (const e of disputed.keys()) e.disputed = true;
+        for (const e of disputed) e.disputed = true;
         for (const b of billed) if (disputed.has(b.report ?? b)) b.disputed = true;
 
         // Overlaps, across every project and across midnight; an event's span overlaps like an entry's
@@ -889,17 +1012,16 @@ class TimeReport {
             if (!latest || t.to > latest.to) latest = t;
         }
 
-        // Parent projects. A loop (A inside B inside A, through `parent`) is cut where it closes.
+        // Parent projects. A loop (A inside B inside A, through two archived projects' `parent`s) is cut
+        // where it closes.
         const parent = new Map();
         const projectProblems = [];
         const addChain = (p) => {
             const path = [];
             while (p && !parent.has(p)) {
-                let up = this.parentProject(p, index);
-                // An archived project is never a live one's parent (OBS-213). An archived sub-project stays
-                // under its live parent, whose total and hours cap count it (Brian, 2026-10-28); Billing's
-                // scope leaves it out, so it's never invoiced.
-                if (up && this.isArchived(up) && !this.isArchived(p)) up = null;
+                // An archived sub-project stays under its live parent, whose total and hours cap count it
+                // (Brian, 2026-10-28); Billing's scope leaves it out, so it's never invoiced.
+                const up = this.parentProject(p, index);
                 if (up && (up === p || path.includes(up))) {
                     parent.set(p, null);
                     projectProblems.push({ project: p, parent: up });
@@ -916,18 +1038,10 @@ class TimeReport {
         for (const e of billed) addChain(e.project);
         for (const p of problems) p.projects.forEach(addChain);
 
-        // Time on a task line whose ⭕ project and ⋯ task note disagree, or an event line whose ⭕
-        // and log do: said on both project notes, once per note and pair of projects (OBS-34)
-        const conflicts = new Map();
-        for (const [e, c] of disputed) {
-            const key = `${c.note}\n${c.lineProject}\n${c.noteProject}`;
-            const had = conflicts.get(key)?.entries ?? [];
-            conflicts.set(key, { ...c, count: had.length + 1, entries: [...had, e] });
-        }
-        for (const { lineProject, note, noteProject, event, count, entries: those } of conflicts.values()) {
-            addChain(noteProject);
-            projectProblems.push({ project: lineProject, conflict: { side: "line", note, other: noteProject, event, count, entries: those } });
-            projectProblems.push({ project: noteProject, conflict: { side: "note", note, other: lineProject, event, count } });
+        // Lines that disagree with themselves, time or no time: said on each project they name
+        for (const r of this.ownNoteProblems(checked, index)) {
+            addChain(r.project);
+            projectProblems.push(r);
         }
         // A chain can also close into a loop found earlier from another start
         for (const p of [...parent.keys()]) {
@@ -982,7 +1096,7 @@ class TimeReport {
         problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
         // Areas, whose notes report by month (OBS-133)
         const areas = new Set([...parent.keys()].filter((p) => this.isAreaOnly(p, index)));
-        return { entries: counted, billingEntries, disputed: [...disputed.keys()], problems, parent, projectProblems, money, events, areas };
+        return { entries: counted, billingEntries, disputed: now ? [...disputed].filter(over) : [...disputed], problems, parent, projectProblems, money, events, areas };
     }
 
     // A project's money: `rate` and `rate_type`, each from the project or else its nearest parent that
@@ -1064,7 +1178,13 @@ class TimeReport {
         const { byInvoice } = billing.invoiceChanges(model, this, index, ledger);
         model.billing = { billing, invoices, ledger, index, byInvoice };
         for (const invoice of invoices) {
-            if (invoice.status === "canceled" || !invoice.project) continue;
+            if (invoice.status === "canceled") continue;
+            // Nothing says whose bill it is: its rows still mark their entries as billed, so it's listed
+            // on each project they bill. It stops nothing: Billing treats it as covering every project.
+            if (!invoice.project) {
+                for (const project of billing.rowProjects(invoice, model, this, index)) model.projectProblems.push({ project, only: "project", invoice, noProject: true });
+                continue;
+            }
             // A table that can't be read would let its entries look unbilled; the Invoice command refuses
             // to invoice the project until it's fixed, and says so here
             if (invoice.problem) {
@@ -1116,16 +1236,14 @@ class TimeReport {
         for (const e of entries) {
             for (let up = e.project; up && !worked.has(up); up = model.parent.get(up)) worked.add(up);
         }
-        const mine = new Set(entries);
         const projectProblems = [];
         for (const p of model.projectProblems) {
             // An invoice's changes, and billing settings, are for the project's own note (OBS-5)
             if (p.only === "project") continue;
             if (p.conflict) {
-                // Said once, by the project the time counts on, with the period's own entries
-                // Its entries count nowhere (Brian, 2026-10-28), so the period's are found by their day
-                const count = p.conflict.side === "line" ? p.conflict.entries.filter((e) => want(e.date)).length : 0;
-                if (count) projectProblems.push({ ...p, conflict: { ...p.conflict, count } });
+                // Said once, in the line's own period: its time counts nowhere, so no entry finds it,
+                // and it may have none
+                if (p.conflict.side === "line" && want(p.conflict.date)) projectProblems.push(p);
             } else if (worked.has(p.project) || (p.parent && worked.has(p.parent))) {
                 projectProblems.push(p);
             }
@@ -1163,7 +1281,8 @@ class TimeReport {
     // { week: [...], month: [...], year: [...] }
     periodsWithEntries(model) {
         const out = {};
-        const dates = [...model.entries.map((e) => e.date), ...this.earnedFees(model).map((f) => f.date)];
+        // Time that isn't counted (Problems say why) has a period too, though nothing else may be in it
+        const dates = [...model.entries.map((e) => e.date), ...(model.disputed ?? []).map((e) => e.date), ...this.earnedFees(model).map((f) => f.date)];
         for (const unit of ["week", "month", "year"]) {
             out[unit] = [...new Set(dates.map((d) => this.periodOf(d, unit)))].sort();
         }
@@ -1627,19 +1746,25 @@ class TimeReport {
             const at = p.note ? `[[${p.note.replace(/\.md$/, "")}|${this.basename(p.note)}]]` : `[[${p.date}|${this.shortDate(p.date)}]]`;
             out.push(`- ${at} line ${p.line}: \`${quote(p.text)}\` ${p.message}`);
         }
+        // Both of a line's projects, or an invoice's, can be in one report: said once
+        const once = (line) => { if (!out.includes(line)) out.push(line); };
         for (const p of projectProblems) {
+            if (p.noProject) {
+                once(this.invoiceProblem(p, link));
+                continue;
+            }
             if (p.invoice || p.twice) {
                 out.push(this.invoiceProblem(p, link));
                 continue;
             }
             if (p.conflict) {
-                const { side, note, other, event, count } = p.conflict;
-                const n = `${count} ${count === 1 ? "entry" : "entries"}`;
-                const noteLink = `[[${note.replace(/\.md$/, "")}|${this.basename(note)}]]`;
-                const [line, kind, it] = event ? ["event line", "log", "log"] : ["task line", "task note", "note"];
-                out.push(side === "line"
-                    ? `- ${link(p.project)} has time (${n}) from ${event ? "an" : "a"} ${line} whose ${kind} ${noteLink} is filed under ${link(other)}, so the time isn't counted on either; move the ${it} here, or change the line's project link`
-                    : `- ${link(p.project)} has a ${kind}, ${noteLink}, whose ${line} links ${link(other)}, so its time (${n}) isn't counted on either; move the ${it}, or change the line's project link`);
+                once(this.conflictLine(p.conflict, link, quote));
+                continue;
+            }
+            if (p.kind === "parent") {
+                const note = this.noteLink(p.path);
+                once(p.folder ? `- ${note} is filed under ${link(p.folder)}, but its \`parent\` names ${link(p.named)}; set \`parent\` to ${link(p.folder)}`
+                    : `- ${note} is in no project's folder, but its \`parent\` names ${link(p.named)}; clear \`parent\`, or file the note`);
                 continue;
             }
             out.push(p.message ? `- ${link(p.project)} ${p.message}`
@@ -1650,10 +1775,25 @@ class TimeReport {
         return out;
     }
 
-    // Whether a Problem touches what's billed: every Problem but a task whose lines disagree, unless the
-    // disagreement is over the project (a stale forward date doesn't change a billable entry)
+    // A link to a note, by its path, showing its name
+    noteLink(path) {
+        return `[[${path.replace(/\.md$/, "")}|${this.basename(path)}]]`;
+    }
+
+    // What's wrong with a line in a periodic note (ownNoteProblems), and what to do about it
+    conflictLine(c, link, quote) {
+        const at = `${c.kind === "day" ? `[[${c.date}|${this.shortDate(c.date)}]]` : this.noteLink(c.path)} line ${c.line}: \`${quote(c.text)}\``;
+        if (c.links) return `- ${at} names ${c.links.map(link).join(" and ")}, so its time isn't counted on either; take the wrong link off`;
+        const [kind, it] = c.event ? ["log", "log"] : ["task note", "note"];
+        if (c.inbox) return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} waits in the Inbox; run AddProjectLink on the line, or MoveToProject on the ${it}`;
+        return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} is filed under ${link(c.noteProject)}, so its time isn't counted on either; run AddProjectLink on the line, which moves the ${it} too, or MoveToProject on the ${it}`;
+    }
+
+    // Whether a Problem touches what's billed: every Problem but a mark on a sub-task, a `parent`, a ⭕
+    // whose note waits in the Inbox (the time counts and bills), and a task whose lines disagree, unless
+    // the disagreement is over the project (a stale forward date doesn't change a billable entry)
     changesBilling(p) {
-        return p.kind !== "task" || p.rule === "project";
+        return (!["task", "subtask", "parent"].includes(p.kind) && !p.conflict?.inbox) || p.rule === "project";
     }
 
     // A billed entry that changed since its invoice was made, or an entry on two invoices (OBS-5). A
@@ -1668,6 +1808,7 @@ class TimeReport {
                 : `- ${when(p.twice.row)} is billed on both [[${a.name}]] and [[${b.name}]]`;
         }
         if (p.problem) return `- [[${p.invoice.name}]] ${p.problem}, so this project can't be invoiced until it's fixed`;
+        if (p.noProject) return `- [[${p.invoice.name}]] has no project that can be read, so nothing says whose bill it is; set its \`parent\` to the project it bills`;
         const { invoice, change: c } = p;
         // A sent invoice's date is the day it was sent
         const on = invoice.status === "paid" ? invoice.paid : invoice.status === "sent" ? invoice.invoiceDate : null;
@@ -1677,6 +1818,7 @@ class TimeReport {
             : c.kind === "unassigned" ? "now on no project"
             : c.kind === "project" ? `now on ${link(c.entry.project)}`
             : c.kind === "disputed" ? "now on a line with two projects, so it isn't counted"
+            : c.kind === "subtask" ? "now under a nested task, so it isn't counted"
             : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${c.entry.date}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
             : `but now it's missing from [[${c.row.date}|the daily note]]`;
         const at = c.kind === "gone" ? this.missingRow(c.row) : when(c.row);
@@ -1726,19 +1868,19 @@ class TimeReport {
     }
 
     // A timesheet's own Problems (OBS-132): the lines its project's note has about the projects the
-    // timesheet covers (overlaps, 🆓 twice, entries of 12 hours or more, a ⭕ and ⋯ that disagree, a
-    // project's settings), but not its invoices', which sheetProblems says. { lines, flagged }: flagged
-    // holds every entry a line is about, for its row's ⚠️: the entry on the line, both sides of an
-    // overlap, the entries under a task or event line a Problem is on (a stray 🆓 there, say), and a
-    // ⭕ and ⋯ disagreement's entries. Running clocks and malformed lines aren't counted, so they
-    // have no row; only their line says so.
+    // timesheet covers (overlaps, 🆓 twice, entries of 12 hours or more, a line that disagrees with
+    // itself, a project's settings), but not its invoices', which sheetProblems says. { lines, flagged }:
+    // flagged holds every entry a line is about, for its row's ⚠️: the entry on the line, both sides of an
+    // overlap, and the entries under a task or event line a Problem is on (a stray 🆓 there, or a note
+    // waiting in the Inbox). Running clocks, malformed lines, time under a sub-task and a line where
+    // nothing decides aren't counted, so they have no row; only their line says so.
     sheetEntryProblems(model, on, root, entries, link) {
         const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)) && this.changesBilling(p));
-        const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && this.changesBilling(p) && (on.has(p.project) || (p.parent && p.parent === root)));
+        const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && (this.changesBilling(p) || p.conflict?.inbox) && (on.has(p.project) || (p.parent && p.parent === root)));
         const at = (path, line) => `${path}\n${line}`;
-        const named = new Set(problems.flatMap((p) => [at(p.path, p.line), ...(p.other ? [at(p.other.path, p.other.line)] : [])]));
-        const conflicted = new Set(projectProblems.flatMap((p) => (p.conflict?.side === "line" ? p.conflict.entries : [])));
-        const about = (e) => named.has(at(e.path, e.line)) || (e.context ?? []).some((c) => named.has(at(e.path, c.line))) || conflicted.has(e);
+        const named = new Set([...problems.flatMap((p) => [at(p.path, p.line), ...(p.other ? [at(p.other.path, p.other.line)] : [])]),
+            ...projectProblems.filter((p) => p.conflict).map((p) => at(p.conflict.path, p.conflict.line))]);
+        const about = (e) => named.has(at(e.path, e.line)) || (e.context ?? []).some((c) => named.has(at(e.path, c.line)));
         return {
             lines: problems.length || projectProblems.length ? this.problemLines(model, problems, projectProblems, entries, link) : [],
             flagged: new Set(entries.filter(about)),
@@ -1756,6 +1898,7 @@ class TimeReport {
         const out = [], explained = new Set();
         for (const invoice of b.invoices) {
             if (invoice.status === "canceled") continue;
+            if (!invoice.project && b.billing.rowProjects(invoice, model, this, b.index).some(mine)) out.push(this.invoiceProblem({ invoice, noProject: true }, link));
             if (invoice.problem) {
                 if (mine(invoice.project)) out.push(this.invoiceProblem({ invoice, problem: invoice.problem }, link));
                 continue;
@@ -2500,15 +2643,16 @@ class TimeReport {
         };
     }
 
-    // The notes the task checks read (OBS-181): the daily notes the report already read (`daily`,
-    // [{ date, path, text }]), every other note holding a task ID, and the periodic notes a task line's forward date
-    // points at, which the cache may not have read again since a command wrote them. Each is read as it
-    // is now (textOf: from its editor when it's open in one), as the daily notes are.
+    // The notes the report's checks read (OBS-181, OBS-196): the daily notes the report already read
+    // (`daily`, [{ date, path, text }]), every other note holding a task ID, the periodic notes a task
+    // line's forward date points at, which the cache may not have read again since a command wrote them,
+    // and every note whose links in the cache include a ⭕, 🗃️, 🚩, ⋯ or ↗. Each is read once, as it is now
+    // (textOf: from its editor when it's open in one), as the daily notes are.
     async taskNotes(daily) {
-        const tasks = globalThis.customJS?.TaskIds;
-        if (!tasks?.allIds) return [];
-        const T = tasks.constructor;
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
+        const tasks = globalThis.customJS?.TaskIds;
+        if (!tasks?.allIds) return [...byPath.values()];
+        const T = tasks.constructor;
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
         const add = async (file) => {
             if (!byPath.has(file.path) && (!tasks.ignored(file) || file.path.startsWith(T.ARCHIVE ?? "Archive/"))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
@@ -2521,6 +2665,9 @@ class TimeReport {
                 const to = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, note.path) : null;
                 if (to && tasks.kindOf(to) !== "other") await add(to);
             }
+        }
+        for (const file of app.vault.getMarkdownFiles()) {
+            if (app.metadataCache.getFileCache(file)?.links?.some((l) => /^\s*(?:⭕|🗃|🚩|⋯|↗)/u.test(l.displayText ?? ""))) await add(file);
         }
         return [...byPath.values()];
     }
@@ -2538,19 +2685,35 @@ class TimeReport {
         }
     }
 
-    // A task's lines that disagree (OBS-181), as Problems: TaskIds.check over `notes` (taskNotes). A line
-    // in a daily note is a Problem on its day; a line in any other note, one on the task's project, or,
-    // when the task counts toward none, a Problem on its note that the weekly, monthly and yearly notes
-    // list under a day (problemDate).
+    // A task's lines that disagree (OBS-181), as Problems: TaskIds.check over `notes` (taskNotes); then
+    // the marks on sub-tasks and the `parent`s that differ from their folders (rule 15). A line in a daily
+    // note is a Problem on its day; a line in any other note, one on the task's project, or, when the task
+    // counts toward none, a Problem on its note that the weekly, monthly and yearly notes list under a day
+    // (problemDate).
     // Pure, so the demo's reports (renderReports.mjs) run it too, passing TaskIds as `T`.
     addTaskProblems(model, index, notes, T = globalThis.customJS?.TaskIds?.constructor) {
-        if (!T?.check || !notes.length) return;
+        if (!T?.check) return;
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const violations = T.check(notes, {
             projectOf: (note, i, lines) => this.lineProject(note, i, lines, index, false),
             exempt: this.keepsProject(model, index),
             resolve: (linkpath, from) => index.linkDest(linkpath.split("#")[0], from),
+            ownNote: (text, from) => this.ownNote(this.lineLinks(this.classify(text).body), from, index),
         });
+        // Where a Problem on line `l` of its note goes
+        const place = (l, fields, projects) => {
+            const note = byPath.get(l.path);
+            const { kind, rule, message } = fields;
+            const shared = { line: l.line + 1, path: l.path, kind, ...(rule ? { rule } : {}) };
+            if (note.kind === "day") {
+                model.problems.push({ date: note.date ?? this.dailyDate(l.path), ...shared, message, text: l.text, projects });
+            } else if (projects.length) {
+                for (const project of projects) model.projectProblems.push({ project, ...shared, message: `has a task line in [[${this.basename(l.path)}]] (line ${l.line + 1}) that ${message}` });
+            } else {
+                // On no day and no project: the periodic notes list it under a day, linking the note it's in
+                model.problems.push({ date: this.problemDate(note, l, byPath, index, T), note: l.path, ...shared, message, text: l.text, projects });
+            }
+        };
         for (const v of violations) {
             const first = v.lines.find((l) => byPath.get(l.path)?.kind !== "other") ?? v.lines[0];
             const firstNote = byPath.get(first.path);
@@ -2558,19 +2721,14 @@ class TimeReport {
             // A project disagreement changes what's billed, so it shows on every project the task's lines
             // count toward; any other rule, on the task's own project
             const projects = v.rule === "project" ? [...new Set(v.detail.projects.filter(Boolean))] : taskProject ? [taskProject] : [];
-            for (const l of v.lines) {
-                const message = this.taskProblemText(v, l);
-                const note = byPath.get(l.path);
-                if (note.kind === "day") {
-                    model.problems.push({ date: note.date ?? this.dailyDate(l.path), line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });
-                } else if (projects.length) {
-                    for (const project of projects) model.projectProblems.push({ project, kind: "task", rule: v.rule, path: l.path, line: l.line + 1, message: `has a task line in [[${this.basename(l.path)}]] (line ${l.line + 1}) that ${message}` });
-                } else {
-                    // On no day and no project: the periodic notes list it under a day, linking the note it's in
-                    model.problems.push({ date: this.problemDate(note, l, byPath, index, T), note: l.path, line: l.line + 1, path: l.path, kind: "task", rule: v.rule, message, text: l.text, projects });
-                }
-            }
+            for (const l of v.lines) place(l, { kind: "task", rule: v.rule, message: this.taskProblemText(v, l) }, projects);
         }
+        for (const l of this.subTaskProblems(notes, T)) {
+            const note = byPath.get(l.path);
+            const project = this.lineProject(note, l.line, this.shown(note), index, false);
+            place(l, { kind: "subtask", message: l.message }, project ? [project] : []);
+        }
+        model.projectProblems.push(...this.parentProblems(index));
         // In the order build sorts the rest
         model.problems.sort((a, b) => a.date.localeCompare(b.date) || a.line - b.line);
     }
@@ -2579,7 +2737,7 @@ class TimeReport {
     // week's, month's or year's first day; for any other note, the day its forward date points at (a week's, month's
     // or year's first), else today
     problemDate(note, l, byPath, index, T) {
-        if (note.kind !== "other") return this.periodStart(note.path, note.kind) ?? this.today();
+        if (note.kind !== "other") return this.noteDate(note, note.kind);
         const fwd = T.forwardOf(l.text);
         const to = fwd ? index.linkDest(fwd.linkpath, l.path) : null;
         const target = to ? byPath.get(to) : null;
@@ -2616,7 +2774,7 @@ class TimeReport {
         const ref = (o) => `[[${this.basename(o.path)}|${name(o.path)}]] line ${o.line + 1}`;
         const others = v.lines.filter((o) => o !== l).map(ref).join(", ");
         switch (v.rule) {
-            case "project": return `is one task with ${others}, and they don't name the same project; give every line of the task the same one`;
+            case "project": return `is the same task as ${others}, and they don't name the same project; give every line of the task the same one`;
             case "open": {
                 // A sent line a click turned into [ ] keeps its ID: taking it off would lose the task's link
                 const clicked = v.lines[v.detail.clicked ?? -1];
@@ -2632,6 +2790,8 @@ class TimeReport {
                 return l === v.lines[0] ? `${on}, but the task is at ${others || "no open line"}` : `is where its task is, but the task's line at ${others} ${on}`;
             }
             case "twice": return `has the ID ^${v.id}, which another line in this note has too (${others})`;
+            case "notes": return `is also at ${others}, with the same ID (^${v.id}). A task lives in one note, apart from the periodic notes. Delete the line that's in the wrong place, or, if they're really two tasks, take the ID off one`;
+            case "ownNotes": return `is the same task as ${others}, and they link different notes with ⋯; take one ⋯ off`;
             default: return `has text after its ID ^${v.id}, so Obsidian no longer reads it; move the text before the ID`;
         }
     }
@@ -2644,9 +2804,10 @@ class TimeReport {
         const clock = window.moment();
         const daily = await this.readDailyNotes(schedule);
         if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
-        const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
+        const checked = await this.taskNotes(daily);
+        const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() }, checked });
         this.attachBilling(model, await this.readInvoices(billing), index, billing);
-        this.addTaskProblems(model, index, await this.taskNotes(daily));
+        this.addTaskProblems(model, index, checked);
         return { model, index };
     }
 
@@ -2815,12 +2976,32 @@ class TimeReport {
             const c = cacheOf(path);
             return !!c && this.tagsOf(c).includes(tag);
         };
+        // What a note is, kept for this index's life, since the report asks about every line. Schedule's
+        // own test, with what it reads off `customJS` taken now, as a run keeps its Schedule (OBS-41): a
+        // note that couldn't be told would otherwise fail the run, and read as "other" its time is lost
+        const schedule = this.schedule ?? customJS.Schedule, tasks = customJS.TaskIds;
+        const rules = customJS.DatePrompt?.weekRules?.(), folders = schedule ? this.periodFolders() : undefined;
+        const kinds = new Map();
+        const kind = (path) => {
+            if (!kinds.has(path)) {
+                const f = app.vault.getFileByPath(path);
+                kinds.set(path, !f ? "other" : schedule.isDailyNote(f) ? "day" : schedule.periodOf(f, rules, folders) ?? "other");
+            }
+            return kinds.get(path);
+        };
         return {
             exists: (path) => !!app.vault.getFileByPath(path),
             // Exact #project or #area, in frontmatter or inline (same rule as pickParent and SyncArea)
             isProject: (path) => tagged(path, "project"),
             isArea: (path) => tagged(path, "area"),
             isInvoice: (path) => tagged(path, "invoice"),
+            isTimesheet: (path) => tagged(path, "timesheet"),
+            kind,
+            // TaskIds.inSystem's test, through the `kind` above: it asks the global Schedule, which is gone
+            // for a moment when CustomJS starts over
+            inSystem: (path) => !tasks || kind(path) !== "other" || tasks.constructor.FOLDERS.some((f) => path.startsWith(`${f}/`)),
+            inInbox: (path) => !!tasks && path.startsWith(`${tasks.constructor.INBOX}/`),
+            paths: () => app.vault.getMarkdownFiles().map((f) => f.path),
             parentLink: (path) => this.parentValue(cacheOf(path)?.frontmatter ?? {}),
             props: (path) => cacheOf(path)?.frontmatter ?? {},
             linkDest: (linktext, fromPath) => app.metadataCache.getFirstLinkpathDest(linktext, fromPath)?.path ?? null,
@@ -2894,11 +3075,11 @@ class TimeReport {
         return String(text).replace(/\[\[[^\]]*\]\]/g, (l) => l.replace(/(?<!\\)\|/g, "\\|"));
     }
 
-    // The project notes a report goes to: every project or area with time, its parents, and any project a
-    // project-level problem is about (a conflict can name a project with no time of its own)
+    // The project notes a report goes to: every project or area with time, counted or not, its parents, and
+    // any project a project-level problem is about (a conflict can name a project with no time of its own)
     projectTargets(model) {
         const targets = new Set();
-        for (const p of [...model.entries.map((e) => e.project), ...model.projectProblems.map((x) => x.project)]) {
+        for (const p of [...[...model.entries, ...(model.disputed ?? [])].map((e) => e.project), ...model.projectProblems.map((x) => x.project)]) {
             const seen = new Set();
             for (let up = p; up && !seen.has(up); up = model.parent.get(up)) { seen.add(up); targets.add(up); }
         }

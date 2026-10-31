@@ -347,7 +347,7 @@ test("overdue: a due date before today; today itself isn't overdue", () => {
     assert.equal(TrailingLinks.overdue("2026-09", "2026-09-27"), false);
 });
 
-// ---------------------------------------------------------------- context and subtreeEnd
+// ---------------------------------------------------------------- subtreeEnd
 
 const NOTE = [
     "- [ ] Plan the shoot [[Kestrel|⭕]]",
@@ -358,23 +358,9 @@ const NOTE = [
     "- [ ] Next task",
 ];
 const lineAt = (n) => NOTE[n - 1];
-const context = (n) => plain(TrailingLinks.context(lineAt, n));
-
-test("context: the line and the lines it's nested under, nearest first", () => {
-    assert.deepEqual(context(2), [NOTE[1], NOTE[0]]);
-    assert.deepEqual(context(3), [NOTE[2], NOTE[1], NOTE[0]]);
-    assert.deepEqual(context(5), [NOTE[4], NOTE[0]], "a blank line doesn't end the nesting");
-    assert.deepEqual(context(6), [NOTE[5]]);
-});
 
 test("subtreeEnd: the last line nested under a line", () => {
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 1), 5);
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 2), 3);
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 6), 6);
-});
-
-test("reportContext: the lines a line is nested under, as the time report reads them (OBS-90)", () => {
-    assert.deepEqual(plain(TrailingLinks.reportContext(["\t- [x] Sub [[Loose|⋯]]", "\tsee [[Beta|⭕]]", "- [<] 9:00am\t[[2026-09-14 Review|Review]]"])),
-        [{ body: "[x] Sub [[Loose|⋯]]" }, { body: "[<] 9:00am\t[[2026-09-14 Review|Review]]" }], "indented text isn't a parent; bullets come off");
-    assert.deepEqual(plain(TrailingLinks.reportContext(["\t1. [ ] Step [[Loose|⋯]]", "## Plan"])), [{ body: "[ ] Step [[Loose|⋯]]" }, { body: "## Plan" }]);
 });

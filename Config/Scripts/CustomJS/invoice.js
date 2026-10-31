@@ -332,6 +332,7 @@ class Invoice {
             unassigned: "now on no project",
             project: `now on [[${tr.basename(c.entry?.project ?? "")}]]`,
             disputed: "now on a line with two projects, so it isn't counted",
+            subtask: "now under a nested task, so it isn't counted",
             gone: `but now it's missing from [[${c.row.date}|the daily note]]; put it back there to settle it`,
             wording: "reads differently now (not a change in what's billed)",
         })[c.kind];

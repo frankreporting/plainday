@@ -131,16 +131,46 @@ const counted = (v) => {
     return plain({ projects: model.entries.map((e) => e.project), conflicts: model.disputed.length });
 };
 
-test("a line's note is its ⋯, else its ↗: with a ⋯, a ↗ to a note in another project changes nothing; with none, the ↗'s note is compared with the ⭕", () => {
+test("a line's own note is its ⋯ and nothing else: a ↗ is read by nobody (OBS-196)", () => {
     // ⋯ in Kestrel, ↗ to a meeting log in Pinecrest, ⭕ Kestrel: Kestrel's, and nothing disagrees
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[Pick fonts|⋯]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [KES], conflicts: 0 });
-    // Only a ↗: the note it was sent from says where it goes
-    assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [PIN], conflicts: 0 });
+    // Only a ↗: Unassigned, like any line with no ⭕
+    assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [null], conflicts: 0 });
     // ⭕ Pinecrest with its own ⋯ in Kestrel: they disagree, so it counts toward neither (OBS-213)
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Pinecrest|⭕]] [[Pick fonts|⋯]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [], conflicts: 1 });
-    // ⭕ Kestrel and only a ↗ to a log in Pinecrest: read alike until OBS-196, so they disagree too, and
-    // nothing decides (Brian, 2026-10-28)
-    assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [], conflicts: 1 });
+    // ⭕ Kestrel and only a ↗ to a log in Pinecrest: nothing disagrees, and the ⭕ says where it goes
+    assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [KES], conflicts: 0 });
+});
+
+test("OBS-41: an index a run began with answers what a note is once CustomJS has started over", () => {
+    const week = `${PLANNER}/weeks/2026w38.md`;
+    const v = standIn({ notes: { [KES]: PROJECT, [week]: "", [day("2026-09-17")]: "", "Reference/People/Someone.md": "---\nparent: \"[[Kestrel]]\"\n---\n" } });
+    const tr = v.customJS.TimeReport;
+    const index = tr.appIndex();
+    for (const name of ["Schedule", "DatePrompt", "TimeReport", "TaskIds"]) delete v.customJS[name];
+    assert.equal(index.inSystem("Reference/People/Someone.md"), false);
+    assert.equal(index.inSystem(KES), true);
+    assert.deepEqual(plain([index.kind(week), index.kind(day("2026-09-17")), index.kind(KES)]), ["week", "day", "other"], "a daily note read as anything else would lose its time");
+    assert.deepEqual(plain(tr.parentProblems(index)), []);
+});
+
+test("taskNotes finds a note by its links: a mark on a sub-task in a project note, and a day with no time, reach the checks", async () => {
+    const v = standIn({ notes: {
+        [KES]: `${PROJECT}- [ ] Shoot\n\t- [ ] Charge batteries [[2026-09-23|🚩 9/23]]\n`,
+        [day("2026-09-17")]: "- [x] No time here [[Kestrel|⭕]] [[Pick fonts|⋯]]\n",
+        [OWN]: "---\ntags: [task]\n---\nNo marks here.\n",
+        "Reference/People/Someone.md": "- [ ] Outside the system [[Kestrel|⭕]]\n",
+        "Archive/Old/Old note.md": "- [ ] Archived [[Kestrel|⭕]]\n",
+    } });
+    const tr = v.customJS.TimeReport;
+    const found = plain((await tr.taskNotes([])).map((n) => n.path)).sort();
+    assert.deepEqual(found, ["Archive/Old/Old note.md", KES, day("2026-09-17")].sort());
+});
+
+test("appIndex knows what waits in the Inbox, by the one name for it", () => {
+    const v = standIn({ notes: { [KES]: PROJECT, "Inbox/Lamp.md": "---\ntags: [task]\n---\n" } });
+    const index = v.customJS.TimeReport.appIndex();
+    assert.deepEqual([index.inInbox("Inbox/Lamp.md"), index.inInbox(KES)], [true, false]);
 });
 
 test("the report's task checks read Archive too: an archived task note's lines are checked (Brian, 2026-10-28)", async () => {

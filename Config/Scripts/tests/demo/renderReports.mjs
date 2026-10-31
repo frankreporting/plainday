@@ -134,13 +134,21 @@ export function readVault(root = ROOT) {
 
 const basename = (p) => p.split("/").pop().replace(/\.md$/, "");
 
+// A note's kind by its folder, as Schedule's own test says in the app
+const kindOf = (p) => {
+    const dir = p.slice(0, p.lastIndexOf("/"));
+    return dir === DAYS ? "day" : Object.keys(FOLDERS).find((u) => FOLDERS[u] === dir) ?? "other";
+};
+// The three folders the system works in (TaskIds.FOLDERS and the Planner's periodic notes)
+const inSystem = (p) => kindOf(p) !== "other" || p.startsWith("Projects/") || p.startsWith("Inbox/");
+
 export function makeIndex(tr, vault) {
     return tr.makeIndex([...vault.notes].map(([p, { fm }]) => ({
         path: p,
         tags: [].concat(fm.tags ?? []).filter(Boolean),
         parent: tr.parentValue(fm),
         props: fm,
-    })));
+    })), { kind: kindOf, inSystem });
 }
 
 // readDailyNotes: YYYY-MM-DD notes in the daily notes folder with a time in them
@@ -195,11 +203,27 @@ export function planBlock(tr, content, block, { heading = true } = {}) {
     return { content: edits.reduce(apply, content) };
 }
 
-// The task checks over the demo's notes (OBS-185), as TimeReport.taskNotes gathers them: the daily
-// notes and every other note that holds a task ID, with kinds `day`, `week`, `month`, `year` by
-// folder and `other` for the rest. A live project is one under Projects/ tagged project or area
-// whose status isn't Done or Canceled, as AddTaskNote.isLiveHome says.
-export function addDemoTaskProblems(tr, vault, model, index) {
+// The notes the report's checks read, as TimeReport.taskNotes gathers them: the daily notes, and every
+// other note in the system or Archive that holds a task ID or a ⭕, 🗃️, 🚩, ⋯ or ↗ link, with kinds `day`,
+// `week`, `month`, `year` by folder and `other` for the rest. With no TaskIds, the daily notes.
+export function checkedNotes(tr, vault) {
+    const daily = dailyNotes(vault);
+    const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
+    const TaskIds = contexts.get(tr)?.TaskIds;
+    if (!TaskIds) return [...byPath.values()];
+    const hasId = (text) => text.split("\n").some((l) => TaskIds.CHECKBOX.test(l) && TaskIds.idOf(l));
+    const hasMark = (text) => /\[\[[^\]|]+\|\s*(?:⭕|🗃|🚩|⋯|↗)/u.test(text);
+    for (const [p, { text }] of vault.notes) {
+        if (byPath.has(p) || !(inSystem(p) || p.startsWith("Archive/")) || !(hasId(text) || hasMark(text))) continue;
+        const kind = kindOf(p);
+        byPath.set(p, { path: p, kind, ...(kind === "day" ? { date: basename(p) } : {}), text });
+    }
+    return [...byPath.values()];
+}
+
+// The task checks over the demo's notes (OBS-185). A live project is one under Projects/ tagged project
+// or area whose status isn't Done or Canceled, as AddTaskNote.isLiveHome says.
+export function addDemoTaskProblems(tr, vault, model, index, checked = checkedNotes(tr, vault)) {
     const loaded = contexts.get(tr);
     if (!loaded) return;
     const { ctx, TaskIds } = loaded;
@@ -210,17 +234,7 @@ export function addDemoTaskProblems(tr, vault, model, index) {
         const done = [].concat(fm.status ?? []).some((x) => ["done", "canceled", "cancelled"].includes(String(x).trim().toLowerCase()));
         return !done && tags.some((t) => t === "area" || t === "project");
     };
-    const daily = dailyNotes(vault);
-    const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
-    const hasId = (text) => text.split("\n").some((l) => TaskIds.CHECKBOX.test(l) && TaskIds.idOf(l));
-    for (const [p, { text }] of vault.notes) {
-        if (byPath.has(p) || !NOTE_FOLDERS.some((f) => p.startsWith(f)) || !hasId(text)) continue;
-        const dir = p.slice(0, p.lastIndexOf("/"));
-        const unit = Object.keys(FOLDERS).find((u) => FOLDERS[u] === dir);
-        const kind = dir === DAYS ? "day" : unit ?? "other";
-        byPath.set(p, { path: p, kind, ...(kind === "day" ? { date: basename(p) } : {}), text });
-    }
-    tr.addTaskProblems(model, index, [...byPath.values()], TaskIds);
+    tr.addTaskProblems(model, index, checked, TaskIds);
 }
 
 // Everything a TimeReport run would do to the vault:
@@ -228,8 +242,9 @@ export function addDemoTaskProblems(tr, vault, model, index) {
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
 export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
     const index = makeIndex(tr, vault);
-    const model = tr.attachBilling(tr.build(dailyNotes(vault), index), invoiceNotes(vault, billing), index, billing);
-    addDemoTaskProblems(tr, vault, model, index);
+    const checked = checkedNotes(tr, vault);
+    const model = tr.attachBilling(tr.build(dailyNotes(vault), index, { checked }), invoiceNotes(vault, billing), index, billing);
+    addDemoTaskProblems(tr, vault, model, index, checked);
     const { link, linkTarget } = linkers(tr, vault);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();

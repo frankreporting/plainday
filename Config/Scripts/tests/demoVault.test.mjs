@@ -147,8 +147,10 @@ test("demo vault: no running clocks, and nothing that hasn't ended by the last d
 test("demo vault: the archived project's entries count in the August, week 35 and 2026 reports, and its note and timesheet are written (OBS-213)", () => {
     const archived = "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md";
     const index = plan.index;
-    const logged = dailyNotes(vault).flatMap((n) => tr.parseNote(n.text, n.date).entries.map((e) => ({ ...e, path: n.path })))
-        .filter((e) => tr.resolve(e.context, e.path, index) === archived);
+    const logged = dailyNotes(vault).flatMap((n) => {
+        const { entries, visible } = tr.parseNote(n.text, n.date);
+        return entries.filter((e) => tr.resolve((k) => visible[k], e.top, n.path, index, e.top).project === archived);
+    });
     assert.equal(logged.length, 2);
     const counted = plan.model.entries.filter((e) => e.project === archived);
     assert.equal(counted.length, 2);

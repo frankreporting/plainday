@@ -685,7 +685,7 @@ test("OBS-213, OBS-215: a live row whose times an archived entry now has says wh
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", KELP]]);
     assert.deepEqual(picked(billing.select(m, tr, idx, { project: OTHER, through: "2026-09-30", ledger })), [["2026-09-04", "1:00pm", "Dune Books"]]);
 });
-test("OBS-213: an archived ⭕ under a live one counts toward the archived project, as it would if live, and is never billed", () => {
+test("OBS-213: a line that names an archived and a live project counts toward neither, and a billed row finds it on the live one", () => {
     const OLD = "Archive/Work/Old/Old.md", ACME = "Projects/Work/Acme/Acme.md", BETA = "Projects/Work/Beta/Beta.md";
     const idx = tr.makeIndex([...NOTES_INDEX,
         { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } },
@@ -695,24 +695,24 @@ test("OBS-213: an archived ⭕ under a live one counts toward the archived proje
     const inv = billing.readInvoice({ path: `${INV}/1005-BET.md`, props: { status: "sent", project: "[[Beta]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
     const ledger = billing.ledger([inv]);
     const m = tr.build([
-        day("2026-09-03", "- [ ] Work [[Acme|⭕]]\n\t- [x] Call [[Old|⭕]]\n\t\t- 9:00am - 10:00am"),
+        day("2026-09-03", "- [ ] Work [[Old|⭕]] [[Acme|⭕]]\n\t- 9:00am - 10:00am"),
         day("2026-09-04", "- [x] Call [[Beta|⭕]]\n\t- 10:00am - 11:00am"),
     ], idx);
-    assert.equal(m.entries.find((e) => e.date === "2026-09-03").project, OLD, "the report counts the 9/3 call toward Old");
-    assert.ok(!billing.entries(m).some((e) => e.date === "2026-09-03"), "so no invoice bills it");
-    assert.equal(billing.byDate(m).live.get("2026-09-03")[0].project, ACME, "a billed row still matches among the entries as read before");
+    assert.ok(!m.entries.some((e) => e.date === "2026-09-03"), "nothing decides, so the report doesn't count the 9/3 call");
+    assert.ok(!billing.entries(m).some((e) => e.date === "2026-09-03"), "and no invoice bills it");
+    assert.equal(billing.byDate(m).live.get("2026-09-03")[0].project, ACME, "a billed row still finds it on the live project");
     // The billed 9/4 row's times are nowhere now: gone, and Beta's 10:00am entry is billed (OBS-215)
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => c.kind)), ["gone"]);
     assert.deepEqual(picked(billing.select(m, tr, idx, { project: BETA, through: "2026-09-30", ledger })), [["2026-09-04", "10:00am", "Beta"]]);
 });
-test("OBS-213: billed time whose line now also names an archived project shows on its invoice as on that project, and isn't billed again", () => {
+test("OBS-213: billed time whose line now names an archived project shows on its invoice as on that project, and isn't billed again", () => {
     const OLD = "Archive/Work/Old/Old.md";
     const idx = tr.makeIndex([...NOTES_INDEX, { path: OLD, tags: ["project"], props: { rate: 50, rate_type: "hourly" } }]);
     const rows = [{ date: "2026-09-02", start: 780, end: 840, minutes: 60, billed: 60, cents: 6000, project: OTHER, task: "Call", note: "" }];
     const inv = billing.readInvoice({ path: `${INV}/1006-DUN.md`, props: { status: "paid", project: "[[Dune Books]]" }, text: billing.billedLines(rows, tr, (p) => p.replace(/\.md$/, "")).join("\n") }, tr, idx);
     const ledger = billing.ledger([inv]);
-    // Billed on Dune Books; a ⭕ for the archived Old added to the line since
-    const m = tr.build([day("2026-09-02", "- [ ] Calls [[Dune Books|⭕]]\n\t- [x] Call [[Old|⭕]]\n\t\t- 1:00pm - 2:00pm")], idx);
+    // Billed on Dune Books; the line's ⭕ changed to the archived Old since
+    const m = tr.build([day("2026-09-02", "- [x] Call [[Old|⭕]]\n\t- 1:00pm - 2:00pm")], idx);
     const entry = m.entries[0];
     assert.equal(entry.project, OLD);
     assert.deepEqual(plain(billing.changes(inv, m, tr, idx, ledger).changes.map((c) => [c.kind, c.entry?.project])), [["project", OLD]]);

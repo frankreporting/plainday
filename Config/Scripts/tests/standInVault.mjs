@@ -55,8 +55,8 @@ export const momentOn = (today) => {
     return moment;
 };
 // The metadata cache Obsidian keeps for a note, as far as the scripts read it: frontmatter (tags,
-// status, parent), list items with their checkbox and block ID, and every block ID (on a list item
-// or any other line) by its lowercased ID
+// status, parent), list items with their checkbox and block ID, every block ID (on a list item or any
+// other line) by its lowercased ID, and its links, whose displayText is a link's alias, or else its text
 export const parseCache = (text) => {
     const lines = text.split("\n");
     let frontmatter = null, start = 0;
@@ -76,9 +76,10 @@ export const parseCache = (text) => {
         }
         start = end + 1;
     }
-    const listItems = [], blocks = {};
+    const listItems = [], blocks = {}, links = [];
     lines.forEach((l, i) => {
         if (i < start) return;
+        for (const m of l.matchAll(/\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g)) links.push({ link: m[1], displayText: m[2] ?? m[1], position: { start: { line: i } } });
         const id = l.match(/\s\^([A-Za-z0-9-]+)\s*$/)?.[1];
         const position = { start: { line: i } };
         if (id) blocks[id.toLowerCase()] = { id, position };
@@ -89,7 +90,7 @@ export const parseCache = (text) => {
         if (id) item.id = id;
         listItems.push(item);
     });
-    return { frontmatter, listItems, blocks };
+    return { frontmatter, listItems, blocks, links };
 };
 
 // The real scripts on a stand-in vault and editor. `notes` maps paths to text; `open` is the note in
@@ -210,6 +211,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         return T.check(notes, {
             projectOf: (note, i, lines) => tr.lineProject(note, i, lines, index, false),
             resolve: (linkpath, from) => app.metadataCache.getFirstLinkpathDest(linkpath, from)?.path ?? null,
+            ownNote: (text, from) => tr.ownNote(tr.lineLinks(tr.classify(text).body), from, index),
         });
     }
 }

@@ -48,6 +48,10 @@ test("fromModel: each kind of project Problem, billing from the model's invoices
             { kind: "task", path: `${DAYS}/2026-09-03.md` },
             { kind: "task", note: "Projects/Work/Harbor Web/Brief.md", path: "Projects/Work/Harbor Web/Brief.md" },
             { kind: "someday", path: `${DAYS}/2026-09-04.md` },
+            { kind: "subtime", path: `${DAYS}/2026-09-06.md` },
+            { kind: "subtask", path: `${DAYS}/2026-09-06.md` },
+            { kind: "task", rule: "notes", path: `${DAYS}/2026-09-06.md` },
+            { kind: "task", rule: "ownNotes", path: `${DAYS}/2026-09-06.md` },
         ],
         projectProblems: [
             // A task line in a project note is on each of its projects: listed once, at its note
@@ -60,12 +64,22 @@ test("fromModel: each kind of project Problem, billing from the model's invoices
             { project: WEB, message: "has an `earned` that isn't a date (x), so its fee isn't counted as earned" },
             { project: WEB, message: "something new" },
             { project: WEB, parent: FREE },
-            { project: FREE, conflict: { side: "note" } },
+            // A line that disagrees is on each project it names: listed once, at the note it's in
+            { project: WEB, conflict: { side: "line", path: `${DAYS}/2026-09-05.md`, line: 3 } },
+            { project: FREE, conflict: { side: "note", path: `${DAYS}/2026-09-05.md`, line: 3 } },
+            { project: WEB, conflict: { side: "line", links: [WEB, FREE], path: `${DAYS}/2026-09-05.md`, line: 4 } },
+            { project: FREE, conflict: { side: "note", links: [WEB, FREE], path: `${DAYS}/2026-09-05.md`, line: 4 } },
+            { project: WEB, conflict: { side: "line", inbox: true, path: `${DAYS}/2026-09-05.md`, line: 5 } },
+            { project: WEB, kind: "subtask", path: "Projects/Work/Harbor Web/Plan.md", line: 9, message: "is a sub-task" },
+            // A `parent` is on both projects too
+            { project: WEB, kind: "parent", path: "Inbox/Lamp.md" },
+            { project: FREE, kind: "parent", path: "Inbox/Lamp.md" },
             // Listed from the model's billing below, not from here
             { project: WEB, invoice: { path: "I/1001-HBR.md" }, change: { kind: "free" } },
         ],
         billing: {
-            invoices: [{ path: "I/1002-HBR.md", status: "sent", problem: "has no rows in its Billed entries" }, { path: "I/1005-HBR.md", status: "canceled", problem: "x" }],
+            invoices: [{ path: "I/1002-HBR.md", project: WEB, status: "sent", problem: "has no rows in its Billed entries" }, { path: "I/1005-HBR.md", status: "canceled", problem: "x" },
+                { path: "I/1006-HBR.md", status: "paid", project: null }],
             byInvoice: new Map([[{ path: "I/1001-HBR.md" }, [{ kind: "free" }, { kind: "wording" }]], [{ path: "Reference/0900-X.md", project: null }, [{ kind: "gone" }]],
                 [{ path: "I/0700-LE.md", project: FREE }, [{ kind: "gone" }]]]),
             ledger: { twice: [{ invoices: [{ path: "I/1001-HBR.md" }, { path: "I/1003-HBR.md" }] }] },
@@ -76,19 +90,28 @@ test("fromModel: each kind of project Problem, billing from the model's invoices
         "Billed entry missing · Loose Ends",
         "Billed entry now 🆓 · 1001-HBR",
         "Entry on two invoices · 1003-HBR",
-        "Billed entries need fixing · 1002-HBR",
+        "Billed entries need fixing · Harbor Web",
+        "Invoice with no project · 1006-HBR",
         "Bad formatting · 2026-09-04",
+        "Time under a nested task · 2026-09-06",
         "Rate isn't a number · Harbor Web",
         "Hourly with no rate · Harbor Web",
         "Earned date problem · Harbor Web",
         "Projects inside each other · Harbor Web",
-        "Line and note name different projects · Loose Ends",
+        "Note's parent differs from its folder · Lamp",
         "Project setting · Harbor Web",
+        "Line and note name different projects · 2026-09-05",
+        "Two project links on one line · 2026-09-05",
+        "Line's note waits in the Inbox · 2026-09-05",
+        "Mark on a nested task · 2026-09-06",
+        "Mark on a nested task · Plan",
         "Task lines disagree · 2026-09-03",
         "Task lines disagree · Brief",
         "Task lines disagree · Plan",
+        "Task in two notes · 2026-09-06",
+        "Two ⋯ notes on one task · 2026-09-06",
     ]);
-    assert.equal(log.fromModel(model, link).find((g) => g.name === "Plan").count, 2);
+    assert.equal(log.fromModel(model, link).find((g) => g.kind === "Task lines disagree" && g.name === "Plan").count, 2);
 });
 
 test("fromModel: a task line in a project note whose day doesn't have it reaches the log, once (review round 1)", async () => {
@@ -105,12 +128,12 @@ test("fromModel: a task line in a project note whose day doesn't have it reaches
     assert.deepEqual(plain(log.fromModel(model, (p) => `[[${tr.basename(p)}]]`).map((g) => [g.kind, g.link, g.count])), [["Task lines disagree", "[[Kestrel]]", 1]]);
 });
 
-test("fromModel: an invoice with no project still lists its missing rows (review round 1)", () => {
+test("fromModel: an invoice with no project says so, and still lists its missing rows (review round 1)", () => {
     const rows = [{ date: "2026-08-31", start: 540, end: 600, minutes: 60, billed: 60, cents: 8000, project: WEB, task: "Kickoff", note: "" }];
     const inv = { path: "Reference/Invoices/0900-X.md", props: { status: "sent" }, text: billing.billedLines(rows, tr, (p) => tr.basename(p)).join("\n") };
     const m = tr.attachBilling(tr.build([], index), [inv], index, billing);
     assert.equal(m.billing.invoices[0].project, null);
-    assert.deepEqual(plain(log.fromModel(m, link).map((g) => [g.kind, g.name])), [["Billed entry missing", "0900-X"]]);
+    assert.deepEqual(plain(log.fromModel(m, link).map((g) => [g.kind, g.name])), [["Billed entry missing", "0900-X"], ["Invoice with no project", "0900-X"]]);
 });
 
 const GROUPS = log.group([

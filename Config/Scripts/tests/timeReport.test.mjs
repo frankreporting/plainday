@@ -132,10 +132,10 @@ test("parseNote: 🆓 after other text on an entry is flagged and billed; 🆓 o
     assert.deepEqual(whole.problems.map((p) => p.kind), ["free"]);
 });
 
-test("parseNote: entries not under a task or event count, and are flagged", () => {
+test("parseNote: a well-formed entry not under a task or event is nothing, and isn't listed (rule 7)", () => {
     const { entries, problems } = entriesOf("## Notes\n\n- 9:00am - 10:00am\nSome text\n\t- 11:00am - 11:30am");
-    assert.equal(entries.length, 2);
-    assert.deepEqual(problems.map((p) => [p.line, p.kind]), [[3, "anchor"], [5, "anchor"]]);
+    assert.equal(entries.length, 0);
+    assert.deepEqual(problems, []);
 });
 
 test("parseNote: long entries are flagged but counted", () => {
@@ -178,9 +178,8 @@ test("parseNote: old-style meeting lines under ## Meetings are events", () => {
         [9, 30, "Check-in with Corwin"],
         [10, 10, "Check-in with Corwin"],
         [14, 30, "Chart review check-in"],
-        [16, 60, ""],
     ]);
-    assert.deepEqual(problems.map((p) => [p.line, p.kind]), [[16, "anchor"]]);
+    assert.deepEqual(problems, []);
 });
 
 // ------------------------------------------------------------------ projects
@@ -201,14 +200,21 @@ const INDEX = tr.makeIndex([
     { path: "20 Projects/Productivity/Tidy up old queries.md", tags: ["task", "project"] },
     { path: "20 Projects/Productivity/Nested tag.md", tags: ["project/sample"] },
 ]);
-const projectFor = (line, context = []) => tr.resolve([{ body: line }, ...context.map((body) => ({ body }))], `${LOG}/2026-09-01.md`, INDEX);
+// A line, nested under `context` (nearest first), as a note's lines: a bullet on each, but for the old
+// layout's meeting lines
+const nested = (line, context) => [...context].reverse().concat(line).map((body, i) => "\t".repeat(i) + (/^\d/.test(body) ? body : `- ${body}`));
+const readLine = (line, context, index) => {
+    const lines = nested(line, context);
+    return tr.resolve((n) => lines[n], lines.length - 1, `${LOG}/2026-09-01.md`, index);
+};
+const projectFor = (line, context = []) => readLine(line, context, INDEX).project;
 
-test("resolve: a ⭕ at the end of the line wins over its note, in either order", () => {
+test("resolve: a line's ⭕ is read wherever it is in the run that ends the line", () => {
     assert.equal(projectFor("[x] Task [[2026-09-02 Launch wrapup|⋯]] [[Orchard Lane Web 2026|⭕]]"), ORCHARD_WEB);
     assert.equal(projectFor("[x] Task [[Orchard Lane Web 2026|⭕]] [[2026-09-02 Launch wrapup|⋯]]"), ORCHARD_WEB, "⭕ before the ⋯ (OBS-90)");
     assert.equal(projectFor("[x] Task [[2026-09-30|🚩 9/30]] [[Orchard Lane Web 2026|⭕]] [[2026-09-02 Launch wrapup|⋯]]"), ORCHARD_WEB, "after a due date");
     assert.equal(projectFor("[>] [[2024-12-10|12/10]] Newsletter [[Kestrel Newsletter|⭕]]"), KESTREL);
-    // on a line the task is nested under, it still beats the task's own ⋯
+    // a sub-task's time is its task's, whatever is on the sub-task
     assert.equal(projectFor("[x] Subtask [[2026-09-02 Launch wrapup|⋯]]", ["[ ] Parent [[Orchard Lane Web 2026|⭕]]"]), ORCHARD_WEB);
     // a ⭕ says where the time goes, ahead of a project mentioned earlier in the text (OBS-36)
     assert.equal(projectFor("[x] Send the [[Kestrel Newsletter]] invoice [[Orchard Lane Web 2026|⭕]]"), ORCHARD_WEB);
@@ -228,9 +234,9 @@ test("resolve: only the links that end a line say where its time goes; a link in
     assert.equal(projectFor("[x] Ask about dates [[Orchard Lane Web 2026]]"), null, "at the end, but not a ⭕");
     assert.equal(projectFor("[x] [[Orchard Lane Web 2026|⭕]] charts"), null, "a ⭕ before the text");
     assert.equal(projectFor("[x] Send the [[Kestrel Newsletter]] invoice [[Orchard Lane Web 2026|⭕ Orchard]]"), null, "⭕ with a name after it is an ordinary alias, as the report itself writes them");
-    // nor does it beat the line's own note, as it did before
-    assert.equal(projectFor("[x] Ask [[Orchard Lane Web 2026]] about [[2026-09-02 Launch wrapup|⋯]]"), PINECONE);
-    assert.equal(projectFor("[x] Subtask [[2026-09-02 Launch wrapup|⋯]]", ["[ ] Parent for [[Orchard Lane Web 2026]]"]), PINECONE, "on a parent line either");
+    // and nor does a line's own note, which is read only to compare with its ⭕ (Brian, 2026-10-30)
+    assert.equal(projectFor("[x] Ask [[Orchard Lane Web 2026]] about [[2026-09-02 Launch wrapup|⋯]]"), null);
+    assert.equal(projectFor("[x] Subtask [[2026-09-02 Launch wrapup|⋯]]", ["[ ] Parent for [[Orchard Lane Web 2026]]"]), null, "on a parent line either");
     // A note linked in the text is part of it too
     assert.equal(projectFor("[x] Read [[Update chart data]] again"), null);
     // Text after a link means it doesn't end the line
@@ -239,40 +245,34 @@ test("resolve: only the links that end a line say where its time goes; a link in
     assert.equal(tr.freeEvent("[<] 4:00pm\tReview ℹ️ [[Orchard Lane Web 2026|⭕]] ^r1"), true);
     // but a block ID doesn't: Obsidian hides it, and Copy link to block adds one
     assert.equal(projectFor("[x] Charts [[Orchard Lane Web 2026|⭕]] ^a1b2c3"), ORCHARD_WEB);
-    assert.equal(projectFor("[x] Wrap up [[2026-09-02 Launch wrapup|⋯]] ^wrap-up"), PINECONE);
+    assert.equal(projectFor("[x] Wrap up [[2026-09-02 Launch wrapup|⋯]] ^wrap-up"), null);
 });
 
-test("resolve: an event whose title is wrapped in a link, the way lines were written before OBS-57, has that note", () => {
-    assert.equal(projectFor("[<] 5:00pm\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]] [[Pinecone Studio|⭕]]"), PINECONE, "its ⭕ still wins");
-    assert.equal(projectFor("[-] 5:00pm\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]"), ORCHARD_WEB, "canceled");
-    assert.equal(projectFor("[>] [[2026-04-03|4/3]] 5:00pm\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]"), ORCHARD_WEB, "forwarded");
-    assert.equal(projectFor("[<] [[2026-04-02 Content Calendar Sync|Content Calendar Sync]]"), ORCHARD_WEB, "a log's line with no time yet");
-    assert.equal(projectFor("5:00pm \t[[2026-04-02 Content Calendar Sync#Notes|Content Calendar Sync]]"), ORCHARD_WEB, "the old layout, without a bullet");
+test("resolve: an event whose title is wrapped in a link, the way lines were written before OBS-57, has that note to compare with its ⭕, and no project through it", () => {
+    const wrapped = "[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]";
+    assert.equal(projectFor(`[<] 5:00pm\t${wrapped} [[Pinecone Studio|⭕]]`), PINECONE, "its ⭕ says where the time goes");
+    assert.equal(readLine(`[<] 5:00pm\t${wrapped} [[Pinecone Studio|⭕]]`, [], INDEX).conflict.noteProject, ORCHARD_WEB, "and the log it's wrapped in disagrees");
+    for (const line of [`[-] 5:00pm\t${wrapped}`, `[>] [[2026-04-03|4/3]] 5:00pm\t${wrapped}`, `[<] ${wrapped}`, `5:00pm \t${wrapped.replace("Sync|", "Sync#Notes|")}`]) {
+        assert.equal(projectFor(line), null, line);
+    }
     // Only a title that is the link: a task, or a title with more text, isn't one
-    assert.equal(projectFor("[x] [[2026-04-02 Content Calendar Sync|Content Calendar Sync]]"), null);
-    assert.equal(projectFor("[<] 5:00pm\t[[2026-04-02 Content Calendar Sync|Sync]] follow-up"), null);
+    assert.equal(readLine(`[x] ${wrapped} [[Pinecone Studio|⭕]]`, [], INDEX).conflict, null);
+    assert.equal(readLine("[<] 5:00pm\t[[2026-04-02 Content Calendar Sync|Sync]] follow-up [[Pinecone Studio|⭕]]", [], INDEX).conflict, null);
 });
 
-test("resolve and taskText: a ↗ note link is read like ⋯ (OBS-208), with or without U+FE0F", () => {
+test("taskText leaves a ⋯ or ↗ out, with or without U+FE0F; neither says where a line's time goes", () => {
     for (const mark of ["⋯", "↗", "↗\uFE0F"]) {
-        // The note link's note decides ahead of another note merely linked in the text
-        assert.equal(projectFor(`[x] Update [[Update chart data]] then wrap up [[2026-09-02 Launch wrapup|${mark}]]`), PINECONE, mark);
+        assert.equal(projectFor(`[x] Update [[Update chart data]] then wrap up [[2026-09-02 Launch wrapup|${mark}]]`), null, mark);
         assert.equal(tr.taskText(`[x] Wrap up [[2026-09-02 Launch wrapup|${mark}]] [[Orchard Lane Web 2026|⭕]]`), "Wrap up", mark);
     }
     assert.equal(tr.taskText("[<] 4:00pm\tKickoff [[2026-09-02 Launch wrapup|⋯]]"), "Kickoff", "an event's log link at the end (OBS-57)");
 });
 
-test("resolve: the ⋯ note's project folder, then its area", () => {
-    assert.equal(projectFor("[x] Wrap up [[2026-09-02 Launch wrapup|⋯]]"), PINECONE);
-    assert.equal(projectFor("[x] Update [[Update chart data|⋯]]"), ORCHARD_WEB);
-    assert.equal(projectFor("[x] Handoff [[Kestrel Handoff Report|⋯]]"), KESTREL);
-    assert.equal(projectFor("[x] Rent [[Renew lease for 2026|⋯]]"), null);
-    assert.equal(projectFor("[x] Queries [[Tidy up old queries|⋯]]"), "20 Projects/Productivity/Tidy up old queries.md");
-});
-
-test("resolve: a linked log note's folder or area", () => {
-    assert.equal(projectFor("[<] 5:00pm\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]"), ORCHARD_WEB);
-    assert.equal(projectFor("[<] 4:00pm\t[[2026-04-01 Meeting (1 hr) — Imogen Fenwick|Meeting]]"), ORCHARD_WEB);
+test("resolve: a ⋯ or a log says nothing about a line's project, wherever its note is filed (Brian, 2026-10-30)", () => {
+    for (const line of ["[x] Wrap up [[2026-09-02 Launch wrapup|⋯]]", "[x] Update [[Update chart data|⋯]]", "[x] Handoff [[Kestrel Handoff Report|⋯]]",
+        "[x] Queries [[Tidy up old queries|⋯]]", "[<] 5:00pm\t[[2026-04-02 Content Calendar Sync|Content Calendar Sync]]", "[<] 4:00pm\t[[2026-04-01 Meeting (1 hr) — Imogen Fenwick|Meeting]]"]) {
+        assert.equal(projectFor(line), null, line);
+    }
 });
 
 test("resolve: date links, nested #project/ tags and plain text resolve to nothing", () => {
@@ -301,18 +301,14 @@ const AREA_INDEX = tr.makeIndex([
     { path: "Archive/Hobbies/Hobbies.md", tags: ["area"] },
     { path: PINECONE, tags: ["project"] },
 ]);
-const areaFor = (line, context = [], live = false) =>
-    tr.resolve([{ body: line }, ...context.map((body) => ({ body }))], `${LOG}/2026-09-01.md`, AREA_INDEX, live);
+const areaFor = (line, context = [], live = false) => readLine(line, context, AREA_INDEX)[live ? "live" : "project"];
 
-test("OBS-51 resolve: time linked to an area, on the line or through a note filed under it, counts toward the area", () => {
+test("OBS-51 resolve: time linked to an area on its line counts toward the area", () => {
     assert.equal(areaFor("[x] Run [[Cycling|⭕]]"), CYCLING);
     assert.equal(areaFor("[x] Run [[Cycling|🗃️]]"), CYCLING, "the 🗃️ mark too");
     assert.equal(areaFor("[x] Run [[Cycling]]"), null, "a link that isn't a ⭕ or 🗃️ is part of the text (OBS-90)");
-    assert.equal(areaFor("[x] Stretch [[Tune the gears|⋯]]"), CYCLING, "a task note filed straight under the area");
-    assert.equal(areaFor("[<] 7:00am\t[[2026-09-01 Group ride|Group ride]]"), CYCLING, "a log whose `area` is the area");
+    assert.equal(areaFor("[x] Stretch [[Tune the gears|⋯]]"), null, "a note filed under the area says nothing");
     assert.equal(areaFor("[x] Subtask", ["[ ] Parent [[Cycling|⭕]]"]), CYCLING, "on a line it's nested under");
-    // A project inside the area keeps its own time: the nearest folder note wins
-    assert.equal(areaFor("[x] Plan [[Route plan|⋯]]"), CENTURY);
     // A ⭕ area beats a project merely mentioned, and a ⭕ project beats an area mentioned
     assert.equal(areaFor("[x] Rest day, no [[Pinecone Studio]] work [[Cycling|⭕]]"), CYCLING);
     assert.equal(areaFor("[x] Skip [[Cycling]] today [[Pinecone Studio|⭕]]"), PINECONE);
@@ -473,8 +469,7 @@ test("an archived project's entries count like any project's, past midnight too 
     const text = [
         "---", "aliases: 12/9/24 Monday", "---", "", "## Meetings", "", "", "## To Do", "",
         "- [>] [[2024-12-10|12/10]] Newsletter [[Kestrel Newsletter|⭕]]",
-        "\t- [x] Sort the backlog into themes",
-        "\t\t- 10:30pm - 5:51am",
+        "\t- 10:30pm - 5:51am",
         "\t- 1:00pm - 2:00pm",
         "\t- 4:34pm - 5:38",
         "- [x] Charts [[Orchard Lane Web 2026|⭕]]",
@@ -690,12 +685,12 @@ test("build: a busy event with an end line counts from start to end, on its proj
         [10, 660, 690, 30, ORCHARD_WEB, "Charts", "", false, true],
         [1, 480, 540, 60, null, "Coffee with Esme", "", false, false],
         [3, 540, 560, 20, ORCHARD_WEB, "Standup", "", false, true],
-        [5, 600, 645, 45, ORCHARD_WEB, "Content Calendar Sync", "", false, true],
+        [5, 600, 645, 45, null, "Content Calendar Sync", "", false, false],
     ]);
     assert.deepEqual(plain(model.problems), []);
     // The summary counts them like typed entries: rounded up to 15 minutes each
     const t = plain(tr.totals(model.entries.filter((e) => e.project === ORCHARD_WEB)));
-    assert.deepEqual([t.count, t.billable, t.exact], [3, 30 + 30 + 45, 30 + 20 + 45]);
+    assert.deepEqual([t.count, t.billable, t.exact], [2, 30 + 30, 30 + 20]);
 });
 
 test("build: 🆓 on the end line, or on the event line, makes the event's time 🆓; both at once is a Problem", () => {
@@ -733,14 +728,15 @@ test("build: ranges under an event still win; a 🆓 left on the end line then d
         [[1, "free", "has 🆓 on its end line, but the entries under it are its time, so it doesn't apply; put 🆓 on the entries or the event line"]]);
 });
 
-test("build: a sub-task's entries under an event are its own; the event still counts", () => {
+test("build: time under an event's sub-task doesn't count and is listed; the event still counts", () => {
     const model = tr.build([note(D, [
         "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]",
         "\t- 9:30am",
         "\t- [ ] Send notes",
         "\t\t- 9:30am - 9:45am",
     ].join("\n"))], INDEX);
-    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[4, 15, "Send notes"], [1, 30, "Standup"]]);
+    assert.deepEqual(plain(model.entries.map((e) => [e.line, e.minutes, e.task])), [[1, 30, "Standup"]]);
+    assert.deepEqual(plain(model.problems.map((p) => [p.line, p.kind])), [[4, "subtime"]]);
     assert.deepEqual(overlaps(model), []);
 });
 
@@ -756,13 +752,11 @@ test("build: zero-length events are silently nothing; long events are flagged bu
     assert.deepEqual(plain(model.problems.map((p) => [p.line, p.kind])), [[3, "long"]]);
 });
 
-test("🆓 on a task line frees every entry under it and under its sub-tasks; on an entry only that one; both is a Problem", () => {
+test("🆓 on a task line frees every entry under it; on an entry only that one; both is a Problem", () => {
     const { entries, problems } = entriesOf([
         "- [x] Rework 🆓 [[Orchard Lane Web 2026|⭕]]",
         "\t- 9:00am - 9:30am",
         "\t- 10:00am - 10:30am: 🆓 also here",
-        "\t- [x] Sub-task",
-        "\t\t- 11:00am - 11:15am",
         "- [x] Fix [[Notes 🆓 Sweep|⋯]]",
         "\t- 1:00pm - 1:30pm",
         "- [x] Mixed (🆓)",
@@ -771,11 +765,11 @@ test("🆓 on a task line frees every entry under it and under its sub-tasks; on
         "\t- 3:00pm - 3:30pm",
     ].join("\n"), D);
     assert.deepEqual(entries.map((e) => [e.line, e.free, e.note]), [
-        [2, true, ""], [3, true, "also here"], [5, true, ""], [7, false, ""], [9, true, ""], [11, false, ""],
+        [2, true, ""], [3, true, "also here"], [5, false, ""], [7, true, ""], [9, false, ""],
     ]);
     assert.deepEqual(problems.map((p) => [p.line, p.kind, p.message]), [
         [3, "free", "has 🆓 here and on the line above; one is enough"],
-        [10, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it"],
+        [8, "free", "has a 🆓 that isn't on its own, so it doesn't count; put a space before it"],
     ]);
     // Said once, on the line that has it, however many entries sit under it
     const many = entriesOf("- [ ] Task🆓\n\t- 1:00pm - 1:30pm\n\t- 2:00pm - 2:30pm\n\t- 3:00pm - 3:30pm", D);
@@ -1553,10 +1547,10 @@ test("foldsAfterInsert: a folded task takes in its new entry; a folded note abov
 
 // ------------------------------------------------------------------ review findings (2026-09-13)
 
-test("review: an area loop between two projects doesn't hide hours or count them twice", () => {
+test("review: a loop between two archived projects' `parent`s doesn't hide hours or count them twice", () => {
     const index = tr.makeIndex([
-        { path: "P/A.md", tags: ["project"], parent: "[[B]]" },
-        { path: "P/B.md", tags: ["project"], parent: "[[A]]" },
+        { path: "Archive/A.md", tags: ["project"], parent: "[[B]]" },
+        { path: "Archive/B.md", tags: ["project"], parent: "[[A]]" },
     ]);
     const model = tr.build([note("2026-09-01", "- [x] Work [[A|⭕]]\n\t- 9:00am - 11:00am\n- [x] More [[B|⭕]]\n\t- 1:00pm - 2:00pm")], index);
     const loops = model.projectProblems.filter((p) => !p.message);
@@ -1565,8 +1559,8 @@ test("review: an area loop between two projects doesn't hide hours or count them
     assert.ok(month.includes("| **All** | **3.00** |"), month);
     // The loop is reported on the project notes involved
     assert.ok(tr.render(model, { kind: "project", path: loops[0].project }, "s").includes("are each inside the other"));
-    const a = tr.render(model, { kind: "project", path: "P/A.md" }, "s");
-    const b = tr.render(model, { kind: "project", path: "P/B.md" }, "s");
+    const a = tr.render(model, { kind: "project", path: "Archive/A.md" }, "s");
+    const b = tr.render(model, { kind: "project", path: "Archive/B.md" }, "s");
     // The project's whole total: the Total column of its By Week table's Total row
     const total = (block) => block.split("\n").filter((l) => l.startsWith("| **Total** |")).at(-1).split(/(?<!\\)\|/)[3].replace(/\*/g, "").trim();
     assert.notEqual(total(a), total(b), "only one of them can include the other");
@@ -1713,10 +1707,10 @@ test("plain bullets and their children are never entries", () => {
         "- Phone: 800-555-0199 8am-4pm",
     ].join("\n");
     const { entries, problems } = entriesOf(text);
-    assert.deepEqual(entries.map((e) => [e.line, e.task]), [[9, "Subtask"]]);
-    // Under a plain bullet inside a task it was probably meant as time, so it's flagged; a plain
-    // itinerary with no task above stays quiet
-    assert.deepEqual(problems.map((p) => [p.line, p.kind]), [[7, "plain"]]);
+    // Only the entry under the sub-task is read, to list it: build counts it nowhere (rule 5). Under a plain
+    // bullet nothing is listed, with a task further up or not (Brian, 2026-10-28)
+    assert.deepEqual(entries.map((e) => [e.line, e.task, e.subTask]), [[9, "Subtask", true]]);
+    assert.deepEqual(problems.map((p) => [p.line, p.kind]), [[9, "subtime"]]);
 });
 
 test("re-review: comments on a task line, and a link inside one, don't move hours", () => {
@@ -1752,7 +1746,7 @@ test("re-review: quoted text can't open a comment that hides the report's end ma
 
 test("re-review: meeting titles with times, numbered-list tasks, and Start under a plain bullet", () => {
     const index = tr.makeIndex([{ path: "P/ProjA.md", tags: ["project"] }]);
-    const old = tr.build([note("2024-02-07", "3:15pm\t[[ProjA|Call 3:15pm]]\n\t- 3:15pm - 4:00pm")], index);
+    const old = tr.build([note("2024-02-07", "3:15pm\t[[ProjA|Call 3:15pm]] [[ProjA|⭕]]\n\t- 3:15pm - 4:00pm")], index);
     assert.deepEqual(plain(old.entries.map((e) => e.project)), ["P/ProjA.md"]);
     assert.deepEqual(plain(old.problems), []);
     const numbered = entriesOf("1. [ ] Task\n\t- 9:00am - 10:00am");
@@ -1777,16 +1771,15 @@ test("live check: %% and <!-- inside inline code aren't comments", () => {
 
 // ------------------------------------------------------------------ overview review (2026-09-13)
 
-test("overview review, reversed by OBS-213: an archived ⭕ counts like a live one, the nearest first", () => {
+test("overview review, reversed by OBS-213: an archived ⭕ counts like a live one; a sub-task's counts for nothing", () => {
     const index = tr.makeIndex([
         { path: "P/Live/Live.md", tags: ["project"] },
         { path: "Archive/Old/Old.md", tags: ["project"] },
     ]);
     const model = tr.build([note("2026-09-01", "- [ ] work [[Live|⭕]]\n\t- [x] follow-up [[Old|⭕]]\n\t\t- 9:00am - 10:00am\n- [ ] only [[Old|⭕]]\n\t- 11:00am - 12:00pm")], index);
-    // As with two live projects, the sub-task's own ⭕ wins over its task's until OBS-196 reads the top line
-    assert.deepEqual(plain(model.entries.map((e) => [e.project, e.minutes, !!e.archived])), [["Archive/Old/Old.md", 60, true], ["Archive/Old/Old.md", 60, true]]);
+    assert.deepEqual(plain(model.entries.map((e) => [e.project, e.minutes, !!e.archived])), [["Archive/Old/Old.md", 60, true]]);
     // Archived or live, the same reading, so archiving Old moves no time; a ⭕ under another isn't a disagreement on one line
-    assert.deepEqual(plain(model.problems), []);
+    assert.deepEqual(plain(model.problems.map((p) => p.kind)), ["subtime"]);
 });
 
 test("overview review: rate and rate_type are inherited separately; bad or missing rates are Problems", () => {
@@ -1806,9 +1799,9 @@ test("overview review: rate and rate_type are inherited separately; bad or missi
     assert.equal(money("P/Par/Zero/Zero.md").rate, null, "an explicit 0 doesn't inherit");
     assert.equal(money("P/Par/Tbd/Tbd.md").rate, null);
     assert.equal(money("P/Alone/Alone.md").rate, null);
-    assert.equal(money("P/Sub/Sub.md").rate, 75, "a live sub-project still gets an archived parent's rate");
+    assert.equal(money("P/Sub/Sub.md").rate, null, "a live project never reads `parent`, so it's under no archived project");
     const messages = plain(model.projectProblems.map((p) => [tr.basename(p.project), p.message]));
-    assert.deepEqual(messages.map((m) => m[0]).sort(), ["Alone", "Tbd", "Zero"]);
+    assert.deepEqual(messages.map((m) => m[0]).sort(), ["Alone", "Sub", "Tbd", "Zero"]);
     const block = tr.render(model, { kind: "period", unit: "month", key: "2026-09" }, "s");
     // Rate problems show on each project's own note
     assert.ok(tr.render(model, { kind: "project", path: "P/Par/Zero/Zero.md" }, "s").includes("- [[Zero]] has a `rate` that isn't a positive number (0), so it has no Earned"));
@@ -2091,29 +2084,30 @@ test("OBS-34: a task line's ⭕ project and its ⋯ task note's project disagree
         "\t- 10:00am - 10:30am",
         "- [ ] Draft the scope [[Tin|⭕]] [[Draft the scope|⋯]]",       // note under Tin too: agrees
         "\t- 11:00am - 11:30am",
-        "- [ ] Loose end [[Tin|⭕]] [[Loose end|⋯]]",                   // note has no project: nothing to disagree with
+        "- [ ] Loose end [[Tin|⭕]] [[Loose end|⋯]]",                   // note waits in the Inbox: its time counts, and it's listed
         "\t- 1:00pm - 1:15pm",
-        "- [ ] By area [[Tin|⭕]] [[Filed by area|⋯]]",                 // project through `area`, like the report itself
+        "- [ ] By area [[Tin|⭕]] [[Filed by area|⋯]]",                 // its `parent` says Hawk, but its folder is in no project
         "\t- 2:00pm - 2:15pm",
     ].join("\n");
     const m = tr.build([note("2026-09-01", text)], idx);
     // A line whose ⭕ and note disagree counts nowhere (Brian, 2026-10-28); the lines that agree count toward Tin
-    assert.deepEqual(plain(m.entries.map((e) => [e.project, e.start])), [["P/Tin/Tin.md", 660], ["P/Tin/Tin.md", 780]]);
-    const conflicts = m.projectProblems.filter((p) => p.conflict);
-    assert.equal(conflicts.length, 4);
+    assert.deepEqual(plain(m.entries.map((e) => [e.project, e.start])), [["P/Tin/Tin.md", 660], ["P/Tin/Tin.md", 780], ["P/Tin/Tin.md", 840]]);
+    const conflicts = m.projectProblems.filter((p) => p.conflict && !p.conflict.inbox);
+    assert.equal(conflicts.length, 4, "one record per line on each project");
 
     const tin = tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s");
-    assert.ok(tin.includes("- [[Tin]] has time (2 entries) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]], so the time isn't counted on either; move the note here, or change the line's project link"), tin);
-    assert.ok(tin.includes("- [[Tin]] has time (1 entry) from a task line whose task note [[Elsewhere/Filed by area|Filed by area]] is filed under [[Hawk]]"), tin);
+    assert.ok(tin.includes("line 1: `- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|⋯]]` links [[Tin]], but its task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]], so its time isn't counted on either; run AddProjectLink on the line, which moves the note too, or MoveToProject on the note"), tin);
+    assert.ok(tin.includes("line 3: `- [ ] Send the invoice again"), tin);
     const tinProblems = tin.slice(tin.indexOf(PROBLEMS), tin.indexOf("### Billable time"));
-    assert.ok(!tinProblems.includes("Draft the scope") && !tinProblems.includes("Loose end"));
+    assert.ok(!tinProblems.includes("Draft the scope"));
+    assert.ok(tinProblems.includes("but its task note [[Inbox/Loose end|Loose end]] waits in the Inbox; run AddProjectLink on the line, or MoveToProject on the note"), tinProblems);
     assert.ok(!tin.includes("⭕ link"), "the message says project link, not ⭕ link");
 
     // Hawk has no time of its own, but its note still gets a report, so the problem is seen there
     assert.ok(tr.projectTargets(m).has("P/Hawk/Hawk.md"));
     const hawk = tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s");
     assert.ok(hawk.includes("No time entries."), hawk);
-    assert.ok(hawk.includes("- [[Hawk]] has a task note, [[P/Hawk/Send the invoice|Send the invoice]], whose task line links [[Tin]], so its time (2 entries) isn't counted on either; move the note, or change the line's project link"), hawk);
+    assert.ok(hawk.includes("line 1: `- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|⋯]]` links [[Tin]], but its task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]], so its time isn't counted on either"), hawk);
 });
 
 test("OBS-90: the conflict reads only the links that end a line, in either order", () => {
@@ -2122,7 +2116,7 @@ test("OBS-90: the conflict reads only the links that end a line, in either order
         { path: "P/Tin/Tin.md", tags: ["project"] },
         { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
     ]);
-    const conflictOf = (line) => plain(tr.conflict([{ body: line }], "days/2026-09-01.md", idx));
+    const conflictOf = (line) => plain(tr.resolve(() => `- ${line}`, 0, `${LOG}/2026-09-01.md`, idx, 0).conflict);
     const moved = { lineProject: "P/Tin/Tin.md", note: "P/Hawk/Send the invoice.md", noteProject: "P/Hawk/Hawk.md", event: false };
     assert.deepEqual(conflictOf("[ ] Send the invoice [[Tin|⭕]] [[Send the invoice|⋯]]"), moved, "the ⭕ before the ⋯");
     assert.deepEqual(conflictOf("[ ] Send the invoice [[Send the invoice|⋯]] [[Tin|⭕]]"), moved, "the older order");
@@ -2132,7 +2126,7 @@ test("OBS-90: the conflict reads only the links that end a line, in either order
     assert.equal(conflictOf("[ ] Read [[Send the invoice|⋯]] then [[Tin|⭕]]"), null);
 });
 
-test("OBS-34: no conflict without a ⋯ note, or when the ⭕ is on an outer line only; an archived note project conflicts like any (OBS-213)", () => {
+test("OBS-34: no conflict without a ⋯ note, or when the ⋯ is on a sub-task; an archived note project conflicts like any (OBS-213)", () => {
     const idx = tr.makeIndex([
         { path: "P/Hawk/Hawk.md", tags: ["project"] },
         { path: "P/Tin/Tin.md", tags: ["project"] },
@@ -2146,9 +2140,9 @@ test("OBS-34: no conflict without a ⋯ note, or when the ⭕ is on an outer lin
         "- [ ] Parent [[Tin|⭕]]", "\t- [ ] Child [[Nested task|⋯]]", "\t\t- 11:00am - 11:30am",
     ].join("\n");
     const m = tr.build([note("2026-09-01", text)], idx);
-    assert.deepEqual(plain(m.projectProblems.filter((p) => p.conflict).map((p) => [p.project, p.conflict.side, p.conflict.note, p.conflict.other])), [
+    assert.deepEqual(plain(m.projectProblems.filter((p) => p.conflict).map((p) => [p.project, p.conflict.side, p.conflict.note, p.conflict.noteProject])), [
         ["P/Tin/Tin.md", "line", "Archive/Old/Old task.md", "Archive/Old/Old.md"],
-        ["Archive/Old/Old.md", "note", "Archive/Old/Old task.md", "P/Tin/Tin.md"],
+        ["Archive/Old/Old.md", "note", "Archive/Old/Old task.md", "Archive/Old/Old.md"],
     ]);
 });
 
@@ -2185,8 +2179,8 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
         { path: "P/Par/Kid/Kid.md", tags: ["project"] },
         { path: "P/Bare/Bare.md", tags: ["project"] },
         { path: "P/Late/Late.md", tags: ["project"] },
-        { path: "P/A.md", tags: ["project"], parent: "[[B]]", props: { rate_type: "non-billable" } },
-        { path: "P/B.md", tags: ["project"], parent: "[[A]]", props: { rate_type: "non-billable" } },
+        { path: "Archive/A.md", tags: ["project"], parent: "[[B]]", props: { rate_type: "non-billable" } },
+        { path: "Archive/B.md", tags: ["project"], parent: "[[A]]", props: { rate_type: "non-billable" } },
         { path: "P/Hawk/Hawk.md", tags: ["project"], props: { rate_type: "non-billable" } },
         { path: "P/Tin/Tin.md", tags: ["project"], props: { rate_type: "non-billable" } },
         { path: "P/Hawk/Send the invoice.md", tags: ["task"] },
@@ -2206,8 +2200,8 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
     const week = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-01") }, "s"));
     assert.deepEqual(plain(week), [
         "- [[B]] and [[A]] are each inside the other (check their folders and `parent`); [[B]] is counted as top-level",
-        // A conflict is said once, from the project the time counts on, with this period's entries only
-        "- [[Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]], so the time isn't counted on either; move the note here, or change the line's project link",
+        // A conflict is said once, in the period the line is in
+        "- [[2026-09-01|9/1/26]] line 7: `- [ ] Send the invoice [[Tin|⭕]] [[Send the invoice|⋯]]` links [[Tin]], but its task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]], so its time isn't counted on either; run AddProjectLink on the line, which moves the note too, or MoveToProject on the note",
         // A parent's problem reaches the period through its sub-project's time
         "- [[Par]] has a `rate` that isn't a positive number (TBD), so it has no Earned",
         "- [[Bare]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)",
@@ -2215,22 +2209,21 @@ test("OBS-29: a weekly, monthly or yearly note lists the project problems of the
     // Only the conflict has time in the next week
     const next = problems(tr.render(m, { kind: "period", unit: "week", key: tr.weekKey("2026-09-08") }, "s"));
     assert.equal(next.length, 1);
-    assert.ok(next[0].includes("has time (1 entry)"), next[0]);
+    assert.ok(next[0].includes("[[2026-09-08|"), next[0]);
 
     const sept = problems(tr.render(m, { kind: "period", unit: "month", key: "2026-09" }, "s"));
-    assert.equal(sept.length, 4);
-    assert.ok(sept.some((l) => l.includes("has time (2 entries)")), sept.join("\n"));
+    assert.equal(sept.length, 5);
+    assert.equal(sept.filter((l) => l.includes("isn't counted on either")).length, 2, sept.join("\n"));
     assert.ok(!sept.some((l) => l.includes("Late")), "a project with no time in the period isn't listed");
     assert.deepEqual(plain(problems(tr.render(m, { kind: "period", unit: "month", key: "2026-10" }, "s"))),
         ["- [[Late]] has no `rate_type`, so its time counts as billable; set one (`hourly`, `flat`, `non-billable`)"]);
 
     const year = problems(tr.render(m, { kind: "period", unit: "year", key: "2026" }, "s"));
-    assert.equal(year.length, 5);
-    assert.ok(year.some((l) => l.includes("has time (2 entries)")) && year.some((l) => l.includes("[[Late")));
+    assert.equal(year.length, 6);
+    assert.ok(year.filter((l) => l.includes("isn't counted on either")).length === 2 && year.some((l) => l.includes("[[Late")));
 
     // The project notes are unchanged: the conflict is still said on both
-    assert.ok(tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s").includes("so its time (2 entries) isn't counted on either"));
-    assert.ok(tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s").includes("has time (2 entries)"));
+    for (const path of ["P/Hawk/Hawk.md", "P/Tin/Tin.md"]) assert.ok(tr.render(m, { kind: "project", path }, "s").includes("so its time isn't counted on either"), path);
 });
 
 test("OBS-57, OBS-87: an event whose ⭕ and ⋯ log disagree is a problem worded for an event and its log; a ⋯ task note conflicts like ⋯", () => {
@@ -2249,10 +2242,10 @@ test("OBS-57, OBS-87: an event whose ⭕ and ⋯ log disagree is a problem worde
     const m = tr.build([note("2026-09-01", text)], idx);
     assert.deepEqual(plain(m.entries), [], "neither line's time counts: nothing decides between its ⭕ and its note (Brian, 2026-10-28)");
     const tin = tr.render(m, { kind: "project", path: "P/Tin/Tin.md" }, "s");
-    assert.ok(tin.includes("- [[Tin]] has time (1 entry) from an event line whose log [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]] is filed under [[Hawk]], so the time isn't counted on either; move the log here, or change the line's project link"), tin);
-    assert.ok(tin.includes("- [[Tin]] has time (1 entry) from a task line whose task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]]"), tin);
+    assert.ok(tin.includes("links [[Tin]], but its log [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]] is filed under [[Hawk]], so its time isn't counted on either; run AddProjectLink on the line, which moves the log too, or MoveToProject on the log"), tin);
+    assert.ok(tin.includes("links [[Tin]], but its task note [[P/Hawk/Send the invoice|Send the invoice]] is filed under [[Hawk]]"), tin);
     const hawk = tr.render(m, { kind: "project", path: "P/Hawk/Hawk.md" }, "s");
-    assert.ok(hawk.includes("- [[Hawk]] has a log, [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]], whose event line links [[Tin]], so its time (1 entry) isn't counted on either; move the log, or change the line's project link"), hawk);
+    assert.ok(hawk.includes("links [[Tin]], but its log [[P/Hawk/logs/2026-09-01 Kickoff|2026-09-01 Kickoff]] is filed under [[Hawk]]"), hawk);
 });
 
 // ------------------------------------------------------------------ timesheets and invoices (OBS-5)
@@ -2721,7 +2714,7 @@ test("timesheet: a Problem on a task or event line, or a ⭕ and ⋯ that disagr
     assert.equal(problems.length, 3, block);
     assert.ok(problems[0].includes("has a 🆓 that isn't on its own"), problems[0]);
     assert.ok(problems[1].includes("has 🆓 on its end line"), problems[1]);
-    assert.ok(problems[2].includes("from a task line whose task note"), problems[2]);
+    assert.ok(problems[2].includes("but its task note"), problems[2]);
     const warned = block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).map((l) => l.split(" | ")[2]);
     // The line whose ⭕ and note disagree has no row: its time counts nowhere, and its Problem says so
     assert.deepEqual(warned, ["9:00am - 9:30am", "9:00am - 9:30am", "10:00am - 10:30am"]);
@@ -2901,7 +2894,7 @@ test("parentValue: a note's `parent`, else the older `area`, in any spelling; em
     assert.equal(tr.parentValue(null), null);
 });
 
-test("makeIndex: a note that still has `area` belongs where it did, and `parent` wins over it", () => {
+test("makeIndex: parentLink reads a note's `parent`, else an older `area`; neither says what a note's project is", () => {
     const idx = tr.makeIndex([
         { path: "P/Orchard/Orchard.md", tags: ["project"] },
         { path: "P/Other/Other.md", tags: ["project"] },
@@ -2910,9 +2903,8 @@ test("makeIndex: a note that still has `area` belongs where it did, and `parent`
         { path: "Notes/Both.md", tags: ["task"], parent: "[[Other]]", area: "[[Orchard]]" },
     ]);
     assert.equal(idx.parentLink("Notes/Old.md"), "[[Orchard]]");
-    assert.equal(tr.projectOfNote("Notes/Old.md", idx), "P/Orchard/Orchard.md");
-    assert.equal(tr.projectOfNote("Notes/New.md", idx), "P/Orchard/Orchard.md");
-    assert.equal(tr.projectOfNote("Notes/Both.md", idx), "P/Other/Other.md");
+    assert.equal(idx.parentLink("Notes/Both.md"), "[[Other]]");
+    for (const path of ["Notes/Old.md", "Notes/New.md", "Notes/Both.md"]) assert.equal(tr.projectOfNote(path, idx), null, path);
 });
 
 test("taskText and itemLabel leave out a task's ID and its forward date (OBS-185)", () => {
@@ -2936,9 +2928,9 @@ test("lineLinks: a forward date after the ⭕ doesn't end the run (OBS-185)", ()
     }
 });
 
-test("lineProject: its own ⭕, a line it's nested under, its note's, or the note it's in (OBS-185)", () => {
+test("lineProject: the top of its nest's ⭕, or the note it's in (OBS-185, OBS-196)", () => {
     const KES = "Projects/Freelance/Kestrel/Kestrel.md";
-    const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book it ^k3x9m2\n" } });
+    const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book it ^k3x9m2\n", [`${PLANNER}/days/2026-09-17.md`]: "" } });
     const t = v.customJS.TimeReport, index = t.appIndex();
     const day = ["- [ ] Kestrel errands [[Kestrel|⭕]]", "\t- [/] Call the printer", "- [ ] Mow the lawn"];
     assert.equal(t.lineProject({ path: `${PLANNER}/days/2026-09-17.md`, kind: "day" }, 1, day, index), KES, "from the line it's nested under");

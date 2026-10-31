@@ -7,9 +7,7 @@ class TrailingLinks {
     //     in the text and old wrapped event titles stay put.
     //   - On screen: the project or area, drawn as its shortest name (faint, no pill), the note,
     //     the due date (faint, red once it's passed), then the forward date (OBS-185) at the edge after the
-    //     due date, faint. A line with a note but no project link (written before OBS-90 kept the
-    //     link on the line) shows the project the time report counts it toward, in faint italics:
-    //     a name only, not a link.
+    //     due date, faint.
     //   - A task's ID (^ and six letters or digits, ending the line) is hidden until the cursor
     //     reaches the end of the line: a second End shows it. Shown on a line with links, it's drawn
     //     last, after them at the right edge, where the caret then is; ← moves back into the links.
@@ -44,7 +42,7 @@ class TrailingLinks {
     // The layout, keyed to the classes the extension puts on a line:
     //   .pm-trail-line  the line, with --pm-run-w (the links' width)
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
-    //   .pm-trail-run   around the links, with data-pm-phantom when it shows a looked-up project
+    //   .pm-trail-run   around the links
     //   .pm-trail       around each link, with .pm-trail-due / -forward / -note / -project / -area,
     //                   and .pm-trail-overdue on a due date that's passed; and around a shown task ID,
     //                   with .pm-trail-id
@@ -111,17 +109,6 @@ class TrailingLinks {
         font-size: var(--pm-trail-name-size);
     }
 
-    /* The project a note's line counts toward, looked up: a name, not a link */
-    & .pm-trail-run[data-pm-phantom]::before {
-        content: attr(data-pm-phantom);
-        order: 1;
-        flex: none;
-        font-size: 0.8em;
-        font-style: italic;
-        color: var(--text-faint);
-        margin-inline-start: 4px;
-    }
-
     /* The due date: faint, red once it's passed. The inner span too: a link to a day with no note
        yet is unresolved, and the theme colours that span. */
     & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
@@ -135,7 +122,7 @@ class TrailingLinks {
         & .pm-trail-run { float: none; width: auto; display: inline; min-height: 0; }
         & .pm-trail { font-size: inherit; margin: 0; }
         & .pm-project-name { font-size: inherit; }
-        & .pm-project-name::before, & .pm-trail-run::before { content: none; }
+        & .pm-project-name::before { content: none; }
     }
 }
 `;
@@ -239,31 +226,6 @@ class TrailingLinks {
         return w;
     }
 
-    // Line `n` and the lines it's nested under, nearest first: TimeReport's context for the line.
-    // `lineAt(n)` gives line n's text (1-based).
-    static context(lineAt, n) {
-        const out = [lineAt(n)];
-        let indent = TrailingLinks.indent(out[0]);
-        for (let i = n - 1; i >= 1 && indent > 0; i--) {
-            const text = lineAt(i);
-            if (!text.trim()) continue;
-            const w = TrailingLinks.indent(text);
-            if (w < indent) {
-                out.push(text);
-                indent = w;
-            }
-        }
-        return out;
-    }
-
-    // A line and the lines it's nested under (context's result) as the time report reads them: each
-    // list item without its bullet, and indented text that isn't a list item left out
-    static reportContext(lines) {
-        return lines
-            .filter((text, i) => i === 0 || /^\s*(?:[-*+]|\d+[.)])\s/.test(text) || !/^\s/.test(text))
-            .map((text) => ({ body: text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim() }));
-    }
-
     // The last of the `count` lines that's nested under line `n` (n itself when none is)
     static subtreeEnd(lineAt, count, n) {
         const base = TrailingLinks.indent(lineAt(n));
@@ -356,22 +318,6 @@ class TrailingLinks {
             ? T.shortestName(file.basename, app.metadataCache.getFileCache(file)?.frontmatter?.aliases)
             : fallback.split("/").pop();
 
-        // The project the time report counts a line toward, when the line has a note link but no
-        // project link of its own (TimeReport's own rule, so the two never disagree)
-        const lookedUp = (doc, line, t, sourcePath, index) => {
-            const TR = customJS.TimeReport;
-            if (!index || !t.links.some((l) => l.kind === "note" || l.kind === "from") || t.links.some((l) => l.kind === "project" || l.kind === "area")) return null;
-            try {
-                const context = T.reportContext(T.context((n) => doc.line(n).text, line.number));
-                const path = TR.resolve(context, sourcePath, index, true);
-                return path ? nameOf(app.vault.getFileByPath(path), path) : null;
-            } catch (e) {
-                // A throw here would switch the whole display off in this editor
-                console.warn("TrailingLinks: couldn't look up the project for a line", e);
-                return null;
-            }
-        };
-
         // The decorations for the lines in `ranges` (by default, the lines on screen)
         const build = (v, ranges = v.visibleRanges) => {
             const none = { outer: Decoration.none, inner: Decoration.none, unmeasured: false };
@@ -379,8 +325,6 @@ class TrailingLinks {
             const doc = v.state.doc;
             const sourcePath = sourceOf(v);
             const today = window.moment().format("YYYY-MM-DD");
-            const TR = customJS.TimeReport;
-            const index = TR?.resolve && TR?.appIndex ? TR.appIndex() : null;
             const outer = [], inner = [];
             let unmeasured = false;
             for (const { from, to } of ranges) {
@@ -404,16 +348,14 @@ class TrailingLinks {
                     // it is in the text, after the room the last word keeps, it lands on top of them
                     const idText = idShown ? line.text.slice(idShown.from + 1, idShown.to) : null;
                     const at = (i) => line.from + i;
-                    const phantom = lookedUp(doc, line, t, sourcePath, index);
                     const shown = t.links.map((l) => {
                         if (l.kind !== "project" && l.kind !== "area") return { l, text: l.alias };
                         return { l, text: nameOf(noteFor(l.target, sourcePath), l.target), name: true };
                     });
                     // What the links show decides their width, so it keys the measured widths
-                    const sig = shown.map((s) => `${s.l.kind}:${s.text}`).concat(phantom ? [`phantom:${phantom}`] : [], idText ? [`id:${idText}`] : []).join("\n");
+                    const sig = shown.map((s) => `${s.l.kind}:${s.text}`).concat(idText ? [`id:${idText}`] : []).join("\n");
                     if (!handles.widths.has(sig)) unmeasured = true;
-                    const guess = shown.reduce((w, s) => w + T.PILL_PX + T.CHAR_PX * s.text.length, 0)
-                        + (phantom ? T.PILL_PX + T.CHAR_PX * phantom.length : 0) + (idText ? T.PILL_PX + T.CHAR_PX * idText.length : 0);
+                    const guess = shown.reduce((w, s) => w + T.PILL_PX + T.CHAR_PX * s.text.length, 0) + (idText ? T.PILL_PX + T.CHAR_PX * idText.length : 0);
                     const width = Math.ceil((handles.widths.get(sig) ?? guess) + T.GAP_PX);
 
                     outer.push(Decoration.line({ class: "pm-trail-line", attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
@@ -423,8 +365,7 @@ class TrailingLinks {
                         outer.push(Decoration.mark({ class: "pm-trail-glue" }).range(at(word), at(t.runFrom)));
                     }
                     // inclusive: it sorts outside a link with the same range (a run of one)
-                    const runAttrs = { "data-pm-sig": sig, ...(phantom ? { "data-pm-phantom": phantom } : {}) };
-                    outer.push(Decoration.mark({ inclusive: true, class: "pm-trail-run", attributes: runAttrs }).range(at(t.runFrom), at(idShown ? idShown.to : t.runTo)));
+                    outer.push(Decoration.mark({ inclusive: true, class: "pm-trail-run", attributes: { "data-pm-sig": sig } }).range(at(t.runFrom), at(idShown ? idShown.to : t.runTo)));
                     // Measured with the links (it has their .pm-trail), so the last word keeps room for it too
                     if (idShown) outer.push(Decoration.mark({ class: "pm-trail pm-trail-id" }).range(at(idShown.from + 1), at(idShown.to)));
                     for (const s of shown) {
@@ -442,16 +383,6 @@ class TrailingLinks {
             return { outer: Decoration.set(outer, true), inner: Decoration.set(inner, true), unmeasured };
         };
 
-        // A looked-up project is drawn by ::before, which has no box to measure: measure its text in
-        // its own font instead
-        const phantomWidth = (run) => {
-            const style = getComputedStyle(run, "::before");
-            const ctx = (handles.canvas ??= run.ownerDocument.createElement("canvas")).getContext("2d");
-            ctx.font = style.font;
-            const text = run.dataset.pmPhantom;
-            return (ctx.measureText(text).width || T.CHAR_PX * text.length) + (parseFloat(style.marginInlineStart) || 0);
-        };
-
         // Measures links it hasn't seen yet (the same links are the same width anywhere), then redraws
         const measure = (v) => v.requestMeasure({
             key: handles,
@@ -461,12 +392,12 @@ class TrailingLinks {
                 .filter((run) => !run.closest(".pm-trail-line")?.querySelector(".pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)"))
                 .map((run) => {
                     // Only the pills: the space between two links is an element too, and it lays out
-                    // at the far left, so counting it would span the looked-up project as well
+                    // at the far left
                     const pills = [...run.children].filter((k) => k.classList.contains("pm-trail"))
                         .map((k) => k.getBoundingClientRect()).filter((r) => r.width > 0);
                     if (!pills.length) return null;
                     const width = Math.max(...pills.map((r) => r.right)) - Math.min(...pills.map((r) => r.left)) + T.PILL_MARGIN_PX;
-                    return [run.dataset.pmSig, Math.ceil(width + (run.dataset.pmPhantom ? phantomWidth(run) : 0))];
+                    return [run.dataset.pmSig, Math.ceil(width)];
                 })
                 .filter(Boolean),
             write: (found, wv) => {
@@ -543,9 +474,8 @@ class TrailingLinks {
                     .map((l) => ({ from: l.from, to: l.to }));
             }
 
-            // The lines an edit touched, each with the lines nested under it (a parent's ⭕ is their
-            // project too), or null when the edit spans lines or changes an indent: then the nesting
-            // itself may have changed, so everything on screen is redrawn
+            // The lines an edit touched, each with the lines nested under it, or null when the edit spans
+            // lines or changes an indent: then everything on screen is redrawn
             touched(u) {
                 const doc = u.state.doc, old = u.startState.doc, out = [];
                 let lines = 0, whole = false;

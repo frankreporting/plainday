@@ -34,6 +34,10 @@ import { ROOT, PLANNER, loadTimeReport, readVault, makeIndex, dailyNotes } from 
 
 const TASK = /^\s*[-*+]\s+\[.\]/;
 
+// The project line `i` counted toward, as a command reads it: through `ctx` (its context) in a
+// timeReport.js from before OBS-196, whose resolve took one, else off the note's `lines`
+const lookup = (tr, lines, ctx, i, p, index) => (tr.resolve.length === 3 ? tr.resolve(ctx, p, index, true) : tr.resolve((n) => lines[n], i, p, index).live);
+
 // The classes, as CustomJS evaluates them; only their text methods are used
 function load(file, name) {
     return new (vm.runInContext(fs.readFileSync(file, "utf8") + `\n;${name}`, vm.createContext({})))();
@@ -104,7 +108,7 @@ export function convert(vault, oldTr, newTr, tasks) {
                 if (marks.length) {
                     next = tasks.withHome(line, marks.join(" "), marks);
                 } else {
-                    const project = oldTr.resolve(ctx[i], p, index, true);
+                    const project = lookup(oldTr, visible, ctx[i], i, p, index);
                     if (!live(project)) return raw[i];
                     next = tasks.withHome(line, linkFor(project), []);
                     // Where the note is filed, when that's somewhere else
@@ -163,8 +167,8 @@ function textOnly(vault, oldTr, newTr, index, converted) {
         const ctx = contexts(newTr, visible);
         for (const [i, line] of visible.entries()) {
             if (hidden[i] || !/^\s*[-*+]\s+\[[ /]\]/.test(line)) continue;
-            const was = oldTr.resolve(ctx[i], p, index, true);
-            if (was && was !== newTr.resolve(ctx[i], p, index, true)) out.push({ path: p, line: i + 1, text: line, project: was });
+            const was = lookup(oldTr, visible, ctx[i], i, p, index);
+            if (was && was !== lookup(newTr, visible, ctx[i], i, p, index)) out.push({ path: p, line: i + 1, text: line, project: was });
         }
     }
     return out;

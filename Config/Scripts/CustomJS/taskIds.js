@@ -107,6 +107,11 @@ class TaskIds {
         return { linkpath: m[2], label: m[3] ?? m[2].split("/").pop(), line: m[1] + line.slice(m[0].length) };
     }
 
+    // Whether the run that ends a line has a ⋯, wherever it links
+    static hasOwnNote(line) {
+        return TaskIds.splitRun(line).items.some((i) => /\|\s*⋯\s*\]\]$/u.test(i));
+    }
+
     // A task's title, for matching lines written before IDs: its text before the links that end it, any
     // link in it read as its alias (or name), without the checkbox, a breadcrumb, the ID, case or extra
     // spaces
@@ -173,7 +178,8 @@ class TaskIds {
 
     // The folders the system works in besides the Planner's periodic notes (rule 12, OBS-208): named
     // once here, a setting later. AddTaskNote's staging folder is the Inbox.
-    static FOLDERS = ["Projects", "Inbox"];
+    static INBOX = "Inbox";
+    static FOLDERS = ["Projects", TaskIds.INBOX];
     static ARCHIVE = "Archive/";
 
     // Whether a note is in the system: a daily, weekly, monthly or yearly note, or a note in one of
@@ -296,18 +302,23 @@ class TaskIds {
     // The rule, checked over `notes` ([{ path, kind, text }], kind as kindOf says), with
     //   projectOf(note, i, lines): the project or area line i counts toward, or null;
     //   exempt(note, i): why line i may name another project ("finished", "invoiced"), or null;
-    //   resolve(linkpath, fromPath): the path a link points at, or null.
+    //   resolve(linkpath, fromPath): the path a link points at, or null;
+    //   ownNote(text, path): the notes a line's ⋯ links, in the system (a ↗ is read by nobody).
+    // Only top-level lines are a task's: at the left edge, since a line nested under a checklist line is
+    // a sub-task (rule 5) and one under nothing but plain bullets isn't defined in the system.
     // Returns [{ rule, id, lines: [{ path, line, text }], detail }], in the spec's order: "project" (two
     // projects), "open" (open twice), "finished" (done while open, or done on two days), "forward" (a
-    // source's forward date points where the task isn't), "twice" (an ID twice in a note), "trailing" (text after
+    // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
+    // notes), "ownNotes" (two different ⋯ notes), "twice" (an ID twice in a note), "trailing" (text after
     // a task's ID, which Obsidian then doesn't read).
-    static check(notes, { projectOf, exempt = () => null, resolve }) {
+    static check(notes, { projectOf, exempt = () => null, resolve, ownNote = () => [] }) {
         const found = [], out = [], twice = [];
+        const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
         for (const note of notes) {
             const lines = note.text.split("\n");
             const seen = new Map();
             lines.forEach((text, line) => {
-                const box = text.match(TaskIds.CHECKBOX);
+                const box = topLevel(text) ? text.match(TaskIds.CHECKBOX) : null;
                 const raw = box ? TaskIds.idOf(text) : null;
                 if (!raw) return;
                 const hit = { id: raw.toLowerCase(), path: note.path, kind: note.kind, line, task: box[1], text: text.trim(), note, lines };
@@ -329,8 +340,9 @@ class TaskIds {
             if (!isTask(hits)) continue;
             const open = hits.filter(isOpen);
             const finished = hits.filter((h) => h.task === "x" || h.task === "-");
-            // Exemptions are only worked out for a task whose lines disagree
-            const all = hits.map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null }));
+            // Exemptions are only worked out for a task whose lines disagree. A line with a ⋯ and no project
+            // is Unassigned and isn't listed (rule 4)
+            const all = hits.map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
             const named = new Set(all.map((n) => n.project)).size > 1 ? all.filter((n) => !exempt(n.h.note, n.h.line)) : all;
             if (new Set(named.map((n) => n.project)).size > 1) out.push({ rule: "project", id, lines: named.map((n) => TaskIds.where(n.h)), detail: { projects: named.map((n) => n.project) } });
             // `clicked`: which of them, if any, is a sent line a click turned from [>] into [ ] (a line outside
@@ -352,19 +364,23 @@ class TaskIds {
                 if (fwd && at.some((h) => h.path === to) && (fwd.id ?? "").toLowerCase() === id) continue;
                 out.push({ rule: "forward", id, lines: [s, ...(current ? [current] : [])].map(TaskIds.where), detail: { to, missing: !fwd } });
             }
+            const others = hits.filter((h) => h.kind === "other");
+            if (new Set(others.map((h) => h.path)).size > 1) out.push({ rule: "notes", id, lines: others.map(TaskIds.where), detail: {} });
+            const owned = hits.map((h) => ({ h, notes: ownNote(h.text, h.path) })).filter((o) => o.notes.length);
+            if (new Set(owned.flatMap((o) => o.notes)).size > 1) out.push({ rule: "ownNotes", id, lines: owned.map((o) => TaskIds.where(o.h)), detail: {} });
         }
         // Twice in a note counts only for a task's ID
         for (const t of twice) if (isTask(byId.get(t.id))) out.push(t);
         const known = new Set([...byId].filter(([, hits]) => isTask(hits)).map(([id]) => id));
         for (const note of notes) {
             note.text.split("\n").forEach((text, line) => {
-                if (!TaskIds.CHECKBOX.test(text) || TaskIds.idOf(text)) return;
+                if (!topLevel(text) || TaskIds.idOf(text)) return;
                 for (const m of text.matchAll(/\s\^([A-Za-z0-9-]+)\s+\S/g)) {
                     if (known.has(m[1].toLowerCase())) out.push({ rule: "trailing", id: m[1].toLowerCase(), lines: [{ path: note.path, line, text: text.trim() }], detail: {} });
                 }
             });
         }
-        const order = ["project", "open", "finished", "forward", "twice", "trailing"];
+        const order = ["project", "open", "finished", "forward", "notes", "ownNotes", "twice", "trailing"];
         return out.sort((a, b) => order.indexOf(a.rule) - order.indexOf(b.rule));
     }
 
@@ -459,7 +475,7 @@ class TaskIds {
                     // A link back by ID links the task's line there, as Schedule writes it now
                     const target = byId && !m.target.includes("#") ? `${m.target}#^${TaskIds.idOf(byId)}` : m.target;
                     after = after.slice(0, m.from) + `[[${target}|${mark}]]` + after.slice(m.to);
-                    // As main read it: every old mark a note link, as a ⋯ is now
+                    // As the report reads the line with every old mark a ⋯: which gives it no project
                     dots = dots.slice(0, m.from) + `[[${m.target}|⋯]]` + dots.slice(m.to);
                 }
                 // The ⭕ a link back gave it, on a checklist line at the left edge of a periodic note
@@ -467,7 +483,7 @@ class TaskIds {
                 let home = null;
                 const run = TaskIds.splitRun(after).items;
                 const own = run.filter((x) => /\|\s*⋯\s*\]\]$/u.test(x)).map((x) => x.match(/^\[\[([^\]|#]+)/)?.[1].trim());
-                // As the report reads a note's project: its folder, or its `parent`
+                // As the report reads a note's project: its folder
                 const ownHome = own.some((t) => { const n = t && app.metadataCache.getFirstLinkpathDest(t, file.path); return n && tr.projectOfNote(n.path, index); });
                 if (back && periodic && /^[-*+] \[.\]/.test(before) && !run.some((x) => /\|\s*(?:⭕|🗃)/u.test(x)) && !ownHome) {
                     home = helper.filedIn(back);

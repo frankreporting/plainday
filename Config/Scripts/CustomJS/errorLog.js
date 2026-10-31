@@ -14,27 +14,32 @@ class ErrorLog {
     // projects' settings, then tasks (Brian, 2026-10-29); the calendar sync's own at the end
     static KINDS = [
         "Billed entry missing", "Billed times changed", "Billed entry on another project", "Billed entry now 🆓",
-        "Billed entry on no project", "Billed entry on a line with two projects", "Entry on two invoices", "Billed entries need fixing",
+        "Billed entry on no project", "Billed entry on a line with two projects", "Billed entry under a nested task", "Entry on two invoices", "Billed entries need fixing",
+        "Invoice with no project",
         "Overlapping time entries", "Bad formatting", "No end time", "Ends before it starts", "Starts and ends at the same time",
-        "12 hours or more", "Misplaced 🆓", "Time not under a task or event", "Time under a plain bullet",
+        "12 hours or more", "Misplaced 🆓", "Time under a nested task",
         "Unmatched time marker", "Unclosed code block or comment",
         "No rate_type", "Rate isn't a number", "Hourly with no rate", "Rate under a non-billable parent",
         "Area with a rate and no rate_type", "Earned date problem", "Projects inside each other",
-        "Line and note name different projects", "Project setting",
-        "Task lines disagree",
+        "Note's parent differs from its folder", "Project setting",
+        "Line and note name different projects", "Two project links on one line", "Line's note waits in the Inbox",
+        "Mark on a nested task", "Task lines disagree", "Task in two notes", "Two ⋯ notes on one task",
         "Held back changes", "Skipped lines",
     ];
     // An entry Problem's kind (TimeReport.parseNote, build, the task checks)
     static ENTRY = {
         overlap: "Overlapping time entries", format: "Bad formatting", open: "No end time", order: "Ends before it starts",
         zero: "Starts and ends at the same time", long: "12 hours or more", free: "Misplaced 🆓",
-        anchor: "Time not under a task or event", plain: "Time under a plain bullet", markers: "Unmatched time marker",
+        subtime: "Time under a nested task", subtask: "Mark on a nested task", markers: "Unmatched time marker",
         unclosed: "Unclosed code block or comment", task: "Task lines disagree",
     };
+    // A task Problem's rule, where it isn't the plain "Task lines disagree" (TaskIds.check)
+    static RULE = { notes: "Task in two notes", ownNotes: "Two ⋯ notes on one task" };
     // A billed row's change (Billing.changes)
     static CHANGE = {
         gone: "Billed entry missing", times: "Billed times changed", project: "Billed entry on another project",
         free: "Billed entry now 🆓", unassigned: "Billed entry on no project", disputed: "Billed entry on a line with two projects",
+        subtask: "Billed entry under a nested task",
     };
     // A project's own Problem, by how its message starts (TimeReport.build and moneyOf)
     static SETTING = [
@@ -58,25 +63,37 @@ class ErrorLog {
     fromModel(model, link) {
         const out = [];
         const add = (kind, path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
-        for (const p of model.problems ?? []) add(ErrorLog.ENTRY[p.kind] ?? "Bad formatting", p.note ?? p.path);
+        const label = (p) => ErrorLog.RULE[p.rule] ?? ErrorLog.ENTRY[p.kind];
+        for (const p of model.problems ?? []) add(label(p) ?? "Bad formatting", p.note ?? p.path);
         const b = model.billing;
         const home = (invoice) => invoice.project ?? invoice.path;
-        for (const invoice of b?.invoices ?? []) if (invoice.problem && invoice.status !== "canceled") add("Billed entries need fixing", home(invoice));
+        for (const invoice of b?.invoices ?? []) {
+            if (invoice.status === "canceled") continue;
+            if (invoice.problem) add("Billed entries need fixing", home(invoice));
+            if (!invoice.project) add("Invoice with no project", invoice.path);
+        }
         for (const [invoice, list] of b?.byInvoice ?? []) {
             for (const c of list) if (c.kind !== "wording") add(ErrorLog.CHANGE[c.kind] ?? "Billed times changed", home(invoice));
         }
         for (const twice of b?.ledger?.twice ?? []) add("Entry on two invoices", twice.invoices[1].project ?? twice.invoices[0].project ?? twice.invoices[1].path);
-        // A task Problem on a line in a note that isn't a day is copied onto each of its projects: once
+        // A task Problem on a line in a note that isn't a day is copied onto each of its projects, and a
+        // line that disagrees, or a `parent`, onto both of its: once, at the note it's in
         const seen = new Set();
+        const once = (kind, path, key) => {
+            if (!path || seen.has(key)) return;
+            seen.add(key);
+            add(kind, path);
+        };
         for (const p of model.projectProblems ?? []) {
             if (p.invoice || p.twice) continue;
-            if (p.kind === "task") {
-                const k = `${p.path}:${p.line}:${p.message}`;
-                if (p.path && !seen.has(k)) { seen.add(k); add("Task lines disagree", p.path); }
-                continue;
-            }
-            if (p.conflict) add("Line and note name different projects", p.project);
-            else if (p.message) add(ErrorLog.SETTING.find(([re]) => re.test(p.message))?.[1] ?? "Project setting", p.project);
+            if (p.kind === "task" || p.kind === "subtask") {
+                once(label(p), p.path, `${p.path}:${p.line}:${p.message}`);
+            } else if (p.kind === "parent") {
+                once("Note's parent differs from its folder", p.path, `parent:${p.path}`);
+            } else if (p.conflict) {
+                const { links, inbox, path, line } = p.conflict;
+                once(links ? "Two project links on one line" : inbox ? "Line's note waits in the Inbox" : "Line and note name different projects", path, `line:${path}:${line}`);
+            } else if (p.message) add(ErrorLog.SETTING.find(([re]) => re.test(p.message))?.[1] ?? "Project setting", p.project);
             else add("Projects inside each other", p.project);
         }
         return this.group(out);

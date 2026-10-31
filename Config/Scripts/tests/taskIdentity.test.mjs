@@ -133,21 +133,22 @@ scenario("Schedule on a sub-task schedules its task: with time logged under it, 
 
 scenario("Schedule on a line nested under a task in a note sends that task, with its open sub-task (OBS-193, rule 5; Brian, 2026-10-26)", async ({ lag }) => {
     const INBOX = "Inbox/Inbox.md", SUB = "Projects/Freelance/Kestrel/Catalog/Catalog.md";
-    // From a note in Inbox, which is in no project: nothing takes the place of the line's ⭕, so it keeps
-    // it (rule 13, OBS-208), with a ↗ back to Inbox after it
+    // From a note in the Inbox folder, which is in no project: nothing takes the place of the line's ⭕, so
+    // it keeps it (rule 13, OBS-208), with a ↗ back to its note after it. A ⭕ on a line outside a periodic
+    // note counts for nothing (rule 4), so the check reads that line as in no project, against the day's Kestrel
     let v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n", [INBOX]: "- [ ] Website [[Kestrel|⭕]]\n\t- [ ] Fix the header\n" }, open: INBOX, at: 1, lag });
     await v.schedule("2026-09-18");
-    assert.deepEqual(v.check(), []);
+    assert.deepEqual(v.check().map((x) => x.rule), ["project"]);
     let id = idIn(v.notes()[INBOX]);
     assert.equal(v.notes()[INBOX], `- [>] Website [[2026-09-18#^${id}|9/18]] [[Kestrel|⭕]] ^${id}\n`);
     assert.equal(v.notes()[day("2026-09-18")].trim(), `- [ ] Website [[Kestrel|⭕]] [[Inbox#^${id}|↗]] ^${id}\n\t- [ ] Fix the header`);
     assert.equal(v.notices.at(-1), 'Forwarded "Website" to 9/18');
     // From a project note, under a line naming a project inside it: the note's own project, Kestrel, since a
     // line outside a periodic note has no project of its own (rules 4 and 13, OBS-208); its ⭕ Catalog stays on
-    // the [>] line and is listed against the day's Kestrel
+    // the [>] line, counting for nothing, so both lines read Kestrel
     v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [ ] Catalog work [[Catalog|⭕]]\n\t- [ ] Book the photographer\n", [SUB]: "---\ntags: [project]\n---\n" }, open: KES, at: 6, lag });
     await v.schedule("2026-09-18");
-    assert.deepEqual(plain(v.check().map((p) => [p.rule, p.detail.projects.slice().sort()])), [["project", [KES, SUB].sort()]]);
+    assert.deepEqual(v.check(), []);
     id = idIn(v.notes()[KES]);
     assert.equal(v.notes()[KES].split("\n").slice(5).join("\n"), `- [>] Catalog work [[2026-09-18#^${id}|9/18]] [[Catalog|⭕]] ^${id}\n`);
     assert.equal(v.notes()[day("2026-09-18")].trim(), `- [ ] Catalog work [[Kestrel|⭕]] ^${id}\n\t- [ ] Book the photographer`);
@@ -161,7 +162,7 @@ scenario("Schedule on a line nested under a task in a note sends that task, with
     assert.equal(v.notes()[day("2026-09-18")].trim(), `- [ ] Mobile layout [[Kestrel|⭕]] [[Draft wireframes#^${id}|↗]] ^${id}\n\t- [ ] Nav first`);
 });
 
-scenario("a task's open line nested by hand under another task is that task's sub-task: Schedule on the task's [>] line writes a fresh copy, and the checks say it's open twice (OBS-193, rule 19)", async ({ lag }) => {
+scenario("a task's open line nested by hand under another task is that task's sub-task: Schedule on the task's [>] line writes a fresh copy, and the ID on the sub-task counts for nothing (OBS-193, OBS-196, rule 5)", async ({ lag }) => {
     for (const time of ["", "\n\t\t- 10:00am - 10:30am"]) {
         const v = standIn({ notes: {
             [KES]: "---\ntags: [project]\n---\n",
@@ -172,7 +173,7 @@ scenario("a task's open line nested by hand under another task is that task's su
         assert.equal(await v.schedule("2026-09-21"), "Schedule for", "no open line of the task: the nested one is Kestrel errands' sub-task");
         assert.equal(v.notes()[day("2026-09-18")], before, "left as it is");
         assert.equal(v.notes()[day("2026-09-21")].trim(), "- [ ] Call the printer [[Kestrel|⭕]] ^abc123", "a fresh copy is open, as before");
-        assert.deepEqual(v.check().map((x) => x.rule), ["open"], "the ID on two open lines, for you to tidy");
+        assert.deepEqual(v.check(), [], "the sub-task's ID isn't the task's: the report lists it as a mark on a sub-task");
     }
 });
 
@@ -279,7 +280,7 @@ scenario("back onto a day where it was worked on, with a line nested under it: t
     assert.deepEqual(v.check().map((x) => x.rule), ["forward"]);
 });
 
-scenario("a sub-task with an ID of its own goes with its task, even onto a day that has a line with that ID: its ID travels as text, and the checks list it twice (OBS-193, rule 5)", async ({ lag }) => {
+scenario("a sub-task with an ID of its own goes with its task, even onto a day that has a line with that ID: its ID travels as text and counts for nothing (OBS-193, OBS-196, rule 5)", async ({ lag }) => {
     const notes = {
         [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-09-18#^abc123|9/18]] ^abc123\n",
         [LOG]: "---\ntags: [log]\n---\n- [>] Send the notes [[2026-09-18#^def456|9/18]] ^def456\n",
@@ -289,13 +290,14 @@ scenario("a sub-task with an ID of its own goes with its task, even onto a day t
     // Moved from its day (from the sub-task's line too), and rescheduled from the project note
     for (const [open, at] of [[day("2026-09-18"), 0], [day("2026-09-18"), 1], [KES, 5]]) {
         const v = standIn({ notes, open, at, lag });
-        assert.deepEqual(v.check(), []);
+        // The checks read top-level lines: the sub-task isn't the task's line, so its forward date points where the task isn't
+        assert.deepEqual(v.check().map((x) => x.rule), ["forward"]);
         await v.schedule("2026-09-16");
         assert.equal(v.notes()[day("2026-09-18")].trim(), "", `${open} ${at}`);
         assert.equal(v.notes()[day("2026-09-16")], "- [>] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n\t- 9:00am - 9:30am\n- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n", `${open} ${at}`);
         assert.equal(v.notes()[KES].split("\n")[5], "- [>] Book the photographer [[2026-09-16#^abc123|9/16]] ^abc123", `${open} ${at}`);
         assert.equal(v.notes()[LOG].split("\n")[3], "- [>] Send the notes [[2026-09-18#^def456|9/18]] ^def456", "the sub-task's own forward date isn't followed");
-        assert.deepEqual(v.check().map((x) => x.rule), ["forward", "twice"], `${open} ${at}`);
+        assert.deepEqual(v.check().map((x) => x.rule), ["forward"], `${open} ${at}`);
     }
 });
 
@@ -552,7 +554,7 @@ scenario("a sent line clicked back to [ ] and scheduled back onto a worked-on da
             [LOG]: "---\ntags: [log]\n---\n- [>] Send the notes [[2026-09-18#^def456|9/18]] ^def456\n",
             [day("2026-09-16")]: "- [>] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n\t- 9:00am - 9:30am\n",
             [day("2026-09-18")]: "- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n",
-        }, "- [>] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n\t- 9:00am - 9:30am\n- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n", ["forward", "twice"]],
+        }, "- [>] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n\t- 9:00am - 9:30am\n- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- [ ] Send the notes [[Kestrel|⭕]] [[2026-09-14 Review|⋯]] ^def456\n", ["forward"]],
     ];
     for (const [said, extra, after, rules] of cases) {
         const v = standIn({ notes: { [KES]: `---\ntags: [project]\n---\n## To Do\n\n${sent}\n`, [day("2026-09-18")]: "- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n", ...extra }, open: KES, at: 5, lag });
@@ -654,23 +656,22 @@ scenario("a reopened line keeps the day's [>] line's ⋯, and a 🚩 taken off t
     assert.equal(v.notices.at(-1), "Reopened on 9/16");
 });
 
-scenario("a day's [>] line nested by hand under another task is that task's sub-task: moving back onto that day adds the task's line, and the checks list the ID twice (OBS-193, rule 5)", async ({ lag }) => {
+scenario("a day's [>] line nested by hand under another task is that task's sub-task: moving back onto that day adds the task's line, and its ID there counts for nothing (OBS-193, OBS-196, rule 5)", async ({ lag }) => {
     const NOTE = "Projects/Freelance/Kestrel/Call the printer.md";
     const notes = {
         [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Call the printer [[2026-09-18#^abc123|9/18]] ^abc123\n",
         [OTHER]: "---\ntags: [project]\n---\n",
         [NOTE]: "---\ntags: [task]\n---\n",
         [day("2026-09-16")]: "- [ ] Other errands [[Other|⭕]]\n\t- [>] Call the printer [[Kestrel|⭕]] ^abc123\n\t\t- 9:00am - 9:30am\n",
-        // Its note is filed in Kestrel, so it counts there too
-        [day("2026-09-18")]: "- [ ] Call the printer [[Call the printer|⋯]] ^abc123\n",
+        [day("2026-09-18")]: "- [ ] Call the printer [[Kestrel|⭕]] [[Call the printer|⋯]] ^abc123\n",
     };
     // Moved from its day, and rescheduled from the project note
     for (const [open, at] of [[day("2026-09-18"), 0], [KES, 5]]) {
         const v = standIn({ notes, open, at, lag });
         await v.schedule("2026-09-16");
-        assert.equal(v.notes()[day("2026-09-16")], "- [ ] Other errands [[Other|⭕]]\n\t- [>] Call the printer [[Kestrel|⭕]] ^abc123\n\t\t- 9:00am - 9:30am\n- [ ] Call the printer [[Call the printer|⋯]] ^abc123\n", open);
+        assert.equal(v.notes()[day("2026-09-16")], "- [ ] Other errands [[Other|⭕]]\n\t- [>] Call the printer [[Kestrel|⭕]] ^abc123\n\t\t- 9:00am - 9:30am\n- [ ] Call the printer [[Kestrel|⭕]] [[Call the printer|⋯]] ^abc123\n", open);
         assert.equal(v.notes()[day("2026-09-18")].trim(), "", open);
-        assert.deepEqual(v.check().map((x) => x.rule), ["twice"], open);
+        assert.deepEqual(v.check(), [], open);
     }
 });
 
@@ -679,11 +680,28 @@ scenario("a reopen takes the moving line's links over an archived project's ⭕ 
     const v = standIn({ notes: {
         [KES]: "---\ntags: [project]\n---\n", "Archive/Old/Old.md": "---\ntags: [project]\n---\n", [NOTE]: "---\ntags: [task]\n---\n",
         [day("2026-09-16")]: "- [>] Call the printer [[Old|⭕]] [[Call the printer|⋯]] ^abc123\n\t- 9:00am - 9:30am\n",
-        [day("2026-09-18")]: "- [ ] Call the printer [[Call the printer|⋯]] ^abc123\n",
+        [day("2026-09-18")]: "- [ ] Call the printer [[Kestrel|⭕]] [[Call the printer|⋯]] ^abc123\n",
     }, open: day("2026-09-18"), at: 0, lag });
     await v.schedule("2026-09-16");
-    assert.equal(v.notices.at(-1), "Reopened on 9/16", "the archived ⭕ counted for nothing: the note's Kestrel is where that day's time counted, and still does");
-    assert.equal(v.notes()[day("2026-09-16")], "- [/] Call the printer [[Call the printer|⋯]] ^abc123\n\t- 9:00am - 9:30am\n");
+    assert.equal(v.notices.at(-1), "Reopened on 9/16", "a command passes over the archived ⭕: the note's Kestrel is the live project that line named, and the line says Kestrel now");
+    assert.equal(v.notes()[day("2026-09-16")], "- [/] Call the printer [[Kestrel|⭕]] [[Call the printer|⋯]] ^abc123\n\t- 9:00am - 9:30am\n");
+});
+
+scenario("a day's [>] line under a plain bullet that names an archived ⭕ isn't defined in the system: a reopen moves no time, so no notice says it did (OBS-196)", async ({ lag }) => {
+    const v = standIn({ notes: {
+        [KES]: "---\ntags: [project]\n---\n", "Archive/Old/Old.md": "---\ntags: [project]\n---\n",
+        [day("2026-09-16")]: "- Old work [[Old|⭕]]\n\t- [>] Call the printer ^abc123\n\t\t- 9:00am - 9:30am\n",
+        [day("2026-09-18")]: "- [ ] Call the printer [[Kestrel|⭕]] ^abc123\n",
+    }, open: day("2026-09-18"), at: 0, lag });
+    const tr = v.customJS.TimeReport;
+    const counted = () => {
+        const notes = Object.entries(v.notes()).filter(([p]) => p.includes("/days/")).map(([path, text]) => ({ path, text, date: path.slice(-13, -3) }));
+        return tr.build(notes, tr.appIndex(), {}).entries.length;
+    };
+    assert.equal(counted(), 0, "time under a task under a plain bullet counts nowhere");
+    await v.schedule("2026-09-16");
+    assert.ok(!v.notices.at(-1).includes("counts toward"), v.notices.at(-1));
+    assert.equal(counted(), 0, "and still does, at the left edge or not: the line stays where it is");
 });
 
 test("a reopen whose [>] line is gone by the time it's written says so, so the line goes in as usual", async () => {
@@ -912,7 +930,7 @@ scenario("an event can't be scheduled, from its line or from under it: a [<] lin
     }
 });
 
-scenario("a line nested by hand on the destination day with the task's ID is a sub-task there: the task's line goes in as usual, and the checks list the ID twice (OBS-193, rule 19)", async ({ lag }) => {
+scenario("a line nested by hand on the destination day with the task's ID is a sub-task there: the task's line goes in as usual, and the ID on the sub-task counts for nothing (OBS-193, OBS-196, rule 5)", async ({ lag }) => {
     const v = standIn({ notes: {
         [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-09-16#^abc123|9/16]] ^abc123\n",
         [day("2026-09-16")]: "- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n",
@@ -923,7 +941,7 @@ scenario("a line nested by hand on the destination day with the task's ID is a s
     assert.equal(v.notes()[day("2026-09-18")], "- [ ] Errands\n\t- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n");
     assert.equal(v.notes()[KES].split("\n")[5], "- [>] Book the photographer [[2026-09-18#^abc123|9/18]] ^abc123");
     assert.equal(v.notices.at(-1), "Moved to 9/18");
-    assert.deepEqual(v.check().map((x) => x.rule), ["open", "twice"]);
+    assert.deepEqual(v.check(), []);
 });
 
 scenario("the time report reads the notes as they are now: run right after a reschedule from the open project note, it finds no Problem", async ({ lag }) => {

@@ -216,14 +216,15 @@ class AddTaskNote {
     // Resolves to { note, home, movedFrom, clear }: the note to link (a same-named note already in the
     // picked project or area is linked instead), the project or area the line should name (null:
     // none), the path the note was moved from, and whether the line's own ⭕ links come off even with
-    // no home to name (the note was left in a finished project, whose time counts there). Null when a
+    // no home to name (the note was left in a finished project; the line's time is Unassigned until
+    // OBS-225 writes that project on the line). Null when a
     // menu was dismissed or the move was refused. A project or area note, and a note MoveToProject
     // never moves (the system, the periodic notes, archived work), is linked where it is, and the
     // line keeps its links. A meeting log goes the same way when an event line links one that exists.
     async settle(existing, line) {
         const none = { note: existing, home: null, movedFrom: null, clear: false };
         if (this.isHomeNote(existing) || customJS.MoveToProject?.kept?.(existing.path)) return none;
-        // Where it's filed, a finished project included: its time still counts there
+        // Where it's filed, a finished project included
         const noteHome = this.filedIn(existing);
         if (!line.projects.length) return { ...none, home: this.lineHome(existing) };
         if (line.projects.includes(noteHome)) return { ...none, home: noteHome };
@@ -294,9 +295,8 @@ class AddTaskNote {
     }
 
     // The project or area a line that links `note` should name (OBS-90): the one the note is filed
-    // in, when that's live. Null when that's a finished project (the report still counts the note's
-    // time there, so naming the area above would move it), for a note outside Projects/, and for a
-    // project or area note itself.
+    // in, when that's live. Null when that's a finished project (OBS-225 names it, finished or not), for a
+    // note outside Projects/, and for a project or area note itself.
     lineHome(note) {
         if (this.isHomeNote(note)) return null;
         const home = this.filedIn(note);

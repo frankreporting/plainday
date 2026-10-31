@@ -37,7 +37,8 @@ test("every script reads ⋯, ↗ and ↗ + U+FE0F as a line's note link (OBS-20
         assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), "Draft the brief", `AddProjectLink.taskLinkpath: ${name}`);
         assert.ok(once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
         assert.ok(once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
-        assert.ok(report.isNoteAlias(mark), `TimeReport.isNoteAlias: ${name}`);
+        const read = report.lineLinks(`[ ] Draft the brief ${link}`);
+        assert.equal(read.notes.length + read.from.length, 1, `TimeReport.lineLinks: ${name}`);
         assert.equal(sync.splitTail(`Planning [[2026-09-16 Planning|${mark}]]`, true).log, `[[2026-09-16 Planning|${mark}]]`, `CalendarSync: ${name}`);
         const day = `- [<] 4:00pm\tPlanning [[2026-09-16 Planning|${mark}]]\n\t- 4:30pm`;
         assert.equal(recordEvent(day, { log: "2026-09-16 Planning", title: "Planning" }, sync).outcome, "present", `recordEvent: ${name}`);
@@ -52,7 +53,8 @@ test("🗒️, 🔗 and … are a note link to none of them now (OBS-208)", () =
         assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), null, `AddProjectLink.taskLinkpath: ${name}`);
         assert.ok(!once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
         assert.ok(!once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
-        assert.ok(!report.isNoteAlias(mark), `TimeReport.isNoteAlias: ${name}`);
+        const read = report.lineLinks(`[ ] Draft the brief ${link}`);
+        assert.equal(read.notes.length + read.from.length, 0, `TimeReport.lineLinks: ${name}`);
         assert.equal(sync.splitTail(`Planning [[2026-09-16 Planning|${mark}]]`, true).log, null, `CalendarSync: ${name}`);
     }
 });
@@ -63,7 +65,7 @@ test("a ⭕ or 🗃️ isn't a note link to any of them", () => {
         assert.ok(!AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${link}`);
         assert.equal(sync.splitTail(`Planning ${link}`, true).log, null, `CalendarSync: ${link}`);
     }
-    assert.ok(!report.isNoteAlias("⭕") && !report.isNoteAlias("Brief"));
+    for (const link of ["[[Studio|⭕]]", "[[Draft the brief|Brief]]"]) assert.equal(report.lineLinks(`[ ] Draft the brief ${link}`).notes.length, 0, link);
 });
 
 test("every writer writes the same marks, ⋯ for a line's own note and ↗ for the note it was sent from (OBS-208)", () => {

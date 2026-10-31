@@ -427,6 +427,18 @@ class Billing {
         return { live: group(live), archived: group(archived), all: group([...archived, ...live.filter((e) => !e.report)]) };
     }
 
+    // The projects `invoice`'s rows bill: each row's project link, or where that names no project, the
+    // project of the entry at its day and times, counted or not, archived or live
+    rowProjects(invoice, model, tr, index) {
+        const out = new Set();
+        const entries = [...model.entries, ...(model.disputed ?? [])];
+        for (const r of invoice.rows) {
+            if (r.projectPath && tr.counts(r.projectPath, index)) out.add(r.projectPath);
+            else for (const e of entries) if (e.project && e.date === r.date && e.start === r.start && e.end === r.end) out.add(e.project);
+        }
+        return [...out];
+    }
+
     // Whether an invoice touches `scope`: its project, or a row's project, is in it (or can't be told)
     touches(invoice, scope) {
         return !invoice.project || scope.has(invoice.project) || invoice.rows.some((r) => !r.projectPath || scope.has(r.projectPath));
@@ -455,8 +467,9 @@ class Billing {
     //              (drafts included), and every gone billed entry on any invoice, since its time could
     //              be anywhere now (OBS-215), for the confirmation's Fix first
     //   notHourly  projects in scope with billable time that isn't billed by the hour
-    //   problems   the model's Problems in scope, from the first entry considered (running clocks from
-    //              any day) through `through`, running clocks first
+    //   problems   the model's Problems in scope, from the first entry considered (running clocks and
+    //              time under a sub-task from any day: neither is an entry to consider) through `through`,
+    //              running clocks first
     //   projectProblems  the project-level ones in scope (a rate that isn't a number, an entry on two
     //              invoices), without the invoice changes `changed` already lists
     //   bad        [{ invoice, problem }] an invoice in scope whose Billed entries can't be trusted:
@@ -491,7 +504,7 @@ class Billing {
         const running = (p) => (p.kind === "open" ? 0 : 1);
         const floor = first ?? through;
         const problems = model.problems
-            .filter((p) => p.date <= through && (p.date >= floor || p.kind === "open") && (p.projects ?? []).some((x) => scope.has(x)))
+            .filter((p) => p.date <= through && (p.date >= floor || p.kind === "open" || p.kind === "subtime") && (p.projects ?? []).some((x) => scope.has(x)))
             .sort((a, b) => running(a) - running(b) || a.date.localeCompare(b.date) || a.line - b.line);
         const projectProblems = model.projectProblems.filter((p) => scope.has(p.project) && !p.invoice);
         // The cap covers the project and every project below it, as on its note
@@ -535,6 +548,8 @@ class Billing {
     //   free        same times, now 🆓 or non-billable
     //   unassigned  same times, now on no project
     //   project     same times, now on another project
+    //   disputed    same times, now on a line that disagrees with itself
+    //   subtask     same times, now under a sub-task
     //   wording     same times, the task or note reads differently (not a change in billing)
     //   times       an entry of the same project or task overlaps it (across midnight too)
     //   gone        none of these. Nothing on another day or at other times is taken for it: without
@@ -551,8 +566,9 @@ class Billing {
             const exact = (pool.get(row.date) ?? []).filter((e) => e.start === row.start && e.end === row.end);
             // A live entry first: a copy at the same times is an archived or disputed line's
             const same = exact.find((e) => !e.report && !e.disputed) ?? exact[0];
-            // Billed time whose line now names two projects, so it isn't counted (Brian, 2026-10-28)
-            if (same?.disputed) { out.push({ row, kind: "disputed", entry: same.report ?? same }); continue; }
+            // Billed time whose line now names two projects, or that's now under a sub-task, so it isn't
+            // counted (Brian, 2026-10-28 and 2026-10-30)
+            if (same?.disputed) { out.push({ row, kind: same.subTask ? "subtask" : "disputed", entry: same.report ?? same }); continue; }
             // Billed time whose line's ⭕ now names an archived project
             if (same?.report) { out.push({ row, kind: "project", entry: same.report }); continue; }
             if (same) {
