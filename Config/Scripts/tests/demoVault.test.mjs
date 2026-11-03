@@ -278,7 +278,7 @@ test("demo vault: ⋯, ⭕, meeting log and property links all resolve", () => {
             checked++;
             assert.ok(resolves(target, p), `${p}: [[${target}]] doesn't resolve`);
         }
-        for (const key of ["parent", "who", "client", "affiliation"]) {
+        for (const key of ["parent", "who", "client", "bill_to", "affiliation"]) {
             for (const v of [].concat(fm[key] ?? [])) {
                 const target = linkTarget(v);
                 if (!target) continue;
@@ -356,6 +356,22 @@ test("demo vault: the paid Kestrel invoice adds up, and is what Invoice would bi
     assert.ok(!text.slice(text.indexOf("# Invoice No."), text.indexOf("## Billed entries")).includes("[["));
 });
 
+test("demo vault: Pinecrest Library Brochure shows a bill-to; Kestrel, with none, bills its client (OBS-109)", () => {
+    const Invoice = vm.runInContext(fs.readFileSync(new URL("../CustomJS/invoice.js", import.meta.url), "utf8") + "\n;Invoice", vm.createContext({}));
+    const inv = new Invoice();
+    const brochure = inv.readBillTo("Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", tr, plan.index);
+    assert.equal(brochure.path, "Reference/Entities/Friends of Pinecrest Library.md");
+    assert.equal(brochure.client.path, "Reference/Entities/Pinecrest Public Library.md");
+    assert.equal(brochure.billingName, "Friends of the Pinecrest Public Library");
+    assert.equal(brochure.address.length, 2);
+    assert.equal(brochure.code, "", "no code yet, so a first invoice would ask for one");
+    // The demo video's invoicing is unchanged: Kestrel bills Kestrel Outfitters, as 1001-KES did
+    const kestrel = inv.readBillTo(KESTREL_PROJECT, tr, plan.index);
+    assert.equal(kestrel.path, "Reference/Entities/Kestrel Outfitters.md");
+    assert.equal(kestrel.code, "KES");
+    assert.equal(kestrel.client.path, kestrel.path);
+});
+
 test("demo vault: each project with time has its timesheet note beside it, linked from the project; an area has none", () => {
     assert.ok(plan.targets.sheet.length >= 5);
     for (const sheet of plan.targets.sheet) {
@@ -390,12 +406,17 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
     // setup, 2026-10-14), grouped by status: draft, sent, paid, then canceled. Obsidian hides a status
     // missing from groupOrder, which hid every new invoice until draft was added
     assert.match(base, /order:\n\s+- invoice_date\n\s+- file\.name\n\s+- formula\.project\n\s+- invoice_status\n\s+- formula\.amount\n/);
-    for (const [p, name] of [["note.invoice_date", "Date"], ["file.name", "Invoice"], ["formula.project", "Project"], ["note.invoice_status", "Status"], ["formula.amount", "Total"]]) {
+    // Bill to (OBS-109) is there to switch on, not shown by default (the maintainer, 2026-11-03)
+    assert.doesNotMatch(base, /- formula\.billed\n/);
+    for (const [p, name] of [["note.invoice_date", "Date"], ["file.name", "Invoice"], ["formula.project", "Project"], ["formula.billed", "Bill to"], ["note.invoice_status", "Status"], ["formula.amount", "Total"]]) {
         assert.match(base, new RegExp(`  ${p.replace(".", "\\.")}:\\n    displayName: ${name}\\n`), p);
     }
     assert.match(base, /\n    groupBy:\n      property: invoice_status\n      direction: ASC\n    groupOrder:\n      - draft\n      - sent\n      - paid\n      - canceled\n/);
     // The project's name, linked, not parent's alias (`area` on invoices from before OBS-175)
     assert.match(base, /\n  project: if\(parent, link\(parent\.asFile\(\)\.path, parent\.asFile\(\)\.basename\), if\(area, link\(area\.asFile\(\)\.path, area\.asFile\(\)\.basename\), ""\)\)\n/);
+    // Who was billed, linked: `bill_to`, or `client` on an invoice from before OBS-109, which recorded the billed note there
+    // Named `billed` and reading `note.`, so the formula can't be taken for the property it reads
+    assert.match(base, /\n  billed: if\(note\.bill_to, link\(note\.bill_to\.asFile\(\)\.path, note\.bill_to\.asFile\(\)\.basename\), if\(note\.client, link\(note\.client\.asFile\(\)\.path, note\.client\.asFile\(\)\.basename\), ""\)\)\n/);
     // The total as $1,235.00, and the sum of what the view shows the same way, every comma dropped
     // before adding
     assert.match(base, /\n  amount: '"\$"\+total\.toFixed\(2\)\.replace\(\/\\B\(\?=\(\\d\{3\}\)\+\(\?!\\d\)\)\/g, ","\)'\n/);

@@ -5,6 +5,7 @@ filters:
     - file.tags.contains("invoice")
 formulas:
   project: if(parent, link(parent.asFile().path, parent.asFile().basename), if(area, link(area.asFile().path, area.asFile().basename), ""))
+  billed: if(note.bill_to, link(note.bill_to.asFile().path, note.bill_to.asFile().basename), if(note.client, link(note.client.asFile().path, note.client.asFile().basename), ""))
   amount: '"$"+total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")'
 properties:
   note.invoice_date:
@@ -13,6 +14,8 @@ properties:
     displayName: Invoice
   formula.project:
     displayName: Project
+  formula.billed:
+    displayName: Bill to
   note.invoice_status:
     displayName: Status
   note.total:

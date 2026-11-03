@@ -32,7 +32,7 @@ const model = tr.build([
 const billed = billing.snapshot(model.entries, model, tr);
 const DATA = (more = {}) => ({
     id: "2026090312000000", name: "1001-HBR", status: "draft",
-    parent: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co",
+    parent: "[[Harbor Web|⭕.Work.Harbor Web]]", clientLink: "Harbor Co", billToLink: "Harbor Co",
     invoiceDate: "2026-09-03", periodStart: "2026-09-01", periodEnd: "2026-09-02",
     from: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"] },
     billTo: { name: "Harbor Co", address: ["1 Dock Street", "Port Town, ST 00000"] },
@@ -57,6 +57,7 @@ test("noteText: frontmatter the Invoices base and Billing read", () => {
         "invoice_status: draft",
         'number: "1001-HBR"',
         'client: "[[Harbor Co]]"',
+        'bill_to: "[[Harbor Co]]"',
         "invoice_date: 2026-09-03",
         "period_start: 2026-09-01",
         "period_end: 2026-09-02",
@@ -65,6 +66,14 @@ test("noteText: frontmatter the Invoices base and Billing read", () => {
         "paid:",
         "---",
     ].join("\n"));
+});
+
+test("noteText: `bill_to` names who's billed, right after `client`; with no client, `client` is blank (OBS-109)", () => {
+    const front = (more) => inv.noteText(DATA(more), tr, billing).split("\n---\n")[0].split("\n");
+    const lines = front({ billToLink: "Tern Agency" });
+    assert.deepEqual(lines.slice(lines.indexOf('client: "[[Harbor Co]]"'), lines.indexOf('client: "[[Harbor Co]]"') + 2), ['client: "[[Harbor Co]]"', 'bill_to: "[[Tern Agency]]"']);
+    const blank = front({ clientLink: "", billToLink: "Tern Agency" });
+    assert.deepEqual(blank.slice(blank.indexOf("client:"), blank.indexOf("client:") + 2), ["client:", 'bill_to: "[[Tern Agency]]"']);
 });
 
 test("noteText: the header, a row per date and rate, the total, then the Billed entries", () => {
@@ -223,12 +232,90 @@ test("readSettings: `folder` and `last_number` (OBS-112), and what's wrong with 
     assert.equal(s({ folder: "../Invoices" }).folder, "");
 });
 
-test("readClient: the project's client, else its parent's; the code upper-cased; errors say what to do", () => {
-    assert.deepEqual(plain(inv.readClient(PHOTO, tr, index)), { path: CLIENT, name: "Harbor Co", code: "HBR", billingName: "Harbor Co", address: ["1 Dock Street", "Port Town, ST 00000"] });
-    const none = tr.makeIndex([{ path: "P/Solo/Solo.md", tags: ["project"], props: {} }]);
-    assert.match(inv.readClient("P/Solo/Solo.md", tr, none).error, /has no `client`/);
-    const missing = tr.makeIndex([{ path: "P/Solo/Solo.md", tags: ["project"], props: { client: "[[Nobody Yet]]" } }]);
-    assert.match(inv.readClient("P/Solo/Solo.md", tr, missing).error, /isn't a note yet/);
+test("readBillTo: with no bill_to, the project's client, else its parent's; the code upper-cased", () => {
+    assert.deepEqual(plain(inv.readBillTo(PHOTO, tr, index)), {
+        path: CLIENT, name: "Harbor Co", code: "HBR", billingName: "Harbor Co", address: ["1 Dock Street", "Port Town, ST 00000"],
+        client: { path: CLIENT, written: "Harbor Co" },
+    });
+});
+
+// A client project billed through an agency (OBS-109): the parent names both, a sub-project repeats the
+// client, another names its own bill-to. Every name and address is invented.
+const AGENCY = "Reference/Entities/Tern Agency.md";
+const PRINT = "Projects/Work/Harbor Web/Harbor Print/Harbor Print.md";
+const BILL_TO_NOTES = [
+    { path: WEB, tags: ["project"], props: { rate: 80, rate_type: "hourly", client: "[[Harbor Co]]", bill_to: "[[Tern Agency]]" } },
+    { path: PHOTO, tags: ["project"], props: { rate: 100, rate_type: "hourly", client: "[[Harbor Co]]" } },
+    { path: PRINT, tags: ["project"], props: { rate: 90, rate_type: "hourly", bill_to: "[[Gull Press]]" } },
+    { path: CLIENT, tags: [], props: { code: "hbr", address: ["1 Dock Street", "Port Town, ST 00000"] } },
+    { path: AGENCY, tags: [], props: { billing_name: " Tern Agency LLC ", address: "77 Mill Street\nPort Town, ST 00000" } },
+    { path: "Reference/Entities/Gull Press.md", tags: [], props: { code: "gp" } },
+];
+
+test("readBillTo: the nearest bill_to wins over every client, so a sub-project that repeats its client bills its parent's bill-to", () => {
+    const idx = tr.makeIndex(BILL_TO_NOTES);
+    const agency = { path: AGENCY, name: "Tern Agency", code: "", billingName: "Tern Agency LLC", address: ["77 Mill Street", "Port Town, ST 00000"], client: { path: CLIENT, written: "Harbor Co" } };
+    assert.deepEqual(plain(inv.readBillTo(WEB, tr, idx)), agency);
+    assert.deepEqual(plain(inv.readBillTo(PHOTO, tr, idx)), agency, "its own client doesn't beat the parent's bill_to");
+    // Its own bill_to beats its parent's; the client recorded is still the nearest one, the parent's
+    assert.deepEqual(plain(inv.readBillTo(PRINT, tr, idx)),
+        { path: "Reference/Entities/Gull Press.md", name: "Gull Press", code: "GP", billingName: "Gull Press", address: [], client: { path: CLIENT, written: "Harbor Co" } });
+});
+
+test("readBillTo: a bill_to with no client anywhere invoices, recording no client", () => {
+    const idx = tr.makeIndex([
+        { path: "P/Solo/Solo.md", tags: ["project"], props: { bill_to: "[[Tern Agency]]" } },
+        { path: AGENCY, tags: [], props: {} },
+    ]);
+    const billed = inv.readBillTo("P/Solo/Solo.md", tr, idx);
+    assert.equal(billed.path, AGENCY);
+    assert.equal(billed.client, null);
+    assert.deepEqual(plain(inv.partyLinks(billed, (p) => tr.basename(p))), { clientLink: "", billToLink: "Tern Agency" });
+});
+
+test("readBillTo: the notices say what to do; a client that isn't a note stops only the invoice that bills it", () => {
+    const solo = (props, more = []) => inv.readBillTo("P/Solo/Solo.md", tr, tr.makeIndex([{ path: "P/Solo/Solo.md", tags: ["project"], props }, ...more]));
+    assert.equal(solo({}).error, "Solo has no `client` or `bill_to`; link the note to bill from the project first");
+    assert.equal(solo({ client: "  ", bill_to: "" }).error, "Solo has no `client` or `bill_to`; link the note to bill from the project first");
+    assert.equal(solo({ client: "[[Nobody Yet]]" }).error, "The client [[Nobody Yet]] isn't a note yet; create it, then run Invoice again");
+    assert.equal(solo({ client: "[[Harbor Co]]", bill_to: "[[Tern Agency]]" }, [{ path: CLIENT, tags: [], props: {} }]).error,
+        "The bill-to [[Tern Agency]] isn't a note yet; create it, then run Invoice again");
+    // Billed to the agency, the client link is recorded as written
+    const billed = solo({ client: "[[Nobody Yet]]", bill_to: "[[Tern Agency]]" }, [{ path: AGENCY, tags: [], props: {} }]);
+    assert.equal(billed.error, undefined);
+    assert.deepEqual(plain(billed.client), { path: null, written: "Nobody Yet" });
+    assert.deepEqual(plain(inv.partyLinks(billed, (p) => tr.basename(p))), { clientLink: "Nobody Yet", billToLink: "Tern Agency" });
+    // Its alias kept; plain text becomes a link to it, with nothing that would break the link
+    const links = (client) => inv.partyLinks(solo({ client, bill_to: "[[Tern Agency]]" }, [{ path: AGENCY, tags: [], props: {} }]), (p) => tr.basename(p)).clientLink;
+    assert.equal(links("[[Nobody Yet|NY Co]]"), "Nobody Yet|NY Co");
+    assert.equal(links("Nobody | Yet ]]"), "Nobody  Yet");
+});
+
+test("rebuiltFront: a Rebuild sets client and bill_to, bill_to right after client on an older draft; nothing else moves", () => {
+    const old = inv.split(inv.noteText(DATA(), tr, billing)).front.replace('bill_to: "[[Harbor Co]]"\n', "").replace("paid:", "paid:\nnotes: mine");
+    const idx = tr.makeIndex(BILL_TO_NOTES);
+    const front = inv.rebuiltFront(old, inv.readBillTo(PHOTO, tr, idx), (p) => tr.basename(p), { hours: "4.50", total: "377.50" });
+    const want = old.split("\n");
+    want.splice(want.indexOf('client: "[[Harbor Co]]"') + 1, 0, 'bill_to: "[[Tern Agency]]"');
+    assert.deepEqual(front.split("\n"), want.map((l) => (l === "hours: 4.00" ? "hours: 4.50" : l === "total: 340.00" ? "total: 377.50" : l)));
+    // Run again, it changes nothing more, and a client gone from the project leaves `client` blank
+    assert.equal(inv.rebuiltFront(front, inv.readBillTo(PHOTO, tr, idx), (p) => tr.basename(p)), front);
+    const alone = tr.makeIndex([{ path: "P/Solo/Solo.md", tags: ["project"], props: { bill_to: "[[Tern Agency]]" } }, { path: AGENCY, tags: [], props: {} }]);
+    const blank = inv.rebuiltFront(front, inv.readBillTo("P/Solo/Solo.md", tr, alone), (p) => tr.basename(p)).split("\n");
+    assert.deepEqual(blank.slice(blank.indexOf("client:"), blank.indexOf("client:") + 2), ["client:", 'bill_to: "[[Tern Agency]]"']);
+});
+
+test("setProps: a new key goes after the key `after` names, past any list under it, else last", () => {
+    const text = "---\nid: 1\ntags:\n  - invoice\nclient: x\n---\nbody";
+    assert.equal(inv.setProps(text, { bill_to: "y" }, { after: { bill_to: "tags" } }), "---\nid: 1\ntags:\n  - invoice\nbill_to: y\nclient: x\n---\nbody");
+    assert.equal(inv.setProps(text, { bill_to: "y" }, { after: { bill_to: "missing" } }), "---\nid: 1\ntags:\n  - invoice\nclient: x\nbill_to: y\n---\nbody");
+    assert.equal(inv.setProps(text, { bill_to: "y" }), "---\nid: 1\ntags:\n  - invoice\nclient: x\nbill_to: y\n---\nbody");
+    // A client written as a list, in another case, in a note with CRLF line ends: replaced whole, bill_to after it
+    const crlf = "---\r\nid: 1\r\nClient:\r\n  - \"[[Old Co]]\"\r\npaid:\r\n---\r\nbody";
+    assert.equal(inv.setProps(crlf, { client: '"[[New Co]]"', bill_to: '"[[Tern Agency]]"' }, { after: { bill_to: "client" } }),
+        '---\r\nid: 1\r\nclient: "[[New Co]]"\r\nbill_to: "[[Tern Agency]]"\r\npaid:\r\n---\r\nbody');
+    // A bill_to already there is set where it stands
+    assert.equal(inv.setProps("---\nbill_to: a\nclient: x\n---\n", { client: "y", bill_to: "b" }, { after: { bill_to: "client" } }), "---\nbill_to: b\nclient: y\n---\n");
 });
 
 test("suggestCode and nameFor", () => {

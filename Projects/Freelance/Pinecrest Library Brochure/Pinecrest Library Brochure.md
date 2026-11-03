@@ -8,12 +8,13 @@ start: 2026-09-02
 due: 2026-09-25
 who: "[[Rafe Oakes]]"
 client: "[[Pinecrest Public Library]]"
+bill_to: "[[Friends of Pinecrest Library]]"
 rate: 1200
 rate_type: flat
 max_hours: 20
 status: Active
 ---
-A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee of $1,200, so the report shows hours against the 20 I budgeted, and what the fee comes to an hour so far. When it's done, run *Invoice* here and pick the day: the fee then counts in that week's, month's and year's Earnings.
+A fold-out brochure for the [[Pinecrest Public Library]] fall programs. Flat fee of $1,200, so the report shows hours against the 20 I budgeted, and what the fee comes to an hour so far. The work is for the library, but the library's [[Friends of Pinecrest Library]] pay for it. So the library is its `client`, the Friends are its `bill_to`, and its invoices will go to the Friends once flat fees can be invoiced. When it's done, run *Invoice* here and pick the day. For now that records the fee as earned rather than making an invoice: the fee then counts in that week's, month's and year's Earnings.
 
 ## To Do
 

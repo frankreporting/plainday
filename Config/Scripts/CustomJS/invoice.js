@@ -13,10 +13,11 @@ class Invoice {
     // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
     // (Billing reads and writes it). Your details come from Config/Invoice Settings.md, which updates
-    // leave alone; the client's code, billing name and address from the note the project's `client`
-    // links to. They're copied in when the invoice is made, so a sent invoice never changes.
+    // leave alone; the code, billing name and address of whoever is billed from the note the project's
+    // `bill_to` links to, else its `client` (OBS-109). They're copied in when the invoice is made, so a
+    // sent invoice never changes.
     //
-    // Only the invoice note (and the client's `code` once, and the settings note) is written. Daily
+    // Only the invoice note (and the billed note's `code` once, and the settings note) is written. Daily
     // notes are only read. The pure methods come first, tested with vm; everything that touches `app`
     // is at the bottom.
     static SETTINGS = "Config/Invoice Settings.md";
@@ -80,28 +81,51 @@ class Invoice {
         return { number: null, error: `isn't a whole number from 0 to ${Invoice.MAX_NUMBER} (${typeof raw === "string" ? raw.trim() : JSON.stringify(raw)})` };
     }
 
-    // The note a project bills: its own `client`, else the nearest parent's. { path, name, code,
-    // billingName, address } or { error }. `code` is upper-cased, "" when not set yet.
-    readClient(project, tr, index) {
-        let raw = null, from = null;
-        const seen = new Set();
-        for (let p = project; p && !seen.has(p); p = tr.parentProject(p, index)) {
-            seen.add(p);
-            const v = [].concat(tr.prop(index.props?.(p) ?? {}, "client") ?? [])[0];
-            if (v !== undefined && v !== null && String(v).trim() !== "") { raw = String(v).trim(); from = p; break; }
-        }
-        if (!raw) return { error: `${tr.basename(project)} has no \`client\`; link the client's note from the project first` };
-        const target = raw.match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? raw;
-        const path = index.linkDest(target, from);
-        if (!path) return { error: `The client ${raw} isn't a note yet; create it, then run Invoice again` };
-        const props = index.props?.(path) ?? {};
-        const name = tr.basename(path);
+    // The note a project's invoices bill (OBS-109): the one the nearest `bill_to` links to, the project's
+    // own or a parent's, so a sub-project that repeats its parent's `client` still bills the parent's
+    // `bill_to`; with no `bill_to` up the chain, the nearest `client`'s. { path, name, code, billingName,
+    // address, client } or { error }. `code` is upper-cased, "" when not set yet. `client` is the
+    // nearest `client`, the end client the invoice records: { path, written }, with `path` null when it
+    // isn't a note (it stops the invoice only when it's the one billed), or null when there's none.
+    readBillTo(project, tr, index) {
+        const nearest = (key) => {
+            for (let p = project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+                seen.add(p);
+                const v = [].concat(tr.prop(index.props?.(p) ?? {}, key) ?? [])[0];
+                if (v === undefined || v === null || String(v).trim() === "") continue;
+                const raw = String(v).trim();
+                const target = raw.match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? raw;
+                // The link as written, alias and all, for a client that isn't a note
+                const written = raw.match(/^\[\[([^\]]+)\]\]$/)?.[1] ?? raw.replace(/[[\]|]/g, "").trim();
+                return { raw, target, written, path: index.linkDest(target, p) };
+            }
+            return null;
+        };
+        const billTo = nearest("bill_to"), client = nearest("client");
+        const billed = billTo ?? client;
+        if (!billed) return { error: `${tr.basename(project)} has no \`client\` or \`bill_to\`; link the note to bill from the project first` };
+        if (!billed.path) return { error: `The ${billTo ? "bill-to" : "client"} ${billed.raw} isn't a note yet; create it, then run Invoice again` };
+        const props = index.props?.(billed.path) ?? {};
+        const name = tr.basename(billed.path);
         return {
-            path, name,
+            path: billed.path, name,
             code: String(tr.prop(props, "code") ?? "").trim().toUpperCase(),
             billingName: String(tr.prop(props, "billing_name") ?? "").trim() || name,
             address: this.list(tr.prop(props, "address")),
+            client: client ? { path: client.path, written: client.written } : null,
         };
+    }
+
+    // The link text of the invoice's `client` and `bill_to`: the client's as written when it isn't a
+    // note, "" with no client; `linkText(path)` makes the rest
+    partyLinks(billed, linkText) {
+        const c = billed.client;
+        return { clientLink: c ? (c.path ? linkText(c.path) : c.written) : "", billToLink: linkText(billed.path) };
+    }
+
+    // A link as a frontmatter value: quoted, or blank with no link text
+    linkValue(text) {
+        return text ? JSON.stringify(`[[${text}]]`) : "";
     }
 
     // A code to suggest for a client: the first letters of its words, or its first three letters
@@ -142,7 +166,8 @@ class Invoice {
             `parent: ${q(d.parent)}`,
             `${Invoice.STATUS}: ${d.status}`,
             `number: ${q(d.name)}`,
-            `client: ${q(`[[${d.clientLink}]]`)}`,
+            `client: ${this.linkValue(d.clientLink)}`.trimEnd(),
+            `bill_to: ${this.linkValue(d.billToLink)}`,
             `invoice_date: ${d.invoiceDate}`,
             `period_start: ${d.periodStart}`,
             `period_end: ${d.periodEnd}`,
@@ -252,22 +277,37 @@ class Invoice {
     }
 
     // The note with frontmatter keys set to plain values (a status, a date, a number), each on its own
-    // line; a key it doesn't have yet goes last. Null when the note has no frontmatter.
-    setProps(text, props) {
+    // line; a key it doesn't have yet goes last, or right after the key `after` names for it when the
+    // note has that one. Null when the note has no frontmatter.
+    setProps(text, props, { after = {} } = {}) {
         const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
         const lines = String(text).split(/\r?\n/);
         let end = this.frontmatterEnd(lines);
         if (end === -1) return null;
+        const find = (key) => lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
+        // The line after a key's own, and the list under it
+        const past = (at) => { let next = at + 1; while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++; return next; };
         for (const [key, value] of Object.entries(props)) {
             const line = `${key}: ${value ?? ""}`.trimEnd();
-            const at = lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
-            if (at === -1) { lines.splice(end, 0, line); end++; continue; }
-            let next = at + 1;
-            while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++;   // a list under the key goes too
+            const at = find(key);
+            if (at === -1) {
+                const anchor = after[key] ? find(after[key]) : -1;
+                lines.splice(anchor === -1 ? end : past(anchor), 0, line);
+                end++;
+                continue;
+            }
+            const next = past(at);   // a list under the key goes too
             lines.splice(at, next - at, line);
             end -= next - at - 1;
         }
         return lines.join(nl);
+    }
+
+    // A rebuilt draft's frontmatter: who it bills set from the project as it is now (`client`, then
+    // `bill_to` right after it on a draft from before OBS-109), and `more`; every other property as it was
+    rebuiltFront(front, billed, linkText, more = {}) {
+        const { clientLink, billToLink } = this.partyLinks(billed, linkText);
+        return this.setProps(front, { client: this.linkValue(clientLink), bill_to: this.linkValue(billToLink), ...more }, { after: { bill_to: "client" } });
     }
 
     // The frontmatter without `keys` (and any list under one), or null when there's none
@@ -487,8 +527,8 @@ class Invoice {
             new Notice(`${tr.basename(project)} isn't its folder's own note, so it has no invoices/ folder; set \`folder\` in ${tr.basename(Invoice.SETTINGS)} to file every invoice in one place`, 0);
             return;
         }
-        const client = this.readClient(project, tr, index);
-        if (client.error) { new Notice(client.error); return; }
+        const billed = this.readBillTo(project, tr, index);
+        if (billed.error) { new Notice(billed.error); return; }
 
         const through = await this.askDate("Bill through");
         if (!through) return;
@@ -507,11 +547,11 @@ class Invoice {
         }
         if (!(await this.confirm(project, through, sel, model, tr, billing))) return;
 
-        if (client.code && !Invoice.CODE.test(client.code)) {
-            new Notice(`The \`code\` on ${client.name} (${client.code}) isn't 2 to 8 letters or digits; fix it there, then run Invoice again`, 0);
+        if (billed.code && !Invoice.CODE.test(billed.code)) {
+            new Notice(`The \`code\` on ${billed.name} (${billed.code}) isn't 2 to 8 letters or digits; fix it there, then run Invoice again`, 0);
             return;
         }
-        const code = client.code || await this.askCode(client, tr);
+        const code = billed.code || await this.askCode(billed, tr);
         if (!code) return;
         // `last_number` as it is now: the prompts may have been open a while
         const now = await this.lastNumberNow(tr, billing);
@@ -528,9 +568,9 @@ class Invoice {
         const props = index.props(project) ?? {};
         const text = this.noteText({
             id: window.moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
-            parent: `[[${linkText(project)}|${alias}]]`, clientLink: linkText(client.path),
+            parent: `[[${linkText(project)}|${alias}]]`, ...this.partyLinks(billed, linkText),
             invoiceDate: window.moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
-            from: settings, billTo: { name: client.billingName, address: client.address },
+            from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
             billed: billing.snapshot(sel.entries, model, tr), linkText,
@@ -732,12 +772,12 @@ class Invoice {
         });
     }
 
-    // The client's invoice code, asked once and saved on the client's note
-    async askCode(client, tr) {
-        const code = await this.askText("Client code", `Invoices for ${client.name} are numbered like 1001-${this.suggestCode(client.name)}. Its code goes on its note as \`code\`.`,
-            this.suggestCode(client.name), (v) => (Invoice.CODE.test(v.toUpperCase()) ? null : "2 to 8 letters or digits"));
+    // The billed note's invoice code (its `bill_to`'s, else its client's), asked once and saved on that note
+    async askCode(billed, tr) {
+        const code = await this.askText("Invoice code", `Invoices to ${billed.name} are numbered like 1001-${this.suggestCode(billed.name)}. Its code goes on its note as \`code\`.`,
+            this.suggestCode(billed.name), (v) => (Invoice.CODE.test(v.toUpperCase()) ? null : "2 to 8 letters or digits"));
         if (!code) return null;
-        const file = app.vault.getFileByPath(client.path);
+        const file = app.vault.getFileByPath(billed.path);
         await app.fileManager.processFrontMatter(file, (fm) => { fm.code = code.toUpperCase(); });
         return code.toUpperCase();
     }
@@ -1034,8 +1074,8 @@ class Invoice {
         if (tr.isArchived(invoice.project)) { new Notice(`${tr.basename(invoice.project)} is archived, so it isn't invoiced`); return; }
         const settings = await this.settings(tr);
         if (!settings) return;
-        const client = this.readClient(invoice.project, tr, index);
-        if (client.error) { new Notice(client.error); return; }
+        const billed = this.readBillTo(invoice.project, tr, index);
+        if (billed.error) { new Notice(billed.error); return; }
         const working = new Notice("Rebuilding…", 0);
         let model, sel;
         try {
@@ -1046,18 +1086,19 @@ class Invoice {
         if (!this.billable(invoice.project, model, sel, tr, billing, invoice.periodEnd, { rebuild: true })) return;
         const linkText = (p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, file.path, true) : tr.basename(p); };
         const props = index.props(invoice.project) ?? {};
-        const billed = billing.snapshot(sel.entries, model, tr);
-        const rows = billing.rows(billed);
+        const entries = billing.snapshot(sel.entries, model, tr);
+        const rows = billing.rows(entries);
         const minutes = rows.reduce((s, r) => s + r.minutes, 0), cents = rows.reduce((s, r) => s + r.amount, 0);
         const d = {
             name: invoice.name, invoiceDate: invoice.invoiceDate ?? window.moment().format("YYYY-MM-DD"), minutes, cents,
-            from: settings, billTo: { name: client.billingName, address: client.address },
+            from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
-            billed, linkText, descriptions: this.keepDescriptions(text, invoice.rows.map((r) => ({ ...r })), billing, tr),
+            billed: entries, linkText, descriptions: this.keepDescriptions(text, invoice.rows.map((r) => ({ ...r })), billing, tr),
             check: this.beforeSending(sel, tr),
         };
-        const front = this.setProps(this.split(text).front, { period_start: sel.entries[0].date, hours: tr.hours(minutes), total: (cents / 100).toFixed(2) });
+        // Who it bills too, so a draft from before OBS-109 moves to its project's `bill_to`; its name stays
+        const front = this.rebuiltFront(this.split(text).front, billed, linkText, { period_start: sel.entries[0].date, hours: tr.hours(minutes), total: (cents / 100).toFixed(2) });
         const nl = text.includes("\r\n") ? "\r\n" : "\n";
         const after = `${front}${nl}${this.body(d, tr, billing).replace(/\n/g, nl)}`;
         if (!(await this.write(file, text, after, tr))) return;
