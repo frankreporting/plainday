@@ -133,15 +133,14 @@ scenario("Schedule on a sub-task schedules its task: with time logged under it, 
 
 scenario("Schedule on a line nested under a task in a note sends that task, with its open sub-task (OBS-193, rule 5; Brian, 2026-10-26)", async ({ lag }) => {
     const INBOX = "Inbox/Inbox.md", SUB = "Projects/Freelance/Kestrel/Catalog/Catalog.md";
-    // From a note in the Inbox folder, which is in no project: nothing takes the place of the line's ⭕, so
-    // it keeps it (rule 13, OBS-208), with a ↗ back to its note after it. A ⭕ on a line outside a periodic
-    // note counts for nothing (rule 4), so the check reads that line as in no project, against the day's Kestrel
+    // From a note in the Inbox folder, which is in no project: the line's ⭕ gives way (rule 13; Brian, 2026-10-31,
+    // a note there gets its project by being filed), with a ↗ back to its note. The [>] line isn't touched
     let v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n", [INBOX]: "- [ ] Website [[Kestrel|⭕]]\n\t- [ ] Fix the header\n" }, open: INBOX, at: 1, lag });
     await v.schedule("2026-09-18");
-    assert.deepEqual(v.check().map((x) => x.rule), ["project"]);
+    assert.deepEqual(v.check(), []);
     let id = idIn(v.notes()[INBOX]);
     assert.equal(v.notes()[INBOX], `- [>] Website [[2026-09-18#^${id}|9/18]] [[Kestrel|⭕]] ^${id}\n`);
-    assert.equal(v.notes()[day("2026-09-18")].trim(), `- [ ] Website [[Kestrel|⭕]] [[Inbox#^${id}|↗]] ^${id}\n\t- [ ] Fix the header`);
+    assert.equal(v.notes()[day("2026-09-18")].trim(), `- [ ] Website [[Inbox#^${id}|↗]] ^${id}\n\t- [ ] Fix the header`);
     assert.equal(v.notices.at(-1), 'Forwarded "Website" to 9/18');
     // From a project note, under a line naming a project inside it: the note's own project, Kestrel, since a
     // line outside a periodic note has no project of its own (rules 4 and 13, OBS-208); its ⭕ Catalog stays on
@@ -184,8 +183,8 @@ scenario("Schedule on a sent line nested under a task in a note sends the task a
     const id = idIn(v.notes()[INBOX].split("\n")[0]);
     assert.notEqual(id, "abc123");
     assert.equal(v.notes()[INBOX], `- [>] Website [[2026-09-21#^${id}|9/21]] [[Kestrel|⭕]] ^${id}\n\t- [>] Fix the header [[2026-09-18#^abc123|9/18]] ^abc123\n`);
-    // From a note in Inbox, in no project: it keeps its ⭕, with a ↗ back to Inbox (rule 13, OBS-208)
-    assert.equal(v.notes()[day("2026-09-21")].trim(), `- [ ] Website [[Kestrel|⭕]] [[Inbox#^${id}|↗]] ^${id}`);
+    // From a note in Inbox, in no project: no ⭕, and a ↗ back to Inbox (rule 13, OBS-208)
+    assert.equal(v.notes()[day("2026-09-21")].trim(), `- [ ] Website [[Inbox#^${id}|↗]] ^${id}`);
 });
 
 for (const lag of [false, true]) {

@@ -25,9 +25,9 @@ class AddTaskNote {
     // Notebook Navigator's icon for a logs folder the system makes (a Lucide name)
     static LOGS_ICON = "history";
     // A line's link to its own note: a task's note, or an event's meeting log (OBS-57), marked ⋯
-    // (OBS-208). FROM_MARK, ↗, links the note Schedule sent the line from (Schedule.FROM_MARK). Until
-    // OBS-196 and OBS-186 tell them apart, a line's note is read as its ⋯, else its ↗ (NOTE_LINK, the
-    // first in the run); OWN_NOTE_LINK and FROM_LINK read one each. A phone may add the U+FE0F to ↗.
+    // (OBS-208). FROM_MARK, ↗, links the note Schedule sent the line from (Schedule.FROM_MARK). NOTE_LINK
+    // reads either, for where the marks sit in a line's run; OWN_NOTE_LINK and FROM_LINK read one each, and
+    // only the ⋯ is a line's own note. A phone may add the U+FE0F to ↗.
     // 🗒️ and 🔗, the marks before, mean nothing now: the one-time conversion replaced them.
     static NOTE_MARK = "⋯";
     static FROM_MARK = "↗";
@@ -48,15 +48,15 @@ class AddTaskNote {
     // Task and Log templates (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
     static preset = null;
 
-    // On a task line: link the task's note, creating it first through the Task template when there
-    // isn't one (filed where the line's ⭕ says, or else in Inbox), then put the cursor right after
-    // the checkbox.
-    // The name is the selected text or, with nothing selected, the task's text, as long as some text
-    // comes after the cursor. With only whitespace after the cursor, insert an empty link to type a
-    // name into. The line keeps a link to the note's project or area, before the note link (OBS-90).
-    // On an event line (`- [<]`), link a meeting log named with the daily note's date and the event's
-    // title (the selection, or the text after its time), at the end of the line like a task's note
-    // (OBS-57), and make the log right away, as a task's note is made (see makeLog).
+    // On a task line: link the task's note, making it first through the Task template when there isn't one,
+    // and put its ⋯ on every line of the task, ahead of any ↗ (rule 8). The cursor stays where it was.
+    // The name is the selected text or, with nothing selected, the task's text, as long as some text comes
+    // after the cursor. With only whitespace after the cursor, insert an empty link to type a name into. On a
+    // line that already has a ⋯, that note's ⋯ goes on the task's other lines (spread). A new note is filed in
+    // the line's project, or waits in Inbox. A note of that name already there is settled (attach).
+    // On an event line (`- [<]`), link a meeting log named with the daily note's date and the event's title
+    // (the selection, or the text after its time), at the end of the line like a task's note (OBS-57), and
+    // make the log right away, as a task's note is made (see makeLog).
     async invoke() {
         const editor = app.workspace.activeLeaf?.view?.editor;
         const source = app.workspace.getActiveFile();
@@ -73,7 +73,7 @@ class AddTaskNote {
         const from = nested ? { line: top, ch: this.afterCheckbox(lineText) } : cursor;
         const to = nested ? from : editor.getCursor("to");
 
-        if (!AddTaskNote.CHECKBOX.test(lineText) && !this.isEvent(lineText)) {
+        if ((!AddTaskNote.CHECKBOX.test(lineText) && !this.isEvent(lineText)) || this.hiddenAt(editor, top)) {
             new Notice("Not on a checklist item");
             return;
         }
@@ -82,42 +82,31 @@ class AddTaskNote {
             new Notice("This event moved to another day: link its log from its line there");
             return;
         }
+        const line = { editor, source, at: top, lineText, cursor };
 
         if (!selection) {
             const target = this.target(lineText, from.ch);
             if (target.error) {
                 new Notice(target.error);
-            } else if (target.mode === "blank" && nested) {
-                // The task at the top of the nest has no text yet: the empty link goes on it, before its ID
-                const id = lineText.match(AddTaskNote.BLOCK_ID);
-                const at = id ? id.index : lineText.length;
-                const text = `${/\S/.test(lineText[at - 1] ?? "") ? " " : ""}[[|${AddTaskNote.NOTE_MARK}]]`;
-                editor.transaction({ changes: [{ from: { line: from.line, ch: at }, text }], selection: { from: { line: from.line, ch: at + text.indexOf("|") } } });
+            } else if (target.mode === "own") {
+                await this.spread(line);
             } else if (target.mode === "blank") {
-                // A task's ID stays last (OBS-181): with the cursor past its start, the link goes in before
-                // it. insert() types at the cursor (replaceSelection), after the ID, so this places it itself.
-                const id = lineText.match(AddTaskNote.BLOCK_ID);
-                if (id && from.ch > id.index) {
-                    const text = ` [[|${AddTaskNote.NOTE_MARK}]]`;
-                    editor.transaction({ changes: [{ from: { line: from.line, ch: id.index }, text }], selection: { from: { line: from.line, ch: id.index + text.indexOf("|") } } });
+                // The empty link goes on the task at the top of the nest, and ahead of a ↗ and a task's ID, which
+                // stay last (OBS-181): insert() types at the cursor, so with one of those behind it, this places it
+                const stop = this.beforeRun(lineText);
+                if (nested || stop !== null) {
+                    const at = stop ?? lineText.length;
+                    const gap = /\S/.test(lineText[at - 1] ?? "") ? " " : "";
+                    const text = `${gap}[[|${AddTaskNote.NOTE_MARK}]]`;
+                    editor.transaction({ changes: [{ from: { line: from.line, ch: at }, text }], selection: { from: { line: from.line, ch: at + text.indexOf("|") } } });
                     return;
                 }
                 const before = /\S/.test(lineText.slice(from.ch - 1, from.ch)) ? " " : "";
                 this.insert(editor, from, "", before + `[[|${AddTaskNote.NOTE_MARK}]]` + this.spacer(lineText.slice(from.ch)));
             } else if (target.kind === "event") {
-                await this.linkEvent(editor, from.line, lineText, target.name);
-                if (nested) editor.setCursor(cursor);
+                await this.linkEvent(line, target.name);
             } else {
-                const found = await this.noteFor(target.name, source.path, lineText);
-                if (!found) return;
-                if (editor.getLine(from.line) !== lineText) {
-                    new Notice(`${found.note.basename} is ready, but the line changed, so it wasn't linked`);
-                    return;
-                }
-                const linked = this.lineWithLink(lineText, target, found);
-                editor.replaceRange(linked, { line: from.line, ch: 0 }, { line: from.line, ch: lineText.length });
-                // Run from a line under the task, the cursor stays where it was
-                editor.setCursor(nested ? cursor : { line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
+                await this.linkTask(line, target.name, target);
             }
             return;
         }
@@ -128,142 +117,252 @@ class AddTaskNote {
         }
 
         if (this.isEvent(lineText)) {
-            await this.linkEvent(editor, from.line, lineText, selection.trim());
+            await this.linkEvent(line, selection.trim());
             return;
         }
 
-        const found = await this.noteFor(selection, source.path, lineText);
-        if (!found) return;
-
-        // A menu may have waited on you; don't write into a line that changed in the meantime
-        if (editor.getLine(from.line) !== lineText) {
-            new Notice(`${found.note.basename} is ready, but the line changed, so it wasn't linked`);
+        // A line with a ⋯ is left alone, whatever's selected (rule 8)
+        if (AddTaskNote.OWN_NOTE_LINK.test(lineText)) {
+            await this.spread(line);
             return;
         }
+
         // The selection's own leading and trailing spaces stay, so words don't run together
         let start = from.ch, end = to.ch;
         while (start < end && /\s/.test(lineText[start])) start++;
         while (end > start && /\s/.test(lineText[end - 1])) end--;
-        const linked = this.lineWithLink(lineText, { from: start, to: end }, found);
-        editor.replaceRange(linked, { line: from.line, ch: 0 }, { line: from.line, ch: lineText.length });
-        editor.setCursor({ line: from.line, ch: this.afterCheckbox(editor.getLine(from.line)) });
+        await this.linkTask(line, selection, { from: start, to: end }, { selected: true });
     }
 
-    // The task note for `text`, as linked from `sourcePath`. A date in the text is the task's due
-    // date, not part of its name: the note is looked up by the name without it, and a new one is made
-    // through the Task template from the full text, so the template can set `due`.
-    //
-    // `lineText` is the whole task line. The line and its note agree on where the time counts
-    // (OBS-90): the line keeps a ⭕ (or 🗃️) for the note's project or area, next to its ⋯. The line's
-    // ⭕ links decide where the note goes first:
-    //   - one project or area linked: a new note is filed there, and an existing note with no
-    //     project or area (its nearest folder note) is moved there, without asking;
-    //   - several linked: you pick, with the line's projects listed first, and the note is filed or
-    //     moved there;
-    //   - an existing note already in a different project or area: you're asked to move it there or
-    //     leave it (its project is shared by every line that links it); left, the line's ⭕ becomes
-    //     the note's project instead.
-    // A line with no ⭕ gets one for wherever its note is filed. A new note for such a line goes where
-    // the note the line is in belongs (a project's own note, or a task note filed in one: see
-    // sourceHome), and otherwise waits in Inbox, unfiled; no menu asks (OBS-55). A project or area
-    // note is never moved. Esc on a menu cancels and nothing changes. An existing note's `parent` is then set from
-    // its folder (SyncArea's rule).
-    //
-    // Resolves to { note, linktext, name, created, home, homeLink, clear, projectLinks }, where `name`
-    // is the text to leave on the line (without its dates), `home` the project or area the line names
-    // from now on and `homeLink` its ⭕ or 🗃️ link (both null when there's none to name: the line's
-    // own links are then left as they are, unless `clear` says they'd disagree with the note), and
-    // `projectLinks` the line's ⭕ link texts, which `homeLink` replaces. Null when no note could be
-    // made or a menu was dismissed. Schedule uses this too, so a ⋯ link it writes always has a note
-    // behind it: a task can have its note before it has a home.
-    async noteFor(text, sourcePath, lineText = "") {
+    // Where an empty link goes when a ↗ or an ID ends the line, or null when neither does
+    beforeRun(lineText) {
+        const from = lineText.match(AddTaskNote.FROM_LINK);
+        if (from) return lineText.slice(0, from.index).replace(/\s+$/, "").length;
+        const id = lineText.match(AddTaskNote.BLOCK_ID);
+        return id ? id.index : null;
+    }
+
+    // The project or area note line `at` of the note at `path` says, a finished one included, or null: in a
+    // periodic note its own ⭕ or 🗃️, anywhere else its note's (rule 4). A line that disagrees with itself says
+    // none, since nothing decides. The time report's one lookup answers.
+    lineHomeAt(lines, at, path) {
+        const tr = customJS.TimeReport, index = tr.appIndex();
+        const project = tr.resolve((n) => lines[n], at, path, index).conflict ? null : tr.lineProject({ path }, at, lines, index);
+        return project ? app.vault.getFileByPath(project) : null;
+    }
+
+    // The project or area a line of a daily note at `path` says, for the Log template, or null
+    lineHomeIn(lineText, path) {
+        return this.lineHomeAt([lineText], 0, path);
+    }
+
+    // The project or area the line at `at` of the note open in `editor` says
+    projectOfLine(editor, source, at) {
+        return this.lineHomeAt(customJS.Schedule.constructor.editorLines(editor).map((l) => l.replace(/\r$/, "")), at, source.path);
+    }
+
+    // The task's line once it links its note: `span` of its text gives way to the name without its dates, and
+    // every line of the task takes the ⋯. `text` is what names the note; a date in it is the task's due date,
+    // not part of its name, so the note is looked up without it, and a new one is made through the Task
+    // template from the name with the dates after it, so the template can set `due` and the name keeps no
+    // doubled space where a date was. Settling on a project is a project change
+    // (rule 9): a new note is made only once the question and the refusal are past.
+    async linkTask(line, text, span, { selected = false } = {}) {
+        const { editor, source, at, lineText, cursor } = line;
+        const change = customJS.TaskChange;
+        if (!change.ready()) return;
         const name = this.withoutDates(text);
-        const line = this.lineProjects(lineText, sourcePath);
-        const existing = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
-        let note, home, movedFrom = null, clear = false;
-        if (existing) {
-            const settled = await this.settle(existing, line);
-            if (!settled) return null;
-            ({ note, home, movedFrom, clear } = settled);
-            await customJS.SyncArea?.sync?.(note, false);
-        } else {
-            let pick = null;
-            if (line.allLive && line.projects.length === 1) {
-                pick = line.projects[0];
-            } else if (line.allLive && line.projects.length > 1) {
-                pick = await this.pickHome(name, line.projects);
-                if (!pick) return this.cancelled();
-            } else if (!line.links.length) {
-                pick = this.sourceHome(sourcePath);
-            }
-            note = await this.createTaskNote(text, pick);
-            if (!note) return null;
-            home = this.homeFor(note, pick);
-            new Notice(`Created ${note.path.replace(/\.md$/, "")}`);
+        // The note of that name outside Archive. One in Archive is an old one: this task gets a fresh note,
+        // named apart from it so the old days' links keep pointing at it, and the old one is left alone
+        // (Brian, 2026-11-02)
+        const named = this.namedNote(name, source.path);
+        let existing = named && !this.inArchive(named) ? named : null;
+        let found = await change.find({ file: source, at }, { note: existing });
+        // The fresh note an earlier run made for it, for the task's next line or after a run that stopped short
+        const madeBefore = named && !existing ? this.freshNote(name, this.homeOf(line, found)) : null;
+        if (madeBefore) {
+            existing = madeBefore;
+            found = await change.find({ file: source, at }, { note: existing });
         }
-        const paths = app.vault.getMarkdownFiles().map((f) => f.path);
-        return {
-            note, name, created: !existing, home, clear,
-            // A note just moved can still show at its old path for a moment (see isSameNote)
-            linktext: this.linktextFor(note, paths.filter((p) => p !== movedFrom)),
-            homeLink: home ? this.homeLink(home, this.linktextFor(home, paths)) : null,
-            projectLinks: line.links,
+        const start = found.lines.find((l) => l.file === source && l.at === at);
+        // A task whose other line, by its ID, already links its note takes that note, unless you named one
+        const T = customJS.TaskIds.constructor, id = start && T.idOf(start.seen)?.toLowerCase();
+        const sameTask = (l) => l !== start && id && T.idOf(l.seen)?.toLowerCase() === id;
+        const others = found.lines.filter(sameTask).map((l) => this.ownNoteOf(l.seen, l.file.path)).filter(Boolean);
+        const other = others.find((n) => !this.inArchive(n));
+        if (other && !selected) return this.spread(line, other);
+        const retitled = lineText.slice(0, span.from) + name + lineText.slice(span.to);
+        const keep = lineText.slice(0, span.to);
+        const each = (note, oldPath = null) => (t, l) => {
+            const paths = app.vault.getMarkdownFiles().map((f) => f.path).filter((p) => p !== oldPath);
+            const named = l === start && t.startsWith(keep) ? retitled.slice(0, span.from + name.length) + t.slice(span.to) : t;
+            return this.withOwn(named, `[[${this.linktextFor(note, paths)}|${AddTaskNote.NOTE_MARK}]]`);
         };
+        let done, note = null;
+        if (existing) done = await this.attach(line, existing, found, each(existing, existing.path), name);
+        else {
+            const home = this.homeOf(line, found);
+            // The template takes the dates off the title for the note's name and keeps the last as its due date
+            const noteName = named ? this.freshName(name, home) : name;
+            const title = [noteName, ...(name.match(AddTaskNote.DATE) ? [] : text.match(AddTaskNote.DATE) ?? [])].join(" ");
+            // With no project the note waits in the Inbox, which a line naming a project is warned about
+            const adds = home ? null : { path: `${customJS.TaskIds.constructor.INBOX}/${noteName}.md`, basename: noteName };
+            const make = async () => {
+                note = await this.createTaskNote(title, home);
+                if (!note) return false;
+                new Notice(`Created ${note.path.replace(/\.md$/, "")}`);
+                // The template took a moment; don't write into a line that changed in the meantime
+                if (editor.getLine(at) === lineText) return true;
+                new Notice(`${note.basename} is ready, but the line changed, so it wasn't linked`);
+                return false;
+            };
+            const own = (t, l) => each(note)(t, l);
+            done = (await change.run(found, home, { ready: make, each: own, name, adds, start, stale: () => editor.getLine(at) !== lineText })).done;
+        }
+        if (!done || start.gone) return;
+        // The task's other line links another note, one you didn't name or one in Archive: the report lists the two
+        const linked = existing ?? note, two = others.find((n) => !(linked && this.isSameNote(n, linked)));
+        if (two) new Notice(`This task's other line links ${two.basename}, so the report lists it as linking two notes`);
+        // A note that moved can have taken a property above the line, as SyncArea writes `parent`
+        const now = start.at, shifted = { line: cursor.line + now - at, ch: cursor.ch };
+        if (selected) editor.setCursor({ line: now, ch: span.from + name.length });
+        else this.keepCursor(editor, shifted, now, lineText, retitled);
     }
 
-    // Where an existing note settles for a line whose ⭕ links are `line` (lineProjects), as noteFor
-    // describes: moved, after asking when it would leave a project or area, or left where it is.
-    // Resolves to { note, home, movedFrom, clear }: the note to link (a same-named note already in the
-    // picked project or area is linked instead), the project or area the line should name (null:
-    // none), the path the note was moved from, and whether the line's own ⭕ links come off even with
-    // no home to name (the note was left in a finished project; the line's time is Unassigned until
-    // OBS-225 writes that project on the line). Null when a
-    // menu was dismissed or the move was refused. A project or area note, and a note MoveToProject
-    // never moves (the system, the periodic notes, archived work), is linked where it is, and the
-    // line keeps its links. A meeting log goes the same way when an event line links one that exists.
-    async settle(existing, line) {
-        const none = { note: existing, home: null, movedFrom: null, clear: false };
-        if (this.isHomeNote(existing) || customJS.MoveToProject?.kept?.(existing.path)) return none;
-        // Where it's filed, a finished project included
-        const noteHome = this.filedIn(existing);
-        if (!line.projects.length) return { ...none, home: this.lineHome(existing) };
-        if (line.projects.includes(noteHome)) return { ...none, home: noteHome };
-        const pick = line.allLive && line.projects.length === 1 ? line.projects[0] : await this.pickHome(existing.basename, line.projects);
-        if (!pick) return this.cancelled();
-        const twin = this.sameNameIn(existing, pick);
-        if (twin) {
-            // The picked home already has a note of that name: link that one, leave this one
-            new Notice(`Linked the ${twin.basename} already in ${pick.basename}; the one in ${existing.parent?.path || "the vault root"} was left alone`);
-            return { note: twin, home: pick, movedFrom: null, clear: false };
+    // Settles `existing`, the note the line's name resolves to (rule 8), and writes the line. True once it has:
+    //   - outside the system, a project or area note, an invoice or a timesheet: it's linked from this line,
+    //     and nothing else changes; a notice names the line if it now disagrees with its note;
+    //   - filed in another project than the line's: it asks, Move or Leave it (TaskChange.ask), unless the
+    //     line's project already has another note of that name, which refuses;
+    //   - otherwise the task takes the line's project, or the note's when the line has none, a note waiting in
+    //     the Inbox filed there with it (rule 9). With neither, it's only linked.
+    async attach(line, existing, found, each, name = null) {
+        const { editor, source, at, lineText } = line;
+        const change = customJS.TaskChange;
+        const adds = existing, stale = () => editor.getLine(at) !== lineText;
+        const start = found.lines.find((l) => l.file === source && l.at === at) ?? null;
+        // Linked from this line as it is; a line it leaves disagreeing is named afterwards (warn after, never block)
+        if (!change.ours(existing)) {
+            const one = { notes: [], stays: [], lines: found.lines.filter((l) => l.file === source && l.at === at) };
+            return !!(await change.run(one, null, { stale, each, name, adds, start })).done;
         }
-        // Already where the pick would put it (a project note that isn't its folder's own note
-        // shares its folder with other notes): nothing moves, and the line names the pick
-        if (pick === noteHome || existing.parent?.path === this.folderFor(existing, pick)) return { ...none, home: pick };
-        if (noteHome) {
-            const choice = await this.confirmMove(existing, noteHome, pick);
-            if (!choice) return this.cancelled();
-            if (choice === "leave") {
-                new Notice(`${existing.basename} stays in ${noteHome.basename}, and so does this line's time`);
-                return { ...none, home: this.lineHome(existing), clear: true };
+        const home = this.homeOf(line, found), noteHome = this.filedAbove(existing);
+        if (home && noteHome && home !== noteHome) {
+            if (this.sameNameIn(existing, home)) {
+                new Notice(`${home.basename} already has a different note named ${existing.basename}, so nothing changed`);
+                return false;
             }
+            return !!(await change.run(found, home, { leave: noteHome, stale, each, name, adds, start })).done;
         }
-        const movedFrom = existing.path;
-        if (!(await this.moveInto(existing, pick))) return null;
-        return { note: existing, home: this.homeFor(existing, pick), movedFrom, clear: false };
+        return !!(await change.run(found, home ?? noteHome, { stale, each, name, adds, start })).done;
     }
 
-    // The project or area a line names for `note`, filed for `pick` (a picked project or area, or
-    // null): `pick` when the note is in the folder the pick files into (a project note that isn't its
-    // folder's own note has no folder of its own; AddProjectLink keeps such a link too), else where
-    // the note is filed (lineHome).
-    homeFor(note, pick = null) {
-        return pick && note.parent?.path === this.folderFor(note, pick) ? pick : this.lineHome(note);
+    // The project a line says, as projectOfLine reads it, or when it names none, the one its task's other
+    // lines agree on
+    homeOf({ editor, source, at }, found) {
+        return this.projectOfLine(editor, source, at) ?? customJS.TaskChange.agreedHome(found);
     }
 
-    // The folder a note goes into for `home` (an area or project note): its folder, or its logs
-    // folder for a meeting log
-    folderFor(note, home) {
-        return this.isLog(note) ? this.logsFolder(home) : home.parent.path;
+    // On a line that already has a ⋯: that note's ⋯ on the task's other lines, and the task takes the note's
+    // project, as a change does (rule 9). A line with a ⋯ is left alone.
+    async spread(line, note = this.ownNoteOf(line.lineText, line.source.path)) {
+        const { editor, source, at, lineText } = line;
+        const change = customJS.TaskChange;
+        if (!change.ready()) return;
+        if (!note) {
+            new Notice("This task already links a note");
+            return;
+        }
+        const T = customJS.TaskIds.constructor;
+        const found = await change.find({ file: source, at });
+        const missing = found.lines.filter((l) => l.task && !T.hasOwnNote(l.seen));
+        const linktext = this.linktextFor(note, app.vault.getMarkdownFiles().map((f) => f.path));
+        const each = (t) => this.withOwn(t, `[[${linktext}|${AddTaskNote.NOTE_MARK}]]`);
+        // A note in the system takes the task to its project, and one waiting in the Inbox is filed where the
+        // task's lines say; any other note is only linked. Run again after a failed write, it finishes.
+        const home = change.ours(note) ? this.filedAbove(note) ?? this.homeOf(line, found) : null;
+        if (!home && !missing.length) {
+            new Notice(`Every line of this task already links ${note.basename}`);
+            return;
+        }
+        const scope = home ? found : { notes: [], stays: [], lines: missing };
+        const result = await change.run(scope, home, { each, name: note.basename, stale: () => editor.getLine(at) !== lineText, adds: note });
+        // A failed write has said so, and to run it again
+        if (!result.done || result.failed.length) return;
+        // One line put in the note's project says so too, as more lines or a moved note already do (said)
+        if (result.wrote === 1 && !result.moved.length) new Notice(customJS.MoveToProject.linesNow(1, home));
+        if (missing.length) new Notice(`Linked ${note.basename} on ${missing.length === 1 ? "1 more line" : `${missing.length} more lines`} of this task`);
+        else if (!result.wrote && !result.moved.length && !result.toDo.length) new Notice(`Every line of this task already links ${note.basename}`);
+    }
+
+    // The note `name` resolves to, preferring one outside Archive when notes there share the name
+    namedNote(name, from) {
+        const first = app.metadataCache.getFirstLinkpathDest(name, from);
+        if (!first || !this.inArchive(first)) return first;
+        const lower = name.toLowerCase();
+        return app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === lower && !this.inArchive(f)) ?? first;
+    }
+
+    // A name for a fresh note that no other note has: `name (Project)`, or with a number after it
+    freshName(name, home) {
+        const taken = new Set(app.vault.getMarkdownFiles().map((f) => f.basename.toLowerCase()));
+        const base = home ? `${name} (${home.basename})` : name;
+        if (!taken.has(base.toLowerCase())) return base;
+        for (let n = 2; ; n++) if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
+    }
+
+    // The fresh note an earlier run made for a task named like a note in Archive, by any name freshName gives
+    // one: outside Archive, one a change can move, named `name (Project)`, wherever it's filed since, with a
+    // number after it or not, or `name 2` (any number) while it waits in the Inbox. A note filed elsewhere
+    // with only a number after the name is another task's (Phase 2). The one in `home`, or in the Inbox when
+    // there's no `home`, else the only one; null when there's none, or no telling which.
+    freshNote(name, home) {
+        const inbox = `${customJS.TaskIds.constructor.INBOX}/`, files = app.vault.getMarkdownFiles();
+        const made = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (?:\\((.+)\\)(?: \\d+)?|\\d+)$`, "i");
+        const isHome = (p) => files.some((f) => f.basename.toLowerCase() === p.toLowerCase() && this.isHomeNote(f));
+        const found = files.filter((f) => {
+            const m = !this.inArchive(f) && f.basename.match(made);
+            return m && customJS.TaskChange.ours(f) && (m[1] ? isHome(m[1]) : f.path.startsWith(inbox));
+        });
+        const here = found.filter((f) => (home ? this.filedAbove(f)?.path === home.path : f.path.startsWith(inbox)));
+        if (here.length) return here.length === 1 ? here[0] : null;
+        return found.length === 1 ? found[0] : null;
+    }
+
+    // Whether `note` is in Archive
+    inArchive(note) {
+        return note.path.startsWith(customJS.TaskIds.constructor.ARCHIVE);
+    }
+
+    // The note a line's ⋯ links, or null
+    ownNoteOf(lineText, from) {
+        const target = this.trailingNote(lineText, AddTaskNote.OWN_NOTE_LINK);
+        return target ? app.metadataCache.getFirstLinkpathDest(target, from) : null;
+    }
+
+    // Whether line `at` of the note open in `editor` is hidden from the system, in a code block or a comment
+    hiddenAt(editor, at) {
+        const tr = globalThis.customJS?.TimeReport;
+        if (!tr) return false;
+        const lines = editor.getValue ? editor.getValue().split("\n") : Array.from({ length: editor.lineCount() }, (_, n) => editor.getLine(n));
+        return !!tr.scan(lines.map((l) => l.replace(/\r$/, ""))).hidden[at];
+    }
+
+    // The cursor where it was, on the same words, once line `at` has gone through `texts` (each a whole line):
+    // a change at its end leaves it, and text taken away from under it leaves it where that text was. Run
+    // from a line under the task, it stays there (OBS-224).
+    keepCursor(editor, cursor, at, ...texts) {
+        if (cursor.line !== at) return editor.setCursor(cursor);
+        let ch = cursor.ch;
+        const steps = [...texts, editor.getLine(at)];
+        for (let i = 0; i + 1 < steps.length; i++) {
+            const [was, now] = [steps[i], steps[i + 1]];
+            let s = 0, e = 0;
+            while (s < was.length && s < now.length && was[s] === now[s]) s++;
+            while (e < was.length - s && e < now.length - s && was[was.length - 1 - e] === now[now.length - 1 - e]) e++;
+            ch = customJS.DueDate.cursorAfter(ch, { from: s, to: was.length - e, text: now.slice(s, now.length - e) });
+        }
+        editor.setCursor({ line: at, ch });
     }
 
     // Whether a note is tagged exactly #project or #area, finished or not
@@ -273,34 +372,19 @@ class AddTaskNote {
     }
 
     // The project or area `file` is filed in: the nearest folder note above it tagged #project or
-    // #area, finished or not (unlike homeOf), or itself for one of those. Null outside any.
+    // #area, finished or not, or itself for one of those. Null outside any.
     filedIn(file) {
-        if (this.isHomeNote(file)) return file;
+        return this.isHomeNote(file) ? file : this.filedAbove(file);
+    }
+
+    // The project or area above `file`: the nearest folder note above it tagged #project or #area, finished or
+    // not. Null outside any.
+    filedAbove(file) {
         for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
             const folderNote = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
             if (folderNote && folderNote !== file && this.isHomeNote(folderNote)) return folderNote;
         }
         return null;
-    }
-
-    // Where a new note goes when its line names no project or area (OBS-55): the note the line is in,
-    // when that's a live project or area's own note, or else the live project or area that note is
-    // filed in. That's the project Schedule names on a line sent from that note. Null for a daily
-    // note, a note in Inbox, or a finished project.
-    sourceHome(sourcePath) {
-        const source = sourcePath ? app.vault.getFileByPath(sourcePath) : null;
-        if (!source) return null;
-        if (this.isHomeNote(source)) return this.isLiveHome(source) ? source : null;
-        return this.lineHome(source);
-    }
-
-    // The project or area a line that links `note` should name (OBS-90): the one the note is filed
-    // in, when that's live. Null when that's a finished project (OBS-225 names it, finished or not), for a
-    // note outside Projects/, and for a project or area note itself.
-    lineHome(note) {
-        if (this.isHomeNote(note)) return null;
-        const home = this.filedIn(note);
-        return home && this.isLiveHome(home) ? home : null;
     }
 
     // `lineText` with `link` ([[Project|⭕]] or [[Area|🗃️]], as homeLink writes it) as its project link
@@ -330,19 +414,9 @@ class AddTaskNote {
         return `${bare.slice(0, before).replace(/ +$/, "")} ${link} ${bare.slice(before).trim()}${block}`;
     }
 
-    // A line once it links its note (noteFor's `found`): the note's project or area in place of the
-    // line's ⭕ links, before the ⋯. A line whose note has no project or area keeps its own, unless
-    // they'd disagree with where the note was left (`clear`).
-    homed(lineText, found) {
-        return this.withHome(lineText, found.homeLink, found.homeLink || found.clear ? found.projectLinks : []);
-    }
-
-    // Whether `file`, a link's target looked up by name, is `note`, which may have just moved from
-    // `oldPath`. For a moment after a move the vault can hold a second entry at the old path (seen
-    // in a vault with a rename-handling plugin): it's gone within 50ms, but a lookup by name in
-    // that moment returns it whenever its path is shorter than the moved note's.
-    isSameNote(file, note, oldPath = null) {
-        return !!file && (file === note || file.path === note.path || (!!oldPath && file.path === oldPath));
+    // Whether `file`, a link's target looked up by name, is `note`
+    isSameNote(file, note) {
+        return !!file && (file === note || file.path === note.path);
     }
 
     // The link text for a task note: its name, or its path (without .md) when another note in `paths`
@@ -360,69 +434,52 @@ class AddTaskNote {
         return null;
     }
 
-    // Asks whether to move `note` from the project or area `from` into `to`. Resolves to "move",
-    // "leave", or null when dismissed (Esc). Enter moves. Laid out as facts, not a sentence: a
-    // Task (or Log, Project, Area or Note), From and To row, each project or area with its 🗃️ or ⭕,
-    // then one line on what happens to its time. The buttons follow the rows' order: Leave it, then
-    // Move. MoveToProject asks for a project or area too, whose `from` can be null (nothing above it).
-    confirmMove(note, from, to) {
+    // What a note is, as the question names it: "Log", "Task", "Area", "Project" or "Note"
+    kindOf(note) {
+        const cache = app.metadataCache.getFileCache(note);
+        const tags = cache ? this.tagsOf(cache) : [];
+        return this.isLog(note) ? "Log" : tags.includes("task") ? "Task"
+            : tags.includes("area") ? "Area" : tags.includes("project") ? "Project" : "Note";
+    }
+
+    // A project or area with its 🗃️ or ⭕, for the question
+    markOf(file) {
+        return file ? `${this.isArea(file) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${file.basename}` : "No project or area";
+    }
+
+    // The one question (rule 10). Asks whether to move `note` from the project or area `from` into `to`, with
+    // `title`, `label`, `name`, `words` (a sentence, or a list of them) and `cancel` when TaskChange has more to
+    // say than that. Resolves to "move", "leave", or null when dismissed (Esc, or Cancel). Enter moves. The one
+    // thing to decide about, highlighted with what it is (Task, Log, Note, Project or Area, or TaskChange's
+    // label), then what follows from it, with no days or lines: the system takes care of those, and `from` and
+    // `to` were just picked (Brian, 2026-11-03). The buttons: Leave it or Cancel, then Move. MoveToProject asks
+    // for a project or area too, whose `from` can be null (nothing above it).
+    confirmMove(note, from, to, { title = null, label = null, name = null, words = null, cancel = "Leave it" } = {}) {
         const { Modal, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
             let choice = null;
             const modal = new (class extends Modal {
                 onClose() { setTimeout(() => resolve(choice), 0); }
-                // Move is the default: focused, so Enter or Space takes it; Tab reaches Leave it.
+                // Move is the default: focused, so Enter or Space takes it; Tab reaches the other.
                 // Focused once the modal is open, not straight after open() (OBS-50)
                 onOpen() { requestAnimationFrame(() => move.buttonEl.focus()); }
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
-            const cache = app.metadataCache.getFileCache(note);
-            const tags = cache ? this.tagsOf(cache) : [];
-            const kind = this.isLog(note) ? "Log" : tags.includes("task") ? "Task"
-                : tags.includes("area") ? "Area" : tags.includes("project") ? "Project" : "Note";
-            const mark = (f) => (f ? `${this.isArea(f) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${f.basename}` : "No project or area");
-            modal.titleEl.setText(kind === "Task" ? "Move task note?" : `Move ${kind.toLowerCase()}?`);
-            const rows = modal.contentEl.createEl("table", { attr: { style: "border-collapse: collapse; margin-bottom: 0.75em;" } });
-            for (const [k, v] of [[kind, note.basename], ["From", mark(from)], ["To", mark(to)]]) {
-                const tr = rows.createEl("tr");
-                tr.createEl("td", { text: k, attr: { style: "padding: 0.15em 1em 0.15em 0; color: var(--text-muted); white-space: nowrap;" } });
-                tr.createEl("td", { text: v, attr: { style: "padding: 0.15em 0; font-weight: var(--font-semibold);" } });
-            }
-            modal.contentEl.createEl("p", { text: kind === "Area" ? "Its time, and its projects', stays their own."
+            const kind = note ? this.kindOf(note) : "Task";
+            modal.titleEl.setText(title ?? `Move ${kind.toLowerCase()}?`);
+            const mark = modal.contentEl.createEl("p").createEl("mark", { attr: { style: "background-color: var(--text-highlight-bg); color: var(--text-normal); padding: 0.1em 0.3em; border-radius: var(--radius-s);" } });
+            mark.createEl("strong", { text: `${label ?? kind}:` });
+            mark.appendText(` ${name ?? note?.basename ?? ""}`);
+            const said = words ?? (kind === "Area" ? "Its time, and its projects', stays their own."
                 : kind === "Project" ? "Its time stays its own. Inside another project, it counts toward that project's totals and takes its rate if it has none of its own."
-                : "Time entries will be reallocated accordingly." });
+                : "Time entries will be reallocated accordingly.");
+            for (const text of [].concat(said)) modal.contentEl.createEl("p", { text });
             const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
-            new ButtonComponent(row).setButtonText("Leave it").onClick(() => pick("leave"));
+            new ButtonComponent(row).setButtonText(cancel).onClick(() => pick(cancel === "Cancel" ? null : "leave"));
             const move = new ButtonComponent(row).setButtonText("Move").setCta().onClick(() => pick("move"));
             modal.scope.register([], "Enter", () => { pick("move"); return false; });
             modal.open();
         });
-    }
-
-    // The project or area a note sits in: its nearest folder note (Folder/Folder.md) tagged #project
-    // or #area, as SyncArea writes `parent`; a project or area note is its own home. Null outside any.
-    homeOf(file) {
-        if (this.isHome(file)) return file;
-        for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
-            const folderNote = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
-            if (folderNote && this.isHome(folderNote)) return folderNote;
-        }
-        return null;
-    }
-
-    // A task line's ⭕ links, the ones that end it (trailingProjectLinks): { links: link texts,
-    // projects: the distinct live projects or areas they point at, in line order, allLive: every
-    // link is one }. Live means tagged #project or #area, under Projects/, and not finished.
-    lineProjects(lineText, sourcePath) {
-        const links = this.trailingProjectLinks(lineText);
-        const projects = [];
-        let allLive = links.length > 0;
-        for (const { linkpath } of links) {
-            const file = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-            if (!file || !this.isLiveHome(file)) { allLive = false; continue; }
-            if (!projects.includes(file)) projects.push(file);
-        }
-        return { links: links.map((l) => l.raw), projects, allLive };
     }
 
     isLiveHome(file) {
@@ -457,18 +514,16 @@ class AddTaskNote {
             .map((t) => String(t).replace(/^#/, "").toLowerCase());
     }
 
-    // Asks which area or project the note `name` belongs to, with `preferred` (the task line's
-    // projects) first, then every other live area and project under Projects/. Resolves
-    // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject
-    // use the same menu; MoveToProject leaves out the ones it can't file into (`exclude(file)` true)
-    // and asks its own question (`placeholder`).
-    pickHome(name, preferred, { exclude = () => false, placeholder = null } = {}) {
+    // Asks which area or project `name` belongs to, from every live area and project under Projects/. Resolves
+    // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject use it,
+    // leaving out the ones they can't file into (`exclude(file)` true); MoveToProject asks its own question
+    // (`placeholder`).
+    pickHome(name, { exclude = () => false, placeholder = null } = {}) {
         const { FuzzySuggestModal } = customJS.obsidian;
         const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
-        const others = app.vault.getMarkdownFiles()
-            .filter((f) => f.parent?.path.startsWith("Projects/") && !preferred.includes(f) && this.isHome(f))
+        const items = app.vault.getMarkdownFiles()
+            .filter((f) => f.parent?.path.startsWith("Projects/") && this.isHome(f) && !exclude(f))
             .sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
-        const items = [...preferred, ...others].filter((f) => !exclude(f));
         return new Promise((resolve) => {
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
@@ -498,43 +553,12 @@ class AddTaskNote {
     }
 
     // The note already in `home`'s folder (or its logs folder, for a log) with the same name as `note`,
-    // other than `note` itself; null when there's none. A line whose note has that twin in the picked
-    // project is pointed at the twin rather than the move being refused (OBS-36).
+    // other than `note` itself; null when there's none. AddTaskNote refuses then (rule 12).
     sameNameIn(note, home) {
         const folder = this.isLog(note) ? this.logsFolder(home) : home.parent.path;
         const target = `${folder}/${note.name}`;
         const twin = app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target);
         return twin && twin !== note && twin.extension === "md" ? twin : null;
-    }
-
-    // Moves `note` into the folder of `home` (an area or project note), updating links to it; a
-    // meeting log (see isLog) goes into that folder's logs folder, where the Log template files them.
-    // The other lines that link the note follow it: their ⭕ for where it was becomes `home`'s, as
-    // MoveToProject does (OBS-90). `line` is the active editor's line the command is writing itself,
-    // which is left to it. False, with a notice, when the target already has a note of the same name.
-    async moveInto(note, home, { line = null } = {}) {
-        const folder = this.isLog(note) ? this.logsFolder(home) : home.parent.path;
-        const target = `${folder}/${note.name}`;
-        if (app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target)) {
-            new Notice(`${folder} already has a note named ${note.basename}, so nothing changed`);
-            return false;
-        }
-        const mover = customJS.MoveToProject;
-        // A ⭕ for a finished project stays on its lines: that time may already be invoiced
-        const filed = this.filedIn(note);
-        const from = filed && this.isLiveHome(filed) ? filed : null, oldPath = note.path;
-        // Collected before the move: Obsidian lists links by the path they point at
-        const sources = mover?.linkingNotes?.(note) ?? [];
-        await this.makeFolder(folder);
-        await app.fileManager.renameFile(note, target);
-        let lines = null;
-        try {
-            lines = await mover?.relinkAll?.(sources, note, from, home, oldPath, { line });
-        } catch (e) {
-            console.error(`AddTaskNote: couldn't update the lines linking ${note.basename}`, e);
-        }
-        new Notice(`Moved ${note.basename} to ${folder}${lines ? mover.linesSaid(lines, "it", home) : ""}`);
-        return true;
     }
 
     // Whether a folder's name makes it a logs folder: `›logs`, in any case
@@ -654,16 +678,18 @@ class AddTaskNote {
     // With nothing selected, what to link:
     //   { kind, mode: "text", from, to, name }: the task's text (up to its first link), when some text
     //     comes after the cursor; on an event line, its title (after its time), wherever the cursor is
-    //   { kind: "task", mode: "blank" }: only whitespace follows the cursor on a task line with no note
-    //     link (a block ID at its end aside), so insert an empty link to type a name into. An event never gets one: `[[2026-09-14 |⋯]]` would point
-    //     at the daily note itself.
-    //   { error }: there's no text to use, or the task already links a note, or the event a log
+    //   { kind: "task", mode: "own" }: the task has a ⋯ already, wherever the cursor is, so that note goes on
+    //     its other lines (spread). A ↗ is no note of its own: it's where the line was sent from.
+    //   { kind: "task", mode: "blank" }: only whitespace follows the cursor on a task line with no ⋯ (a block
+    //     ID at its end aside), so insert an empty link to type a name into. An event never gets one:
+    //     `[[2026-09-14 |⋯]]` would point at the daily note itself.
+    //   { error }: there's no text to use, or the event links a log already
     // `kind` is "task" or "event".
     target(lineText, ch) {
         const kind = this.isEvent(lineText) ? "event" : "task";
         if (kind === "event" && this.linksLog(lineText)) return { error: "This event already links a log" };
         // Wherever the cursor is: a task with a note never gets a second, blank link
-        if (kind === "task" && AddTaskNote.NOTE_LINK.test(lineText)) return { error: "This task already links a note" };
+        if (kind === "task" && AddTaskNote.OWN_NOTE_LINK.test(lineText)) return { kind, mode: "own" };
         // A task's ID at the end is hidden (OBS-181), so the cursor at the end of the visible text has
         // nothing after it: the ID doesn't count
         const id = lineText.match(AddTaskNote.BLOCK_ID);
@@ -686,13 +712,6 @@ class AddTaskNote {
         if (to === from && kind === "event") return { error: /\S/.test(lineText.slice(from)) ? "This event's title is already a link" : "This event has no title to name its log" };
         if (to === from) return { error: "No task text to name the note" };
         return { kind, mode: "text", from, to, name: lineText.slice(from, to) };
-    }
-
-    // The task line once it links its note: the name without its dates where the task text (or the
-    // selection) was, the note's project or area (see homed), then the ⋯ link, which ends the line
-    lineWithLink(lineText, target, found) {
-        const text = lineText.slice(0, target.from) + found.name + lineText.slice(target.to);
-        return this.endWith(this.homed(text, found), `[[${found.linktext}|${AddTaskNote.NOTE_MARK}]]`);
     }
 
     // The target of the note link in the run of links that ends `lineText` (the first, when there are
@@ -729,6 +748,22 @@ class AddTaskNote {
         return `${text.replace(/\s+$/, "")}${gap}${run.join(" ")}${block}`;
     }
 
+    // `lineText` with `link`, a ⋯ to its own note, in its run: ahead of a ↗, else at the end, before a block ID.
+    // A line with a ⋯ is left alone (rule 8).
+    withOwn(lineText, link) {
+        let bare = lineText.replace(/\s+$/, "");
+        const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
+        bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
+        const items = [];
+        let at = bare.length;
+        for (let item; (item = bare.slice(0, at).match(AddTaskNote.TRAIL_ITEM));) { items.unshift(item[0].trim()); at = item.index; }
+        if (items.some((x) => AddTaskNote.OWN_NOTE_LINK.test(x))) return lineText;
+        const from = items.findIndex((x) => AddTaskNote.FROM_LINK.test(x));
+        items.splice(from === -1 ? items.length : from, 0, link);
+        const text = bare.slice(0, at), gap = text.match(/\s*$/)[0] || " ";
+        return `${text.replace(/\s+$/, "")}${gap}${items.join(" ")}${block}`;
+    }
+
     // `lineText` with `link` at its end, before a block ID if it ends in one
     endWith(lineText, link) {
         const bare = lineText.replace(/\s+$/, "");
@@ -736,12 +771,12 @@ class AddTaskNote {
         return `${bare.slice(0, bare.length - block.length).replace(/\s+$/, "")} ${link}${block}`;
     }
 
-    // Links an event line to its meeting log (see eventLine) and puts the cursor after the checkbox.
-    // A new log is made (makeLog), and the Log template files it where the line's ⭕ says. A log that
-    // exists already is settled the way a task's note is (settle): moved to the line's project, or the
-    // line's ⭕ set to where it's filed, so the two agree (OBS-90).
-    async linkEvent(editor, line, lineText, name) {
-        const sourcePath = app.workspace.getActiveFile()?.path ?? "";
+    // Links an event line to its meeting log (see eventLine); the cursor stays where it was. A new log is made
+    // (makeLog), and the Log template files it where the line's ⭕ says. A log that exists already is settled
+    // the way a task's note is (attach).
+    async linkEvent(line, name) {
+        const { editor, source, at, lineText, cursor } = line;
+        const change = customJS.TaskChange;
         const date = this.dailyNoteDate();
         const logName = `${date} ${this.logName(name)}`;
         const fresh = this.eventLine(lineText, name, date);
@@ -749,28 +784,21 @@ class AddTaskNote {
             new Notice(fresh.error);
             return;
         }
-        const existing = app.metadataCache.getFirstLinkpathDest(logName, sourcePath);
+        const existing = this.namedNote(logName, source.path);
         if (!existing) {
-            editor.replaceRange(fresh, { line, ch: 0 }, { line, ch: lineText.length });
-            editor.setCursor({ line, ch: this.afterCheckbox(editor.getLine(line)) });
+            editor.replaceRange(fresh, { line: at, ch: 0 }, { line: at, ch: lineText.length });
+            this.keepCursor(editor, cursor, at, lineText);
             await this.makeLog(logName);
             return;
         }
-        const settled = await this.settle(existing, this.lineProjects(lineText, sourcePath));
-        if (!settled) return;
-        await customJS.SyncArea?.sync?.(settled.note, false);
-        // The menus waited on you; don't write into a line that changed in the meantime
-        if (editor.getLine(line) !== lineText) {
-            new Notice(`${settled.note.basename} is ready, but the line changed, so it wasn't linked`);
-            return;
-        }
-        const paths = app.vault.getMarkdownFiles().map((f) => f.path);
-        const linktext = this.linktextFor(settled.note, paths.filter((p) => p !== settled.movedFrom));
-        const linked = this.eventLine(lineText, name, date, linktext);
-        const home = settled.home ? this.homeLink(settled.home, this.linktextFor(settled.home, paths)) : null;
-        const drop = home || settled.clear ? this.trailingProjectLinks(linked).map((l) => l.raw) : [];
-        editor.replaceRange(this.withHome(linked, home, drop), { line, ch: 0 }, { line, ch: lineText.length });
-        editor.setCursor({ line, ch: this.afterCheckbox(editor.getLine(line)) });
+        if (!change.ready()) return;
+        const found = await change.find({ file: source, at }, { note: existing });
+        const oldPath = existing.path;
+        const each = (t) => {
+            const paths = app.vault.getMarkdownFiles().map((f) => f.path).filter((p) => p !== oldPath);
+            return this.withOwn(t, `[[${this.linktextFor(existing, paths)}|${AddTaskNote.NOTE_MARK}]]`);
+        };
+        if (await this.attach(line, existing, found, each, name)) this.keepCursor(editor, cursor, at, lineText);
     }
 
     // A log's name from an event's title, as CalNav names them: ": " becomes " - ", a slash or bar

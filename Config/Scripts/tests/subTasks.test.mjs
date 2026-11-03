@@ -93,8 +93,6 @@ test("AddProjectLink on a meeting line in the form used before August 2025, or a
         assert.deepEqual(v.notices, [], `line ${at}`);
     }
     const cmd = standIn({ notes }).customJS.AddProjectLink;
-    assert.equal(cmd.taskLinkpath("11:00am [[2025-03-04 Team meeting|Team meeting]]"), "2025-03-04 Team meeting");
-    assert.equal(cmd.relinked("11:00am [[2025-03-04 Team meeting|Team meeting]]", "P/›logs/2025-03-04 Team meeting"), "11:00am [[P/›logs/2025-03-04 Team meeting|Team meeting]]");
     assert.equal(cmd.label("11:00am [[2025-03-04 Team meeting|Team meeting]]"), "Team meeting");
 });
 

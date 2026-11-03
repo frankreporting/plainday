@@ -283,7 +283,9 @@ class Billing {
             : total !== null && (!Number.isFinite(total) || Math.round(total * 100) !== cents) ? `has Billed entries that add up to ${tr.money(cents)}, not its \`total\` (${p("total")})`
             : null;
         return {
-            path, name: tr.basename(path), number: String(p("number") ?? tr.basename(path)), status,
+            // `unread`: its status can't be read, so it isn't taken for a draft. One that lost its tag but still
+            // states a status is read by it.
+            path, name: tr.basename(path), number: String(p("number") ?? tr.basename(path)), status, unread: !!error || (!tagged && !raw),
             paid: this.isoDate(p("paid")), invoiceDate: this.isoDate(p("invoice_date")),
             periodStart: this.isoDate(p("period_start")), periodEnd: this.isoDate(p("period_end")), project, rows, bad, problem,
             // As the invoice states them, for the project's list of invoices (null when blank or not a number)

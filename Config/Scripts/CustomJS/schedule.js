@@ -750,8 +750,8 @@ class Schedule {
     // A line sent here from `src`, a note that isn't a daily, weekly, monthly or yearly note (rule 13,
     // OBS-208): its ⭕ (or 🗃️) is its own note's project when it has a ⋯ filed in one, else the project
     // of the note it came from, finished or not; a project or area note names itself. A ⭕ it had in that
-    // note gives way, since a line outside a periodic note has no project of its own (rule 4), except
-    // from a note in no project (the Inbox), where nothing takes its place. Then a ↗ to the note it came
+    // note gives way, since a line outside a periodic note has no project of its own (rule 4), and from a
+    // note in no project (the Inbox) nothing takes its place. Then a ↗ to the note it came
     // from, after its own ⋯, unless that note is a project or area note, which its ⭕ already names. The
     // ↗ links the task's own line there by its ID, `Source#^id`, the line that keeps the same ID (Brian,
     // 2026-10-28).
@@ -766,7 +766,7 @@ class Schedule {
         const homeLink = ownHome ? helper.homeLink(ownHome, helper.linktextFor(ownHome, paths))
             : tagged ? `[[${helper.linktextFor(src, paths)}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]`
             : srcHome ? helper.homeLink(srcHome, helper.linktextFor(srcHome, paths)) : null;
-        const sent = homeLink ? helper.withHome(line, homeLink, helper.trailingProjectLinks(line).map((l) => l.raw), { inRun: true }) : line;
+        const sent = helper.withHome(line, homeLink, helper.trailingProjectLinks(line).map((l) => l.raw), { inRun: true });
         const id = customJS.TaskIds?.constructor.idOf?.(line);
         return tagged ? sent : helper.withFrom(sent, `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${Schedule.FROM_MARK}]]`);
     }

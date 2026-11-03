@@ -1,27 +1,19 @@
 class MoveToProject {
-    // What this command never moves: the system, the daily and other periodic notes, and archived
-    // work (its time is out of the reports and usually invoiced; bring it back by hand)
-    static KEEP = ["Config/", "Reference/Planner/", "Archive/"];
-
-    // Moves the note you're on into a project or area picked from the menu AddProjectLink uses, or,
-    // when Notebook Navigator's pane has the focus, the notes selected there. Where each one goes:
-    //   - a meeting log (see AddTaskNote.isLog) into the project's `›logs`, made if missing;
-    //   - a project or area's folder note: the whole folder, sub-projects and logs included;
-    //   - anything else into the project's folder.
-    // Obsidian's move updates links, and SyncArea sets `parent`; this never writes `parent` itself.
-    //
-    // Moving one thing asks first (AddTaskNote.confirmMove) when a note leaves a project or area,
-    // since every line that links it follows it, and whenever a project or area moves, since its
-    // parent's totals and any rate it inherits change. Moving several at once doesn't ask.
-    //
-    // The lines that link a moved note follow it (OBS-90): a ⭕ or 🗃️ for the project it left becomes
-    // the new one's, and a line with none gets one, so each line and its note keep agreeing. A ⭕ for
-    // anywhere else is the line's own choice and stays; the notice says how many lines kept one. A
-    // moved project's notes keep their project, so their lines are left alone.
-    //
-    // It refuses, with a notice, a move whose target already has a note or folder of that name, one
-    // already where it would go, and a folder into itself; the menu leaves out the projects inside a
-    // folder being moved. MoveToProjectMenu puts the same move in the file menus.
+    // Moves the note you're on into a project or area picked from the menu AddProjectLink uses, or, when
+    // Notebook Navigator's pane has the focus, the notes selected there (rule 8):
+    //   - a task note, a log (see AddTaskNote.isLog) or a plain note in `Projects` or the `Inbox`: the note
+    //     says where it belongs, and its tasks follow (TaskChange, which asks, refuses and writes). A log goes
+    //     into the project's `›logs`, made if missing. Several notes are each their own change, one after
+    //     another, each with its own question. Picking the project a note is already in moves nothing and
+    //     still writes its lines, which is how a note dragged by hand is put right.
+    //   - a project or area's folder note: the whole folder, sub-projects and logs included. It's the same
+    //     project at a new path, so its lines are left alone. It asks when it's the only thing moving, since
+    //     its parent's totals and any rate it inherits change.
+    //   - any other note, or a file that isn't a note: nothing, and the notice says why (stays).
+    // Obsidian's move updates links, and SyncArea sets `parent`; this never writes `parent` itself. It refuses,
+    // with a notice, a move whose target already has a note or folder of that name, and a folder into itself;
+    // the menu leaves out the projects inside a folder being moved. MoveToProjectMenu puts the same move in
+    // the file menus.
     async invoke() {
         const files = this.selected();
         if (!files.length) {
@@ -42,12 +34,29 @@ class MoveToProject {
         return file ? [file] : [];
     }
 
+    // Why this command leaves `file`, a note or file (not a folder), where it is, or null when it doesn't
+    stays(file) {
+        const tasks = customJS.TaskIds;
+        if (file.extension !== "md") return `${file.name} isn't a note, so it wasn't moved`;
+        const kind = this.billingNote(file);
+        if (kind) return `${file.basename} stays where it is: ${kind === "invoice" ? "an invoice" : "a timesheet"} belongs to the time report`;
+        if (!tasks.inSystem(file)) return tasks.outside(file);
+        return tasks.kindOf(file) !== "other" ? `${file.basename} stays where it is: run AddProjectLink on a line in it` : null;
+    }
+
+    // "invoice" or "timesheet" for a note the time report writes and reads wherever it is, else null
+    billingNote(file) {
+        const cache = app.metadataCache.getFileCache(file);
+        const tags = cache ? customJS.AddTaskNote.tagsOf(cache) : [];
+        return ["invoice", "timesheet"].find((t) => tags.includes(t)) ?? null;
+    }
+
     // Whether any of `files` is something this command moves, for the file menus. A link's menu
     // offers it for notes only: a slip there shouldn't be one pick away from moving a whole project.
     movable(files, { homes = true } = {}) {
         return files.some((f) => {
             const item = this.itemFor(f);
-            return item && !this.kept(item.path) && (homes || !item.home);
+            return item && !this.stays(item.note) && (homes || !item.home);
         });
     }
 
@@ -61,18 +70,19 @@ class MoveToProject {
         const tell = () => { if (told.length) new Notice(told.join("\n")); };
         for (const f of files) {
             const item = this.itemFor(f);
+            const stays = item ? this.stays(item.note) : null;
             if (!item) told.push(`${f.name} isn't a project or area folder, so it wasn't moved`);
-            else if (this.kept(item.path)) told.push(`${item.label} stays where it is: nothing in ${MoveToProject.KEEP.map((p) => p.slice(0, -1).split("/").pop()).join(", ").replace(/, (?=[^,]*$)/, " or ")} is moved`);
+            else if (stays) told.push(stays);
             else if (!items.some((i) => i.path === item.path)) items.push(item);
         }
         if (!items.length) return tell();
+        if (!customJS.TaskChange.ready()) return;
 
         const folders = items.filter((i) => i.folder).map((i) => i.path);
-        const notesOnly = items.every((i) => !i.home && i.file.extension === "md");
-        const label = items.length === 1 ? items[0].label : `${items.length} ${notesOnly ? "notes" : "items"}`;
+        const label = items.length === 1 ? items[0].label : `${items.length} ${items.every((i) => !i.home) ? "notes" : "items"}`;
         // A project note without a folder of its own has nowhere to put a note, and a folder can't
         // go into itself
-        const home = await helper.pickHome(label, [], {
+        const home = await helper.pickHome(label, {
             exclude: (f) => !this.isFolderNote(f) || this.inside(f.path, folders),
             placeholder: `Move "${label}" to which project or area? (Esc: cancel)`,
         });
@@ -82,26 +92,52 @@ class MoveToProject {
         }
 
         const into = home.parent.path;
-        const moved = [];
-        const lines = { relinked: 0, kept: 0, keptIn: [] };
+        const movedFolders = [], movedNotes = [], carried = new Map();
         for (const step of this.plan(items, into, (p) => this.exists(p), helper.logsFolder(home))) {
             if (step.skip === "inside") continue;
-            if (step.skip) { told.push(this.why(step, home)); continue; }
-            const result = await this.moveOne(step, home, into, items.length === 1);
+            if (step.skip && (step.folder || step.skip !== "here")) { told.push(this.why(step, home)); continue; }
+            if (step.folder) {
+                const result = await this.moveFolder(step, home, into, items.length === 1);
+                if (result.cancelled) {
+                    tell();
+                    new Notice("Nothing was moved");
+                    return;
+                }
+                if (result.told) told.push(result.told);
+                if (result.moved) movedFolders.push(step);
+                continue;
+            }
+            // A note of the same task went with an earlier change already
+            if (carried.has(step.file)) {
+                told.push(`${step.label} moved with ${carried.get(step.file)}`);
+                continue;
+            }
+            const result = await this.moveNote(step, home, into);
             if (result.cancelled) {
                 tell();
-                new Notice("Nothing was moved");
+                if (movedNotes.length) new Notice(`Stopped there: ${movedNotes.join(", ")} had already moved`);
                 return;
             }
             if (result.told) told.push(result.told);
-            if (!result.moved) continue;
-            moved.push(step);
-            lines.relinked += result.relinked ?? 0;
-            lines.kept += result.kept ?? 0;
-            for (const f of result.keptIn ?? []) if (!lines.keptIn.includes(f)) lines.keptIn.push(f);
+            if (result.done && result.moved.length) movedNotes.push(step.label);
+            for (const s of result.moved ?? []) if (s.note !== step.file) carried.set(s.note, step.label);
         }
-        if (moved.length) new Notice(this.summary(moved, home, lines));
+        if (movedFolders.length) new Notice(this.summary(movedFolders, home));
         tell();
+    }
+
+    // One note's change (TaskChange), `here` when it's already in the project picked. The menus waited on
+    // you, so it's checked again first.
+    async moveNote(step, home, into) {
+        const change = customJS.TaskChange;
+        if (app.vault.getAbstractFileByPath(step.path) !== step.file || app.vault.getAbstractFileByPath(home.path) !== home || home.parent?.path !== into) {
+            return { told: `${step.label} or ${home.basename} moved meanwhile, so ${step.label} wasn't moved` };
+        }
+        const here = step.skip === "here";
+        const result = await change.run(await change.find({ note: step.file }), home, { here: here ? step.label : null, name: step.label });
+        // A note tagged #project that isn't its folder's own is a plain note (rule 3)
+        if (result.done && this.isHomeNote(step.file)) return { ...result, told: `${step.label} moved as a plain note: a project needs a folder of its name, with the note inside` };
+        return result;
     }
 
     // One thing to move, or null for a folder that isn't a project or area's:
@@ -117,12 +153,9 @@ class MoveToProject {
             return { file: f, note, path: f.path, name: f.name, label: f.name, folder: true, home: true, log: false, from, homeFolder: from?.parent?.path ?? null };
         }
         if (this.isFolderNote(f)) return this.itemFor(f.parent);
-        const md = f.extension === "md";
-        const from = this.homeAbove(f);
-        return {
-            file: f, note: f, path: f.path, name: f.name, label: md ? f.basename : f.name, folder: false,
-            home: md && this.isHomeNote(f), log: md && helper.isLog(f), from, homeFolder: from?.parent?.path ?? null,
-        };
+        // Where it's filed, a finished project included: the question's From
+        const from = helper.filedAbove(f);
+        return { file: f, note: f, path: f.path, name: f.name, label: f.basename, folder: false, home: false, log: helper.isLog(f), from, homeFolder: from?.parent?.path ?? null };
     }
 
     // The project or area above `file` (a note, or a folder): the nearest folder note tagged
@@ -145,10 +178,6 @@ class MoveToProject {
     isHomeNote(file) {
         const cache = app.metadataCache.getFileCache(file);
         return !!cache && customJS.AddTaskNote.tagsOf(cache).some((t) => t === "project" || t === "area");
-    }
-
-    kept(path) {
-        return MoveToProject.KEEP.some((p) => path.startsWith(p));
     }
 
     // Whether `path` is inside any of `folders`
@@ -195,13 +224,11 @@ class MoveToProject {
         return `${where} already has a ${step.folder ? "folder" : "note"} named ${step.label}, so it wasn't moved`;
     }
 
-    // Moves one thing, asking first (when `ask`) if a note leaves a project or area or a project or
-    // area moves at all; then, for a note, sets the ⭕ on the lines that link it to where it went
-    // (relinkAll). Resolves to { moved, relinked, kept, keptIn, told, cancelled }.
-    async moveOne(step, home, into, ask) {
+    // Moves a project or area's folder, asking first (when `ask`). Resolves to { moved, told, cancelled }.
+    async moveFolder(step, home, into, ask) {
         const helper = customJS.AddTaskNote;
         const { file, from } = step;
-        if (ask && (step.home || (from && from !== home))) {
+        if (ask) {
             const choice = await helper.confirmMove(step.note, from, home);
             if (!choice) return { cancelled: true };
             if (choice === "leave") return { told: `${step.label} stays ${from ? `in ${from.basename}` : "where it is"}, so nothing changed` };
@@ -211,12 +238,8 @@ class MoveToProject {
             return { told: `${step.label} or ${home.basename} moved meanwhile, so ${step.label} wasn't moved` };
         }
         if (this.exists(step.to)) return { told: this.why({ ...step, skip: "clash" }, home) };
-        // Collected before the move: Obsidian lists links by the path they point at
-        const sources = step.home || file.extension !== "md" ? [] : this.linkingNotes(file);
-        const folder = step.to.slice(0, step.to.lastIndexOf("/"));
-        if (!this.exists(folder)) await helper.makeFolder(folder);
         await app.fileManager.renameFile(file, step.to);
-        return { moved: true, ...(await this.relinkAll(sources, file, from, home, step.path)) };
+        return { moved: true };
     }
 
     // The notes that link `note`, other than itself
@@ -227,157 +250,16 @@ class MoveToProject {
             .filter((f) => f?.extension === "md");
     }
 
-    // After `note` moved from the project or area `from` (null: none) into `home`, from `oldPath`: the
-    // lines in `sources` (the notes that linked it, collected before the move) that link it get their
-    // ⭕ set to `home` (relinkStale). The note in the active editor is changed through the editor,
-    // except its line `line`, which the command that moved the note writes itself; the others
-    // through the vault. AddTaskNote.moveInto uses this too, so every command's move does it
-    // (OBS-90). Resolves to { relinked, kept, keptIn } (see relinkStale), summed over the notes.
-    async relinkAll(sources, note, from, home, oldPath = null, { line = null } = {}) {
-        const helper = customJS.AddTaskNote;
-        const lines = { relinked: 0, kept: 0, keptIn: [] };
-        if (!sources.length) return lines;
-        const link = helper.homeLink(home, helper.linktextFor(home, app.vault.getMarkdownFiles().map((f) => f.path)));
-        const view = app.workspace.activeLeaf?.view;
-        const changed = [];
-        for (const source of sources) {
-            try {
-                const editor = view?.file?.path === source.path ? view.editor : null;
-                const out = editor
-                    ? this.relinkEditor(editor, source, note, from, home, link, oldPath, line)
-                    : await this.relinkIn(source, note, from, home, link, oldPath);
-                lines.relinked += out.relinked;
-                lines.kept += out.kept;
-                for (const f of out.keptIn) if (!lines.keptIn.includes(f)) lines.keptIn.push(f);
-                if (out.relinked) changed.push(source.path);
-            } catch (e) {
-                console.error(`MoveToProject: couldn't update the lines in ${source.path}`, e);
-            }
-        }
-        if (changed.length) console.info(`MoveToProject: set the ⭕ to ${home.basename} on lines linking ${note.basename} in`, changed);
-        return lines;
-    }
-
-    // relinkStale on `source`, writing the note only when something changes. Resolves to its counts.
-    async relinkIn(source, note, from, home, link, oldPath = null) {
-        const args = { note, from, home, link, oldPath, resolve: (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, source.path) };
-        const dry = this.relinkStale(await app.vault.read(source), args);
-        if (!dry.relinked) return dry;
-        let out = dry;
-        await app.vault.process(source, (text) => {
-            out = this.relinkStale(text, args);
-            return out.text;
-        });
-        // A daily note's fold snapshot, taken again: RefoldOnOpen matches items by text, and would
-        // otherwise read the changed line as new and fold it, though you'd left it open
-        try {
-            await customJS.RefoldDailyNotes?.onLeave?.(source);
-        } catch (e) {
-            console.error(`MoveToProject: couldn't snapshot the folds of ${source.path}`, e);
-        }
-        return out;
-    }
-
-    // relinkStale on the note open in `editor`, changing only the lines that change (never line
-    // `skip`), so the editor keeps its cursor and folds. Returns its counts.
-    relinkEditor(editor, source, note, from, home, link, oldPath = null, skip = null) {
-        const before = editor.getValue().split("\n");
-        const out = this.relinkStale(before.join("\n"), {
-            note, from, home, link, oldPath, skip,
-            resolve: (linkpath) => app.metadataCache.getFirstLinkpathDest(linkpath, source.path),
-        });
-        const after = out.text.split("\n");
-        for (let i = 0; i < before.length; i++) {
-            if (after[i] !== before[i]) editor.replaceRange(after[i], { line: i, ch: 0 }, { line: i, ch: before[i].length });
-        }
-        return out;
-    }
-
-    // `text` with the ⭕ on every checklist line whose note link (its ⋯, or an event's log link,
-    // either way) is `note` set to where the note now is, `home`, whose ⭕ or 🗃️ link is `link`
-    // (OBS-90):
-    //   - a ⭕ or 🗃️ for `from`, where the note was, becomes `link`, before the ⋯;
-    //   - a line with no ⭕ gets `link`, as a note from the Inbox or no project does;
-    //   - a ⭕ for anywhere else (or one that's broken) is that line's own choice and stays, and a
-    //     link for `from` beside it just comes off: the line keeps counting where its own links say.
-    // Lines are read as the time report reads them: frontmatter and code blocks are skipped, and a
-    // comment on a line doesn't count (there a link for `from` comes off only when it's outside the
-    // comment and appears once, and nothing is added). Line `skip` is left alone. Only a line's end
-    // changes, so the note keeps its line count, its folds and its line endings. `resolve(linkpath)`
-    // finds a link's note; a note just moved from `oldPath` can briefly resolve to an entry there,
-    // which counts as the note (AddTaskNote.isSameNote). Returns { text, relinked: lines changed,
-    // kept: lines that still count their time somewhere other than `home`, keptIn: where those
-    // lines' own links point }.
-    relinkStale(text, { note, from, home, link, resolve, oldPath = null, skip = null }) {
-        const helper = customJS.AddTaskNote;
-        const linker = customJS.AddProjectLink;
-        const raw = text.split("\n");
-        const bare = raw.map((line) => line.replace(/\r$/, ""));
-        const shown = customJS.TimeReport?.scan?.(bare);
-        let relinked = 0, kept = 0;
-        const keptIn = [];
-        const out = bare.map((line, i) => {
-            const cr = raw[i].endsWith("\r") ? "\r" : "";
-            if (i === skip || shown?.hidden[i]) return raw[i];
-            const seen = shown ? shown.visible[i] : line;
-            if (!helper.constructor.CHECKBOX.test(seen)) return raw[i];
-            const linkpath = linker.taskLinkpath(seen);
-            if (!linkpath || !helper.isSameNote(resolve(linkpath), note, oldPath)) return raw[i];
-            const links = helper.projectLinks(seen).map((l) => ({ ...l, dest: resolve(l.linkpath) }));
-            const commented = seen !== line;
-            let stale = links.filter((l) => from && from !== home && l.dest === from);
-            // With a comment on the line, only a link that can't also be inside it is taken off
-            if (commented && !stale.every((l) => line.split(l.raw).length === 2)) stale = [];
-            const own = links.filter((l) => l.dest && l.dest !== home && !stale.includes(l));
-            if (own.length) kept++;
-            for (const l of own) if (!keptIn.includes(l.dest)) keptIn.push(l.dest);
-            // The new home's link in place of `from`'s, or on a line with no ⭕ at all; a line whose
-            // other ⭕ (or a broken one) is its own choice gets none
-            const add = commented ? null : stale.length ? (!own.length && !links.some((l) => l.dest === home) ? link : null) : !links.length ? link : null;
-            if (!stale.length && !add) return raw[i];
-            const next = helper.withHome(line, add, stale.map((l) => l.raw));
-            if (next === line) return raw[i];
-            relinked++;
-            return next + cr;
-        });
-        return { text: out.join("\n"), relinked, kept, keptIn };
-    }
-
-    // "2 lines linking them now link ⭕ Pinecrest Library Brochure"
-    linesNow(count, them, home) {
+    // "2 lines now link ⭕ Pinecrest Library Brochure"
+    linesNow(count, home) {
         const mark = customJS.AddTaskNote.isArea(home) ? "🗃️" : "⭕";
-        return `${count === 1 ? `A line linking ${them} now links` : `${count} lines linking ${them} now link`} ${mark} ${home.basename}`;
+        return `${count === 1 ? "A line now links" : `${count} lines now link`} ${mark} ${home.basename}`;
     }
 
-    // "Moved Printer call to Projects/…/logs", or for several, "Moved 2 notes and 1 folder to
-    // Pinecrest Library Brochure"; then what happened to the lines that link them (`relinked`: lines
-    // now naming `home`; `keptIn`: where the other lines' own links point)
-    summary(moved, home, { relinked, kept, keptIn = [] }) {
-        const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-        const them = moved.length === 1 ? "it" : "them";
-        let text;
-        if (moved.length === 1) {
-            const [step] = moved;
-            text = `Moved ${step.label}${step.folder ? " with everything in it" : ""} to ${step.to.slice(0, step.to.lastIndexOf("/"))}`;
-        } else {
-            const folders = moved.filter((s) => s.folder).length;
-            const parts = [];
-            if (moved.length - folders) parts.push(plural(moved.length - folders, moved.every((s) => s.folder || s.file.extension === "md") ? "note" : "file"));
-            if (folders) parts.push(plural(folders, "folder"));
-            text = `Moved ${parts.join(" and ")} to ${home.basename}`;
-        }
-        return text + this.linesSaid({ relinked, kept, keptIn }, them, home);
-    }
-
-    // What happened to the lines that link what moved (relinkAll's counts), for a notice:
-    // ". 2 lines linking it now link ⭕ Pinecrest. A line linking it has 🗃️ Household too, so …",
-    // or "" when there were none. AddTaskNote.moveInto says the same after its moves.
-    linesSaid({ relinked = 0, kept = 0, keptIn = [] }, them, home) {
-        const helper = customJS.AddTaskNote;
-        let text = "";
-        if (relinked) text += `. ${this.linesNow(relinked, them, home)}`;
-        const marks = (list) => list.map((f) => `${helper.isArea(f) ? "🗃️" : "⭕"} ${f.basename}`).join(", ");
-        if (kept) text += `. ${kept === 1 ? `A line linking ${them} has` : `${kept} lines linking ${them} have`} ${marks(keptIn)} too, so ${kept === 1 ? "that line's" : "their"} time still counts there, not in ${home.basename}`;
-        return text;
+    // "Moved Kestrel with everything in it to Projects/Freelance", or for several, "Moved 2 folders to Freelance"
+    summary(moved, home) {
+        if (moved.length > 1) return `Moved ${moved.length} folders to ${home.basename}`;
+        const [step] = moved;
+        return `Moved ${step.label} with everything in it to ${step.to.slice(0, step.to.lastIndexOf("/"))}`;
     }
 }

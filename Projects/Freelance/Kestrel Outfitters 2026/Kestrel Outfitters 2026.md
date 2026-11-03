@@ -22,7 +22,7 @@ Website redesign for [[Kestrel Outfitters]], an outdoor gear shop with two store
 - Store locator
 - The fall catalog shoot is billed as a sub-project: [[Kestrel Fall Catalog|⭕ Kestrel Fall Catalog]]
 
-## Tasks
+## To Do
 
 - [x] Proposal and estimate
 - [x] Sitemap and content inventory

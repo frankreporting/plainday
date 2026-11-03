@@ -87,11 +87,15 @@ test("target: with nothing selected, text after the cursor means use the line's 
     assert.equal(name("- [ ] Order toner ^abc123", 8), "Order toner");
     assert.equal(t("- [<] 2:00pm\tReview ^mtg1", 8).name, "Review");
     // Nothing to use
-    // Its own note's ⋯, or the ↗ to the note it was sent from, read alike until OBS-196 (OBS-208)
-    for (const mark of ["⋯", "↗", "↗\uFE0F"]) assert.ok(t(`- [ ] Call the bank [[Call the bank|${mark}]]`, 8).error, `already linked (${mark})`);
-    // With the cursor at the end, too: no second, blank link (fix round 6)
+    // A ⋯ already there, wherever the cursor is: that note goes on the task's other lines, and no second link
     for (const line of ["- [>] Order paper samples [[Order paper samples|⋯]]", "- [ ] Order paper samples [[Order paper samples|⋯]]   ", "- [x] A [[2026-09-30|🚩 9/30]] [[A|⋯]]"]) {
-        assert.deepEqual(t(line, line.length), { error: "This task already links a note" }, line);
+        assert.deepEqual(t(line, line.length), { kind: "task", mode: "own" }, line);
+        assert.deepEqual(t(line, 8), { kind: "task", mode: "own" }, line);
+    }
+    // A ↗ is where the line was sent from, no note of its own
+    for (const mark of ["↗", "↗\uFE0F"]) {
+        assert.equal(name(`- [ ] Call the bank [[Brochure|${mark}]]`, 8), "Call the bank", mark);
+        assert.deepEqual(t(`- [ ] Call the bank [[Brochure|${mark}]]`, `- [ ] Call the bank [[Brochure|${mark}]]`.length), { kind: "task", mode: "blank" }, mark);
     }
     assert.ok(t("- [ ] [[Hawk Ledger|⭕]]", 7).error, "no task text before the link");
 });
@@ -163,10 +167,6 @@ test("withHome: the project or area link goes before the note links that end the
     assert.equal(add.withHome("- [x] Task ^abc123", H), "- [x] Task [[Hawk Ledger|⭕]] ^abc123");
     // An event's tab after its time isn't eaten, even with no title before the note link
     assert.equal(add.withHome("- [<] 9:00am\t[[Task A|⋯]]", H), "- [<] 9:00am\t [[Hawk Ledger|⭕]] [[Task A|⋯]]");
-    // homed: what noteFor found decides
-    assert.equal(add.homed("- [ ] A [[Tin|⭕]] [[Other|⭕]]", { homeLink: H, projectLinks: ["[[Tin|⭕]]", "[[Other|⭕]]"] }), "- [ ] A [[Hawk Ledger|⭕]]");
-    assert.equal(add.homed("- [ ] A [[Tin|⭕]]", { homeLink: null, projectLinks: ["[[Tin|⭕]]"] }), "- [ ] A [[Tin|⭕]]", "no home to name: the line's own links stay");
-    assert.equal(add.homed("- [ ] A [[Tin|⭕]]", { homeLink: null, clear: true, projectLinks: ["[[Tin|⭕]]"] }), "- [ ] A", "unless they'd disagree with where the note was left");
 });
 
 test("trailingNote and endWith: the note link in the run that ends a line; a link added at the end goes before a block ID", () => {
@@ -182,27 +182,18 @@ test("trailingNote and endWith: the note link in the run that ends a line; a lin
     assert.deepEqual(own("- [ ] A [[Tin|⭕ Tin]] [[Note|⋯]]"), [], "a ⭕ with a name after it isn't one, as the report reads it");
     assert.equal(add.endWith("- [ ] A [[P|⭕]]  ", "[[A|⋯]]"), "- [ ] A [[P|⭕]] [[A|⋯]]");
     assert.equal(add.endWith("- [ ] A ^x1", "[[A|⋯]]"), "- [ ] A [[A|⋯]] ^x1");
-    // With a selection, the name is the selection, and the note link still ends the line (OBS-90 review)
-    const line = "- [ ] Draft wireframes for the homepage [[Tin|⭕]]";
-    assert.equal(add.lineWithLink(line, { from: 6, to: 22 }, { name: "Draft wireframes", linktext: "Draft wireframes", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Tin|⭕]]"] }),
-        "- [ ] Draft wireframes for the homepage [[Hawk Ledger|⭕]] [[Draft wireframes|⋯]]");
 });
 
-test("lineWithLink: task text without its dates, the note's project in place of the line's ⭕, the ⋯ link last (OBS-90)", () => {
-    const line = "- [ ] 2026-11-01 Plan the offsite [[Hawk Ledger|⭕]]  ";
-    const target = add.target(line, 8);
-    const kept = { name: "Plan the offsite", linktext: "Plan the offsite", homeLink: "[[Hawk Ledger|⭕]]", projectLinks: ["[[Hawk Ledger|⭕]]"] };
-    assert.equal(add.lineWithLink(line, target, kept), "- [ ] Plan the offsite [[Hawk Ledger|⭕]] [[Plan the offsite|⋯]]");
-    const left = { ...kept, homeLink: "[[Tin Works|⭕]]" };
-    assert.equal(add.lineWithLink(line, target, left), "- [ ] Plan the offsite [[Tin Works|⭕]] [[Plan the offsite|⋯]]", "the note stayed in Tin Works");
-    const plain = "\t- [/] Order new toner";
-    assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
-        "\t- [/] Order new toner [[Household|🗃️]] [[Order new toner|⋯]]", "a line with no ⭕ gets the note's");
-    assert.equal(add.lineWithLink(plain, add.target(plain, 9), { name: "Order new toner", linktext: "Order new toner", homeLink: null, projectLinks: [] }),
-        "\t- [/] Order new toner [[Order new toner|⋯]]", "a note with no project or area");
-    const date = "- [ ] Pay rent [[2026-10-01|🚩 10/1]]";
-    assert.equal(add.lineWithLink(date, add.target(date, 7), { name: "Pay rent", linktext: "Pay rent", homeLink: "[[Household|🗃️]]", projectLinks: [] }),
-        "- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]] [[Pay rent|⋯]]", "the 🚩, then the ⭕, then the ⋯");
+test("withOwn: the ⋯ goes ahead of a ↗ and an ID, after the ⭕; a line with a ⋯ is left alone", () => {
+    const N = "[[Plan the offsite|⋯]]";
+    assert.equal(add.withOwn("- [ ] Plan the offsite", N), `- [ ] Plan the offsite ${N}`);
+    assert.equal(add.withOwn("- [ ] Plan it [[Hawk Ledger|⭕]]  ", N), `- [ ] Plan it [[Hawk Ledger|⭕]] ${N}`);
+    assert.equal(add.withOwn("- [ ] Plan it [[Hawk Ledger|⭕]] [[Brief#^k3x9m2|↗]] ^k3x9m2", N), `- [ ] Plan it [[Hawk Ledger|⭕]] ${N} [[Brief#^k3x9m2|↗]] ^k3x9m2`);
+    assert.equal(add.withOwn("- [>] Plan it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2", N), `- [>] Plan it [[2026-09-17#^k3x9m2|9/17]] ${N} ^k3x9m2`);
+    assert.equal(add.withOwn("- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]]", N), `- [ ] Pay rent [[2026-10-01|🚩 10/1]] [[Household|🗃️]] ${N}`);
+    assert.equal(add.withOwn("- [<] 1:30pm\tKickoff ℹ️ [[Hawk Ledger|⭕]]", N), `- [<] 1:30pm\tKickoff ℹ️ [[Hawk Ledger|⭕]] ${N}`);
+    const has = "- [ ] Plan it [[Other|⋯]] ^k3x9m2";
+    assert.equal(add.withOwn(has, N), has);
 });
 
 test("eventLink: a meeting log named with the day's date, as a ⋯ note link; blank, it waits for the name", () => {
@@ -305,7 +296,7 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
     assert.equal(presetFor(null), null);
     assert.equal(presetFor("inbox"), null, "an older AddTaskNote's Inbox preset files the log in Inbox");
     assert.equal(vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""), { tasks: null, tp: { config: { target_file: { path: "x" } } } }), null, "without CustomJS");
-    assert.match(log, /const pickedFile = lineHomes\.allLive && lineHomes\.projects\.length === 1 \? lineHomes\.projects\[0\] : preset;/);
+    assert.match(log, /const pickedFile = lineHome \?\? preset;/);
     // A new project or area gets its folder at the top of Projects/, and its note in it
     for (const name of ["Project", "Area"]) {
         const template = read(name);
@@ -314,31 +305,6 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
         assert.doesNotMatch(template, /\d\d Projects\//, `${name}: no numbered folder from before OBS-81`);
     }
     assert.match(read("Project"), /tR \+= "parent: \\n";/, "a new project's parent is empty until it's filed");
-});
-
-test("OBS-55: sourceHome: a line with no project files its new note where the line's own note belongs", () => {
-    const files = new Map();
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app: { vault: { getFileByPath: (p) => files.get(p) ?? null } } }));
-    const h = new Cls();
-    // Stand-ins for the tag and folder rules, which other tests cover
-    h.isHomeNote = (f) => !!f.home;
-    h.isLiveHome = (f) => !!f.home && !f.finished;
-    h.lineHome = (f) => f.filedIn ?? null;
-    const kestrel = { path: "Projects/Freelance/Kestrel/Kestrel.md", home: true };
-    const done = { path: "Archive/Old/Old.md", home: true, finished: true };
-    const taskNote = { path: "Projects/Freelance/Kestrel/Draft.md", filedIn: kestrel };
-    const daily = { path: "Reference/Planner/days/2026-09-16.md" };
-    for (const f of [kestrel, done, taskNote, daily]) files.set(f.path, f);
-    assert.equal(h.sourceHome(kestrel.path), kestrel, "a project's own note: that project");
-    assert.equal(h.sourceHome(taskNote.path), kestrel, "a task note: the project it's filed in");
-    assert.equal(h.sourceHome(daily.path), null, "a daily note: Inbox");
-    assert.equal(h.sourceHome(done.path), null, "a finished project: Inbox");
-    assert.equal(h.sourceHome("Nowhere.md"), null);
-    assert.equal(h.sourceHome(""), null);
-    // noteFor asks it only when the line names no project or area at all
-    const code = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    assert.match(code, /} else if \(!line\.links\.length\) \{\n\s+pick = this\.sourceHome\(sourcePath\);/);
 });
 
 test("OBS-55: a new project, area or Inbox task note never takes a name another note already has", () => {
@@ -369,12 +335,13 @@ test("linktextFor: the note's name, or its path only when another note really sh
     assert.equal(add.linktextFor(note, [note.path]), "Check the numbers");
 });
 
-test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter moves", async () => {
+test("confirmMove: the note to decide about, highlighted with what it is, then what follows, and Enter moves", async () => {
     // A Modal and elements just real enough to lay the prompt out and press its buttons
     const el = () => {
         const e = { children: [], text: undefined };
         e.createEl = (tag, o = {}) => { const c = el(); c.tag = tag; c.text = o.text; e.children.push(c); return c; };
         e.createDiv = () => e.createEl("div");
+        e.appendText = (t) => { e.children.push({ tag: "#text", text: t }); };
         return e;
     };
     let keys;
@@ -397,17 +364,21 @@ test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter move
     );
     const helper = new Cls();
     helper.isArea = (f) => f.basename === "Household";
-    const rowsOf = () => opened.contentEl.children[0].children.map((tr) => tr.children.map((td) => td.text));
+    // The highlighted line, as its element and text, and the paragraphs after it
+    const shown = () => { const mark = opened.contentEl.children[0].children[0]; return [mark.tag, mark.children.map((c) => c.text).join("")]; };
+    const said = () => opened.contentEl.children.filter((c) => c.tag === "p").slice(1).map((c) => c.text);
+    const TASK = { cache: { frontmatter: { tags: ["task"] } } };
 
-    const task = helper.confirmMove({ basename: "Renew online", parent: { name: "Household" }, cache: { frontmatter: { tags: ["task"] } } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
-    assert.equal(opened.title, "Move task note?");
-    assert.deepEqual(rowsOf(), [["Task", "Renew online"], ["From", "🗃️ Household"], ["To", "⭕ Garden Club Newsletter"]]);
+    const task = helper.confirmMove({ basename: "Renew online", parent: { name: "Household" }, ...TASK }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
+    assert.equal(opened.title, "Move task?");
+    assert.deepEqual(shown(), ["mark", "Task: Renew online"]);
+    assert.deepEqual(said(), ["Time entries will be reallocated accordingly."]);
     keys.Enter();
     assert.equal(await task, "move");
 
     const log = helper.confirmMove({ basename: "2026-09-18 Printer call", parent: { name: "›logs" } }, { basename: "Garden Club Newsletter" }, { basename: "Household" });
     assert.equal(opened.title, "Move log?");
-    assert.deepEqual(rowsOf(), [["Log", "2026-09-18 Printer call"], ["From", "⭕ Garden Club Newsletter"], ["To", "🗃️ Household"]]);
+    assert.deepEqual(shown(), ["mark", "Log: 2026-09-18 Printer call"]);
     opened.close();
     assert.equal(await log, null, "Esc (a close with no choice) leaves it");
 
@@ -418,22 +389,30 @@ test("confirmMove: rows read Task (or Log, or Note), From and To, and Enter move
     await inbox;
     const note = helper.confirmMove({ basename: "Seed catalog", parent: { name: "Household" }, cache: { frontmatter: { tags: [] } } }, { basename: "Household" }, { basename: "Garden Club Newsletter" });
     assert.equal(opened.title, "Move note?");
-    assert.deepEqual(rowsOf()[0], ["Note", "Seed catalog"]);
-    assert.equal(opened.contentEl.children[1].text, "Time entries will be reallocated accordingly.");
+    assert.deepEqual(shown(), ["mark", "Note: Seed catalog"]);
     opened.close();
     await note;
 
-    // A project or area moving (MoveToProject): its own time stays with it; one at the top has no From
+    // TaskChange's question: its own title, the label and name it highlights, and a paragraph for each sentence
+    const asked = helper.confirmMove({ basename: "Write copy", parent: { name: "Old" }, ...TASK }, null, { basename: "New" },
+        { title: "A note with this name already exists", label: "Task note", name: "Write copy, in ⭕ Old", words: ["First.", "Second."], cancel: "Cancel" });
+    assert.equal(opened.title, "A note with this name already exists");
+    assert.deepEqual(shown(), ["mark", "Task note: Write copy, in ⭕ Old"]);
+    assert.deepEqual(said(), ["First.", "Second."]);
+    opened.close();
+    assert.equal(await asked, null);
+
+    // A project or area moving (MoveToProject): its own time stays with it
     const project = helper.confirmMove({ basename: "Garden Club Newsletter", parent: { name: "Garden Club Newsletter" }, cache: { frontmatter: { tags: ["project"] } } }, { basename: "Household" }, { basename: "Freelance" });
     assert.equal(opened.title, "Move project?");
-    assert.deepEqual(rowsOf(), [["Project", "Garden Club Newsletter"], ["From", "🗃️ Household"], ["To", "⭕ Freelance"]]);
-    assert.match(opened.contentEl.children[1].text, /^Its time stays its own/);
+    assert.deepEqual(shown(), ["mark", "Project: Garden Club Newsletter"]);
+    assert.match(said()[0], /^Its time stays its own/);
     opened.close();
     await project;
     const area = helper.confirmMove({ basename: "Household", parent: { name: "Household" }, cache: { frontmatter: { tags: ["area"] } } }, null, { basename: "Freelance" });
     assert.equal(opened.title, "Move area?");
-    assert.deepEqual(rowsOf()[1], ["From", "No project or area"]);
-    assert.equal(opened.contentEl.children[1].text, "Its time, and its projects', stays their own.", "an area has no parent to count toward");
+    assert.deepEqual(shown(), ["mark", "Area: Household"]);
+    assert.deepEqual(said(), ["Its time, and its projects', stays their own."], "an area has no parent to count toward");
     opened.close();
     await area;
 });
@@ -511,24 +490,12 @@ test("makeFolder: a logs folder it makes gets Navigator's history icon; another 
     assert.equal(errors.length, 1);
 });
 
-test("isSameNote: the note itself, its current path, or the path it was just moved from; nothing else", () => {
-    const helper = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
-    const note = { path: "Projects/A/logs/2026-09-14 Review.md" };
-    assert.ok(helper.isSameNote(note, note));
-    assert.ok(helper.isSameNote({ path: note.path }, note), "another object for the same path");
-    assert.ok(helper.isSameNote({ path: "Inbox/2026-09-14 Review.md" }, note, "Inbox/2026-09-14 Review.md"), "a stale entry where it was");
-    assert.ok(!helper.isSameNote({ path: "Inbox/2026-09-14 Review.md" }, note), "without the old path, that's another note");
-    assert.ok(!helper.isSameNote({ path: "Projects/B/2026-09-14 Review.md" }, note, "Inbox/2026-09-14 Review.md"));
-    assert.ok(!helper.isSameNote(null, note, "Inbox/2026-09-14 Review.md"));
-});
-
-test("a note just moved isn't mistaken for a clash or another note (AddTaskNote's link text, AddProjectLink's check)", () => {
-    const addTaskNote = fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8");
-    assert.match(addTaskNote, /const movedFrom = existing\.path;\n\s*if \(!\(await this\.moveInto\(existing, pick\)\)\) return null;/);
-    assert.match(addTaskNote, /\.filter\(\(p\) => p !== movedFrom\)/, "the old path isn't counted as a second note of that name");
-    const addProjectLink = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
-    assert.match(addProjectLink, /const movedFrom = note\.path;\n\s*if \(!\(await helper\.moveInto\(note, home, \{ line \}\)\)\) return;/);
-    assert.match(addProjectLink, /helper\.isSameNote\(this\.taskNoteOf\(before, source\.path\), note, movedFrom\)/);
+test("isSameNote: the note itself, or its current path; nothing else", () => {
+    const note = { path: "Projects/A/2026-09-14 Review.md" };
+    assert.ok(add.isSameNote(note, note));
+    assert.ok(add.isSameNote({ path: note.path }, note), "another object for the same path");
+    assert.ok(!add.isSameNote({ path: "Inbox/2026-09-14 Review.md" }, note));
+    assert.ok(!add.isSameNote(null, note));
 });
 
 test("pickHome: MoveToProject can leave homes out of the menu and ask its own question; otherwise it's unchanged", async () => {
@@ -546,35 +513,12 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
     const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
         vm.createContext({ app, customJS: { obsidian: { FuzzySuggestModal } }, setTimeout }));
     const helper = new Cls();
-    await helper.pickHome("Order toner", [files[2]]);
-    assert.deepEqual(Array.from(shown.items), ["C", "A", "B"], "the line's projects first, then the rest");
+    await helper.pickHome("Order toner");
+    assert.deepEqual(Array.from(shown.items), ["A", "B", "C"], "in order of their names");
     assert.equal(shown.placeholder, 'Which project or area is "Order toner" for? (Esc: cancel)');
-    await helper.pickHome("B", [], { exclude: (f) => f.path.startsWith("Projects/A/B/"), placeholder: 'Move "B" to which project or area? (Esc: cancel)' });
+    await helper.pickHome("B", { exclude: (f) => f.path.startsWith("Projects/A/B/"), placeholder: 'Move "B" to which project or area? (Esc: cancel)' });
     assert.deepEqual(Array.from(shown.items), ["A", "C"]);
     assert.equal(shown.placeholder, 'Move "B" to which project or area? (Esc: cancel)');
-});
-
-test("moveInto: a clash is refused before anything is made; a log from the Inbox goes into a new ›logs/", async () => {
-    const made = [];
-    const renamed = [];
-    const notices = [];
-    const { files, app } = withApp([
-        ["Projects/A/A.md", ["project"]],
-        ["Projects/A/Order toner.md", ["task"]],
-        ["Inbox/Order toner.md", ["task"]],
-        ["Inbox/2026-09-18 Printer call.md", ["log"]],
-    ], {
-        fileManager: { renameFile: async (f, to) => renamed.push([f.path, to]) },
-    });
-    app.vault.createFolder = async (p) => made.push(p);
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app, customJS: {}, Notice: class { constructor(m) { notices.push(m); } } }));
-    const helper = new Cls();
-    assert.equal(await helper.moveInto(files[2], files[0]), false);
-    assert.deepEqual(notices, ["Projects/A already has a note named Order toner, so nothing changed"]);
-    assert.equal(await helper.moveInto(files[3], files[0]), true);
-    assert.deepEqual(made, ["Projects/A/›logs"]);
-    assert.deepEqual(renamed, [["Inbox/2026-09-18 Printer call.md", "Projects/A/›logs/2026-09-18 Printer call.md"]]);
 });
 
 // A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a Log template that
@@ -613,8 +557,9 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
     const getFileByPath = app.vault.getFileByPath;
     app.vault.getFileByPath = (p) => (p === tpl.path ? tpl : getFileByPath(p));
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
+    const DueDate = vm.runInContext(fs.readFileSync(new URL("../CustomJS/setDueDate.js", here), "utf8") + "\n;DueDate", vm.createContext({}));
     const Cls = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({
-        app, customJS: {}, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+        app, customJS: { DueDate: new DueDate() }, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -637,10 +582,10 @@ test("invoke on an event line: wherever the cursor is, the log is named from the
         assert.equal(refused.text, linked, linked);
         assert.deepEqual(refused.notices, ["This event already links a log"], linked);
     }
-    // The cursor in the title: the log is named from it, and the cursor goes after the checkbox
+    // The cursor in the title: the log is named from it, and the cursor stays there (OBS-224)
     const named = await invokeOn(ev, { ch: 16, paths: HAWK });
     assert.equal(named.text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
-    assert.deepEqual(named.cursor, { line: 0, ch: 6 });
+    assert.deepEqual(named.cursor, { line: 0, ch: 16 });
 });
 
 test("invoke on an event line makes the log right away through the Log template, after saving the line (OBS-57)", async () => {
@@ -653,21 +598,6 @@ test("invoke on an event line makes the log right away through the Log template,
     assert.deepEqual((await invokeOn(ev, { paths: HAWK })).calls, made.calls);
     assert.ok(!(await invokeOn("- [<] 1:30pm\t")).calls.some((c) => c.startsWith("template")));
     assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|⋯]]")).calls, ["notice: This event already links a log"]);
-});
-
-test("invoke on an event line whose log exists: nothing is made, and the line and the log agree on its project (OBS-90)", async () => {
-    const LOG = "Projects/Freelance/Hawk Ledger/logs/2026-09-14 Kickoff call.md";
-    const paths = [...HAWK, [LOG, ["log"]], ["Projects/Freelance/Tin Works/Tin Works.md", ["project"]], ["Inbox/2026-09-14 Printer call.md", ["log"]]];
-    // No ⭕ on the line: it gets the log's project, before the ⋯
-    const plain = await invokeOn("- [<] 1:30pm\tKickoff call", { paths });
-    assert.equal(plain.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
-    assert.ok(!plain.calls.some((c) => c.startsWith("template") || c === "save"), "the log isn't made again");
-    // The line already names the log's project: kept
-    assert.equal((await invokeOn("- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]]", { paths })).text, "- [<] 1:30pm\tKickoff call ℹ️ [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]");
-    // A log in the Inbox has no project: the line's ⭕ files it there without asking
-    const inbox = await invokeOn("- [<] 11:00am\tPrinter call [[Tin Works|⭕]]", { paths });
-    assert.equal(inbox.text, "- [<] 11:00am\tPrinter call [[Tin Works|⭕]] [[2026-09-14 Printer call|⋯]]");
-    assert.ok(inbox.calls.includes("move Inbox/2026-09-14 Printer call.md to Projects/Freelance/Tin Works/›logs/2026-09-14 Printer call.md"), inbox.calls.join("\n"));
 });
 
 test("an event time with nothing after it is a line with no title; a title a file can't be named after makes a log name that works (fix round 4)", () => {
@@ -683,13 +613,6 @@ test("an event time with nothing after it is a line with no title; a title a fil
     // The title on the line stays as the calendar wrote it; only the log's name changes
     assert.equal(add.eventLine("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", "Sync: Q3 plan", "2026-09-14"),
         "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|⋯]]");
-});
-
-test("invoke with a selection: its spaces stay, so the words around it don't run together; the ⋯ ends the line (OBS-90 review)", async () => {
-    const paths = [...HAWK, ["Projects/Freelance/Hawk Ledger/Call the printer.md", ["task"]]];
-    const line = "- [ ] Call the printer tomorrow";
-    const out = await invokeOn(line, { sel: [6, "- [ ] Call the printer ".length], paths });
-    assert.equal(out.text, "- [ ] Call the printer tomorrow [[Hawk Ledger|⭕]] [[Call the printer|⋯]]");
 });
 
 test("isFinished: a status of Done or Canceled, in any case, finishes a project or area; completed doesn't (OBS-125)", () => {

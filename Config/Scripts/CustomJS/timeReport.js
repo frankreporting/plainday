@@ -1164,16 +1164,20 @@ class TimeReport {
         return { money: { rate, type, label, capMinutes: cap === null ? null : Math.round(cap * 60), invest, fee, earned }, typedAt: typeAt, problems };
     }
 
+    // Invoice notes as Billing reads them, in number order, then path, so the first invoice to bill an entry
+    // is always the same one, whatever order the vault lists its files in
+    readBilled(notes, index, billing) {
+        return notes.map((n) => billing.readInvoice(n, this, index))
+            .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.path.localeCompare(b.path));
+    }
+
     // Invoice notes (OBS-5): read them, keep what they billed on the model for the timesheets, and
     // list on the project's own note (never on weekly, monthly or yearly notes) an invoice whose billed
     // entries changed since it was made (a draft's too, which says to rebuild it, OBS-143), an entry on
     // two invoices, and an invoice whose Billed entries can't be read. `notes` are [{ path, props, text }];
     // `billing` is a Billing.
     attachBilling(model, notes, index, billing) {
-        // In number order, then path, so the first invoice to bill an entry is always the same one,
-        // whatever order the vault lists its files in
-        const invoices = notes.map((n) => billing.readInvoice(n, this, index))
-            .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.path.localeCompare(b.path));
+        const invoices = this.readBilled(notes, index, billing);
         const ledger = billing.ledger(invoices);
         const { byInvoice } = billing.invoiceChanges(model, this, index, ledger);
         model.billing = { billing, invoices, ledger, index, byInvoice };
@@ -2643,6 +2647,13 @@ class TimeReport {
         };
     }
 
+    // Whether a task's line in `note` ({ path, kind }) is compared with its other lines for its project: one
+    // in a periodic note, or a project's or area's own note. A line in a task note, log or plain note is
+    // compared with nothing (rule 15), so a subtask's day line can go its own way.
+    comparedNote(note, index) {
+        return note.kind !== "other" || (this.counts(note.path, index) && this.basename(this.dirname(note.path)) === this.basename(note.path));
+    }
+
     // The notes the report's checks read (OBS-181, OBS-196): the daily notes the report already read
     // (`daily`, [{ date, path, text }]), every other note holding a task ID, the periodic notes a task
     // line's forward date points at, which the cache may not have read again since a command wrote them,
@@ -2697,6 +2708,7 @@ class TimeReport {
         const violations = T.check(notes, {
             projectOf: (note, i, lines) => this.lineProject(note, i, lines, index, false),
             exempt: this.keepsProject(model, index),
+            compared: (note) => this.comparedNote(note, index),
             resolve: (linkpath, from) => index.linkDest(linkpath.split("#")[0], from),
             ownNote: (text, from) => this.ownNote(this.lineLinks(this.classify(text).body), from, index),
         });

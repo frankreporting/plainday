@@ -133,9 +133,9 @@ Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command i
 | --- | --- | --- |
 | Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; on a nested task it moves the task above it. One already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line; a finished task reopens |
 | DueDate | `⇧⌘D` | Adds a `🚩 M/D` due-date link, or replaces the one on the line |
-| AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and keeps the line's ⭕ for it; on an event line, links a meeting log |
-| AddProjectLink | `⌥⌘P` | Links the line to a project (`⭕`) or area (`🗃️`), and moves its task note or log there too |
-| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area: a log into its `›logs/`, a project with its whole folder. The lines that link a moved note get its new ⭕. Also *Move to project…* in the file menus |
+| AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and puts its ⋯ on every line of the task; on an event line, links a meeting log |
+| AddProjectLink | `⌥⌘P` | On a line in a daily, weekly, monthly or yearly note, says which project (`⭕`) or area (`🗃️`) its task belongs to: every line of the task changes, its note moves with the task note or log it's a subtask of, and its line in a project note goes to the new `## To Do`. It asks before a note leaves a project or time moves, and refuses to move billed time |
+| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area, and its tasks and subtasks follow: a log into its `›logs/`, a project with its whole folder. Picking the project a note is already in puts its lines right. Also *Move to project…* in the file menus |
 | ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | ConvertToProject | | Turns the selection into a new project folder and note |

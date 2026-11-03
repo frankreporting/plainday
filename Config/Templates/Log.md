@@ -16,7 +16,7 @@ if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.h
 }
 
 // Every log has a line in its daily note (OBS-10), and the line says where the log belongs
-// (OBS-57): when its ⭕ or 🗃️ links name one live project or area, the log is filed there, as
+// (OBS-57): when its ⭕ or 🗃️ names a project or area, finished or not, the log is filed there, as
 // AddTaskNote files a task's note. Otherwise it waits in Inbox, with no menu (OBS-55), and is filed
 // afterwards: AddProjectLink on its line or MoveToProject on the log moves it and sets the line's
 // ⭕, so the line and its log agree on where the meeting's time counts (OBS-90).
@@ -27,13 +27,13 @@ const day = window.moment(logDate, "YYYY-MM-DD", true);
 const dailyPath = schedule && day.isValid() ? schedule.dailyNotePath(day) : null;
 const dailyFile = dailyPath ? app.vault.getFileByPath(dailyPath) : null;
 const eventLine = sync && dailyFile ? tp.user.recordEvent(await app.vault.cachedRead(dailyFile), { log: logName, title: cleanTitle }, sync).line : null;
-const lineHomes = eventLine && tasks ? tasks.lineProjects(eventLine, dailyPath) : { projects: [], allLive: false };
+const lineHome = eventLine && tasks ? tasks.lineHomeIn(eventLine, dailyPath) : null;
 
 // Logs live in a `›logs` folder under their project or area (AddTaskNote.logsFolderIn). A command
 // that already knows where the log goes hands it over; Raycast's Open Log Note hands over Inbox
 // (anything that isn't a note, such as "inbox" from an AddTaskNote that hasn't reloaded yet, is Inbox)
 const preset = [tasks?.takePresetParent?.(tp.config.target_file.path)].find((p) => p && typeof p === "object") ?? null;
-const pickedFile = lineHomes.allLive && lineHomes.projects.length === 1 ? lineHomes.projects[0] : preset;
+const pickedFile = lineHome ?? preset;
 let parentLink = "";
 let folder = "Inbox";
 if (pickedFile) {

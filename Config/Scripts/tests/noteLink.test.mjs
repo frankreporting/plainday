@@ -1,6 +1,6 @@
 // A line's link to its own note (a task's note, an event's log) is written ⋯, and the link to the note
-// Schedule sent it from ↗ (OBS-208); until OBS-196 and OBS-186 tell them apart, every script reads either
-// as the line's note link, the ↗ with or without the U+FE0F a phone may add. 🗒️ and 🔗, the marks before,
+// Schedule sent it from ↗ (OBS-208); every script reads both spellings of the link, the ↗ with or without the
+// U+FE0F a phone may add, and only what a line's own note decides reads the ⋯ alone. 🗒️ and 🔗, the marks before,
 // and a typed … mean nothing. Each script keeps its own pattern (TimeReport has to stand alone for the
 // Raycast timer), so this checks they all read the same spellings, and all write the same marks. Run from
 // the vault root:
@@ -33,8 +33,6 @@ test("every script reads ⋯, ↗ and ↗ + U+FE0F as a line's note link (OBS-20
     for (const [name, mark] of Object.entries(SPELLINGS)) {
         const link = `[[Draft the brief|${mark}]]`;
         assert.ok(AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${name}`);
-        assert.ok(AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${name}`);
-        assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), "Draft the brief", `AddProjectLink.taskLinkpath: ${name}`);
         assert.ok(once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
         assert.ok(once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
         const read = report.lineLinks(`[ ] Draft the brief ${link}`);
@@ -49,8 +47,6 @@ test("🗒️, 🔗 and … are a note link to none of them now (OBS-208)", () =
     for (const [name, mark] of Object.entries(NOTHING)) {
         const link = `[[Draft the brief|${mark}]]`;
         assert.ok(!AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${name}`);
-        assert.ok(!AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${name}`);
-        assert.equal(linker.taskLinkpath(`- [ ] Draft the brief ${link}`), null, `AddProjectLink.taskLinkpath: ${name}`);
         assert.ok(!once(DueDate.NOTE_LINK).test(link), `DueDate: ${name}`);
         assert.ok(!once(TimeReport.SYMBOL_LINK).test(link), `TimeReport.SYMBOL_LINK: ${name}`);
         const read = report.lineLinks(`[ ] Draft the brief ${link}`);
@@ -62,7 +58,6 @@ test("🗒️, 🔗 and … are a note link to none of them now (OBS-208)", () =
 test("a ⭕ or 🗃️ isn't a note link to any of them", () => {
     for (const link of ["[[Studio|⭕]]", "[[Home|🗃️]]", "[[2026-09-30|🚩 9/30]]", "[[Draft the brief|Brief]]"]) {
         assert.ok(!AddTaskNote.NOTE_LINK.test(link), `AddTaskNote: ${link}`);
-        assert.ok(!AddProjectLink.TASK_LINK.test(link), `AddProjectLink: ${link}`);
         assert.equal(sync.splitTail(`Planning ${link}`, true).log, null, `CalendarSync: ${link}`);
     }
     for (const link of ["[[Studio|⭕]]", "[[Draft the brief|Brief]]"]) assert.equal(report.lineLinks(`[ ] Draft the brief ${link}`).notes.length, 0, link);

@@ -274,10 +274,14 @@ test("oldMarksLeft counts every daily note, one with no times included, as the c
     assert.equal(tr.oldMarkLines(await tr.readDailyNotes(v.customJS.Schedule)), 0, "the report reads only days with times");
 });
 
-test("AddProjectLink reads a line's note as its ⋯, else its ↗, wherever each sits in the run", () => {
-    const cmd = standIn({ notes: {} }).customJS.AddProjectLink;
-    assert.equal(cmd.taskLinkpath("- [ ] A [[B|⭕]] [[Src|↗]] [[Own|⋯]]"), "Own");
-    assert.equal(cmd.taskLinkpath("- [ ] A [[B|⭕]] [[Src|↗]]"), "Src");
-    assert.equal(cmd.relinked("- [ ] A [[Src|↗]] [[Own|⋯]]", "P/Own"), "- [ ] A [[Src|↗]] [[P/Own|⋯]]");
-    assert.ok(cmd.sameButTaskLink("- [ ] A [[Src|↗]] [[P/Own|⋯]]", "- [ ] A [[Src|↗]] [[Own|⋯]]"));
+test("a change reads only a line's ⋯ for its own note; its ↗ joins nothing, and a line whose links moved is still found", () => {
+    const v = standIn({ notes: {} });
+    const at = (lines, raw, n = 0) => v.customJS.TaskChange.locate(lines, { raw, at: n });
+    assert.equal(at(["- [ ] A [[Src|↗]] [[P/Own|⋯]]"], "- [ ] A [[Src|↗]] [[Own|⋯]]"), 0);
+    assert.equal(at(["- [ ] B", "- [ ] A [[Own|⋯]]"], "- [ ] A [[Own|⋯]]"), 1, "a line that shifted");
+    assert.equal(at(["- [ ] A [[X|⭕]]", "- [ ] A [[Y|⭕]]"], "- [ ] A [[Y|⭕]]"), 1, "the line as it was read, before one that differs only in a link");
+    assert.equal(at(["- [ ] B"], "- [ ] A"), -1);
+    const own = (text) => [...v.customJS.TimeReport.lineLinks(v.customJS.TimeReport.classify(text).body).notes].map((l) => l.target);
+    assert.deepEqual(own("- [ ] A [[B|⭕]] [[Src|↗]] [[Own|⋯]]"), ["Own"]);
+    assert.deepEqual(own("- [ ] A [[B|⭕]] [[Src|↗]]"), []);
 });

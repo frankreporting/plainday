@@ -210,7 +210,6 @@ class TaskIds {
     // item). From Obsidian's metadata cache, so no file is read; it finds where a task's lines are, but
     // the cache trails a write by a moment, so decisions read the notes themselves (gather).
     linesOf(id) {
-        if (this.index) return this.index.get(id.toLowerCase()) ?? [];
         const out = [];
         // A note's place is asked only of a note holding the ID, so a vault of many notes costs no more
         for (const file of app.vault.getMarkdownFiles()) {
@@ -231,6 +230,69 @@ class TaskIds {
         return { file, line, task: item ? item.task : null };
     }
 
+    // Every task ID's lines in the notes in the system, in one pass over Obsidian's cache: Map from the ID,
+    // lowercased, to its lines, as linesOf gives them. A command builds it once and looks every ID up there
+    // (rule 19). A note's place is asked only of a note holding an ID, so a vault of many notes costs no more.
+    map() {
+        const out = new Map();
+        for (const file of app.vault.getMarkdownFiles()) {
+            const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
+            if (!items.length || this.ignored(file)) continue;
+            for (const li of items) {
+                const key = li.id.toLowerCase();
+                if (!out.has(key)) out.set(key, []);
+                out.get(key).push({ file, line: li.position.start.line, task: li.task });
+            }
+        }
+        return out;
+    }
+
+    // The notes the cache can't be trusted about: every note open in an editor, and those a command wrote a
+    // moment ago, which it may not have read again yet
+    nowFiles() {
+        const files = new Map();
+        for (const [path, at] of this.recent ?? []) {
+            const f = Date.now() - at < TaskIds.RECENT_MS ? app.vault.getFileByPath(path) : null;
+            if (f) files.set(path, f);
+        }
+        for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+            const f = leaf.view?.file;
+            if (f && leaf.view.editor) files.set(f.path, f);
+        }
+        return [...files.values()];
+    }
+
+    // Several tasks' checklist lines as they are now, top-level lines only: Map from each of `ids` that is a
+    // task's (isTask) to its lines, as gather gives them. `map` is the command's (map()). A block ID of your
+    // own on lines that were never sent joins nothing.
+    async gatherMany(ids, map = this.map()) {
+        const want = new Set(ids.map((id) => id.toLowerCase()));
+        const files = new Map();
+        for (const id of want) for (const l of map.get(id) ?? []) files.set(l.file.path, l.file);
+        for (const f of this.nowFiles()) files.set(f.path, f);
+        const out = new Map();
+        for (const file of files.values()) {
+            if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
+            const ls = (await this.readNow(file)).split("\n");
+            ls.forEach((raw, line) => {
+                const text = raw.replace(/\r$/, "");
+                const box = text.match(TaskIds.CHECKBOX);
+                const id = box ? TaskIds.idOf(text)?.toLowerCase() : null;
+                if (!id || !want.has(id) || !TaskIds.isTop(ls, line)) return;
+                if (!out.has(id)) out.set(id, []);
+                out.get(id).push({ file, line, task: box[1], text });
+            });
+        }
+        for (const [id, lines] of out) if (!TaskIds.isTask(lines)) out.delete(id);
+        return out;
+    }
+
+    // Whether lines sharing a block ID are a task's: one of them is sent, a [>] line or one with a forward
+    // date. Lines that only share a block ID of your own were never one task (rule 2).
+    static isTask(lines) {
+        return lines.some((l) => l.task === ">" || TaskIds.forwardOf(l.text));
+    }
+
     // A note's text as it is now: from its editor when it's open in one (ahead of the saved file and
     // the cache while you type), else as the vault has it
     async readNow(file) {
@@ -247,15 +309,7 @@ class TaskIds {
         const files = new Map();
         for (const l of this.linesOf(id)) files.set(l.file.path, l.file);
         for (const f of also) if (f) files.set(f.path, f);
-        // Notes a command wrote a moment ago, which the cache may not have read again yet
-        for (const [path, at] of this.recent ?? []) {
-            const f = Date.now() - at < TaskIds.RECENT_MS ? app.vault.getFileByPath(path) : null;
-            if (f) files.set(path, f);
-        }
-        for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-            const f = leaf.view?.file;
-            if (f && leaf.view.editor) files.set(f.path, f);
-        }
+        for (const f of this.nowFiles()) files.set(f.path, f);
         const out = [];
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
@@ -273,7 +327,6 @@ class TaskIds {
     // For the task checks, which also read `Archive`, as before OBS-208, since an archived project's
     // Problems are listed (Brian, 2026-10-28); no command searches there.
     allIds() {
-        if (this.index) return this.index;
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
             const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
@@ -295,13 +348,15 @@ class TaskIds {
         const taken = (id) => app.vault.getMarkdownFiles().some((f) => !f.path.startsWith("Config/") && this.lineIn(f, id));
         for (;;) {
             const id = TaskIds.newId(new Set(), this.random ?? Math.random);
-            if (this.index ? !this.linesOf(id).length : !taken(id)) return id;
+            if (!taken(id)) return id;
         }
     }
 
     // The rule, checked over `notes` ([{ path, kind, text }], kind as kindOf says), with
     //   projectOf(note, i, lines): the project or area line i counts toward, or null;
     //   exempt(note, i): why line i may name another project ("finished", "invoiced"), or null;
+    //   compared(note): whether its lines are compared at all: a line in a task note, log or plain note
+    //     isn't (Brian, 2026-10-25), so a subtask's day line can go its own way;
     //   resolve(linkpath, fromPath): the path a link points at, or null;
     //   ownNote(text, path): the notes a line's ⋯ links, in the system (a ↗ is read by nobody).
     // Only top-level lines are a task's: at the left edge, since a line nested under a checklist line is
@@ -311,7 +366,7 @@ class TaskIds {
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
     // notes), "ownNotes" (two different ⋯ notes), "twice" (an ID twice in a note), "trailing" (text after
     // a task's ID, which Obsidian then doesn't read).
-    static check(notes, { projectOf, exempt = () => null, resolve, ownNote = () => [] }) {
+    static check(notes, { projectOf, exempt = () => null, compared = () => true, resolve, ownNote = () => [] }) {
         const found = [], out = [], twice = [];
         const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
         for (const note of notes) {
@@ -333,16 +388,15 @@ class TaskIds {
             byId.get(h.id).push(h);
         }
         const isOpen = (h) => h.task === " " || h.task === "/";
-        // Only a task's ID: one a sent line ([>], or one with a forward date) carries. Lines that only share a block ID
-        // of your own were never one task.
-        const isTask = (hits) => hits.some((h) => h.task === ">" || TaskIds.forwardOf(h.text));
+        // Only a task's ID: one a sent line carries (isTask)
+        const isTask = TaskIds.isTask;
         for (const [id, hits] of byId) {
             if (!isTask(hits)) continue;
             const open = hits.filter(isOpen);
             const finished = hits.filter((h) => h.task === "x" || h.task === "-");
             // Exemptions are only worked out for a task whose lines disagree. A line with a ⋯ and no project
             // is Unassigned and isn't listed (rule 4)
-            const all = hits.map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
+            const all = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
             const named = new Set(all.map((n) => n.project)).size > 1 ? all.filter((n) => !exempt(n.h.note, n.h.line)) : all;
             if (new Set(named.map((n) => n.project)).size > 1) out.push({ rule: "project", id, lines: named.map((n) => TaskIds.where(n.h)), detail: { projects: named.map((n) => n.project) } });
             // `clicked`: which of them, if any, is a sent line a click turned from [>] into [ ] (a line outside

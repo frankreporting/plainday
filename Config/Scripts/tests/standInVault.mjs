@@ -38,6 +38,7 @@ export const NAMES = { "YYYY-MM-DD": /^\d{4}-\d{2}-\d{2}$/, "gggg[w]ww": /^\d{4}
 export const momentOn = (today) => {
     const make = (date, valid = true) => ({
         isValid: () => valid,
+        hours: () => 23, minutes: () => 59,
         locale: () => make(date, valid),
         clone: () => make(date, valid),
         startOf: (unit) => make({ week: plus(date, -dow(date)), isoWeek: plus(date, -((dow(date) + 6) % 7)), month: `${date.slice(0, 7)}-01`, year: `${date.slice(0, 4)}-01-01` }[unit] ?? date, valid),
@@ -102,12 +103,13 @@ export const parseCache = (text) => {
 // the previous command's writes. create and process write disk and live text together; process
 // replaces the open note's editor text, so unsaved editor edits are lost as in a real conflict.
 // create throws on an existing path; a folder exists once a note lives under it or it was created.
-export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false }) {
+export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null }) {
     const vault = new Map(Object.entries(notes));
     const folders = new Map();
+    const root = { path: "/", name: "", children: [], isRoot: () => true, parent: null };
     const folder = (p) => {
-        if (!p) return { path: "/", name: "", parent: null };
-        if (!folders.has(p)) folders.set(p, { path: p, name: p.split("/").pop(), parent: folder(p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "") });
+        if (!p) return root;
+        if (!folders.has(p)) folders.set(p, { path: p, name: p.split("/").pop(), children: [], isRoot: () => false, parent: folder(p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "") });
         return folders.get(p);
     };
     const disk = new Map(vault);
@@ -122,12 +124,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     const cacheText = (p) => (lag && seen ? seen.get(p) : vault.get(p));
     const flush = () => { if (editing && vault.has(editing)) disk.set(editing, vault.get(editing)); };
     const tick = () => { flush(); seen = started; started = new Map(disk); };
-    const notices = [], left = [];
-    let editing = open, cursor = at, cursorCh = null, placed = null, lines = (vault.get(open) ?? "").split("\n");
+    const notices = [], left = [], asked = [], menus = [];
+    // What a question covers, which it doesn't list (Brian, 2026-11-03): the days whose lines change, whose time
+    // moves and whose time stops counting, as the tests check them. Set while TaskChange.ask runs.
+    let covers = null;
+    let editing = open, cursor = at, cursorCh = null, placed = null, selected = null, lines = (vault.get(open) ?? "").split("\n");
     const save = () => { if (editing) { vault.set(editing, lines.join("\n")); if (!lag) disk.set(editing, vault.get(editing)); } };
     const offset = (p) => lines.slice(0, p.line).reduce((s, l) => s + l.length + 1, 0) + p.ch;
     const editor = {
-        getCursor: () => ({ line: cursor, ch: cursorCh ?? lines[cursor]?.length ?? 0 }), setCursor(c) { placed = { line: c.line, ch: c.ch }; }, getSelection: () => "",
+        getCursor: (which) => ({ line: cursor, ch: which === "to" && selected ? selected.to : selected ? selected.from : cursorCh ?? lines[cursor]?.length ?? 0 }), setCursor(c) { placed = { line: c.line, ch: c.ch }; }, getSelection: () => (selected ? lines[cursor].slice(selected.from, selected.to) : ""),
         getLine: (n) => lines[n], lineCount: () => lines.length, getValue: () => lines.join("\n"),
         offsetToPos(o) { let line = 0; while (line < lines.length - 1 && o > lines[line].length) { o -= lines[line].length + 1; line++; } return { line, ch: o }; },
         replaceRange(text, from, to = from) {
@@ -138,6 +143,27 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     const view = { editor, file: fileOf(open), currentMode: { getFoldInfo: () => null } };
     const byName = (name) => [...vault.keys()].map(fileOf).find((f) => f.path.replace(/\.md$/, "").toLowerCase() === name.toLowerCase() || f.basename.toLowerCase() === name.toLowerCase()) ?? null;
+    const listeners = new Set();
+    const changed = (file) => { for (const l of [...listeners]) if (l.name === "changed") l.fn(file); };
+    const put = (p, text) => { vault.set(p, text); disk.set(p, text); if (p === editing) lines = text.split("\n"); };
+    // Obsidian's move: a note's links are written again when its name stops being unique, or they named its path
+    const moveNote = (from, to) => {
+        if (vault.has(to)) throw new Error("Destination file already exists!");
+        const file = fileOf(from), old = from.replace(/\.md$/, "").toLowerCase(), name = file.basename.toLowerCase();
+        const clash = [...vault.keys()].some((k) => k !== from && k.split("/").pop().replace(/\.md$/, "").toLowerCase() === name);
+        const linktext = clash ? to.replace(/\.md$/, "") : file.basename;
+        const points = (t) => { const x = t.trim().toLowerCase(); return x === old || (x === name && byName(x) === file); };
+        for (const [p, text] of [...vault]) {
+            const next = text.replace(/\[\[([^\]|#]+)([^\]]*)\]\]/g, (m, t, rest) => (points(t) ? `[[${linktext}${rest}]]` : m));
+            if (next !== text) put(p, next);
+        }
+        for (const map of [vault, disk]) { map.set(to, map.get(from)); map.delete(from); }
+        for (const map of [seen, started]) if (map?.has(from)) { map.set(to, map.get(from)); map.delete(from); }
+        files.delete(from);
+        Object.assign(file, { path: to, name: to.split("/").pop(), basename: to.split("/").pop().replace(/\.md$/, ""), parent: folder(to.slice(0, to.lastIndexOf("/"))) });
+        files.set(to, file);
+        if (editing === from) editing = to;
+    };
     const app = {
         internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: `${PLANNER}/days`, format: "YYYY-MM-DD" } } } } },
         plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {}, getPlugin: () => null },
@@ -148,10 +174,50 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             getFileCache: (f) => { const t = cacheText(f.path); return t === undefined ? null : parseCache(t); },
             getFirstLinkpathDest: (linkpath) => byName(linkpath.split("#")[0].trim()),
             fileToLinktext: (f) => f.basename,
+            on: (name, fn) => { const ref = { name, fn }; listeners.add(ref); return ref; },
+            offref: (ref) => listeners.delete(ref),
+            // Which notes link which, from what the cache has read
+            get resolvedLinks() {
+                const out = {};
+                for (const p of vault.keys()) {
+                    const links = {};
+                    for (const l of parseCache(cacheText(p) ?? "").links) {
+                        const f = byName(l.link.split("#")[0].trim());
+                        if (f) links[f.path] = (links[f.path] ?? 0) + 1;
+                    }
+                    out[p] = links;
+                }
+                return out;
+            },
+        },
+        fileManager: {
+            renameFile: async (file, to) => {
+                if (file.children) {
+                    const from = file.path;
+                    for (const k of [...vault.keys()].filter((p) => p.startsWith(`${from}/`))) moveNote(k, to + k.slice(from.length));
+                } else moveNote(file.path, to);
+            },
+            processFrontMatter: async (file, fn) => {
+                const text = disk.get(file.path);
+                const before = parseCache(text).frontmatter ?? { tags: [] };
+                const after = { ...before };
+                fn(after);
+                const ls = text.split("\n");
+                if (ls[0] !== "---") ls.unshift("---", "---");
+                const end = ls.indexOf("---", 1);
+                for (const key of Object.keys(after)) {
+                    if (key === "tags" || after[key] === before[key]) continue;
+                    const at = ls.findIndex((l, i) => i < end && l.startsWith(`${key}:`));
+                    const line = `${key}: "${after[key]}"`;
+                    if (at === -1) ls.splice(ls.indexOf("---", 1), 0, line); else ls[at] = line;
+                }
+                put(file.path, ls.join("\n"));
+                changed(file);
+            },
         },
         vault: {
             getMarkdownFiles: () => [...vault.keys()].map(fileOf),
-            getFileByPath: fileOf, getAbstractFileByPath: fileOf,
+            getFileByPath: fileOf, getAbstractFileByPath: (p) => fileOf(p) ?? app.vault.getFolderByPath(p),
             getFolderByPath: (p) => (!p || p === "/" || made.has(p) || [...vault.keys()].some((k) => k.startsWith(`${p}/`)) ? folder(p) : null),
             createFolder: async (p) => {
                 if (made.has(p) || [...vault.keys()].some((k) => k.startsWith(`${p}/`))) throw new Error("Folder already exists.");
@@ -172,15 +238,36 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             },
         },
     };
-    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true } } };
-    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {}, info: () => {} } });
-    const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
+    // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
+    const frontMatter = (text) => { const m = text.match(/^---\n([\s\S]*?)\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
+    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y}---\n`).frontmatter } };
+    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, console: { ...console, error: () => {}, info: () => {} } });
+    // `plant(name, text)` changes a script's text, to show a test catches a bug
+    const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
     Object.assign(customJS, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
-        AddProjectLink: make("addProjectLink", "AddProjectLink"),
+        AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
+        TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
+    const ask = customJS.TaskChange.ask.bind(customJS.TaskChange);
+    customJS.TaskChange.ask = async (weighed, ...rest) => {
+        const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => customJS.TaskChange.dayName(l.file)))].join(", ");
+        covers = { lines: days(weighed.lines), time: days(weighed.days.map((d) => d.l)), stops: days(weighed.stops.map((d) => d.l)) };
+        try { return await ask(weighed, ...rest); } finally { covers = null; }
+    };
+    // Templater's part: a task note or log made where the Task and Log templates would put it
+    const made2 = (path, text) => { put(path, text); return fileOf(path); };
+    customJS.AddTaskNote.createTaskNote = async (name, parent = null) => {
+        // As the Task template names it: its dates and "!task" taken off and the ends trimmed, spaces left as they are
+        const title = name.replaceAll(/[0-9]{4}-[0-9]{2}-[0-9]{2}/g, "").replace("!task", "").trim() || name;
+        return made2(`${parent ? parent.parent.path : "Inbox"}/${title}.md`, `---\ntags: [task]\n${parent ? `parent: "[[${parent.basename}]]"\n` : ""}---\n`);
+    };
+    customJS.AddTaskNote.makeLog = async (name) => {
+        if (app.metadataCache.getFirstLinkpathDest(name)) return;
+        made2(`Inbox/${name}.md`, "---\ntags: [log]\n---\n");
+    };
     let n = 0;
     customJS.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);
     return {
@@ -189,6 +276,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         placed: () => placed,
         notes: () => Object.fromEntries(vault),
         open(p, line, ch = null) { flush(); editing = p; cursor = line; cursorCh = ch; lines = (vault.get(p) ?? "").split("\n"); view.file = fileOf(p); },
+        // Text selected on the cursor's line, as columns
+        select(from, to) { selected = { from, to }; },
         lineOf: (p, text) => (vault.get(p) ?? "").split("\n").findIndex((l) => l.includes(text)),
         async schedule(date, unit = "day") {
             tick();
@@ -199,7 +288,64 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             return prompt?.title ?? null;
         },
         check: () => JSON.parse(JSON.stringify(checkAll())),
+        // What the checks say, and every line that disagrees with its own note, as the report lists them
+        problems: () => JSON.parse(JSON.stringify([...checkAll().map((x) => x.rule), ...ownNotes(), ...parents()])),
+        // What the question asked, as confirmMove was called, and what each menu was given
+        asked, menus,
+        // A command, answering its menu with `pick` (a path, or null for Esc) and its question with `answer`
+        answering,
+        async addProjectLink(pick, answer = "move") { tick(); answering(pick, answer); await customJS.AddProjectLink.invoke(); },
+        // With no cursor placed (open's `ch`), it's in the task's text, as you'd run the command
+        async addTaskNote(answer = "move", pick = null) { tick(); answering(pick, answer); cursorCh ??= customJS.AddTaskNote.afterCheckbox(lines[cursor]); await customJS.AddTaskNote.invoke(); },
+        async moveToProject(pick, answer = "move", files = null) { tick(); answering(pick, answer); await customJS.MoveToProject.move(files ? files.map(fileOf) : [view.file]); },
+        file: fileOf,
     };
+    function ownNotes() {
+        const tr = customJS.TimeReport, index = tr.appIndex();
+        const notes = [...vault.keys()].filter((p) => customJS.TaskIds.inSystem(fileOf(p))).map((p) => ({ path: p, text: vault.get(p) }));
+        return [...new Set(tr.ownNoteProblems(notes, index).map((p) => `${p.conflict.path}:${p.conflict.line}`))].map((at) => `own note ${at}`);
+    }
+    // Every subtask's day line that names another project than the task note or log it sits in, which the
+    // commands keep together (Brian, 2026-11-02). The report's own check for it is OBS-233's.
+    function parents() {
+        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor, ids = customJS.TaskIds, index = tr.appIndex();
+        const holds = (p, text) => {
+            const fm = (text.startsWith("---") ? text.split(/^---\s*$/m)[1] ?? "" : "").split("\n");
+            const at = fm.findIndex((l) => /^tags?:/.test(l));
+            const inline = at === -1 ? "" : fm[at].replace(/^tags?:/, "").trim();
+            const tags = at === -1 ? [] : inline ? inline.replace(/^\[|\]$/g, "").split(/[,\s]+/) : fm.slice(at + 1).filter((l, i, all) => all.slice(0, i + 1).every((x) => /^\s*-\s/.test(x))).map((l) => l.replace(/^\s*-\s*/, ""));
+            return p.includes("/›logs/") || tags.some((t) => ["task", "log"].includes(t.trim().replace(/^#/, "").toLowerCase()));
+        };
+        const parentOf = new Map();
+        for (const [p, text] of vault) {
+            const f = fileOf(p);
+            if (!ids.inSystem(f) || ids.kindOf(f) !== "other" || !holds(p, text)) continue;
+            const { visible, hidden } = tr.scan(text.split("\n"));
+            visible.forEach((l, i) => {
+                const id = !hidden[i] && T.CHECKBOX.test(l) && T.isTop(visible, i) ? T.idOf(l)?.toLowerCase() : null;
+                if (id) parentOf.set(id, tr.projectOfNote(p, index) ?? null);
+            });
+        }
+        const out = [];
+        for (const [p, text] of vault) {
+            const f = fileOf(p);
+            if (!ids.inSystem(f) || ids.kindOf(f) === "other") continue;
+            const { visible, hidden } = tr.scan(text.split("\n"));
+            visible.forEach((l, i) => {
+                const id = !hidden[i] && T.CHECKBOX.test(l) && T.isTop(visible, i) ? T.idOf(l)?.toLowerCase() : null;
+                if (id && parentOf.has(id) && (tr.resolve((n) => visible[n], i, p, index).project ?? null) !== parentOf.get(id)) out.push(`parent ${p}:${i + 1}`);
+            });
+        }
+        return out;
+    }
+    function answering(pick, answer) {
+        const answers = [].concat(answer);
+        customJS.AddTaskNote.pickHome = async (name, options = {}) => { menus.push({ name, options }); return pick ? fileOf(pick) : null; };
+        customJS.AddTaskNote.confirmMove = async (note, from, to, words = {}) => {
+            asked.push({ note: note?.basename ?? null, from: from?.basename ?? null, to: to?.basename ?? null, ...words, ...covers });
+            return answers.length > 1 ? answers.shift() : answers[0];
+        };
+    }
     // Every task's lines over the notes the report's checks read (the system and Archive, OBS-208), as
     // the live text says (`vault`, not `disk`: the notes as you'd see them open, which is what must agree;
     // disk lags by design), projects read as the time report reads them
@@ -210,6 +356,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         const notes = [...vault.keys()].filter(read).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
         return T.check(notes, {
             projectOf: (note, i, lines) => tr.lineProject(note, i, lines, index, false),
+            compared: (note) => tr.comparedNote(note, index),
             resolve: (linkpath, from) => app.metadataCache.getFirstLinkpathDest(linkpath, from)?.path ?? null,
             ownNote: (text, from) => tr.ownNote(tr.lineLinks(tr.classify(text).body), from, index),
         });

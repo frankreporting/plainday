@@ -218,6 +218,31 @@ test("check: a task whose lines agree has nothing to say", () => {
     assert.deepEqual(run([{ ...SRC, text: SRC.text.replace("[>]", "[x]") }, { ...OPEN, text: OPEN.text.replace("[ ]", "[x]") }]), [], "done, and the forward date names the day");
     assert.deepEqual(run([{ path: "days/2026-10-07.md", kind: "day", text: "- [>] Call [[Kestrel|⭕]] ^q1w2e3" }, { path: "days/2026-10-08.md", kind: "day", text: "- [/] Call [[Kestrel|⭕]] ^q1w2e3" }]), [], "only daily lines, no source");
 });
+test("map and gatherMany: one pass for a command, notes in the system only, task IDs only (OBS-225)", async () => {
+    const DAY = "Reference/Planner/days/2026-09-17.md", P = "Projects/Kestrel/Kestrel.md", NOTE = "Reference/People/Rafe.md", MINE = "Projects/Kestrel/Mine.md";
+    const v = standIn({ notes: {
+        [P]: "---\ntags: [project]\n---\n- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n\t- [ ] Nested ^k3x9m2\n",
+        [DAY]: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n- [ ] Mine ^myown\n",
+        [MINE]: "- [ ] Mine too ^myown\n",
+        [NOTE]: "- [ ] Outside ^k3x9m2\n",
+    } });
+    const t = v.customJS.TaskIds;
+    const map = t.map();
+    assert.deepEqual([...map.keys()].sort(), ["k3x9m2", "myown"]);
+    assert.ok(!map.get("k3x9m2").some((l) => l.file.path === NOTE), "a note outside the system isn't in it");
+    const lines = await t.gatherMany(["k3x9m2", "myown", "NOPE"], map);
+    assert.deepEqual([...lines.keys()], ["k3x9m2"], "a block ID of your own that was never sent isn't a task's");
+    assert.deepEqual(plain(lines.get("k3x9m2").map((l) => [l.file.path, l.line, l.task]).sort()), [[DAY, 0, " "], [P, 3, ">"]].sort(), "top-level lines only");
+});
+
+test("check: a line in a task note, log or plain note is compared with nothing, when `compared` says so (OBS-225)", () => {
+    const note = { path: "P/Write copy.md", kind: "other", text: "- [>] Book it [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2" };
+    const other = { ...OPEN, text: "- [ ] Book it [[Household|⭕]] ^k3x9m2" };
+    const rules = (compared) => plain(TaskIds.check([note, other], { projectOf: (n) => (n === note ? "Kestrel" : "Household"), resolve, compared }).map((x) => x.rule));
+    assert.deepEqual(rules(undefined), ["project"]);
+    assert.deepEqual(rules((n) => n.kind !== "other"), []);
+});
+
 test("check 1: two projects (an invoiced or finished line excepted)", () => {
     const other = { ...OPEN, text: "- [ ] Book it [[Household|⭕]] ^k3x9m2" };
     assert.deepEqual(run([SRC, other]), [["project", ["P/Kestrel.md:0", "days/2026-10-08.md:0"]]]);

@@ -14,7 +14,7 @@ status: Active
 ---
 The monthly newsletter for the neighborhood garden club. Volunteer work: `rate_type: non-billable`, so every hour logged here counts as 🆓. Its `rate` puts a value on that time, $40 an hour, what the club would pay a designer: the report shows it as Invested, never as Earned.
 
-## Tasks
+## To Do
 
 - [x] Layout template
 - [x] September issue: member updates
