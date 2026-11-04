@@ -138,7 +138,7 @@ test("every table the system writes comes from TimeReport.table: no script build
     const found = [];
     for (const url of scripts) {
         const lines = fs.readFileSync(url, "utf8").split("\n");
-        const from = lines.findIndex((l) => /^\s+table\(head, align, rows\) \{$/.test(l));
+        const from = lines.findIndex((l) => /^\s+table\(head, align, rows(?:, \{[^}]*\} = \{\})?\) \{$/.test(l));
         const to = from === -1 ? -1 : lines.findIndex((l, i) => i > from && /^    \}$/.test(l));
         lines.forEach((line, i) => {
             if (url.pathname.endsWith("CustomJS/timeReport.js") && i >= from && i <= to) return;

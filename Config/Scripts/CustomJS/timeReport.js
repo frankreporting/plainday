@@ -98,6 +98,17 @@ class TimeReport {
     static SHEET = " timesheet";
     // An invoice's status as the mark in its links, in the timesheets and on the project's note (OBS-117)
     static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
+    // Freezing tables for the Selectable Tables plugin (OBS-238). The default is set in TABLE_SETTINGS. A
+    // freeze is that plugin's mark in a table's header row, `%%freeze 2 1%%` for 2 rows and 1 column, read
+    // as its src/editor/freeze-mark.ts reads it: the first one counts, spaces inside are fine, and one in a
+    // code span is text. Beside it the report writes a label saying whose freeze it is: `%%default 2 1%%`,
+    // its own default, or `%%custom%%`, yours. FREEZE_COMMENT is a comment as the report writes it, which
+    // defuse leaves whole: never next to another `%`, or after a `<` (Templater's `<%`).
+    static TABLE_SETTINGS = "Config/Table Settings.md";
+    static FREEZE_MARK = /%%\s*freeze\s+(\d+)\s+(\d+)\s*%%/;
+    static FREEZE_LABEL = /%%\s*(?:default\s+(\d+)\s+(\d+)|custom)\s*%%/;
+    static FREEZE_COMMENT = /((?<![%<])%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%))/;
+    static MAX_FROZEN_COLUMNS = 9;
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
     // Time under a sub-task isn't counted, only listed (Brian, 2026-10-30): counting it too would leave
@@ -1378,9 +1389,11 @@ class TimeReport {
     // Text quoted from notes can't open a comment in the report and hide its end marker, or run as Templater.
     // Running it twice changes nothing more (OBS-184: a table's cells are defused before they're measured,
     // and the report's lines again after): `%%%` becomes `%`, a zero-width space, `%`, another, `%`, with no `%%` left.
+    // A table's freeze comments are left whole (OBS-238): each closes itself, so it can't hide what follows.
     defuse(text) {
-        return String(text ?? "").replace(/%(?=%)/g, "%\u200B").replace(/<!--/g, "<\u200B!--").replace(/-->/g, "--\u200B>")
-            .replace(/<%/g, "<\u200B%");   // Templater syntax, which a device could run when the note syncs in
+        return String(text ?? "").split(TimeReport.FREEZE_COMMENT).map((part, i) => (i % 2 ? part
+            : part.replace(/%(?=%)/g, "%\u200B").replace(/<!--/g, "<\u200B!--").replace(/-->/g, "--\u200B>")
+                .replace(/<%/g, "<\u200B%"))).join("");   // Templater syntax, which a device could run when the note syncs in
     }
 
     // Totals in minutes, plus Earned in cents for entries whose project has an hourly rate, and
@@ -1547,7 +1560,10 @@ class TimeReport {
     //   - A cell has one space before its text and the rest after it; right-aligned, the rest before it
     //     and one after; centered, split, with the extra one after. The second row fills each column
     //     with dashes, with the alignment's colons.
-    table(head, align, rows) {
+    //   - `freeze` is the freeze comments for the header (freezeHeader), which go at the start of its first
+    //     cell, where Selectable Tables' commands put a mark, and are measured with it (OBS-238).
+    table(head, align, rows, { freeze = "" } = {}) {
+        if (freeze) head = [`${freeze} ${head[0] ?? ""}`, ...head.slice(1)];
         const lines = [head, ...rows].map((row) => {
             if (row.length > align.length) throw new Error(`TimeReport.table: a row of ${row.length} cells in a table of ${align.length} columns`);
             return align.map((_, i) => this.defuse(String(row[i] ?? "")).trim());
@@ -2097,6 +2113,155 @@ class TimeReport {
         return lines.length ? [TimeReport.PROBLEMS, ...lines.map((l) => `> ${l}`), ""] : [];
     }
 
+    // ---------------------------------------------------------------- freezing tables (OBS-238)
+    // Every table the system writes can come out frozen for the Selectable Tables plugin: a default from
+    // Table Settings, and a freeze you set on one table yourself is kept through every rewrite. Before a
+    // block or an invoice is written, each new table's header gets what its old one held (freezeHeader),
+    // matched by the heading above it. A table of yours outside the block is never touched.
+
+    // The default from Table Settings' properties: { rows, columns }, or null when both are 0 or blank.
+    // Anything but a whole number (or one written as text) counts as 0. Selectable Tables freezes at most
+    // 9 columns, a status column that comes along included.
+    tableSettingsOf(props) {
+        const whole = (key) => {
+            const v = this.prop(props ?? {}, key);
+            const n = typeof v === "number" || typeof v === "string" ? Number(v) : 0;
+            return Number.isInteger(n) && n > 0 ? n : 0;
+        };
+        const rows = whole("freeze_rows"), columns = Math.min(whole("freeze_columns"), TimeReport.MAX_FROZEN_COLUMNS);
+        return rows || columns ? { rows, columns } : null;
+    }
+
+    // The default as Table Settings says it now, or null with no note. Read from its text, since the
+    // metadata cache can lag an edit made just before the run.
+    async tableSettings() {
+        const file = app.vault.getFileByPath(TimeReport.TABLE_SETTINGS);
+        if (!file) return null;
+        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
+        const info = getFrontMatterInfo(await this.textOf(file));
+        let props = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+        try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { /* the cache's, then */ }
+        return this.tableSettingsOf(props);
+    }
+
+    // What a header row holds: { mark: { rows, columns } or null, label: { kind: "default", rows, columns },
+    // { kind: "custom" } or null }. The first mark counts, as in Selectable Tables, and code shows its text.
+    freezeOf(header) {
+        const text = String(header ?? "").replace(/(`+)[^`]+\1/g, (code) => " ".repeat(code.length));
+        const mark = text.match(TimeReport.FREEZE_MARK), label = text.match(TimeReport.FREEZE_LABEL);
+        return {
+            mark: mark ? { rows: Number(mark[1]), columns: Number(mark[2]) } : null,
+            label: !label ? null : label[1] !== undefined ? { kind: "default", rows: Number(label[1]), columns: Number(label[2]) } : { kind: "custom" },
+        };
+    }
+
+    // The default for a table headed `head` (its header cells): `columns` counts from the first named
+    // column, so an unnamed status column at the left comes along without counting (Brian, 11/03). Null when off.
+    freezeDefault(settings, head = []) {
+        if (!settings) return null;
+        const named = head.findIndex((h) => String(h ?? "").trim() !== "");
+        const lead = settings.columns && named > 0 ? named : 0;
+        return { rows: settings.rows, columns: Math.min(settings.columns + lead, TimeReport.MAX_FROZEN_COLUMNS) };
+    }
+
+    // The freeze comments a table's new header gets, from what its old header held (`old`, as freezeOf
+    // reads it, or null for a new table), or "" for none:
+    //   - nothing, or a freeze that still matches its default label: the default and its label, or nothing
+    //     when the default is off, so it follows the setting;
+    //   - a freeze that differs from its default label (changed with a command), one with no label (typed),
+    //     or one labeled custom: that freeze, labeled custom;
+    //   - a label with no freeze (Unfreeze table): `%%freeze 0 0%%`, labeled custom, so it stays unfrozen.
+    freezeHeader(old, settings, head = []) {
+        const mark = ({ rows, columns }) => `%%freeze ${rows} ${columns}%%`;
+        const custom = (freeze) => `${mark(freeze)} %%custom%%`;
+        const def = this.freezeDefault(settings, head);
+        const byDefault = def ? `${mark(def)} %%default ${def.rows} ${def.columns}%%` : "";
+        const { mark: now = null, label = null } = old ?? {};
+        if (!now && !label) return byDefault;
+        if (!now) return custom({ rows: 0, columns: 0 });
+        if (label?.kind === "default" && now.rows === label.rows && now.columns === label.columns) return byDefault;
+        return custom(now);
+    }
+
+    // A header cell without its freeze comments, each with the spaces after it
+    withoutFreeze(text) {
+        return String(text ?? "").replace(new RegExp(`${TimeReport.FREEZE_COMMENT.source}[ \\t]*`, "g"), "").trim();
+    }
+
+    // The tables in `lines`, each with the heading above it: [{ at (its first row), end (its last), heading }].
+    // A heading's numbers don't count (a timesheet's carry its total), so it's the same heading next run.
+    tablesIn(lines) {
+        const out = [];
+        const row = (j) => /^\s*\|/.test(lines[j] ?? "");
+        let heading = "";
+        for (let i = 0; i < lines.length; i++) {
+            const t = lines[i].trim();
+            if (/^#{1,6}\s/.test(t)) { heading = t.replace(/\d[\d.,]*/g, "#").replace(/\s+/g, " "); continue; }
+            if (!row(i)) continue;
+            let end = i;
+            while (row(end + 1)) end++;
+            out.push({ at: i, end, heading });
+            i = end;
+        }
+        return out;
+    }
+
+    // What the tables in `lines` hold in their header rows: Map(heading → [freezeOf, …]), in order
+    freezesIn(lines) {
+        const out = new Map();
+        for (const { at, heading } of this.tablesIn(lines)) {
+            if (!out.has(heading)) out.set(heading, []);
+            out.get(heading).push(this.freezeOf(lines[at]));
+        }
+        return out;
+    }
+
+    // A row's cells as written, padding included: a `\` escapes the character after it
+    tableCells(line) {
+        const text = line.trimEnd(), out = [];
+        let from = text.length - text.trimStart().length;
+        if (text[from] === "|") from++;
+        for (let i = from; i < text.length; i++) {
+            if (text[i] === "\\") i++;
+            else if (text[i] === "|") { out.push(text.slice(from, i)); from = i + 1; }
+        }
+        if (text.slice(from).trim()) out.push(text.slice(from));
+        return out;
+    }
+
+    // `lines` with each table's header frozen as freezeHeader says, from `old` (freezesIn of what's there
+    // now) and `settings` (tableSettingsOf). A table matches the old one under the same heading, the first
+    // with the first. A table whose header changes is written again through `table`, so it stays padded.
+    withFreezes(lines, old, settings) {
+        const out = lines.slice();
+        const seen = new Map();
+        for (const { at, end, heading } of this.tablesIn(lines)) {
+            const n = seen.get(heading) ?? 0;
+            seen.set(heading, n + 1);
+            const rows = out.slice(at, end + 1).map((l) => this.tableCells(l).map((c) => c.trim()));
+            if (rows.length < 2 || !rows[1].every((c) => /^:?-+:?$/.test(c))) continue;
+            // A row with more cells than the table has columns (a `\\|` typed in a description) is left as written
+            if (rows.some((r) => r.length > rows[1].length)) continue;
+            const head = rows[0].map((c) => this.withoutFreeze(c));
+            const freeze = this.freezeHeader(old.get(heading)?.[n] ?? null, settings, head);
+            if (!freeze && head.every((c, k) => c === rows[0][k])) continue;
+            const align = rows[1].map((c) => (c.startsWith(":") ? (c.endsWith(":") ? "center" : "left") : c.endsWith(":") ? "right" : null));
+            out.splice(at, end - at + 1, ...this.table(head, align, rows.slice(2), { freeze }));
+        }
+        return out;
+    }
+
+    // `block` with its tables frozen, from the block in `content` (the note as it is now) and `settings`.
+    // With the default off and no freeze in the note, it's `block` as it is.
+    freezeBlock(block, content, settings) {
+        const text = String(content ?? "");
+        if (!settings && !/%%\s*(?:freeze|default|custom)\b/.test(text)) return block;
+        const lines = this.lines(text);
+        const { blocks, starts, ends } = this.scan(lines);
+        const now = starts.length === 1 && ends.length === 1 && blocks.length === 1 ? lines.slice(blocks[0].start, blocks[0].end + 1) : [];
+        return this.withFreezes(this.lines(block), this.freezesIn(now), settings).join("\n");
+    }
+
     // ---------------------------------------------------------------- writing the block
 
     // Where the block goes in `content`: { start, end, text, inserted } (character offsets to
@@ -2167,8 +2332,9 @@ class TimeReport {
     // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
     // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
     // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), and
-    // a new block gets none.
-    blockEdits(content, block, { onlyIfChanged = true, heading = true } = {}) {
+    // a new block gets none. `tables` is the default freeze (tableSettingsOf): the block's tables are
+    // frozen from it and from the block that's there now (freezeBlock), before they're compared.
+    blockEdits(content, block, { onlyIfChanged = true, heading = true, tables = null } = {}) {
         const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
         const edits = [];
         let current = content;
@@ -2177,6 +2343,7 @@ class TimeReport {
             const edit = step(current);
             if (edit) { edits.push(edit); current = apply(current, edit); }
         }
+        block = this.freezeBlock(block, current, tables);
         if (!(onlyIfChanged && this.sameBlock(current, block))) {
             const place = this.placeBlock(current, block, { heading: heading ? TimeReport.HEADING : null });
             if (place.error) return place;
@@ -2628,7 +2795,10 @@ class TimeReport {
             if (periods.updated) done.push(`${periods.updated} periodic note${periods.updated === 1 ? "" : "s"}`);
             broken.push(...periods.broken);
             trouble.push(...periods.trouble);
-            if (broken.length) trouble.push(`couldn't update ${broken.join(", ")} (check its time:start/end markers, or an unclosed code block or comment)`);
+            const markers = broken.filter((b) => typeof b === "string"), heldBack = broken.filter((b) => b?.heldBack).map((b) => b.heldBack);
+            if (markers.length) trouble.push(`couldn't update ${markers.join(", ")} (check its time:start/end markers, or an unclosed code block or comment)`);
+            // A plugin refused the change to the open note (OBS-238); the next run tries again
+            if (heldBack.length) trouble.push(`couldn't update ${heldBack.join(", ")}: the open note didn't take the change; click outside its tables and run TimeReport again`);
 
             // The error log (OBS-218): this run's Problems, one line per kind per note, and a toast
             // for the new ones, at startup too
@@ -2845,6 +3015,8 @@ class TimeReport {
         const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() }, checked });
         this.attachBilling(model, await this.readInvoices(billing), index, billing);
         this.addTaskProblems(model, index, checked);
+        // The default freeze for the tables written from it (OBS-238)
+        model.tables = await this.tableSettings();
         return { model, index };
     }
 
@@ -2961,7 +3133,7 @@ class TimeReport {
                 try {
                     if (!file) {
                         if (!canCreate || remembered.has(path)) continue;
-                        const made = await this.createPeriodNote(path, unit, key, this.render(model, scopeOf(unit, key), stamp, link));
+                        const made = await this.createPeriodNote(path, unit, key, this.freezeBlock(this.render(model, scopeOf(unit, key), stamp, link), "", model.tables));
                         if (made.error) {
                             trouble.push(made.error);
                             canCreate = false;      // whatever went wrong would go wrong for the rest too
@@ -2974,8 +3146,8 @@ class TimeReport {
                         app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                     }
                     const block = this.render(model, scopeOf(unit, key), stamp, link);
-                    const r = await this.writeBlock(file, block, { onlyIfChanged: true });
-                    if (r.error) broken.push(file.basename);
+                    const r = await this.writeBlock(file, block, { onlyIfChanged: true, tables: model.tables });
+                    if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
                     else if (r.wrote && !isNew) updated++;
                 } catch (e) {
                     console.error(`TimeReport: couldn't update ${path}`, e);
@@ -3140,8 +3312,8 @@ class TimeReport {
             const sheet = this.takesTimesheet(path, index, model) ? await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created) : null;
             try {
                 const block = this.render(model, { kind: "project", path, linkTarget, sheet }, stamp, link);
-                const r = await this.writeBlock(file, block, { onlyIfChanged: true });
-                if (r.error) broken.push(file.basename);
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true, tables: model.tables });
+                if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
                 else if (r.wrote) updated++;
             } catch (e) {
                 console.error(`TimeReport: couldn't update ${path}`, e);
@@ -3184,13 +3356,13 @@ class TimeReport {
                 if (!customJS.obsidian.Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
                 const projectFile = app.vault.getFileByPath(project);
                 const alias = [].concat(app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases ?? [])[0] || projectFile.basename;
-                file = await app.vault.create(path, this.sheetNote(window.moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, block));
+                file = await app.vault.create(path, this.sheetNote(window.moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
                 remembered.add(path);
                 app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                 created.push(file.basename);
             } else {
-                const r = await this.writeBlock(file, block, { onlyIfChanged: true, heading: false });
-                if (r.error) broken.push(file.basename);
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true, heading: false, tables: model.tables });
+                if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
             }
             return app.metadataCache.fileToLinktext(file, project, true);
         } catch (e) {
@@ -3200,13 +3372,29 @@ class TimeReport {
         }
     }
 
+    // Makes `edits` ({ start, end, text }, in order, each placed in the text the ones before it leave) to a
+    // note open in `editor`. False when the editor doesn't take one, so the caller can say so rather than
+    // count the note as written. A plugin can refuse a change: Selectable Tables drops any change to a table
+    // while one of its cells is selected (OBS-238). The selection is left alone; clicking outside the table
+    // and running the command again gets the change in.
+    applyInEditor(editor, edits) {
+        for (const edit of edits) {
+            const was = editor.getValue();
+            if (was.slice(edit.start, edit.end) === edit.text) continue;
+            editor.replaceRange(edit.text, editor.offsetToPos(edit.start), editor.offsetToPos(edit.end));
+            if (editor.getValue() === was) return false;
+        }
+        return true;
+    }
+
     // Writes through an open editor when there is one (the editor keeps its own folds), else
-    // through the vault in one read-modify-write, moving the saved folds to match. `heading` as in blockEdits.
-    async writeBlock(file, block, { onlyIfChanged, heading = true }) {
+    // through the vault in one read-modify-write, moving the saved folds to match. `heading` and
+    // `tables` as in blockEdits. { error, heldBack } when the open note didn't take the change.
+    async writeBlock(file, block, { onlyIfChanged, heading = true, tables = null }) {
         const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
         // What to do to `content`: [edits in order], or { error }. Nothing when it's already right.
         const plan = (content) => {
-            const edits = this.blockEdits(content, block, { onlyIfChanged, heading });
+            const edits = this.blockEdits(content, block, { onlyIfChanged, heading, tables });
             return edits.error ? edits : { edits };
         };
 
@@ -3214,9 +3402,7 @@ class TimeReport {
         if (view) {
             const p = plan(view.editor.getValue());
             if (p.error) return p;
-            for (const edit of p.edits) {
-                view.editor.replaceRange(edit.text, view.editor.offsetToPos(edit.start), view.editor.offsetToPos(edit.end));
-            }
+            if (!this.applyInEditor(view.editor, p.edits)) return { error: "the open note didn't take the change", heldBack: true };
             return { wrote: p.edits.length > 0, inserted: p.edits.some((e) => e.inserted) };
         }
         let result = { wrote: false };

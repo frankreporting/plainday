@@ -75,6 +75,12 @@ class UpdateObsidianPM {
         // The demo's invented details: a vault's own settings note is never the repository's
         "Config/Invoice Settings.md",
     ];
+    // Settings notes a vault gets once, as the repository has them, and keeps as its own: installed when
+    // the vault has none, then never updated, listed or removed (OBS-238). Nothing makes them on first use,
+    // as the Invoice command makes Invoice Settings, and the repository's copy holds no demo details.
+    static ONCE = [
+        "Config/Table Settings.md",
+    ];
 
     // ---------------------------------------------------------------- planning (no app, no fs)
 
@@ -140,7 +146,8 @@ class UpdateObsidianPM {
     //   vault    Map(path → hash)  what the vault has now (missing paths are absent)
     //   manifest Map(path → hash)  what this command installed last time, empty on a first run
     //   origin   Map(path → path)  the repository path of a file placed elsewhere (placed())
-    // Every list is sorted, and each path appears in exactly one of the first six:
+    // Every list is sorted, and each path appears in exactly one of the first six, but for a file in
+    // ONCE that the vault has, which is in none:
     //   add      not in the vault
     //   update   differs from the repository, and matches what was installed (so it's an old version)
     //   local    differs from both: changed in the vault since it was installed (or never installed)
@@ -177,12 +184,13 @@ class UpdateObsidianPM {
                 }
             }
             if (have === undefined) out.add.push(path);
+            else if (UpdateObsidianPM.ONCE.includes(rel)) continue;
             else if (have === hash) out.same.push(path);
             else if (was === have) out.update.push(path);
             else out.local.push(path);
         }
         for (const [path, hash] of sorted(manifest)) {
-            if (moved.has(path) || placed.has(fold(path)) || !vault.has(path)) continue;
+            if (moved.has(path) || placed.has(fold(path)) || !vault.has(path) || UpdateObsidianPM.ONCE.includes(path)) continue;
             (vault.get(path) === hash ? out.remove : out.keep).push(path);
         }
         return out;

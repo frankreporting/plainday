@@ -185,6 +185,10 @@ class Invoice {
         const lines = (list) => list.map(e).join("<br>");
         const fact = (label, value, strong = false) => `<p><span class="pm-invoice-label">${label}</span><br>${strong ? `<strong>${e(value)}</strong>` : e(value)}</p>`;
         const items = this.lines(d.billed, billing, tr, d.descriptions);
+        // The two tables, each under its heading, frozen for Selectable Tables (OBS-238): `d.tables` is the
+        // default, and `d.freezes` what a rebuilt draft's tables held (TimeReport.freezesIn), so a freeze
+        // you set stays. A table of yours in the payment note is left alone.
+        const frozen = (lines) => tr.withFreezes(lines, d.freezes ?? new Map(), d.tables ?? null);
         const facts = [
             ...(d.requestedBy ? [fact("Requested by", d.requestedBy)] : []),
             ...(d.projectId ? [fact("Project ID", d.projectId)] : []),
@@ -205,15 +209,13 @@ class Invoice {
             `<div class="pm-invoice-facts">${facts.join("")}</div>`,
             "</div>",
             "",
-            Invoice.HEADING,
-            "",
-            ...tr.table(["Line item", "Qty", "Rate", "Amount"], [null, "right", "right", "right"], [
+            ...frozen([Invoice.HEADING, "", ...tr.table(["Line item", "Qty", "Rate", "Amount"], [null, "right", "right", "right"], [
                 ...items.map((r) => [`${r.label} — ${r.description}`, tr.hours(r.minutes), r.rate, tr.money(r.amount)]),
                 ["**Total**", `**${tr.hours(d.minutes)}**`, "", `**${tr.money(d.cents)}**`],
-            ]),
+            ])]),
             "",
             ...(d.paymentNote ? [tr.defuse(d.paymentNote), ""] : []),
-            ...billing.billedLines(d.billed, tr, d.linkText),
+            ...frozen(billing.billedLines(d.billed, tr, d.linkText)),
         ];
         return out.join("\n") + "\n";
     }
@@ -574,7 +576,7 @@ class Invoice {
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
             billed: billing.snapshot(sel.entries, model, tr), linkText,
-            check: this.beforeSending(sel, tr),
+            check: this.beforeSending(sel, tr), tables: model.tables,
         }, tr, billing);
         await this.makeFolders(folder);
         const file = await app.vault.create(path, text);
@@ -979,15 +981,16 @@ class Invoice {
     }
 
     // Writes the whole new text of an invoice note: through its editor when it's open (the editor can be
-    // ahead of the file), else in one step that refuses if the file changed since `before` was read
+    // ahead of the file), else in one step that refuses if the file changed since `before` was read.
+    // An open editor that doesn't take the change, as with a table cell selected (OBS-238), says so.
     async write(file, before, after, tr) {
         if (before === after) return true;
         const view = this.editorOf(file);
         if (view) {
             if (view.editor.getValue() !== before) { new Notice("The invoice changed while Invoice was working; run it again"); return false; }
-            const { start, end, text } = this.changed(before, after);
-            view.editor.replaceRange(text, view.editor.offsetToPos(start), view.editor.offsetToPos(end));
-            return true;
+            if (tr.applyInEditor(view.editor, [this.changed(before, after)])) return true;
+            new Notice("The open invoice didn't take the change; click outside its tables and run Invoice again", 0);
+            return false;
         }
         let ok = true;
         await app.vault.process(file, (current) => {
@@ -1096,6 +1099,8 @@ class Invoice {
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
             billed: entries, linkText, descriptions: this.keepDescriptions(text, invoice.rows.map((r) => ({ ...r })), billing, tr),
             check: this.beforeSending(sel, tr),
+            // The freezes its tables hold now, so one you set or took off stays (OBS-238)
+            tables: model.tables, freezes: tr.freezesIn(this.split(text).body.split(/\r?\n/)),
         };
         // Who it bills too, so a draft from before OBS-109 moves to its project's `bill_to`; its name stays
         const front = this.rebuiltFront(this.split(text).front, billed, linkText, { period_start: sel.entries[0].date, hours: tr.hours(minutes), total: (cents / 100).toFixed(2) });

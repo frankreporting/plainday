@@ -59,6 +59,14 @@ class Billing {
         return this.tableText(tr.defuse(text)).replace(/\\\|/g, "|");
     }
 
+    // Whether `text` from a daily note reads as `cell`, a Billed entries cell: compared as stored, without
+    // the zero-width spaces defuse puts in, since what it escapes can change (OBS-238 left the report's
+    // freeze comments whole, which an invoice made before escaped)
+    readsAs(tr, text, cell) {
+        const bare = (t) => String(t ?? "").replace(/\u200B/g, "");
+        return bare(this.stored(tr, text)) === bare(cell);
+    }
+
     // A table row's cells, `\|` read back as `|`. A `|` inside a [[link]] belongs to the link even when
     // its `\` is gone: moving a note with the Advanced Rename and Delete Handler plugin strips it from
     // every link in a table, and the row must still read (OBS-117).
@@ -76,6 +84,11 @@ class Billing {
         }
         out.push(cell);
         return out.map((c) => c.trim().replace(/\\\|/g, "|"));
+    }
+
+    // A cell's text as it shows: without the %% comments that close in it
+    shown(cell) {
+        return String(cell ?? "").replace(/%%.*?%%/g, " ").replace(/\s+/g, " ").trim();
     }
 
     // ---------------------------------------------------------------- the Billed entries table
@@ -151,8 +164,10 @@ class Billing {
             const cells = this.cells(body);
             if (first) {
                 first = false;
-                if (cells[0].toLowerCase() === "date") {
-                    head = cells.length === Billing.HEAD.length && cells.every((c, n) => c.toLowerCase() === Billing.HEAD[n].toLowerCase());
+                // The header as it shows: a comment in it, such as a freeze for Selectable Tables (OBS-238), draws as nothing
+                const named = cells.map((c) => this.shown(c));
+                if (named[0].toLowerCase() === "date") {
+                    head = named.length === Billing.HEAD.length && named.every((c, n) => c.toLowerCase() === Billing.HEAD[n].toLowerCase());
                     continue;
                 }
             }
@@ -219,7 +234,7 @@ class Billing {
             const body = lines[i].replace(/^\s*>\s?/, "").trim();
             if (!body.startsWith("|")) continue;
             const cells = this.cells(body);
-            if (first && cells[0].toLowerCase() === "date") { head = true; first = false; continue; }
+            if (first && this.shown(cells[0]).toLowerCase() === "date") { head = true; first = false; continue; }
             first = false;
             if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
             const row = this.readRow(cells, tr);
@@ -577,14 +592,14 @@ class Billing {
                 if (!same.project) out.push({ row, kind: "unassigned", entry: same });
                 else if (!same.billable) out.push({ row, kind: "free", entry: same });
                 else if (row.projectPath && same.project !== row.projectPath) out.push({ row, kind: "project", entry: same });
-                else if (this.stored(tr, same.task) !== row.task || this.stored(tr, same.note) !== row.note) out.push({ row, kind: "wording", entry: same });
+                else if (!this.readsAs(tr, same.task, row.task) || !this.readsAs(tr, same.note, row.note)) out.push({ row, kind: "wording", entry: same });
                 continue;
             }
             const [rf, rt] = abs(row);
             const near = [-1, 0, 1].flatMap((d) => pool.get(this.date(this.day(row.date) + d)) ?? []);
             const over = near.find((e) => {
                 const [f, t] = abs(e);
-                return f < rt && rf < t && ((row.projectPath && e.project === row.projectPath) || this.stored(tr, e.task) === row.task);
+                return f < rt && rf < t && ((row.projectPath && e.project === row.projectPath) || this.readsAs(tr, e.task, row.task));
             });
             if (over) { out.push({ row, kind: "times", entry: over.report ?? over }); continue; }
             // Not found among the entries it could be: one with its times that counts toward an archived

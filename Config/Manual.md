@@ -307,6 +307,23 @@ Updated 9/16 9:00pm · 3 open
 	- An entry added on top of billed time whose own entry is still there gets a line of its own, after the overlap's: `… 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it`.
 	- With nothing to say, there's no Problems callout. In the demo, Kestrel Outfitters 2026's timesheet has an invoice's line, Pinecrest Library Brochure's the mistyped 9/16 entry, and Block Party Poster's its missing `rate_type`.
 
+#### Freezing tables
+
+With the [Selectable Tables](https://github.com/frankreporting/selectable-tables) plugin, a long table can keep its first rows and columns in view as you scroll it in Live Preview, like a spreadsheet. The plugin keeps a freeze as a comment in the table's header row: `%%freeze 2 1%%` keeps 2 rows and 1 column in view. A comment draws as nothing, so you see only the cell's text.
+
+- **A default for every table the system writes:** set `freeze_rows` and `freeze_columns` in `Config/Table Settings.md`, as whole numbers. Blank or 0 is off, as it comes. With both at 1, every table keeps its header row and first column in view: the time report's tables in weekly, monthly, yearly, project and area notes, every timesheet, and an invoice's *Billable hours* and *Billed entries*. A short table gets it too, which changes nothing you'd see. The next run, or *Rebuild* on a draft, writes it.
+- **`freeze_columns` counts from the first named column:** a timesheet's unnamed status column, and the one in a project's *Invoices*, comes along without counting. So with 1, a timesheet keeps its ✅ column and its Date in view, and its header starts `%%freeze 1 2%%`. Selectable Tables freezes at most 9 columns, a status column included.
+- **The label beside it:** the report writes a second comment saying whose freeze it is, `%%default 1 2%%` for its own default, `%%custom%%` for yours. It's hidden like the mark, and you never type it. Both start the header row's first cell, so in Source mode that column is wider.
+- **Your freezes are kept:** freeze or unfreeze a table with Selectable Tables' commands, or type a mark yourself, and that table keeps it through every rewrite. The next run labels it `%%custom%%`. An unfrozen table gets `%%freeze 0 0%% %%custom%%`, so it stays unfrozen.
+- **A table with a cell selected:** Selectable Tables' freeze commands, and its arrow keys, leave a cell selected, and while one is, the plugin turns away any change to that table, the report's and *Invoice*'s included. So a run right after *Unfreeze table* can't update that note. It says so ("the open note didn't take the change") rather than counting the note as written: click outside its tables and run the command again.
+- **Changing the default** moves every table still labeled `%%default …%%` to the new numbers and leaves yours alone. **Clearing it** takes the default's comments out, and leaves yours.
+- **To give a table back to the default,** delete both comments from its header row in Source mode. The next run treats it as a new table.
+- **How a table is known from run to run:** by the heading above it in the block, its numbers aside (a timesheet's headings carry its totals). A table whose heading changes is a new table and gets the default: a project's *By Week* becomes *By Month* once its time spans more than 13 weeks. So does a table that was gone for a run, such as a timesheet's *🆓 time* while it had no 🆓 entries.
+- **Only the freeze is kept.** Anything else you change in a report's table, its header included, is rewritten as always. A table of yours outside the report's block is never read or touched.
+- **Invoices:** a new draft's tables get the default. *Rebuild* keeps a freeze you set on a draft's table, as it keeps a description you changed. A sent or paid invoice is never rewritten, so it keeps what it has. Billing reads *Billed entries* with the comments in it, and *Export to PDF* prints neither comment.
+- **Without the plugin** the comments stay hidden, so the tables look as before. Nothing checks whether it's installed.
+- **The note is yours:** *UpdateObsidianPM* installs `Table Settings.md` when the vault has none, and never changes it after that. A run reads it from the note's text, so a change counts at once.
+
 ### Links at the end of a line
 
 In daily notes, links to other notes go at the **end** of the line, each with a symbol alias:
@@ -552,7 +569,7 @@ One folder for every invoice is the better choice: invoices are business records
 	- **It's the end of the invoice:** nothing below it prints.
 	- **Folded:** *Invoice* folds it when it makes or rebuilds the invoice, and keeps it folded through *Mark sent*, *Mark paid*, *Cancel* and *Check for changes*. Obsidian keeps folds per device, so on another device it opens unfolded.
 	- **Invoices made before** keep theirs in a folded `[!pm-billed]` callout, which still reads; *Rebuild* on such a draft writes the section. A note with both counts the rows of each and lists a Problem.
-	- **Its tables are padded,** as the reports' are (see *The time report*), so clicking into one doesn't change the invoice. An invoice made before keeps its tables as they were written; Obsidian pads one the first time you click into it, and Billing reads it either way.
+	- **Its tables are padded,** as the reports' are (see *The time report*), so clicking into one doesn't change the invoice. An invoice made before keeps its tables as they were written; Obsidian pads one the first time you click into it, and Billing reads it either way. They can be frozen too: see *Freezing tables*.
 	- Moving an invoice note with the *Advanced Rename and Delete Handler* plugin strips the `\` from the `\|` in its table's links. Billing still reads the table.
 - Your details and the billed note's are copied in when the invoice is made, so a sent invoice never changes when they do.
 
@@ -747,6 +764,8 @@ Installs the system from a local clone of the repository into the vault it runs 
 - **`Projects/Projects.base`** beside the projects, the `Projects` folder's note in Notebook Navigator: an *Active* view (anything not Done, Canceled or On Hold) and an *Inactive* one, each grouped by status.
 - **`Invoices.base`** beside the invoices, in the `folder` Invoice Settings names (see *Where invoices live*), else in `Config/Bases/`. When `folder` changes, the next update moves it there as it is, with any sorting or filters you added. While Invoice Settings can't be read (its properties don't parse, or `folder` isn't a folder), the base stays where it is and the update says why.
 
+**`Config/Table Settings.md`** is installed when the vault has none, with both settings blank, and is yours from then on: an update never changes or lists it (see *Freezing tables*).
+
 **A base saves your view changes into its file:** sorting, filters, column widths. So once you've used a base, an update sees it as changed by you and leaves it alone: it's listed under *Changed in this vault*. To take a new version from the repository, turn on *Take the repository's version* in the update's dialog; your copy of a file outside `Config` goes to the vault's trash first, so you can copy a view back from it.
 
 **Upgrading from before the bases moved:** the version of this command already in your vault doesn't know the new places, and would list the demo's `Invoice Settings.md` as a change to yours. So first copy the new `Config/Scripts/CustomJS/updateObsidianPM.js` from your clone into the vault, as when you installed it, and reload CustomJS (or the vault). Then one update puts both bases in place. If the old version runs first anyway, leave *Take the repository's version* off: it would replace your Invoice Settings with the demo's. Run the update again once CustomJS has reloaded. If you had changed the Projects base and the old version kept your copy in `Config/Bases/`, copy any view you want from it into the new one, then delete it.
@@ -781,6 +800,7 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 - [Notebook Navigator](https://github.com/johansan/notebook-navigator): a calendar for the periodic notes, and folder notes. The scripts read its week, month and year patterns when it's installed, and new project and area folders get a look in it: a red circle or a green archive, or the look you've given their tag.
 - [Task Status](https://github.com/ebullient/obsidian-task-status): shows `[<]`, `[>]`, `[-]` and the other markers as their own icons, and `⇧⌘⏎` picks one.
+- [Selectable Tables](https://github.com/frankreporting/selectable-tables): arrow keys select and move through a table's cells, and a table can keep its first rows and columns in view as it scrolls. `Config/Table Settings.md` sets a default for the system's tables (see *Freezing tables*).
 
 ## Working on the system
 
