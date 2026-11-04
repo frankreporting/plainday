@@ -8,13 +8,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
+import { compactWriter } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
 const TimeReport = vm.runInContext(
     fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport",
     vm.createContext({}),
 );
-const tr = new TimeReport();
+// Most tests here are about what a table says, so this TimeReport's tables are read back compactly
+// (`| a | b |`) after the real writer pads them; tables.test.mjs checks the padding (OBS-184)
+const tr = compactWriter(new TimeReport());
 const Billing = vm.runInContext(
     fs.readFileSync(new URL("../CustomJS/billing.js", here), "utf8") + "\n;Billing",
     vm.createContext({}),
@@ -337,7 +340,7 @@ test("OBS-51 parentProject: an area is never a parent, so a project's time doesn
     assert.ok(!block.includes("Century Ride"), block);
     // 45 minutes, 🆓 since the area sets no rate: only Exact and Total, by month, with no rate line (OBS-133)
     assert.equal(block, ["%% time:start %%", "*Updated s*", "", "### By Month", "",
-        "| Month | Exact | Total |", "| ----- | ----: | ----: |",
+        "| Month | Exact | Total |", "| --- | --: | --: |",
         "| [[2026-09\\|September 2026]] | 0.75 | 0.75 |", "| **Total** | **0.75** | **0.75** |", "", "%% time:end %%"].join("\n"));
     assert.ok(!block.includes(PROBLEMS), "and it isn't asked for a rate_type");
 });
@@ -851,7 +854,7 @@ test("render month: that month's Problems first, then Earnings for what bills (B
     assert.deepEqual(plain(lines.slice(earnedAt, hoursAt - 1)), [
         "### Earnings", "",
         "| Project | Billable | Rate | Earned |",
-        "| ------- | -------: | ---: | -----: |",
+        "| --- | --: | --: | --: |",
         "| [[Orchard Lane 2026]] | 1.00 | $80/hr | $80.00 |",
         "| [[Orchard Lane Web 2026]] | 1.00 | $80/hr | $80.00 |",
         "| **All** | **2.00** |  | **$160.00** |",
@@ -903,7 +906,7 @@ test("render project (OBS-133): hours, Earned and effective rate, By Project onl
         "**Hours:**\t\t2.00 used", "**Earned:**\t\t$160.00 | $160.00 unpaid", "**Eff. rate:**\t\t$71.11/hr", "",
         "### By Week", "",
         "| Week | Exact | Total | 🆓 | Billable | Earned |",
-        "| ---- | ----: | ----: | -: | -------: | -----: |",
+        "| --- | --: | --: | --: | --: | --: |",
         "| [[2026w40\\|9/27-10/3]] | 1.00 | 1.00 |  | 1.00 | $80.00 |",
         "| [[2026w36\\|8/30-9/5]] | 1.00 | 1.25 | 0.25 | 1.00 | $80.00 |",
         "| **Total** | **2.00** | **2.25** | **0.25** | **2.00** | **$160.00** |",
@@ -920,13 +923,13 @@ test("render project (OBS-133): hours, Earned and effective rate, By Project onl
         "**Hours:**\t\t3.00 used | 117.00 left", "**Earned:**\t\t$240.00 | $240.00 unpaid", "**Eff. rate:**\t\t$73.85/hr", "",
         "### By Project", "",
         "| Project | Exact | Total | 🆓 | Billable | Rate | Earned |",
-        "| ------- | ----: | ----: | -: | -------: | ---: | -----: |",
+        "| --- | --: | --: | --: | --: | --: | --: |",
         "| [[Orchard Lane 2026]] | 1.00 | 1.00 |  | 1.00 | $80/hr | $80.00 |",
         "| [[Orchard Lane Web 2026]] | 2.00 | 2.25 | 0.25 | 2.00 | $80/hr | $160.00 |",
         "| **Total** | **3.00** | **3.25** | **0.25** | **3.00** |  | **$240.00** |", "",
         "### By Week", "",
         "| Week | Exact | Total | 🆓 | Billable | Earned |",
-        "| ---- | ----: | ----: | -: | -------: | -----: |",
+        "| --- | --: | --: | --: | --: | --: |",
         "| [[2026w40\\|9/27-10/3]] | 1.00 | 1.00 |  | 1.00 | $80.00 |",
         "| [[2026w36\\|8/30-9/5]] | 2.00 | 2.25 | 0.25 | 2.00 | $160.00 |",
         "| **Total** | **3.00** | **3.25** | **0.25** | **3.00** | **$240.00** |",
@@ -954,7 +957,7 @@ test("render project (OBS-133): past 13 weeks a project reports by month; earlie
     const table = months.slice(months.indexOf("### By Month") + 2);
     assert.deepEqual(table.slice(0, 7), [
         "| Month | Exact | Total | 🆓 | Billable | Earned |",
-        "| ----- | ----: | ----: | -: | -------: | -----: |",
+        "| --- | --: | --: | --: | --: | --: |",
         "| [[2026-12\\|December 2026]] | 2.00 | 2.00 |  | 2.00 | $160.00 |",
         "| [[2026-09\\|September 2026]] | 1.00 | 1.00 |  | 1.00 | $80.00 |",
         "| **Total** | **3.00** | **3.00** |  | **3.00** | **$240.00** |",
@@ -1029,7 +1032,7 @@ test("OBS-156 render: Rate and Invested after Exact and Total; a mixed By Projec
     // A valued area: no summary (it doesn't bill and has no cap), Invested by month
     assert.deepEqual(render("P/Research/Research.md").slice(3), [
         "### By Month", "",
-        "| Month | Exact | Total | Invested |", "| ----- | ----: | ----: | -------: |",
+        "| Month | Exact | Total | Invested |", "| --- | --: | --: | --: |",
         "| [[2026-09\\|September 2026]] | 1.17 | 1.25 | $75.00 |",
         "| **Total** | **1.17** | **1.25** | **$75.00** |", "", "%% time:end %%",
     ]);
@@ -1040,14 +1043,14 @@ test("OBS-156 render: Rate and Invested after Exact and Total; a mixed By Projec
         "**Hours:**\t\t2.25 used | 0.25 over", "**Earned:**\t\t$225.00 | $225.00 unpaid", "**Eff. rate:**\t\t$69.23/hr", "",
         "### By Project", "",
         "| Project | Exact | Total | 🆓 | Billable | Rate | Earned | Invested |",
-        "| ------- | ----: | ----: | -: | -------: | ---: | -----: | -------: |",
+        "| --- | --: | --: | --: | --: | --: | --: | --: |",
         "| [[Client]] | 2.25 | 2.25 |  | 2.25 | $100/hr | $225.00 |  |",
         "| [[Comp]] | 0.50 | 0.50 | 0.50 |  | non-billable |  |  |",
         "| [[Lab]] | 0.50 | 0.50 | 0.50 |  | $40/hr non-billable |  | $20.00 |",
         "| **Total** | **3.25** | **3.25** | **1.00** | **2.25** |  | **$225.00** | **$20.00** |", "",
         "### By Week", "",
         "| Week | Exact | Total | 🆓 | Billable | Earned | Invested |",
-        "| ---- | ----: | ----: | -: | -------: | -----: | -------: |",
+        "| --- | --: | --: | --: | --: | --: | --: |",
         "| [[2026w36\\|8/30-9/5]] | 3.25 | 3.25 | 1.00 | 2.25 | $225.00 | $20.00 |",
         "| **Total** | **3.25** | **3.25** | **1.00** | **2.25** | **$225.00** | **$20.00** |",
         "", "%% time:end %%",
@@ -1059,7 +1062,7 @@ test("OBS-156 render: Rate and Invested after Exact and Total; a mixed By Projec
     assert.deepEqual(volunteer.slice(6, 13), [
         "### By Project", "",
         "| Project | Exact | Total | Rate | Invested |",
-        "| ------- | ----: | ----: | ---: | -------: |",
+        "| --- | --: | --: | --: | --: |",
         "| [[Volunteer]] | 0.50 | 0.50 | non-billable |  |",
         "| [[Paid]] | 0.50 | 0.50 | $30/hr non-billable | $15.00 |",
         "| **Total** | **1.00** | **1.00** |  | **$15.00** |",
@@ -2021,7 +2024,7 @@ test("weekly notes: one table of hours per project per day, day headers linking 
     assert.deepEqual(plain(lines.slice(head - 2, head)), ["### Hours", ""], "each table has its own H3, Earnings first");
     assert.deepEqual(plain(lines.slice(head, head + 7)), [
         "| Project | [[2026-09-13\\|Sun 9/13]] | [[2026-09-14\\|Mon 9/14]] | [[2026-09-15\\|Tue 9/15]] | [[2026-09-16\\|Wed 9/16]] | [[2026-09-17\\|Thu 9/17]] | [[2026-09-18\\|Fri 9/18]] | [[2026-09-19\\|Sat 9/19]] | Week |",
-        "| ------- | --: | --: | --: | --: | --: | --: | --: | --: |",
+        "| --- | --: | --: | --: | --: | --: | --: | --: | --: |",
         "| [[Bramble]] |  |  | 1.00 |  |  |  |  | 1.00 |",
         "| [[Orchard Lane Web 2026]] | 0.50 |  |  |  |  |  |  | 0.50 |",
         "| [[Pinecone Studio]] | 2.75 |  |  |  |  |  |  | 2.75 |",
@@ -2049,7 +2052,7 @@ test("monthly notes: hours per project per week, week headers linking to weekly 
     assert.deepEqual(plain(lines.slice(head - 2, head)), ["### Hours", ""], "each table has its own H3, Earnings first");
     assert.deepEqual(plain(lines.slice(head, head + 6)), [
         "| Project | [[2026w36\\|8/30-9/5]] | [[2026w37\\|9/6-9/12]] | [[2026w38\\|9/13-9/19]] | [[2026w39\\|9/20-9/26]] | [[2026w40\\|9/27-10/3]] | Month |",
-        "| ------- | --: | --: | --: | --: | --: | --: |",
+        "| --- | --: | --: | --: | --: | --: | --: |",
         // August 31 is in week 36 but not in September, so it stays out
         "| [[Orchard Lane Web 2026]] |  |  | 0.50 |  |  | 0.50 |",
         "| [[Pinecone Studio]] | 2.25 |  |  |  |  | 2.25 |",

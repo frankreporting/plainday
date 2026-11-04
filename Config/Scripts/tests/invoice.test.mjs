@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { compactTable, obsidianPadded } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
 const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
@@ -84,7 +85,9 @@ test("noteText: the header, a row per date and rate, the total, then the Billed 
     assert.ok(lines.includes('<div class="pm-invoice-facts"><p><span class="pm-invoice-label">Invoice date</span><br>9/3/2026</p></div>'));
     assert.ok(lines.includes('<div class="pm-invoice-facts"><p><span class="pm-invoice-label">Terms</span><br>Net 30</p><p><span class="pm-invoice-label">Total hours</span><br><strong>4.00</strong></p><p><span class="pm-invoice-label">Total due</span><br><strong>$340.00</strong></p></div>'));
     const table = lines.slice(at("## Billable hours") + 2, at("## Billable hours") + 8);
-    assert.deepEqual(table, [
+    // Padded as Obsidian's table editor pads it (OBS-184); what it says, read back compactly
+    assert.deepEqual(table, obsidianPadded(table));
+    assert.deepEqual(compactTable(table), [
         "| Line item | Qty | Rate | Amount |",
         "| --- | --: | --: | --: |",
         "| 9/1 — Site map, Review | 2.00 | $80.00 | $160.00 |",
@@ -92,9 +95,9 @@ test("noteText: the header, a row per date and rate, the total, then the Billed 
         "| 9/2 — Build pages | 1.00 | $80.00 | $80.00 |",
         "| **Total** | **4.00** |  | **$340.00** |",
     ]);
-    assert.ok(at("Please pay by bank transfer within 30 days.") > at("| **Total** | **4.00** |  | **$340.00** |"));
+    assert.ok(at("Please pay by bank transfer within 30 days.") > lines.findIndex((l) => l.startsWith("| **Total** ")));
     assert.ok(at("## Billed entries") > at("Please pay by bank transfer within 30 days."), "Billed entries comes last");
-    assert.equal(lines[at("## Billed entries") + 2], "| Date | Time | Project | Task | Notes | Rate | Hours |");
+    assert.equal(compactTable(lines.slice(at("## Billed entries") + 2, at("## Billed entries") + 4))[0], "| Date | Time | Project | Task | Notes | Rate | Hours |");
 });
 
 test("noteText: nothing printed is a link", () => {
@@ -129,7 +132,7 @@ test("lines: dates carry the year when an invoice spans two", () => {
 // ------------------------------------------------------------------ rebuilding a draft
 
 test("keepDescriptions: an edited description survives a rebuild; an untouched one follows the tasks", () => {
-    const text = inv.noteText(DATA(), tr, billing).replace("| 9/2 — Build pages |", "| 9/2 — Page templates, first pass |");
+    const text = inv.noteText(DATA(), tr, billing).replace(/\| 9\/2 — Build pages\s*\|/, "| 9/2 — Page templates, first pass |");
     const kept = inv.keepDescriptions(text, billed, billing, tr);
     assert.deepEqual(plain([...kept]), [["9/2 $80.00", "Page templates, first pass"]]);
     // A new task on 9/1: its untouched description takes it
@@ -140,7 +143,7 @@ test("keepDescriptions: an edited description survives a rebuild; an untouched o
 });
 
 test("descriptions: a | in a description survives", () => {
-    const text = inv.noteText(DATA(), tr, billing).replace("| 9/2 — Build pages |", "| 9/2 — Pages \\| templates |");
+    const text = inv.noteText(DATA(), tr, billing).replace(/\| 9\/2 — Build pages\s*\|/, "| 9/2 — Pages \\| templates |");
     assert.equal(inv.descriptions(text, billing).get("9/2 $80.00"), "Pages \\| templates");
 });
 
@@ -490,7 +493,7 @@ test("billedFold: from the Billed entries heading to its last line, 0-based, as 
     const fold = inv.billedFold(text, billing);
     assert.equal(lines[fold.from], "## Billed entries");
     assert.equal(fold.to, lines.length - 2, "the last row; the note ends with a newline");
-    assert.ok(lines[fold.to].startsWith("|  | "));
+    assert.match(lines[fold.to], /^\|\s+\| \S/);
     assert.deepEqual(plain(inv.billedFold(text.replace(/\n/g, "\r\n"), billing)), plain(fold), "the same with CRLF");
     assert.equal(inv.billedFold("# Invoice No. 1\n\n## Billable hours\n", billing), null);
     assert.equal(inv.billedFold("## Billed entries\n\n", billing), null, "nothing under it to fold");

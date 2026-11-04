@@ -13,9 +13,9 @@ parent: "[[Block Party Poster|⭕.Personal.Block Party Poster]]"
 
 ### Billable time: 1.00 hrs
 
-| Date | Time | Hours | Task | Notes |
-| --- | --- | --: | --- | --- |
-| **[[2026-09-17\|Thu 9/17]]** |  | **1.00** |  |  |
-|  | 7:00pm - 8:00pm | 1.00 | Block party poster: first layout |  |
+| Date                         | Time            |    Hours | Task                             | Notes |
+| ---------------------------- | --------------- | -------: | -------------------------------- | ----- |
+| **[[2026-09-17\|Thu 9/17]]** |                 | **1.00** |                                  |       |
+|                              | 7:00pm - 8:00pm |     1.00 | Block party poster: first layout |       |
 
 %% time:end %%

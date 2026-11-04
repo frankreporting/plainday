@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, loadBilling, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
+import { compactTables, obsidianPadded, tablesIn } from "./tables.mjs";
 import { convert } from "./demo/addProjectLinks.mjs";
 
 // Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
@@ -56,6 +57,26 @@ test("demo vault: invoices and their base in the folder Invoice Settings names; 
 });
 
 // ------------------------------------------------------------------ time reports
+
+// Every table the system wrote into the demo (a report block's, a timesheet's, an invoice's) is padded the
+// way Obsidian's table editor would pad it, so entering one changes nothing (OBS-184)
+test("demo vault: every table in a report block, a timesheet or an invoice is already as Obsidian writes it", () => {
+    let checked = 0;
+    for (const p of demoNotes) {
+        const { text, fm } = vault.notes.get(p);
+        const tags = [].concat(fm.tags ?? []);
+        const whole = tags.includes("timesheet") || tags.includes("invoice");
+        const start = text.indexOf("%% time:start %%"), end = text.indexOf("%% time:end %%");
+        const part = whole ? text : start !== -1 && end > start ? text.slice(start, end) : "";
+        const lines = part.split("\n");
+        for (const t of tablesIn(lines)) {
+            const table = lines.slice(t.from, t.to + 1);
+            assert.deepEqual(table, obsidianPadded(table), `${p}, the table starting "${table[0].slice(0, 40)}"; re-render with renderReports.mjs`);
+            checked++;
+        }
+    }
+    assert.ok(checked >= 30, `only ${checked} tables checked`);
+});
 
 test("demo vault: the reports in the notes are exactly what TimeReport would write", () => {
     assert.deepEqual(plan.errors, []);
@@ -156,9 +177,9 @@ test("demo vault: the archived project's entries count in the August, week 35 an
     assert.equal(counted.length, 2);
     assert.ok(counted.every((e) => e.archived), "marked archived, so the Invoice command leaves them out");
     for (const p of [`${FOLDERS.week}/2026w35.md`, `${FOLDERS.month}/2026-08.md`, `${FOLDERS.year}/2026.md`]) {
-        assert.ok(plan.blocks.get(p).includes("| [[Marlowe Bakery Rebrand]] |"), p);
+        assert.ok(compactTables(plan.blocks.get(p)).includes("| [[Marlowe Bakery Rebrand]] |"), p);
     }
-    assert.ok(plan.blocks.get(`${FOLDERS.month}/2026-08.md`).includes("| [[Marlowe Bakery Rebrand]] | 1.50 | $80/hr | $120.00 |"));
+    assert.ok(compactTables(plan.blocks.get(`${FOLDERS.month}/2026-08.md`)).includes("| [[Marlowe Bakery Rebrand]] | 1.50 | $80/hr | $120.00 |"));
     assert.ok(plan.targets.project.includes(archived) && plan.blocks.get(archived).includes("**Earned:**\t\t$120.00"));
     assert.ok(plan.targets.sheet.includes("Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand timesheet.md"));
 });

@@ -566,7 +566,7 @@ test("a ⭕ with its note in the Inbox bills normally: not in Fix first, and its
     assert.equal(sel.entries.length, 1, "and the time is billed");
     const sheet = tr.render(m, { kind: "timesheet", path: KES }, "s", link);
     assert.ok(sheet.includes("waits in the Inbox"), sheet);
-    assert.ok(sheet.split("\n").some((l) => l.startsWith("| ⚠️ |") && l.includes("9:00am - 9:20am")), sheet);
+    assert.ok(sheet.split("\n").some((l) => /^\|\s*⚠️\s*\|/.test(l) && l.includes("9:00am - 9:20am")), sheet);
 });
 
 test("the Inbox is named once: the index says what waits there", () => {

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { compactTable, obsidianPadded } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
 const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
@@ -82,7 +83,9 @@ test("snapshot: each entry as billed, at its project's hourly rate", () => {
 
 test("Billed entries: a section with a row per date, its entries under it, read back the same (OBS-145)", () => {
     const lines = billing.billedLines(ROWS(), tr, name);
-    assert.deepEqual(plain(lines), [
+    // Padded as Obsidian's table editor pads it (OBS-184), read back from that
+    assert.deepEqual(plain(lines.slice(2)), obsidianPadded(plain(lines.slice(2))));
+    assert.deepEqual([...plain(lines.slice(0, 2)), ...compactTable(lines.slice(2))], [
         "## Billed entries",
         "",
         "| Date | Time | Project | Task | Notes | Rate | Hours |",
@@ -131,7 +134,9 @@ test("Billed entries: a table the editor reformatted, with CRLF line endings, re
 });
 
 test("Billed entries: a date row with more in it keeps its entries on its date; an empty row is nothing (OBS-145)", () => {
-    const lines = billing.billedLines(ROWS(), tr, name);
+    // Damaged by hand, as a compact table: someone typing in it doesn't keep Obsidian's padding
+    const written = billing.billedLines(ROWS(), tr, name);
+    const lines = [...written.slice(0, 2), ...compactTable(written.slice(2))];
     const at = lines.findIndex((l) => /Wed 9\/2/.test(l));
     const damaged = [...lines];
     damaged[at] = damaged[at].replace("|  |", "| oops |");
@@ -540,9 +545,9 @@ test("review: an invoice whose Billed entries can't be trusted stops invoicing t
     const good = invoiceNote("1001-HBR", "sent", rows, { hours: 3.5, total: 300 });
     assert.equal(read(good).problem, null, "hours and total match the rows");
     const cases = [
-        [{ ...good, text: good.text.replace("| 1:00pm - 2:30pm |", "| 13:00 - 2:30pm |") }, /a Billed entries row that doesn't read/],
+        [{ ...good, text: good.text.replace(/\| 1:00pm - 2:30pm\s*\|/, "| 13:00 - 2:30pm |") }, /a Billed entries row that doesn't read/],
         [{ ...good, text: good.text.replace("## Billed entries", "## Notes") }, /has no Billed entries table/],
-        [{ ...good, text: good.text.replace(/\| Date .*\n\| --- .*\n/, "") }, /without its column names/],
+        [{ ...good, text: good.text.replace(/\| Date .*\n\| -+ .*\n/, "") }, /without its column names/],
         [{ ...good, text: `${good.text}\n\n> [!pm-billed]- Billed entries\n> | Date | Start | End | Minutes | Hours | Rate | Project | Task | Note |` }, /two Billed entries tables/],
         [{ ...good, props: { ...good.props, hours: 5 } }, /add up to 3\.50 hours, not its `hours` \(5\)/],
         [{ ...good, props: { ...good.props, total: 250 } }, /add up to \$300\.00, not its `total` \(250\)/],

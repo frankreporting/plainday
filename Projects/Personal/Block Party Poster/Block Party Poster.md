@@ -33,9 +33,9 @@ Deliberate mistake for the demo: this note was made with `!project`, and its `ra
 
 ### By Week
 
-| Week | Exact | Total | 🆓 | Billable | Earned |
-| ---- | ----: | ----: | -: | -------: | -----: |
-| [[2026w38\|9/13-9/19]] | 1.00 | 1.00 |  | 1.00 |  |
-| **Total** | **1.00** | **1.00** |  | **1.00** |  |
+| Week                   |    Exact |    Total |  🆓 | Billable | Earned |
+| ---------------------- | -------: | -------: | --: | -------: | -----: |
+| [[2026w38\|9/13-9/19]] |     1.00 |     1.00 |     |     1.00 |        |
+| **Total**              | **1.00** | **1.00** |     | **1.00** |        |
 
 %% time:end %%

@@ -1375,9 +1375,11 @@ class TimeReport {
         return `${+m}/${+d}/${y.slice(2)}`;
     }
 
-    // Text quoted from notes can't open a comment in the report and hide its end marker, or run as Templater
+    // Text quoted from notes can't open a comment in the report and hide its end marker, or run as Templater.
+    // Running it twice changes nothing more (OBS-184: a table's cells are defused before they're measured,
+    // and the report's lines again after): `%%%` becomes `%`, a zero-width space, `%`, another, `%`, with no `%%` left.
     defuse(text) {
-        return String(text ?? "").replace(/%%/g, "%\u200B%").replace(/<!--/g, "<\u200B!--").replace(/-->/g, "--\u200B>")
+        return String(text ?? "").replace(/%(?=%)/g, "%\u200B").replace(/<!--/g, "<\u200B!--").replace(/-->/g, "--\u200B>")
             .replace(/<%/g, "<\u200B%");   // Templater syntax, which a device could run when the note syncs in
     }
 
@@ -1434,13 +1436,13 @@ class TimeReport {
 
     // A table's rows for `projects` (OBS-167): the projects' rows, then, when there are areas, an
     // **Area** row with `width - 1` blank cells, heading the areas below it as Project heads the
-    // table, and the areas' rows, each group in the order given. `row(path)` makes one row. The
+    // table, and the areas' rows, each group in the order given. `row(path)` makes one row's cells. The
     // **Area** row has no numbers, so the rows still add up to All.
     groupedRows(model, projects, row, width) {
         const isArea = (p) => model.areas?.has(p) ?? false;
         const areas = projects.filter(isArea);
         return [...projects.filter((p) => !isArea(p)).map(row),
-            ...(areas.length ? [this.tableRow(["Area", ...Array(width - 1).fill("")], true), ...areas.map(row)] : [])];
+            ...(areas.length ? [this.boldRow(["Area", ...Array(width - 1).fill("")]), ...areas.map(row)] : [])];
     }
 
     // Earned for a row, or "" when the row's own project isn't hourly or nothing had a rate
@@ -1476,8 +1478,8 @@ class TimeReport {
         // tables, plus the flat fees earned here; with only flat fees not earned here it would be blank
         const t = this.totals(hourly, model.money);
         const fees = earned.reduce((sum, f) => sum + f.cents, 0);
-        return [...this.tableHead(["Project", "Billable", "Rate", "Earned"]), ...this.groupedRows(model, [...rows.keys()], (p) => this.tableRow(rows.get(p)), 4),
-            ...(hourly.length || fees ? [this.tableRow(["All", this.hoursCell(t.billable), "", this.moneyCell(t.cents + fees)], true)] : [])];
+        return this.table(["Project", "Billable", "Rate", "Earned"], this.numberAlign(4), [...this.groupedRows(model, [...rows.keys()], (p) => rows.get(p), 4),
+            ...(hourly.length || fees ? [this.boldRow(["All", this.hoursCell(t.billable), "", this.moneyCell(t.cents + fees)])] : [])]);
     }
 
     // A project or area note (OBS-133), its sub-projects' time included. By Project, only when time was
@@ -1491,18 +1493,15 @@ class TimeReport {
         const out = [];
         if (subs.length) {
             const head = ["Project", ...this.numberHeads(has, { rate: true })];
-            out.push("### By Project", "", ...this.tableHead(head));
-            for (const p of [scope.path, ...subs]) {
-                out.push(this.tableRow([this.cell(link(p)), ...this.numberCells(model, entries.filter((e) => e.project === p), has, { project: p, rate: true })]));
-            }
-            out.push(this.tableRow(["Total", ...this.numberCells(model, entries, has, { rate: true })], true), "");
+            const rows = [scope.path, ...subs].map((p) => [this.cell(link(p)), ...this.numberCells(model, entries.filter((e) => e.project === p), has, { project: p, rate: true })]);
+            out.push("### By Project", "", ...this.table(head, this.numberAlign(head.length),
+                [...rows, this.boldRow(["Total", ...this.numberCells(model, entries, has, { rate: true })])]), "");
         }
         const unit = this.reportUnit(model, scope.path, entries);
-        out.push(`### By ${unit === "week" ? "Week" : "Month"}`, "", ...this.tableHead([unit === "week" ? "Week" : "Month", ...this.numberHeads(has)]));
-        for (const { label, list } of this.periodRows(entries, unit, scope.linkTarget)) {
-            out.push(this.tableRow([label, ...this.numberCells(model, list, has)]));
-        }
-        out.push(this.tableRow(["Total", ...this.numberCells(model, entries, has)], true));
+        const head = [unit === "week" ? "Week" : "Month", ...this.numberHeads(has)];
+        const rows = this.periodRows(entries, unit, scope.linkTarget).map(({ label, list }) => [label, ...this.numberCells(model, list, has)]);
+        out.push(`### By ${unit === "week" ? "Week" : "Month"}`, "", ...this.table(head, this.numberAlign(head.length),
+            [...rows, this.boldRow(["Total", ...this.numberCells(model, entries, has)])]));
         return out;
     }
 
@@ -1535,14 +1534,44 @@ class TimeReport {
             ...(valued ? [t.valued ? this.moneyCell(t.invested) : ""] : [])];
     }
 
-    // A table's header and separator rows: the first column left-aligned, the numbers right-aligned
-    tableHead(head) {
-        return [this.tableRow(head), this.tableRow(head.map((h, i) => (i === 0 ? "-".repeat(Math.max(3, h.length)) : `${"-".repeat(Math.max(1, h.length - 1))}:`)))];
+    // A table's lines, padded the way Obsidian's table editor pads one (OBS-184), so that clicking into
+    // it changes nothing: the time report compares its block exactly, and a table Obsidian had padded
+    // would be written back every run. Every table the system writes comes from here; tables.test.mjs
+    // fails on a row built by hand.
+    //   - `head` is the header's cells, `align` each column's "left", "right", "center" or null (plain),
+    //     and `rows` each row's cells: Markdown already fit for a cell (see tableText and cell). Each cell is
+    //     defused here, before it's measured, since the report defuses its lines afterwards (see render).
+    //   - A column is as wide as its longest cell as written, plus 2, and at least 5. "As written": a
+    //     `\|` is two characters, a link its whole source, and a character counts as JavaScript counts
+    //     it, so ✅ is 1 and ⚠️ is 2, and such columns don't line up by eye. Obsidian counts the same way.
+    //   - A cell has one space before its text and the rest after it; right-aligned, the rest before it
+    //     and one after; centered, split, with the extra one after. The second row fills each column
+    //     with dashes, with the alignment's colons.
+    table(head, align, rows) {
+        const lines = [head, ...rows].map((row) => {
+            if (row.length > align.length) throw new Error(`TimeReport.table: a row of ${row.length} cells in a table of ${align.length} columns`);
+            return align.map((_, i) => this.defuse(String(row[i] ?? "")).trim());
+        });
+        const width = align.map((_, i) => Math.max(5, ...lines.map((row) => row[i].length + 2)));
+        const cell = (text, i) => {
+            const space = width[i] - text.length;
+            const before = align[i] === "right" ? space - 1 : align[i] === "center" ? Math.floor(space / 2) : 1;
+            return " ".repeat(before) + text + " ".repeat(space - before);
+        };
+        const dashes = (a, w) => (a === "left" ? ` :${"-".repeat(w - 3)} ` : a === "center" ? ` :${"-".repeat(w - 4)}: `
+            : a === "right" ? ` ${"-".repeat(w - 3)}: ` : ` ${"-".repeat(w - 2)} `);
+        const line = (cells) => `|${cells.join("|")}|`;
+        return [line(lines[0].map(cell)), line(align.map((a, i) => dashes(a, width[i]))), ...lines.slice(1).map((row) => line(row.map(cell)))];
     }
 
-    // A table row; a bold one (a Total) bolds every cell that has something in it
-    tableRow(cells, bold = false) {
-        return `| ${(bold ? cells.map((v) => (v === "" ? "" : `**${v}**`)) : cells).join(" | ")} |`;
+    // The alignments of a table whose first column names something and whose others hold numbers
+    numberAlign(columns) {
+        return [null, ...Array(columns - 1).fill("right")];
+    }
+
+    // A row with every cell that has something in it bolded (a Total)
+    boldRow(cells) {
+        return cells.map((v) => (v === "" ? "" : `**${v}**`));
     }
 
     // How a project or area note's time is broken down (OBS-133): an area's by month, since its time
@@ -1663,8 +1692,8 @@ class TimeReport {
         if (measure === "earned" && !projects.length) return [];
         if (measure === "hours" && !entries.length) return ["No time entries."];
         const months = TimeReport.SHORT_MONTHS.map((name, i) => ({ name, key: `${scope.key}-${String(i + 1).padStart(2, "0")}` }));
-        const head = months.map(({ name, key }) => `[[${scope.linkTarget ? scope.linkTarget("month", key) : key}\\|${name}]]`);
-        const out = [`| Project | ${head.join(" | ")} | ${scope.key} |`, `| ------- | ${months.map(() => "--:").join(" | ")} | --: |`];
+        const head = ["Project", ...months.map(({ name, key }) => `[[${scope.linkTarget ? scope.linkTarget("month", key) : key}\\|${name}]]`), scope.key];
+        const out = [];
         // A month's (or with `month` null, the year's) Earned: what the entries earned by the hour, and
         // the flat fees earned then (the project's, or every one on the All row)
         const value = (list, project, month = null) => {
@@ -1676,36 +1705,35 @@ class TimeReport {
             return c ? this.money(c).replace(/\.00$/, "") : "";
         };
         const row = (name, list, project, bold = false) => {
-            const b = (v) => (bold && v ? `**${v}**` : v);
-            const cells = months.map(({ key }) => b(value(list.filter((e) => e.date.startsWith(key + "-")), project, key)));
-            return `| ${bold ? `**${name}**` : name} | ${cells.join(" | ")} | ${b(value(list, project))} |`;
+            const cells = [name, ...months.map(({ key }) => value(list.filter((e) => e.date.startsWith(key + "-")), project, key)), value(list, project)];
+            return bold ? this.boldRow(cells) : cells;
         };
         out.push(...this.groupedRows(model, projects, (p) => row(this.cell(link(p)), entries.filter((e) => e.project === p), p), months.length + 2));
         const unassigned = entries.filter((e) => !e.project);
         if (unassigned.length && measure === "hours") out.push(row("Unassigned", unassigned, null));
         out.push(row("All", entries, null, true));
-        return out;
+        return this.table(head, this.numberAlign(head.length), out);
     }
 
     // Hours by column: a row per project (its own entries), Unassigned and All; `columns` are
     // [{ head, match(entry) }], followed by a total column headed `totalHead`. Cells are hours
     // (billable + 🆓, rounded per entry), blank when none.
     hoursGrid(model, entries, columns, totalHead, link) {
-        const out = [`| Project | ${columns.map((c) => c.head).join(" | ")} | ${totalHead} |`, `| ------- | ${columns.map(() => "--:").join(" | ")} | --: |`];
+        const head = ["Project", ...columns.map((c) => c.head), totalHead];
         const hours = (list) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
             return this.hoursCell(t.billable + t.free);
         };
         const row = (name, list, bold = false) => {
-            const b = (v) => (bold && v ? `**${v}**` : v);
-            return `| ${bold ? `**${name}**` : name} | ${columns.map((c) => b(hours(list.filter(c.match)))).join(" | ")} | ${b(hours(list))} |`;
+            const cells = [name, ...columns.map((c) => hours(list.filter(c.match))), hours(list)];
+            return bold ? this.boldRow(cells) : cells;
         };
-        out.push(...this.groupedRows(model, this.ownProjects(entries), (p) => row(this.cell(link(p)), entries.filter((e) => e.project === p)), columns.length + 2));
+        const out = this.groupedRows(model, this.ownProjects(entries), (p) => row(this.cell(link(p)), entries.filter((e) => e.project === p)), columns.length + 2);
         const unassigned = entries.filter((e) => !e.project);
         if (unassigned.length) out.push(row("Unassigned", unassigned));
         out.push(row("All", entries, true));
-        return out;
+        return this.table(head, this.numberAlign(head.length), out);
     }
 
     // A weekly note's breakdown by day: a column per day of the week, headed "Sun 9/6" with a link to
@@ -1844,7 +1872,7 @@ class TimeReport {
     // or note shown as text, so it can't tag the note the table is in (a #project would make it a
     // project) or draw anything. Billing.tableText does the same for invoices.
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)\|/g, "\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|")
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 
@@ -1965,25 +1993,24 @@ class TimeReport {
             return [warn(this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice)), `[[${s.invoice.name}]]`];
         };
         const head = [...(marks ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
-        const row = (c) => `| ${c.join(" | ")} |`;
         const bold = (v) => (v === "" ? "" : `**${v}**`);
-        const sum = (label, minutes) => row([...(marks ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])]);
+        const sum = (label, minutes) => [...(marks ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])];
         const days = [...new Set(entries.map((e) => e.date))].sort().reverse().map((d) => {
             const list = entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end);
             return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0) };
         });
-        const out = [row(head), row(head.map((h, i) => (h === "Hours" ? "--:" : marks && i === 0 ? ":-:" : "---")))];
+        const rows = [];
         for (const { d, list, minutes } of days) {
-            out.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes));
+            rows.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes));
             for (const e of list) {
                 const [mark, invoice] = cells(e);
-                out.push(row([...(marks ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
+                rows.push([...(marks ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
                     this.hours(this.rounded(e.minutes)),
                     this.tableText(written ? e.taskWritten ?? e.task : e.task), this.tableText(written ? e.noteWritten ?? e.note : e.note),
-                    ...(billing ? [invoice] : [])]));
+                    ...(billing ? [invoice] : [])]);
             }
         }
-        return out;
+        return this.table(head, head.map((h, i) => (h === "Hours" ? "right" : marks && i === 0 ? "center" : null)), rows);
     }
 
     // An invoice's status as its mark (📄 for a status of your own)
@@ -2007,18 +2034,16 @@ class TimeReport {
         const cents = (i) => (i.total === null ? null : Math.round(i.total * 100));
         const live = list.filter((i) => i.status !== "canceled");
         const head = ["", "Invoice", ...(project ? ["Project"] : []), "Date", "Period", "Hours", "Total"];
-        const row = (cells) => `| ${cells.join(" | ")} |`;
-        return [
-            row(head), row(head.map((h, k) => (h === "Hours" || h === "Total" ? "--:" : k === 0 ? ":-:" : "---"))),
-            ...list.map((i) => row([
+        return this.table(head, head.map((h, k) => (h === "Hours" || h === "Total" ? "right" : k === 0 ? "center" : null)), [
+            ...list.map((i) => [
                 this.invoiceMark(i), `[[${i.name}]]`, ...(project ? [this.cell(link(i.project))] : []),
                 i.invoiceDate ? this.shortDate(i.invoiceDate) : "",
                 i.periodStart && i.periodEnd ? `${md(i.periodStart)} – ${this.shortDate(i.periodEnd)}` : "",
                 minutes(i) === null ? "" : this.hours(minutes(i)), cents(i) === null ? "" : this.money(cents(i)),
-            ])),
-            row(["", "**Total**", ...(project ? [""] : []), "", "", `**${this.hours(live.reduce((s, i) => s + (minutes(i) ?? 0), 0))}**`,
-                `**${this.money(live.reduce((s, i) => s + (cents(i) ?? 0), 0))}**`]),
-        ];
+            ]),
+            ["", "**Total**", ...(project ? [""] : []), "", "", `**${this.hours(live.reduce((s, i) => s + (minutes(i) ?? 0), 0))}**`,
+                `**${this.money(live.reduce((s, i) => s + (cents(i) ?? 0), 0))}**`],
+        ]);
     }
 
     // The block, markers included, for { kind: "project", path } or { kind: "period", unit, key };

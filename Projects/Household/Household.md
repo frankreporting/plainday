@@ -14,9 +14,9 @@ The house, the car and paperwork. No projects, just the odd task note, and time 
 
 ### By Month
 
-| Month | Exact | Total |
-| ----- | ----: | ----: |
-| [[2026-09\|September 2026]] | 0.50 | 0.50 |
-| **Total** | **0.50** | **0.50** |
+| Month                       |    Exact |    Total |
+| --------------------------- | -------: | -------: |
+| [[2026-09\|September 2026]] |     0.50 |     0.50 |
+| **Total**                   | **0.50** | **0.50** |
 
 %% time:end %%

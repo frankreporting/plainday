@@ -49,7 +49,7 @@ class Billing {
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the invoice or draw anything (as TimeReport.tableText)
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)\|/g, "\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|")
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 
@@ -86,19 +86,19 @@ class Billing {
     // Task and note are defused, so text quoted from a daily note can't open a comment in the invoice.
     billedLines(rows, tr, linkText) {
         const t = (s) => this.tableText(tr.defuse(s));
-        const row = (c) => `| ${c.join(" | ")} |`;
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end);
-        const out = [Billing.HEADING, "", row(Billing.HEAD), "| --- | --- | --- | --- | --- | --: | --: |"];
+        const out = [];
         for (const date of new Set(sorted.map((r) => r.date))) {
             const day = sorted.filter((r) => r.date === date);
-            out.push(row([`**[[${date}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]));
+            out.push([`**[[${date}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
             for (const r of day) {
-                out.push(row(["", `${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`, r.project ? `[[${linkText(r.project)}]]` : "",
-                    t(r.task), t(r.note), (r.cents / 100).toFixed(2), tr.hours(r.billed)]));
+                out.push(["", `${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`, r.project ? `[[${linkText(r.project)}]]` : "",
+                    t(r.task), t(r.note), (r.cents / 100).toFixed(2), tr.hours(r.billed)]);
             }
         }
-        return out;
+        // Padded as Obsidian pads it (TimeReport.table), so clicking into it doesn't change the invoice
+        return [Billing.HEADING, "", ...tr.table(Billing.HEAD, [null, null, null, null, null, "right", "right"], out)];
     }
 
     // The rows of an invoice's Billed entries: { rows, bad: [{ line, text }], found, head, both }. `head`

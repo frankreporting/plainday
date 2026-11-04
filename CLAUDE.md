@@ -72,6 +72,8 @@ Obsidian doesn't render a table inside a list item: indented under a bullet, it 
 
 The time reports follow this already: TimeReport writes its tables at the left edge and escapes the `|` in every link.
 
+**Every table a script writes goes through `TimeReport.table` (RULE, OBS-184).** It pads a table the way Obsidian's table editor does, so entering the table changes nothing. A table written any other way gets padded by Obsidian on the first visit, which saves the note; the time report then sees its block as changed and writes it back, on every visit. That covers the reports, timesheets, invoices and any table added later: build the header, the alignments and the rows' cells, and let `table` write the lines. `tables.test.mjs` fails on a row built by hand (`join(" | ")`, or a string starting `| `), and `demoVault.test.mjs` checks that every table in the sample notes' reports, timesheets and invoices is already padded. Tests about what a table says can read it back compactly with `tests/tables.mjs`.
+
 ## Privacy: nothing personal reaches GitHub (RULE)
 
 This repository is public. That covers:
