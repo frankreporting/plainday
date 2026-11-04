@@ -224,30 +224,66 @@ test("your freeze survives a rewrite, and the report labels it custom", () => {
     note = write(note, sheet(modelOf(MORE)), ON, SHEET);
     assert.ok(note.includes("Thu 9/3") && note.includes("Billable time: 3.50 hrs"), "the timesheet took the new entry, and its heading's total changed");
     assert.equal(comments(note, "Billable"), "%%freeze 3 2%% %%custom%%");
-    assert.equal(comments(note, "🆓"), "%%freeze 1 2%% %%default 1 2%%");
+});
+
+test("a timesheet's table keeps your freeze when its summary line gains or loses a kind of time (OBS-242)", () => {
+    const billableOnly = [day("2026-09-02", "- [x] Build pages [[Harbor Web|⭕]]\n\t- 9:00am - 9:50am")];
+    let note = write("", sheet(modelOf(billableOnly)), ON, SHEET);
+    assert.ok(note.includes("### Billable time: 1.00 hrs\n"), note);
+    note = write(freezeRows(note, "Billable", 3), sheet(modelOf(billableOnly)), ON, SHEET);
+    note = write(note, sheet(modelOf(NOTES)), ON, SHEET);
+    assert.ok(note.includes("### Billable time: 2.50 hrs · 🆓 time: 0.50 hrs"), note);
+    assert.equal(comments(note, "Billable"), "%%freeze 3 2%% %%custom%%", "its first 🆓 entry doesn't make it a new table");
+});
+
+test("a timesheet from before OBS-242: a freeze you set on either of its two tables carries over to the one, the Billable table's when both have one", () => {
+    // The old layout's two tables, each with the freeze comments it may have
+    const old = (billable, free) => [
+        "%% time:start %%", "*Updated s*", "",
+        "### Billable time: 2.50 hrs", "", `| ${billable} | Date | Time | Hours |`, "| :-: | --- | --- | --: |", "|  | **[[2026-09-02\\|Wed 9/2]]** |  | **1.00** |", "",
+        "### 🆓 time: 0.50 hrs", "", `| ${free} | Date | Time | Hours |`, "| :-: | --- | --- | --: |", "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **0.50** |", "",
+        "%% time:end %%",
+    ].join("\n");
+    const block = sheet(modelOf(NOTES));
+    const DEF = "%%freeze 1 2%% %%default 1 2%%";
+    assert.equal(comments(write(old(DEF, DEF), block, ON, SHEET), "Billable"), DEF, "both at the default: the default");
+    assert.equal(comments(write(old(DEF, "%%freeze 4 2%% %%custom%%"), block, ON, SHEET), "Billable"), "%%freeze 4 2%% %%custom%%", "yours on 🆓 time carries over");
+    assert.equal(comments(write(old("", "%%default 1 2%%"), block, ON, SHEET), "Billable"), "%%freeze 0 0%% %%custom%%", "so does an Unfreeze");
+    assert.equal(comments(write(old("%%freeze 2 2%% %%custom%%", "%%freeze 4 2%% %%custom%%"), block, ON, SHEET), "Billable"), "%%freeze 2 2%% %%custom%%", "both yours: Billable time's");
+    assert.equal(tr.tablesIn(write(old(DEF, DEF), block, ON, SHEET).split("\n")).length, 1, "one table now");
+    // Date and Time are one column now, so a freeze of yours that reached Time ends at the same column
+    assert.equal(comments(write(old("%%freeze 2 3%% %%custom%%", DEF), block, ON, SHEET), "Billable"), "%%freeze 2 2%% %%custom%%", "status, Date and Time: status and Date / Time");
+    assert.equal(comments(write(old("%%freeze 2 2%% %%custom%%", DEF), block, ON, SHEET), "Billable"), "%%freeze 2 2%% %%custom%%", "status and Date: the same two");
+    assert.equal(comments(write(old("%%freeze 2 4%% %%custom%%", DEF), block, ON, SHEET), "Billable"), "%%freeze 2 3%% %%custom%%", "and one past Time keeps the column after");
 });
 
 test("changing the default changes only the tables still at the default, and clearing it takes them out", () => {
-    let note = write("", sheet(modelOf(NOTES)), ON, SHEET);
-    note = write(freezeRows(note, "Billable", 3), sheet(modelOf(NOTES)), ON, SHEET);
-    note = write(note, sheet(modelOf(NOTES)), { rows: 1, columns: 2 }, SHEET);
-    assert.equal(comments(note, "🆓"), "%%freeze 1 3%% %%default 1 3%%");
-    assert.equal(comments(note, "Billable"), "%%freeze 3 2%% %%custom%%");
-    note = write(note, sheet(modelOf(NOTES)), null, SHEET);
-    assert.equal(comments(note, "🆓"), "");
-    assert.equal(comments(note, "Billable"), "%%freeze 3 2%% %%custom%%");
+    // A project note with time on its sub-project has two tables, By Project and By Week
+    const notes = [...NOTES, day("2026-09-03", "- [x] Shoot [[Harbor Photos|⭕]]\n\t- 1:00pm - 2:00pm")];
+    const project = () => tr.render(modelOf(notes), { kind: "project", path: WEB }, "s");
+    let note = write("## Time Report\n", project(), ON);
+    note = write(freezeRows(note, "By Week", 3), project(), ON);
+    note = write(note, project(), { rows: 1, columns: 2 });
+    assert.equal(comments(note, "By Project"), "%%freeze 1 2%% %%default 1 2%%");
+    assert.equal(comments(note, "By Week"), "%%freeze 3 1%% %%custom%%");
+    note = write(note, project(), null);
+    assert.equal(comments(note, "By Project"), "");
+    assert.equal(comments(note, "By Week"), "%%freeze 3 1%% %%custom%%");
 });
 
 test("Unfreeze sticks, on a table at the default and on one of yours", () => {
-    let note = write("", sheet(modelOf(NOTES)), ON, SHEET);
-    note = freezeRows(note, "Billable", 3);
-    note = command(command(note, "🆓", { rows: 0, columns: 0 }), "Billable", { rows: 0, columns: 0 });
-    assert.equal(comments(note, "🆓"), "%%default 1 2%%", "Unfreeze takes the mark out and leaves the label");
-    note = write(note, sheet(modelOf(NOTES)), ON, SHEET);
-    assert.equal(comments(note, "🆓"), "%%freeze 0 0%% %%custom%%");
-    assert.equal(comments(note, "Billable"), "%%freeze 0 0%% %%custom%%");
-    note = write(note, sheet(modelOf(NOTES)), { rows: 2, columns: 2 }, SHEET);
-    assert.equal(comments(note, "🆓"), "%%freeze 0 0%% %%custom%%", "a new default doesn't freeze it again");
+    // One timesheet's table at the default, another's frozen to 3 rows, which a run labels custom
+    const fresh = write("", sheet(modelOf(NOTES)), ON, SHEET);
+    const yours = write(freezeRows(fresh, "Billable", 3), sheet(modelOf(NOTES)), ON, SHEET);
+    assert.equal(comments(yours, "Billable"), "%%freeze 3 2%% %%custom%%");
+    for (const start of [fresh, yours]) {
+        let note = command(start, "Billable", { rows: 0, columns: 0 });
+        assert.equal(comments(note, "Billable"), start === fresh ? "%%default 1 2%%" : "%%custom%%", "Unfreeze takes the mark out and leaves the label");
+        note = write(note, sheet(modelOf(NOTES)), ON, SHEET);
+        assert.equal(comments(note, "Billable"), "%%freeze 0 0%% %%custom%%");
+        note = write(note, sheet(modelOf(NOTES)), { rows: 2, columns: 2 }, SHEET);
+        assert.equal(comments(note, "Billable"), "%%freeze 0 0%% %%custom%%", "a new default doesn't freeze it again");
+    }
 });
 
 test("deleting both comments gives a table back to the default", () => {

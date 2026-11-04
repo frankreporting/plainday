@@ -1,0 +1,33 @@
+/* Obsidian PM: day bands in a timesheet (OBS-242).
+   Copy this file into your vault's .obsidian/snippets/ and turn it on under Appearance → CSS snippets.
+   It applies only to notes with `cssclasses: pm-timesheet`, which the time report writes into every
+   timesheet. Instead of shading every other row, each day row gets the shade the theme uses for
+   alternating rows, and the entries under it share one plain background, so each day reads as a block.
+   A day row is the one with a bold date in its Date / Time column: the second column, after the status
+   column, or the first in a timesheet that has none.
+   Obsidian's default theme gives alternating rows the table's own color, so there the bands don't show.
+   To pick their color, set --pm-timesheet-day-background in a snippet of your own, for example
+   body { --pm-timesheet-day-background: var(--background-secondary); } */
+
+/* No alternating shade in a timesheet's table */
+.pm-timesheet table tbody tr:nth-child(n) {
+    background-color: transparent;
+}
+
+/* Day rows take the alternating rows' shade, or the color you set */
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong) {
+    background-color: var(--pm-timesheet-day-background, var(--table-row-alt-background));
+}
+
+/* With the Selectable Tables plugin, frozen cells are painted solid, row by row, as the table's first odd
+   and even rows look. In a timesheet those are always a day row and an entry under it, so each row's frozen
+   cells take the look of its own kind: the day's shade, or the entries' plain background. */
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n) {
+    --selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
+    --selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:has(> td:nth-child(-n + 2) strong) {
+    --selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
+    --selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
+}

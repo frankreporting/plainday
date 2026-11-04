@@ -2272,38 +2272,53 @@ const section = (block, heading) => {
     return lines.slice(at + 2, end).filter((l) => l !== "");
 };
 
-test("entries keep the 🆓 as written, for the timesheet's 🆓 time", () => {
+// The ### headings in a block
+const block2heads = (block) => block.split("\n").filter((l) => l.startsWith("### "));
+
+test("a 🆓 comes out of an entry's task and note, wherever it was typed: a timesheet shows it in its status column (OBS-242)", () => {
     const { entries } = tr.parseNote("- [x] Redo it 🆓 [[P|⭕]]\n\t- 9:00am - 9:30am\n- [x] Fix [[P|⭕]]\n\t- 10:00am - 10:20am: 🆓 my typo", "2026-09-01");
-    assert.deepEqual(plain(entries.map((e) => [e.task, e.taskWritten, e.note, e.noteWritten])), [
-        ["Redo it", "Redo it 🆓", "", ""],
-        ["Fix", "Fix", "my typo", "🆓 my typo"],
-    ]);
+    assert.deepEqual(plain(entries.map((e) => [e.task, e.note, e.free])), [["Redo it", "", true], ["Fix", "my typo", true]]);
     const m = tr.build([note("2026-09-01", "- [<] 4:00pm\tCall [[Orchard Lane 2026|⭕]]\n\t- 4:30pm: 🆓 not billing")], INDEX);
-    assert.deepEqual(plain(m.entries.map((e) => [e.task, e.note, e.noteWritten])), [["Call", "not billing", "🆓 not billing"]]);
+    assert.deepEqual(plain(m.entries.map((e) => [e.task, e.note, e.free])), [["Call", "not billing", true]]);
 });
 
-test("render timesheet: Billable time and 🆓 time, each total in its heading, a bold row per day, newest first", () => {
+test("render timesheet: one table under a line of each kind's total, a bold row per day, newest first, then its entries in time order (OBS-242)", () => {
     const block = tr.render(SMALL, { kind: "timesheet", path: ORCHARD_WEB }, "s");
     const heads = block.split("\n").filter((l) => l.startsWith("### "));
-    assert.deepEqual(heads, ["### Billable time: 2.00 hrs", "### 🆓 time: 0.25 hrs"]);
+    assert.deepEqual(heads, ["### Billable time: 2.00 hrs · 🆓 time: 0.25 hrs"]);
     assert.ok(block.startsWith("%% time:start %%\n*Updated s*\n\n### Billable time"), "no line about the table before it (OBS-167)");
+    // Billable and 🆓 entries together: each entry's hours in its own column, each kind's total on its
+    // day's row, and the 🆓 in the status column rather than in Notes
     assert.deepEqual(section(block, "### Billable time"), [
-        "|  | Date | Time | Hours | Task | Notes | Invoice |",
-        "| :-: | --- | --- | --: | --- | --- | --- |",
-        "|  | **[[2026-10-01\\|Thu 10/1]]** |  | **1.00** |  |  |  |",
-        "|  |  | 9:00am - 10:00am | 1.00 | Charts |  |  |",
-        "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **1.00** |  |  |  |",
-        "|  |  | 9:00am - 9:50am | 1.00 | Charts |  |  |",
-    ]);
-    // 🆓 time: the same status and Invoice columns, and the 🆓 as written; its total is the summary's 🆓
-    assert.deepEqual(section(block, "### 🆓 time"), [
-        "|  | Date | Time | Hours | Task | Notes | Invoice |",
-        "| :-: | --- | --- | --: | --- | --- | --- |",
-        "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **0.25** |  |  |  |",
-        "|  |  | 1:00pm - 1:10pm | 0.25 | Charts | 🆓 fix \\| pipe |  |",
+        "|  | Date / Time | Bill | 🆓 | Task | Notes | Invoice |",
+        "| :-: | --- | --: | --: | --- | --- | --- |",
+        "|  | **[[2026-10-01\\|Thu 10/1]]** | **1.00** |  |  |  |  |",
+        "|  | 9:00am - 10:00am | 1.00 |  | Charts |  |  |",
+        "|  | **[[2026-09-01\\|Tue 9/1]]** | **1.00** | **0.25** |  |  |  |",
+        "|  | 9:00am - 9:50am | 1.00 |  | Charts |  |  |",
+        "| 🆓 | 1:00pm - 1:10pm |  | 0.25 | Charts | fix \\| pipe |  |",
     ]);
     assert.ok(tr.render(SMALL, { kind: "project", path: ORCHARD_WEB }, "s").includes("| **Total** | **2.00** | **2.25** | **0.25** | **2.00** | **$160.00** |"), "the project's note agrees");
-    assert.ok(block.endsWith("🆓 fix \\| pipe |  |\n\n%% time:end %%"));
+    assert.ok(block.endsWith("fix \\| pipe |  |\n\n%% time:end %%"));
+});
+
+test("timesheet: a kind of time it has none of is left out of its line and its columns, and a day with none of a kind leaves that cell blank (OBS-242)", () => {
+    const idx = orcIndex();
+    const sheetOf = (index, notes) => tr.render(tr.attachBilling(tr.build(notes, index), [], index, billing), { kind: "timesheet", path: ORCHARD_WEB }, "s");
+    // Billable time only: no 🆓 in the line, no 🆓 column
+    const billable = sheetOf(idx, [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am")]);
+    assert.deepEqual(block2heads(billable), ["### Billable time: 1.00 hrs"]);
+    assert.equal(section(billable, "### Billable time")[0], "|  | Date / Time | Bill | Task | Notes | Invoice |");
+    // A non-billable project's time is all 🆓: no Billable in the line, no Billable column, 🆓 on every row
+    const free = sheetOf(orcIndex({ rate_type: "non-billable" }), [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am\n\t- 1:00pm - 1:30pm")]);
+    assert.deepEqual(block2heads(free), ["### 🆓 time: 1.50 hrs"]);
+    assert.deepEqual(section(free, "### 🆓 time"), [
+        "|  | Date / Time | 🆓 | Task | Notes |",
+        "| :-: | --- | --: | --- | --- |",
+        "| 🆓 | **[[2026-09-01\\|Tue 9/1]]** | **1.50** |  |  |",
+        "| 🆓 | 9:00am - 9:50am | 1.00 | Charts |  |",
+        "| 🆓 | 1:00pm - 1:30pm | 0.50 | Charts |  |",
+    ]);
 });
 
 test("render project: include_subprojects adds a Project column and the sub-projects' entries", () => {
@@ -2313,21 +2328,21 @@ test("render project: include_subprojects adds a Project column and the sub-proj
     ]);
     const m = tr.attachBilling(tr.build(SMALL_NOTES, idx), [], idx, billing);
     const sheet = section(tr.render(m, { kind: "timesheet", path: ORCHARD }, "s"), "### Billable time");
-    assert.equal(sheet[0], "|  | Date | Time | Project | Hours | Task | Notes | Invoice |");
-    assert.ok(tr.render(m, { kind: "timesheet", path: ORCHARD }, "s").includes("### Billable time: 3.00 hrs"), "the summary's Total: 3.00 billable");
-    assert.ok(sheet.includes("|  |  | 2:00pm - 3:00pm | [[Orchard Lane 2026]] | 1.00 | Contract |  |  |"));
-    assert.ok(sheet.includes("|  |  | 9:00am - 9:50am | [[Orchard Lane Web 2026]] | 1.00 | Charts |  |  |"));
+    assert.equal(sheet[0], "|  | Date / Time | Project | Bill | 🆓 | Task | Notes | Invoice |");
+    assert.ok(tr.render(m, { kind: "timesheet", path: ORCHARD }, "s").includes("### Billable time: 3.00 hrs · 🆓 time: 0.25 hrs"), "the summary's Total: 3.00 billable");
+    assert.ok(sheet.includes("|  | 2:00pm - 3:00pm | [[Orchard Lane 2026]] | 1.00 |  | Contract |  |  |"));
+    assert.ok(sheet.includes("|  | 9:00am - 9:50am | [[Orchard Lane Web 2026]] | 1.00 |  | Charts |  |  |"));
     // Off: the project's own entries only
     const own = section(tr.render(SMALL, { kind: "timesheet", path: ORCHARD }, "s"), "### Billable time");
     assert.deepEqual(own.slice(2), [
-        "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **1.00** |  |  |  |",
-        "|  |  | 2:00pm - 3:00pm | 1.00 | Contract |  |  |",
+        "|  | **[[2026-09-01\\|Tue 9/1]]** | **1.00** |  |  |  |",
+        "|  | 2:00pm - 3:00pm | 1.00 | Contract |  |  |",
     ]);
 });
 
 test("render project: a timesheet with nothing hourly has no money columns", () => {
     const sheet = section(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Bramble/Bramble.md" }, "s"), "### Billable time");
-    assert.deepEqual(sheet.slice(0, 2), ["| Date | Time | Hours | Task | Notes |", "| --- | --- | --: | --- | --- |"]);
+    assert.deepEqual(sheet.slice(0, 2), ["| Date / Time | Bill | Task | Notes |", "| --- | --: | --- | --- |"], "and no status column, since no row is 🆓 or ⚠️");
 });
 
 // Invoices for Orchard Lane Web 2026, as the Invoice command writes their Billed entries
@@ -2358,7 +2373,7 @@ test("timesheet: each billable entry's invoice last, its status mark first (OBS-
     const m = tr.attachBilling(tr.build(ORC_NOTES, idx), invoices, idx, billing);
     const block = tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s");
     const cells = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time")
-        .map((l) => billing.cells(l)).filter((c) => /^\d{1,2}:\d{2}[ap]m - /.test(c[2])).map((c) => [c[2], c[0], c.at(-1)]);
+        .map((l) => billing.cells(l)).filter((c) => /^\d{1,2}:\d{2}[ap]m - /.test(c[1])).map((c) => [c[1], c[0], c.at(-1)]);
     assert.deepEqual(cells, [
         ["9:00am - 10:00am", "", ""],
         ["3:00pm - 3:30pm", "", ""],
@@ -2583,7 +2598,7 @@ test("review: Earned, the timesheet and an invoice agree to the cent at a rate t
     // timesheet is about time and shows no amounts (OBS-117).
     const sheet = section(sheetBlock, "### Billable time");
     assert.ok(sheetBlock.includes("### Billable time: 0.50 hrs"));
-    assert.ok(sheet.includes("|  | **[[2026-09-02\\|Wed 9/2]]** |  | **0.25** |  |  |  |"));
+    assert.ok(sheet.includes("|  | **[[2026-09-02\\|Wed 9/2]]** | **0.25** |  |  |  |"));
     assert.ok(block.includes("| **Total** | **0.50** | **0.50** |  | **0.50** | **$31.26** |"), "Earned is priced the same way");
     const rows = billing.snapshot(m.entries, m, tr);
     assert.equal(billing.rows(rows).reduce((s, r) => s + r.amount, 0), 3126, "and so is the invoice");
@@ -2596,11 +2611,11 @@ test("review: a billed entry shows the invoice that billed it, at whatever rate,
     const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "9:00am", "10:00am"]], { invoice_date: "2026-09-04" });
     const m = tr.attachBilling(m0, [inv], idx, billing);
     const sheet = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time");
-    assert.ok(sheet.includes("| 🕒 |  | 9:00am - 10:00am | 1.00 | Charts |  | [[1001-ORC]] |"), sheet.join("\n"));
-    assert.equal(sheet[2], "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **1.00** |  |  |  |", "no Total row: the total is in the heading");
+    assert.ok(sheet.includes("| 🕒 | 9:00am - 10:00am | 1.00 | Charts |  | [[1001-ORC]] |"), sheet.join("\n"));
+    assert.equal(sheet[2], "| 🕒 | **[[2026-09-01\\|Tue 9/1]]** | **1.00** |  |  |  |", "no Total row: the total is in the heading");
 });
 
-test("timesheet: 🆓 time has the status and Invoice columns; a 🆓 entry an invoice billed is ⚠️", () => {
+test("timesheet: a 🆓 entry shows 🆓 in the status column, beside the billable ones; one an invoice billed is ⚠️ (OBS-242)", () => {
     const idx = orcIndex();
     // 1001 billed 9:00am - 9:50am, which was made 🆓 since; 3:00pm - 3:30pm is 🆓 and on no invoice, so
     // it says nothing about an invoice
@@ -2611,12 +2626,17 @@ test("timesheet: 🆓 time has the status and Invoice columns; a 🆓 entry an i
     const inv = orcInvoice("1001-ORC", "paid", [["2026-09-01", "9:00am", "9:50am"], ["2026-09-01", "11:00am", "11:30am"]], { paid: "2026-09-15", invoice_date: "2026-09-04" });
     const m = tr.attachBilling(tr.build(notes, idx), [inv], idx, billing);
     const block = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
-    assert.ok(block.includes("### 🆓 time: 1.50 hrs"), block);
-    const free = section(block, "### 🆓 time");
-    assert.equal(free[0], "|  | Date | Time | Hours | Task | Notes | Invoice |");
-    assert.ok(free.includes("| ⚠️ |  | 9:00am - 9:50am | 1.00 | Charts | 🆓 my mistake | [[1001-ORC]] |"), free.join("\n"));
-    assert.ok(free.includes("|  |  | 3:00pm - 3:30pm | 0.50 | Charts | 🆓 |  |"), free.join("\n"));
-    assert.ok(section(block, "### Billable time").includes("| ✅ |  | 11:00am - 11:30am | 0.50 | Charts |  | [[1001-ORC]] |"));
+    assert.ok(block.includes("### Billable time: 0.50 hrs · 🆓 time: 1.50 hrs"), block);
+    // 9/2 has only a 🆓 entry, so it's 🆓; 9/1's ⚠️ entry makes its day ⚠️
+    assert.deepEqual(section(block, "### Billable time"), [
+        "|  | Date / Time | Bill | 🆓 | Task | Notes | Invoice |",
+        "| :-: | --- | --: | --: | --- | --- | --- |",
+        "| 🆓 | **[[2026-09-02\\|Wed 9/2]]** |  | **0.50** |  |  |  |",
+        "| 🆓 | 3:00pm - 3:30pm |  | 0.50 | Charts |  |  |",
+        "| ⚠️ | **[[2026-09-01\\|Tue 9/1]]** | **0.50** | **1.00** |  |  |  |",
+        "| ⚠️ | 9:00am - 9:50am |  | 1.00 | Charts | my mistake | [[1001-ORC]] |",
+        "| ✅ | 11:00am - 11:30am | 0.50 |  | Charts |  | [[1001-ORC]] |",
+    ]);
 });
 
 test("timesheet: Problems say why each ⚠️ entry is ⚠️, as the project's note does, drafts too; with nothing to say, no Problems (OBS-143)", () => {
@@ -2633,7 +2653,7 @@ test("timesheet: Problems say why each ⚠️ entry is ⚠️, as the project's 
     ];
     const m = tr.attachBilling(tr.build(notes, idx), invoices, idx, billing);
     const block = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
-    assert.equal(block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).length, 2, block);
+    assert.equal(block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).length, 3, "two entries, and their day");
     assert.deepEqual(section(block, "### Problems"), [
         "- [[1001-ORC]] (paid 9/15): [[2026-09-01|9/1/26]] 9:00am - 9:50am was billed, now 🆓",
         "- [[1001-ORC]] (paid 9/15): 9/2/26 3:00pm - 3:30pm `Charts` was billed, but now it's missing from [[2026-09-02|the daily note]]; put it back there to settle it",
@@ -2656,9 +2676,9 @@ test("timesheet: an entry that overlaps billed time whose own entry is still the
     const inv = orcInvoice("1001-ORC", "sent", [["2026-09-01", "1:00pm", "2:30pm"]], { invoice_date: "2026-09-04" });
     const m = tr.attachBilling(tr.build(notes, idx), [inv], idx, billing);
     const block = tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s");
-    assert.ok(section(block, "### Billable time").some((l) => l.startsWith("| ⚠️ |  | 2:00pm - 3:00pm |")), block);
+    assert.ok(section(block, "### Billable time").some((l) => l.startsWith("| ⚠️ | 2:00pm - 3:00pm |")), block);
     // The overlap itself is listed first, as on the project's note (OBS-132), which marks the billed row ⚠️ too
-    assert.ok(section(block, "### Billable time").some((l) => l.startsWith("| ⚠️ |  | 1:00pm - 2:30pm |")), block);
+    assert.ok(section(block, "### Billable time").some((l) => l.startsWith("| ⚠️ | 1:00pm - 2:30pm |")), block);
     assert.deepEqual(section(block, "### Problems"), [
         "- [[2026-09-01|9/1/26]] line 3: `- 2:00pm - 3:00pm` overlaps 1:00pm - 2:30pm (line 2)",
         "- [[1001-ORC]] (sent 9/4): [[2026-09-01|9/1/26]] 1:00pm - 2:30pm was billed, and 2:00pm - 3:00pm overlaps it",
@@ -2691,9 +2711,10 @@ test("timesheet: its project's entry Problems come first, as its note has them, 
     ]);
     // The same entry Problems as the project's note, which has the invoice's line too
     assert.deepEqual(section(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s"), "### Problems"), problems);
-    // Every row a line names is ⚠️, both sides of the overlap included; nothing else is
-    const warned = block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).map((l) => l.split(" | ")[2]);
-    assert.deepEqual(warned, ["6:00am - 7:00pm", "9:00am - 10:00am", "9:30am - 10:30am", "1:00pm - 2:00pm", "3:00pm - 3:30pm"]);
+    // Every row a line names is ⚠️, both sides of the overlap included, and so is its day; nothing else is
+    const warned = block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).map((l) => l.split(" | ")[1]);
+    assert.deepEqual(warned, ["**[[2026-09-03\\|Thu 9/3]]**", "6:00am - 7:00pm", "**[[2026-09-02\\|Wed 9/2]]**", "3:00pm - 3:30pm",
+        "**[[2026-09-01\\|Tue 9/1]]**", "9:00am - 10:00am", "9:30am - 10:30am", "1:00pm - 2:00pm"]);
 });
 
 test("timesheet: a Problem on a task or event line, or a ⭕ and ⋯ that disagree, marks the entries under it ⚠️ (OBS-132)", () => {
@@ -2718,26 +2739,107 @@ test("timesheet: a Problem on a task or event line, or a ⭕ and ⋯ that disagr
     assert.ok(problems[0].includes("has a 🆓 that isn't on its own"), problems[0]);
     assert.ok(problems[1].includes("has 🆓 on its end line"), problems[1]);
     assert.ok(problems[2].includes("but its task note"), problems[2]);
-    const warned = block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).map((l) => l.split(" | ")[2]);
+    const warned = block.split("\n").filter((l) => l.startsWith("| ⚠️ |")).map((l) => l.split(" | ")[1]).filter((c) => !c.startsWith("**"));
     // The line whose ⭕ and note disagree has no row: its time counts nowhere, and its Problem says so
     assert.deepEqual(warned, ["9:00am - 9:30am", "9:00am - 9:30am", "10:00am - 10:30am"]);
-    assert.ok(section(block, "### Billable time").includes("|  |  | 11:00am - 11:30am | 0.50 | Charts |  |  |"), "the task with nothing wrong stays unmarked");
+    assert.ok(section(block, "### Billable time").includes("|  | 11:00am - 11:30am | 0.50 | Charts |  |  |"), "the task with nothing wrong stays unmarked");
+});
+
+test("timesheet: a day row's status sums up its entries', the first rule that fits (OBS-242)", () => {
+    const row = (mark, hourly = true) => ({ mark, hourly });
+    const free = row("🆓", false), fee = row("", false);
+    // ⚠️ on any entry wins, 🆓 or not, so a problem always shows on its day
+    assert.equal(tr.dayMark([row("✅"), row("⚠️")]), "⚠️");
+    assert.equal(tr.dayMark([row("✅"), row("⚠️", false)]), "⚠️", "a 🆓 entry an invoice billed");
+    assert.equal(tr.dayMark([row(""), row("⚠️")]), "⚠️");
+    // An hourly entry on no invoice leaves its day blank, nor is one on a canceled invoice invoiced
+    assert.equal(tr.dayMark([row("✏️"), row("")]), "");
+    assert.equal(tr.dayMark([row("✅"), row("❌")]), "");
+    // Otherwise the earliest status among the hourly entries: ✏️, 🕒, 📄, then ✅
+    assert.equal(tr.dayMark([row("✏️"), row("🕒"), row("✅")]), "✏️");
+    assert.equal(tr.dayMark([row("🕒"), row("📄"), row("✅")]), "🕒");
+    assert.equal(tr.dayMark([row("📄"), row("✅")]), "📄", "a status word of your own sorts between sent and paid");
+    assert.equal(tr.dayMark([row("✅"), row("✅")]), "✅", "✅ only when every hourly entry is paid");
+    // 🆓 entries and flat-fee time never hold a day back
+    assert.equal(tr.dayMark([row("✅"), free, fee]), "✅");
+    assert.equal(tr.dayMark([row("🕒"), free]), "🕒");
+    // With no hourly entries: 🆓 when every entry is 🆓, else blank
+    assert.equal(tr.dayMark([free, free]), "🆓");
+    assert.equal(tr.dayMark([free, fee]), "");
+    assert.equal(tr.dayMark([fee]), "");
+    assert.equal(tr.dayMark([]), "");
+});
+
+test("timesheet: each entry's status, and its day's, in an hourly project's timesheet (OBS-242)", () => {
+    const idx = orcIndex();
+    const day = (date, more = "") => note(date, `- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am${more}\n\t- 1:00pm - 2:00pm`);
+    const notes = [
+        // 9/1: paid, paid, and a 🆓 entry on no invoice; 9/8: a 🆓 entry an invoice billed, and a paid one
+        note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am\n\t- 11:00am - 11:30am\n\t- 1:00pm - 1:30pm: 🆓 my mistake"),
+        day("2026-09-02"), day("2026-09-03"), day("2026-09-04"), day("2026-09-05"), day("2026-09-08", ": 🆓 redo"), day("2026-09-09"),
+    ];
+    const invoices = [
+        // 9/9's morning was billed as 9:00am - 9:30am, so it changed since
+        orcInvoice("1001-ORC", "paid", [["2026-09-01", "9:00am", "10:00am"], ["2026-09-01", "11:00am", "11:30am"], ["2026-09-02", "9:00am", "10:00am"],
+            ["2026-09-04", "1:00pm", "2:00pm"], ["2026-09-05", "1:00pm", "2:00pm"], ["2026-09-08", "9:00am", "10:00am"], ["2026-09-08", "1:00pm", "2:00pm"],
+            ["2026-09-09", "9:00am", "9:30am"], ["2026-09-09", "1:00pm", "2:00pm"]], { paid: "2026-09-15", invoice_date: "2026-09-10", period_end: "2026-09-09" }),
+        orcInvoice("1002-ORC", "sent", [["2026-09-02", "1:00pm", "2:00pm"], ["2026-09-03", "9:00am", "10:00am"]], { invoice_date: "2026-09-11", period_end: "2026-09-03" }),
+        orcInvoice("1003-ORC", "draft", [["2026-09-04", "9:00am", "10:00am"]], { period_end: "2026-09-04" }),
+        orcInvoice("1004-ORC", "invoiced", [["2026-09-05", "9:00am", "10:00am"]], { invoice_date: "2026-09-12", period_end: "2026-09-05" }),
+    ];
+    const m = tr.attachBilling(tr.build(notes, idx), invoices, idx, billing);
+    const rows = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").slice(2).map((l) => billing.cells(l));
+    assert.deepEqual(rows.map((c) => [c[0], c[1].replace(/^\*\*\[\[[\d-]+\|(.*)\]\]\*\*$/, "$1")]), [
+        ["⚠️", "Wed 9/9"], ["⚠️", "9:00am - 10:00am"], ["✅", "1:00pm - 2:00pm"],
+        ["⚠️", "Tue 9/8"], ["⚠️", "9:00am - 10:00am"], ["✅", "1:00pm - 2:00pm"],
+        ["📄", "Sat 9/5"], ["📄", "9:00am - 10:00am"], ["✅", "1:00pm - 2:00pm"],
+        ["✏️", "Fri 9/4"], ["✏️", "9:00am - 10:00am"], ["✅", "1:00pm - 2:00pm"],
+        ["", "Thu 9/3"], ["🕒", "9:00am - 10:00am"], ["", "1:00pm - 2:00pm"],
+        ["🕒", "Wed 9/2"], ["✅", "9:00am - 10:00am"], ["🕒", "1:00pm - 2:00pm"],
+        ["✅", "Tue 9/1"], ["✅", "9:00am - 10:00am"], ["✅", "11:00am - 11:30am"], ["🆓", "1:00pm - 1:30pm"],
+    ]);
+});
+
+test("timesheet: flat-fee time doesn't hold a day back, on a parent's timesheet through include_subprojects or on its own project's (OBS-242)", () => {
+    // Orchard Lane is billed by the hour, and its sub-project Web is a flat fee
+    const idx = tr.makeIndex([
+        { path: ORCHARD, tags: ["project"], props: { rate: "80", rate_type: "hourly", include_subprojects: true } },
+        { path: ORCHARD_WEB, tags: ["project"], props: { rate: "500", rate_type: "flat" } },
+    ]);
+    const notes = [
+        note("2026-09-07", "- [x] Plan [[Orchard Lane 2026|⭕]]\n\t- 9:00am - 10:00am\n- [x] Logo [[Orchard Lane Web 2026|⭕]]\n\t- 1:00pm - 1:30pm"),
+        note("2026-09-08", "- [x] Logo [[Orchard Lane Web 2026|⭕]]\n\t- 1:00pm - 1:30pm\n- [x] Logo call 🆓 [[Orchard Lane Web 2026|⭕]]\n\t- 2:00pm - 2:15pm"),
+        note("2026-09-09", "- [x] Logo call 🆓 [[Orchard Lane Web 2026|⭕]]\n\t- 2:00pm - 2:15pm"),
+    ];
+    const inv = {
+        path: `${ORC}/1001-ORC.md`,
+        props: { status: "paid", number: "1001-ORC", project: "[[Orchard Lane 2026]]", period_start: "2026-09-07", period_end: "2026-09-07", invoice_date: "2026-09-10", paid: "2026-09-15" },
+        text: billing.billedLines([{ date: "2026-09-07", start: tr.minutes("9:00am"), end: tr.minutes("10:00am"), minutes: 60, billed: 60, cents: 8000, project: ORCHARD, task: "Plan", note: "" }],
+            tr, (p) => tr.basename(p)).join("\n"),
+    };
+    const m = tr.attachBilling(tr.build(notes, idx), [inv], idx, billing);
+    const marks = (path) => section(tr.render(m, { kind: "timesheet", path }, "s"), "### Billable time").slice(2).map((l) => billing.cells(l)).map((c) => c[0]);
+    // 9/7: a paid hourly hour and half an hour on the flat fee is ✅; 9/8 has no hourly time; 9/9 is all 🆓
+    assert.deepEqual(marks(ORCHARD), ["🆓", "🆓", "", "", "🆓", "✅", "✅", ""]);
+    // Web's own timesheet bills nothing, and gets the status column for its 🆓 rows; its billable rows stay blank
+    assert.deepEqual(marks(ORCHARD_WEB), ["🆓", "🆓", "", "", "🆓", "", ""]);
+    assert.equal(section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time")[0], "|  | Date / Time | Bill | 🆓 | Task | Notes |");
 });
 
 test("timesheet: a table that bills nothing gets the ⚠️ column only when a row needs it (OBS-132)", () => {
     const idx = orcIndex({ rate: "500", rate_type: "flat" });
     const clean = tr.render(tr.attachBilling(tr.build(ORC_NOTES, idx), [], idx, billing), { kind: "timesheet", path: ORCHARD_WEB }, "s");
-    assert.equal(section(clean, "### Billable time")[0], "| Date | Time | Hours | Task | Notes |");
+    assert.equal(section(clean, "### Billable time")[0], "| Date / Time | Bill | Task | Notes |");
     assert.ok(!clean.includes(PROBLEMS));
     const overlap = [note("2026-09-01", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am\n\t- 9:30am - 10:30am\n\t- 1:00pm - 2:00pm")];
     const sheet = section(tr.render(tr.attachBilling(tr.build(overlap, idx), [], idx, billing), { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time");
     assert.deepEqual(sheet, [
-        "|  | Date | Time | Hours | Task | Notes |",
-        "| :-: | --- | --- | --: | --- | --- |",
-        "|  | **[[2026-09-01\\|Tue 9/1]]** |  | **3.00** |  |  |",
-        "| ⚠️ |  | 9:00am - 10:00am | 1.00 | Charts |  |",
-        "| ⚠️ |  | 9:30am - 10:30am | 1.00 | Charts |  |",
-        "|  |  | 1:00pm - 2:00pm | 1.00 | Charts |  |",
+        "|  | Date / Time | Bill | Task | Notes |",
+        "| :-: | --- | --: | --- | --- |",
+        "| ⚠️ | **[[2026-09-01\\|Tue 9/1]]** | **3.00** |  |  |",
+        "| ⚠️ | 9:00am - 10:00am | 1.00 | Charts |  |",
+        "| ⚠️ | 9:30am - 10:30am | 1.00 | Charts |  |",
+        "|  | 1:00pm - 2:00pm | 1.00 | Charts |  |",
     ]);
 });
 
@@ -2759,10 +2861,10 @@ test("timesheet: it lists the Problems of the projects it shows, and only theirs
     // Each side of the overlap lists it and marks its own row
     const web = render(idx(), ORCHARD_WEB);
     assert.deepEqual(section(web, "### Problems"), [overlap]);
-    assert.ok(section(web, "### Billable time").some((l) => l.startsWith("| ⚠️ |  | 9:30am - 10:30am |")), web);
+    assert.ok(section(web, "### Billable time").some((l) => l.startsWith("| ⚠️ | 9:30am - 10:30am |")), web);
     const own = render(idx(), ORCHARD);
     assert.deepEqual(section(own, "### Problems"), [overlap]);
-    assert.ok(section(own, "### Billable time").some((l) => l.startsWith("| ⚠️ |  | 9:00am - 10:00am |")), own);
+    assert.ok(section(own, "### Billable time").some((l) => l.startsWith("| ⚠️ | 9:00am - 10:00am |")), own);
     // The parent's note adds up Kids, so it lists Kids' Problem; its timesheet doesn't show Kids' time, so it doesn't
     const note_ = tr.render(tr.attachBilling(tr.build(notes, idx()), [], idx(), billing), { kind: "project", path: ORCHARD }, "s");
     assert.deepEqual(section(note_, "### Problems"), [overlap, long]);
@@ -2796,7 +2898,7 @@ test("review: a #tag or HTML in a task or note shows as text in the timesheet", 
     const idx = orcIndex();
     const m = tr.attachBilling(tr.build([note("2026-09-01", "- [x] Plan #project work [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:50am: see <b>this</b> #area")], idx), [], idx, billing);
     const row = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").find((l) => l.includes("9:00am - 9:50am"));
-    assert.equal(row, "|  |  | 9:00am - 9:50am | 1.00 | Plan \\#project work | see &lt;b>this&lt;/b> \\#area |  |");
+    assert.equal(row, "|  | 9:00am - 9:50am | 1.00 | Plan \\#project work | see &lt;b>this&lt;/b> \\#area |  |");
 });
 
 test("render project: the block opens with its timesheet link, beside when it was updated", () => {
@@ -2809,12 +2911,40 @@ test("render project: the block opens with its timesheet link, beside when it wa
     assert.ok(tr.sameBlock(note(withSheet), withSheet.replace("*Updated s*", "*Updated t*")));
     assert.ok(!tr.sameBlock(note(without), withSheet));
     assert.equal(tr.sheetPath(ORCHARD_WEB), "20 Projects/Freelance/Orchard Lane 2026/Orchard Lane Web 2026/Orchard Lane Web 2026 timesheet.md");
-    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\nparent: "[[A|⭕.A]]"\n---\n\nB\n', "no heading: the whole note is the report (OBS-167)");
+    assert.equal(tr.sheetNote("1", "[[A|⭕.A]]", "B"), '---\nid: 1\ntags:\n  - timesheet\nparent: "[[A|⭕.A]]"\ncssclasses:\n  - pm-timesheet\n---\n\nB\n',
+        "no heading: the whole note is the report (OBS-167); its class, for the day bands (OBS-242)");
     assert.match(tr.render(SMALL, { kind: "timesheet", path: "20 Projects/Freelance/Nobody/Nobody.md" }, "s"), /No time entries\.\n%% time:end %%$/);
 });
 
+test("a timesheet made before OBS-242 gets its class at its next refresh, keeping any class it has; then there's nothing to add", () => {
+    const sheet = (props) => `---\nid: 1\ntags:\n  - timesheet\n${props}---\n\n${BLOCK}\n`;
+    const write = (content) => tr.blockEdits(content, BLOCK, { heading: false }).reduce(apply, content);
+    assert.equal(write(sheet("")), sheet("cssclasses:\n  - pm-timesheet\n"), "even when its block hasn't changed");
+    assert.equal(write(sheet("cssclasses:\n  - wide\n")), sheet("cssclasses:\n  - wide\n  - pm-timesheet\n"));
+    assert.equal(write(sheet("cssclasses: [wide, \"tall\"]\n")), sheet("cssclasses: [wide, \"tall\", pm-timesheet]\n"));
+    assert.equal(write(sheet("cssclasses: wide\n")), sheet("cssclasses:\n  - wide\n  - pm-timesheet\n"));
+    for (const has of ["cssclasses:\n  - pm-timesheet\n", "cssclasses:\n  - wide\n  - \"pm-timesheet\"\n", "cssclasses: [wide, pm-timesheet]\n", "cssclasses: pm-timesheet\n"]) {
+        assert.deepEqual(plain(tr.blockEdits(sheet(has), BLOCK, { heading: false })), [], has);
+    }
+    // A list at the left edge, a quoted key, comments between the items, no value
+    assert.equal(write(sheet("cssclasses:\n- wide\n")), sheet("cssclasses:\n- wide\n- pm-timesheet\n"));
+    assert.equal(write(sheet('"cssclasses": wide\n')), sheet("cssclasses:\n  - wide\n  - pm-timesheet\n"));
+    assert.equal(write(sheet("cssclasses:\n  - a\n  # mine\n  - b\nparent: x\n")), sheet("cssclasses:\n  - a\n  # mine\n  - b\n  - pm-timesheet\nparent: x\n"));
+    assert.equal(write(sheet("cssclasses:\nparent: x\n")), sheet("cssclasses:\n  - pm-timesheet\nparent: x\n"));
+    assert.equal(write(sheet("cssclasses: null\n")), sheet("cssclasses:\n  - pm-timesheet\n"));
+    // What it can't read safely it leaves alone, rather than break the properties and lose the timesheet tag
+    for (const odd of ["cssclasses: [a, b] # mine\n", "cssclasses: [a,\n  b]\n", "cssclasses: # none\n", "cssclasses:\n- pm-timesheet\n", "cssclasses:\n  - a\n  # x\n  - pm-timesheet\n"]) {
+        assert.deepEqual(plain(tr.blockEdits(sheet(odd), BLOCK, { heading: false })), [], odd);
+    }
+    const crlf = sheet("").replace(/\n/g, "\r\n");
+    assert.equal(write(crlf), sheet("cssclasses:\n  - pm-timesheet\n").replace(/\n/g, "\r\n"));
+    // A note with no properties is left as it is; a project's note never gets the class
+    assert.equal(write(`Notes\n\n${BLOCK}\n`), `Notes\n\n${BLOCK}\n`);
+    assert.ok(!tr.blockEdits(sheet(""), BLOCK).reduce(apply, sheet("")).includes("pm-timesheet"));
+});
+
 test("OBS-167: a timesheet's report has no heading; the one above an existing timesheet's block goes", () => {
-    const sheet = (body) => `---\ntags:\n  - timesheet\n---\n\n${body}\n`;
+    const sheet = (body) => `---\ntags:\n  - timesheet\ncssclasses:\n  - pm-timesheet\n---\n\n${body}\n`;
     const write = (content) => { const edits = tr.blockEdits(content, BLOCK, { heading: false }); return edits.error ? edits : edits.reduce(apply, content); };
     // The heading above the block goes, with the blank line under it, even when the block is unchanged
     assert.equal(write(sheet(`## Time Report\n\n${BLOCK}`)), sheet(BLOCK));
@@ -2836,7 +2966,7 @@ test("OBS-215, reversing a final review: a billed entry moved to another day isn
     const moved = [ORC_NOTES[0], note("2026-09-02", "- [x] Other [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 9:15am"), note("2026-09-03", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 3:00pm - 3:30pm")];
     const m = tr.attachBilling(tr.build(moved, idx), [inv], idx, billing);
     const row = section(tr.render(m, { kind: "timesheet", path: ORCHARD_WEB }, "s"), "### Billable time").find((l) => l.includes("3:00pm - 3:30pm"));
-    assert.match(row, /^\|  \|  \| 3:00pm - 3:30pm \| /, "not ⚠️: nothing ties it to the billed row");
+    assert.match(row, /^\|  \| 3:00pm - 3:30pm \| /, "not ⚠️: nothing ties it to the billed row");
     assert.ok(tr.render(m, { kind: "project", path: ORCHARD_WEB }, "s").includes("- [[1001-ORC]] (sent 9/4): 9/2/26 3:00pm - 3:30pm `Charts` was billed, but now it's missing from [[2026-09-02|the daily note]]; put it back there to settle it"));
 });
 

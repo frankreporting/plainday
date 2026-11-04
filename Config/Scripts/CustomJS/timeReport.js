@@ -7,8 +7,8 @@ class TimeReport {
     //     note, its hours, Earned and effective rate, By Project when time was logged to a sub-project,
     //     then By Week or By Month, its invoices, and Problems (which also say what changed since an
     //     invoice, OBS-5);
-    //   - each project's timesheet note, beside its note: every entry, as Billable time and 🆓 time,
-    //     with the invoice that billed it (OBS-5), and Problems that say why an entry is ⚠️ (OBS-143);
+    //   - each project's timesheet note, beside its note: every entry, billable and 🆓, in one table
+    //     with the invoice that billed it (OBS-5, OBS-242), and Problems that say why an entry is ⚠️ (OBS-143);
     //   - each weekly and monthly note in Planner (weeks/, months/, from Notebook Navigator's
     //     patterns) for a period with entries: Hours, by project and by day (weekly) or by week
     //     (monthly), then Earned, the billed projects' money, and its Problems;
@@ -96,6 +96,12 @@ class TimeReport {
     static CREATED_KEY = "time-report-created-notes";
     // A project's timesheet note sits beside it, named after it: "Kestrel Outfitters 2026 timesheet"
     static SHEET = " timesheet";
+    // Every timesheet carries this class, for the day bands of pm-timesheet.css (OBS-242)
+    static SHEET_CLASS = "pm-timesheet";
+    // A timesheet's summary line, its numbers aside (tableHeading), whichever kinds of time it names: its one
+    // table's heading. It had two tables before OBS-242, Billable time and 🆓 time.
+    static SHEET_HEADING = "### Billable time: # hrs · 🆓 time: # hrs";
+    static SHEET_HEADINGS = /^### (?:Billable time: # hrs(?: · 🆓 time: # hrs)?|🆓 time: # hrs)$/u;
     // An invoice's status as the mark in its links, in the timesheets and on the project's note (OBS-117)
     static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
     // Freezing tables for the Selectable Tables plugin (OBS-238). The default is set in TABLE_SETTINGS. A
@@ -400,7 +406,6 @@ class TimeReport {
                         under.endBare = bare;
                         under.endFree = /^🆓/u.test(note);
                         under.endNote = under.endFree ? note.replace(/^🆓\uFE0F?\s*/u, "") : note;
-                        under.endNoteWritten = note;
                         under.endStray = !under.endFree && note.includes("🆓");
                     }
                     continue;
@@ -490,9 +495,6 @@ class TimeReport {
                 date, line: i + 1, start, end, minutes: end - start, crossesMidnight, free,
                 note: free ? note.replace(/^🆓\uFE0F?\s*/u, "") : note,
                 task: this.taskText(context[0].body),
-                // As written, 🆓 and all, for the timesheet's 🆓 time
-                taskWritten: this.taskText(context[0].body, { keepFree: true }),
-                noteWritten: note,
                 context: ctx,
                 top: top.line,
                 ...(subTask ? { subTask } : {}),
@@ -553,14 +555,13 @@ class TimeReport {
             date: ev.date, line: ev.line, path: ev.path, project: ev.project, ...(ev.archived ? { archived: true } : {}), ...(ev.subTask ? { subTask: true } : {}), start: ev.start, end: ev.end, minutes: ev.minutes,
             crossesMidnight: !!ev.crossesMidnight, free: ev.endFree || ev.lineFree, note: ev.endNote,
             task: this.taskText(ev.context[0].body), context: ev.context, startText: ev.startText, endText: ev.endText, text: ev.text,
-            taskWritten: this.taskText(ev.context[0].body, { keepFree: true }), noteWritten: ev.endNoteWritten ?? ev.endNote,
         };
     }
 
     // A task or event line as plain text for a table: no checkbox, event time, symbol links or
-    // date breadcrumbs; other links show their alias. With `keepFree`, a 🆓 on the line stays, for the
-    // timesheet's 🆓 time, where it says why the time isn't billed (OBS-5).
-    taskText(body, { keepFree = false } = {}) {
+    // date breadcrumbs; other links show their alias. A 🆓 comes out: a timesheet shows it in its own
+    // column (OBS-242).
+    taskText(body) {
         const text = body.trimEnd().replace(TimeReport.BLOCK_ID, "")
             .replace(/^\[.\]\s*/, "")
             .replace(/^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s*/, "")
@@ -569,7 +570,7 @@ class TimeReport {
             .replace(TimeReport.SYMBOL_LINK, "")
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
             .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1");
-        return (keepFree ? text : text.replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, ""))
+        return text.replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "")
             .replace(/\s+/g, " ")
             .trim()
             .replace(TimeReport.FREE_MARK, "")
@@ -1335,10 +1336,52 @@ class TimeReport {
         return `${dir ? `${dir}/` : ""}${this.basename(project)}${TimeReport.SHEET}.md`;
     }
 
-    // The whole of a new timesheet note: an id, the timesheet tag and its project as `parent`, then its
-    // report, with no heading: the whole note is the report (OBS-167)
+    // The whole of a new timesheet note: an id, the timesheet tag, its project as `parent` and the class for
+    // its day bands (OBS-242), then its report, with no heading: the whole note is the report (OBS-167)
     sheetNote(id, parent, block) {
-        return `---\nid: ${id}\ntags:\n  - timesheet\nparent: ${JSON.stringify(parent)}\n---\n\n${block}\n`;
+        return `---\nid: ${id}\ntags:\n  - timesheet\nparent: ${JSON.stringify(parent)}\ncssclasses:\n  - ${TimeReport.SHEET_CLASS}\n---\n\n${block}\n`;
+    }
+
+    // The edit { start, end, text } that gives a timesheet made before OBS-242 its class, keeping any
+    // class it has: `cssclasses` as a list (indented or not), `[a, b]` or one class. Null when it has
+    // it, has no properties, or has `cssclasses` in a form this doesn't read (a comment after it, a list
+    // over several lines): a note left as it is beats properties that no longer parse, which would lose
+    // its `timesheet` tag.
+    sheetClass(content) {
+        const cls = TimeReport.SHEET_CLASS;
+        const nl = content.includes("\r\n") ? "\r\n" : "\n";
+        const lines = content.split("\n").map((l) => l.replace(/\r$/, ""));
+        if (lines[0] !== "---") return null;
+        const close = lines.findIndex((l, i) => i > 0 && /^(?:---|\.\.\.)\s*$/.test(l));
+        if (close === -1) return null;
+        const offset = (n) => content.split("\n").slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+        const unquote = (v) => v.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+        const KEY = /^(["']?)cssclasses\1\s*:(.*)$/;
+        const key = lines.findIndex((l, i) => i > 0 && i < close && KEY.test(l));
+        if (key === -1) return { start: offset(close), end: offset(close), text: `cssclasses:${nl}  - ${cls}${nl}` };
+        const value = lines[key].match(KEY)[2].trim();
+        const whole = { start: offset(key), end: offset(key) + lines[key].length };
+        if (value.includes("#")) return null;
+        if (!value) {
+            // Its items, with blank and comment lines between them; the new one goes after the last
+            let last = key;
+            for (let j = key + 1; j < close; j++) {
+                if (/^\s*-(?:\s|$)/.test(lines[j])) last = j;
+                else if (lines[j].trim() && !lines[j].trim().startsWith("#")) break;
+            }
+            const items = lines.slice(key + 1, last + 1).filter((l) => /^\s*-(?:\s|$)/.test(l));
+            if (items.some((l) => unquote(l.replace(/^\s*-/, "")) === cls)) return null;
+            const indent = items.length ? items[0].match(/^\s*/)[0] : "  ";
+            return { start: offset(last + 1), end: offset(last + 1), text: `${indent}- ${cls}${nl}` };
+        }
+        if (value.startsWith("[")) {
+            if (!value.endsWith("]")) return null;
+            const items = value.slice(1, -1).split(",").map((v) => v.trim()).filter(Boolean);
+            return items.some((v) => unquote(v) === cls) ? null : { ...whole, text: `cssclasses: [${[...items, cls].join(", ")}]` };
+        }
+        if (/^(?:null|~)$/i.test(value)) return { ...whole, text: `cssclasses:${nl}  - ${cls}` };
+        if (/^[{|>&*!]/.test(value)) return null;
+        return unquote(value) === cls ? null : { ...whole, text: `cssclasses:${nl}  - ${value}${nl}  - ${cls}` };
     }
 
     // Whether a note gets a timesheet: a project does, an area doesn't, since its time never ends and
@@ -1892,13 +1935,12 @@ class TimeReport {
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 
-    // A project note's timesheets (OBS-5): every entry of the project, and of the projects below it
-    // when its include_subprojects checkbox is on, split into Billable time and 🆓 time. Each heading
-    // carries its table's total (`### Billable time: 20.50 hrs`); the table has a bold row per day,
-    // newest first, adding up the day's hours, then the day's entries in time order. 🆓 time shows the
-    // 🆓 as written (on the task line, or at the start of the note), so each row says why it isn't billed.
-    // Then Problems, when there's anything to say: its entries' (see sheetEntryProblems), then its
-    // invoices' (see sheetProblems). Each part ends with a blank line.
+    // A project note's timesheet (OBS-5; one table since OBS-242): every entry of the project, and of the
+    // projects below it when its include_subprojects checkbox is on, billable and 🆓 together. A summary
+    // line gives each kind's total (`### Billable time: 20.50 hrs · 🆓 time: 1.75 hrs`), leaving out a kind
+    // the timesheet has no time of; the table has a bold row per day, newest first, then the day's
+    // entries in time order (see sheet). Problems come first, when there's anything to say: its entries'
+    // (see sheetEntryProblems), then its invoices' (see sheetProblems). Each part ends with a blank line.
     timesheetLines(model, scope, link) {
         const b = model.billing;
         const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
@@ -1909,9 +1951,12 @@ class TimeReport {
         const own = this.sheetEntryProblems(model, on, scope.path, entries, link);
         // Problems first, as in every report (OBS-167)
         const out = this.problemsCallout([...own.lines, ...this.sheetProblems(model, on, entries, link)]);
-        if (billable.length) out.push(`### Billable time: ${total(billable)}`, "", ...this.sheet(model, billable, { project, link, flagged: own.flagged }), "");
-        if (free.length) out.push(`### 🆓 time: ${total(free)}`, "", ...this.sheet(model, free, { project, link, written: true, flagged: own.flagged }), "");
-        if (!entries.length) out.push("No time entries.", "");
+        if (!entries.length) {
+            out.push("No time entries.", "");
+            return out;
+        }
+        const kinds = [...(billable.length ? [`Billable time: ${total(billable)}`] : []), ...(free.length ? [`🆓 time: ${total(free)}`] : [])];
+        out.push(`### ${kinds.join(" · ")}`, "", ...this.sheet(model, entries, { project, link, flagged: own.flagged }), "");
         return out;
     }
 
@@ -1990,43 +2035,69 @@ class TimeReport {
         return s.kind === "changed" || (s.kind === "billed" && !e.billable);
     }
 
-    // One timesheet table. Where anything in it bills by the hour, it starts with an unnamed column for
-    // the status of the invoice that billed the entry (✏️ draft, 🕒 sent, ✅ paid, ⚠️ changed since it
-    // was billed) and ends with that invoice; an entry on none isn't invoiced yet (OBS-117). 🆓 time has
-    // the same columns: a 🆓 entry on an invoice was billed before it was made 🆓, so it's ⚠️ (until
-    // OBS-110 puts 🆓 time on invoices at no charge).
-    // An entry in `flagged` (one a Problem names, OBS-132) is ⚠️ too, and a table that bills nothing
-    // gets the first column for it. It's about time, so it has no amounts.
-    sheet(model, entries, { project, link, written = false, flagged = new Set() }) {
+    // A timesheet's table (OBS-242). Its first column, unnamed, is each row's status:
+    //   - an entry's, the first that fits: ⚠️ when it changed after it was billed, when a Problem names it
+    //     (`flagged`, OBS-132), or when it's 🆓 and on an invoice (billed before it was made 🆓, until
+    //     OBS-110 puts 🆓 time on invoices at no charge); 🆓 for a 🆓 entry; else the status of the
+    //     invoice that billed it (✏️ draft, 🕒 sent, ✅ paid, 📄 a status of your own), or blank while
+    //     it's on none (OBS-117);
+    //   - a day's, from its entries' (dayMark).
+    // The column is there where anything bills by the hour, and elsewhere only when a row is 🆓 or ⚠️.
+    // Then Date / Time (the day's bold date, or the entry's times), Project when it shows more than one,
+    // Bill (billable hours, named short for a phone's width) and 🆓, each only when the timesheet has that kind of time (an entry's hours, rounded as
+    // billed, in its own; a day's total of each kind, blank when it has none), Task and Notes (with no
+    // 🆓: the status column says it), and Invoice, the invoice that billed the entry, where anything bills
+    // by the hour. It's about time, so it has no amounts.
+    sheet(model, entries, { project, link, flagged = new Set() }) {
         const billing = entries.some((e) => this.hourlyCents(model, e) !== null);
-        const marks = billing || entries.some((e) => flagged.has(e));
+        const billable = entries.some((e) => e.billable), free = entries.some((e) => !e.billable);
+        const marks = billing || free || entries.some((e) => flagged.has(e));
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const standing = this.sheetStanding(model);
-        const cells = (e) => {
+        // An entry's { mark, invoice, hourly }: hourly when an hourly invoice can bill it
+        const status = (e) => {
             const s = billing ? standing(e) : { kind: "open" };
-            const warn = (mark) => (flagged.has(e) ? "⚠️" : mark);
-            if (s.kind === "open") return [warn(""), ""];
-            return [warn(this.warned(e, s) ? "⚠️" : this.invoiceMark(s.invoice)), `[[${s.invoice.name}]]`];
+            const mark = flagged.has(e) || this.warned(e, s) ? "⚠️" : !e.billable ? "🆓" : s.kind === "open" ? "" : this.invoiceMark(s.invoice);
+            return { mark, invoice: s.kind === "open" ? "" : `[[${s.invoice.name}]]`, hourly: e.billable && this.hourlyCents(model, e) !== null };
         };
-        const head = [...(marks ? [""] : []), "Date", "Time", ...(project ? ["Project"] : []), "Hours", "Task", "Notes", ...(billing ? ["Invoice"] : [])];
-        const bold = (v) => (v === "" ? "" : `**${v}**`);
-        const sum = (label, minutes) => [...(marks ? [""] : []), bold(label), "", ...(project ? [""] : []), bold(this.hours(minutes)), "", "", ...(billing ? [""] : [])];
-        const days = [...new Set(entries.map((e) => e.date))].sort().reverse().map((d) => {
-            const list = entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end);
-            return { d, list, minutes: list.reduce((m, e) => m + this.rounded(e.minutes), 0) };
-        });
+        const head = [...(marks ? [""] : []), "Date / Time", ...(project ? ["Project"] : []), ...(billable ? ["Bill"] : []), ...(free ? ["🆓"] : []),
+            "Task", "Notes", ...(billing ? ["Invoice"] : [])];
+        const hours = (list) => this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0));
+        // A row's hours: in Billable, then in 🆓, each column only when the timesheet has it
+        const split = (b, f) => [...(billable ? [b] : []), ...(free ? [f] : [])];
+        const days = [...new Set(entries.map((e) => e.date))].sort().reverse()
+            .map((d) => ({ d, list: entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end) }));
         const rows = [];
-        for (const { d, list, minutes } of days) {
-            rows.push(sum(`[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]`, minutes));
-            for (const e of list) {
-                const [mark, invoice] = cells(e);
-                rows.push([...(marks ? [mark] : []), "", `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
-                    this.hours(this.rounded(e.minutes)),
-                    this.tableText(written ? e.taskWritten ?? e.task : e.task), this.tableText(written ? e.noteWritten ?? e.note : e.note),
-                    ...(billing ? [invoice] : [])]);
+        for (const { d, list } of days) {
+            const each = list.map(status);
+            const kind = (want) => list.filter((e) => e.billable === want);
+            const sum = (want) => (kind(want).length ? `**${hours(kind(want))}**` : "");
+            rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]**`, ...(project ? [""] : []),
+                ...split(sum(true), sum(false)), "", "", ...(billing ? [""] : [])]);
+            for (const [k, e] of list.entries()) {
+                const { mark, invoice } = each[k];
+                const h = hours([e]);
+                rows.push([...(marks ? [mark] : []), `${this.formatTime(e.start)} - ${this.formatTime(e.end)}`, ...(project ? [this.cell(link(e.project))] : []),
+                    ...split(e.billable ? h : "", e.billable ? "" : h), this.tableText(e.task), this.tableText(e.note), ...(billing ? [invoice] : [])]);
             }
         }
-        return this.table(head, head.map((h, i) => (h === "Hours" ? "right" : marks && i === 0 ? "center" : null)), rows);
+        return this.table(head, head.map((h, i) => (h === "Bill" || h === "🆓" ? "right" : marks && i === 0 ? "center" : null)), rows);
+    }
+
+    // A timesheet day row's status, from its entries' ({ mark, hourly }, as sheet works them out), the
+    // first that fits (OBS-242, Brian 2026-11-03):
+    //   - ⚠️ when any entry is ⚠️, 🆓 or not, so a problem always shows on its day;
+    //   - then only its hourly entries count, the billable time an hourly invoice bills: 🆓 entries and
+    //     flat-fee time never hold a day back. Blank while any of them is on no invoice (nor is one on a
+    //     canceled invoice); else the earliest status among them: ✏️ draft, 🕒 sent, 📄 a status of your
+    //     own (most likely sent), then ✅ paid, so a day is ✅ only when every one is paid;
+    //   - a day with no hourly entries is 🆓 when every entry is 🆓, and blank otherwise.
+    dayMark(rows) {
+        if (rows.some((r) => r.mark === "⚠️")) return "⚠️";
+        const hourly = rows.filter((r) => r.hourly).map((r) => r.mark);
+        if (!hourly.length) return rows.length && rows.every((r) => r.mark === "🆓") ? "🆓" : "";
+        if (hourly.some((m) => m === "" || m === TimeReport.INVOICE_MARK.canceled)) return "";
+        return ["✏️", "🕒", "📄"].find((m) => hourly.includes(m)) ?? "✅";
     }
 
     // An invoice's status as its mark (📄 for a status of your own)
@@ -2188,15 +2259,23 @@ class TimeReport {
         return String(text ?? "").replace(new RegExp(`${TimeReport.FREEZE_COMMENT.source}[ \\t]*`, "g"), "").trim();
     }
 
-    // The tables in `lines`, each with the heading above it: [{ at (its first row), end (its last), heading }].
-    // A heading's numbers don't count (a timesheet's carry its total), so it's the same heading next run.
+    // How a table's heading is known from run to run: its numbers don't count (a timesheet's carry its
+    // totals), and a timesheet's summary line is one heading whatever kinds of time it names, so its table
+    // keeps its freeze when its first 🆓 entry comes in (OBS-242)
+    tableHeading(line) {
+        const h = line.trim().replace(/\d[\d.,]*/g, "#").replace(/\s+/g, " ");
+        return TimeReport.SHEET_HEADINGS.test(h) ? TimeReport.SHEET_HEADING : h;
+    }
+
+    // The tables in `lines`, each with the heading above it (tableHeading): [{ at (its first row), end (its
+    // last), heading }].
     tablesIn(lines) {
         const out = [];
         const row = (j) => /^\s*\|/.test(lines[j] ?? "");
         let heading = "";
         for (let i = 0; i < lines.length; i++) {
             const t = lines[i].trim();
-            if (/^#{1,6}\s/.test(t)) { heading = t.replace(/\d[\d.,]*/g, "#").replace(/\s+/g, " "); continue; }
+            if (/^#{1,6}\s/.test(t)) { heading = this.tableHeading(t); continue; }
             if (!row(i)) continue;
             let end = i;
             while (row(end + 1)) end++;
@@ -2206,14 +2285,34 @@ class TimeReport {
         return out;
     }
 
-    // What the tables in `lines` hold in their header rows: Map(heading → [freezeOf, …]), in order
+    // What the tables in `lines` hold in their header rows: Map(heading → [freezeOf, …]), in order. A
+    // timesheet from before OBS-242 has two tables, Billable time and 🆓 time, for the one it has now: a
+    // freeze you set on either carries over, the Billable table's when both have one.
     freezesIn(lines) {
         const out = new Map();
         for (const { at, heading } of this.tablesIn(lines)) {
             if (!out.has(heading)) out.set(heading, []);
-            out.get(heading).push(this.freezeOf(lines[at]));
+            out.get(heading).push(this.freezeOfRow(lines[at], heading));
         }
+        const two = out.get(TimeReport.SHEET_HEADING);
+        if (two?.length > 1) out.set(TimeReport.SHEET_HEADING, [two.find((f) => this.ownFreeze(f)) ?? two[0]]);
         return out;
+    }
+
+    // A header row's freeze (freezeOf). One you set on a timesheet from before OBS-242, whose Date and Time
+    // were two columns, counts one column fewer once it reached Time, so it ends at the same column.
+    freezeOfRow(header, heading) {
+        const f = this.freezeOf(header);
+        if (heading !== TimeReport.SHEET_HEADING || !f.mark || !this.ownFreeze(f)) return f;
+        const time = this.tableCells(header).findIndex((c) => this.withoutFreeze(c) === "Time") + 1;
+        return time > 0 && f.mark.columns >= time ? { ...f, mark: { ...f.mark, columns: f.mark.columns - 1 } } : f;
+    }
+
+    // Whether a header's freeze (freezeOf) is one you set, which freezeHeader keeps and labels custom,
+    // rather than the default's or none
+    ownFreeze({ mark, label }) {
+        if (!mark) return !!label;
+        return !(label?.kind === "default" && mark.rows === label.rows && mark.columns === label.columns);
     }
 
     // A row's cells as written, padding included: a `\` escapes the character after it
@@ -2331,14 +2430,14 @@ class TimeReport {
     // content the ones before it left: the old heading renamed, a blank line above the heading, then
     // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
     // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
-    // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), and
-    // a new block gets none. `tables` is the default freeze (tableSettingsOf): the block's tables are
+    // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), a new
+    // block gets none, and the note gets its class if it hasn't (sheetClass). `tables` is the default freeze (tableSettingsOf): the block's tables are
     // frozen from it and from the block that's there now (freezeBlock), before they're compared.
     blockEdits(content, block, { onlyIfChanged = true, heading = true, tables = null } = {}) {
         const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
         const edits = [];
         let current = content;
-        const steps = heading ? [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)] : [(c) => this.dropHeading(c)];
+        const steps = heading ? [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)] : [(c) => this.sheetClass(c), (c) => this.dropHeading(c)];
         for (const step of steps) {
             const edit = step(current);
             if (edit) { edits.push(edit); current = apply(current, edit); }
