@@ -21,15 +21,19 @@
     --pm-timesheet-entry-mix: 12%;
 }
 
-/* No alternating shade in a timesheet's table: every entry takes the band's shade, or the color you set */
-.pm-timesheet table tbody tr:nth-child(n) {
+/* No alternating shade in a timesheet's table: every entry takes the band's shade, or the color you set.
+   Each row rule holds under the mouse too, or Obsidian's own hover rule for odd rows would repaint every
+   other row, and never a frozen cell, which Selectable Tables paints from the rows at rest. */
+.pm-timesheet table tbody tr:nth-child(n),
+.pm-timesheet table tbody tr:nth-child(n):hover {
     background-color: var(--pm-timesheet-entry-background,
         color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-timesheet-entry-mix)));
 }
 
 /* Day rows are plain: the note's own background, painted rather than clear, since a theme can shade the
    table under its rows (Baseline gives the table's body --background-primary-alt) */
-.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong) {
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong),
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong):hover {
     background-color: var(--background-primary);
 }
 
