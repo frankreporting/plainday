@@ -1,27 +1,41 @@
-/* Obsidian PM: day bands in a timesheet (OBS-242).
+/* Obsidian PM: day bands in a timesheet (OBS-242, OBS-243).
    Copy this file into your vault's .obsidian/snippets/ and turn it on under Appearance → CSS snippets.
    It applies only to notes with `cssclasses: pm-timesheet`, which the time report writes into every
-   timesheet. Instead of shading every other row, each day row gets the shade the theme uses for
-   alternating rows, and the entries under it share one plain background, so each day reads as a block.
+   timesheet. Instead of shading every other row, each day's entries share one shade under a day row in
+   the note's own background, so each day reads as a block. The shade is the theme's text color mixed into
+   the note's background, 4% in light mode and 12% in dark, where a small step near black doesn't show.
+   Both are the theme's own colors, so it takes the theme's tint. No color a theme names does that:
+   Baseline's dark --background-primary-alt is a hair off the note's background, and the default theme's
+   light one is faint.
    A day row is the one with a bold date in its Date / Time column: the second column, after the status
    column, or the first in a timesheet that has none.
-   Obsidian's default theme gives alternating rows the table's own color, so there the bands don't show.
-   To pick their color, set --pm-timesheet-day-background in a snippet of your own, for example
-   body { --pm-timesheet-day-background: var(--background-secondary); } */
+   To pick the entries' color, set --pm-timesheet-entry-background in a snippet of your own, for example
+   body { --pm-timesheet-entry-background: var(--background-secondary); } */
 
-/* No alternating shade in a timesheet's table */
-.pm-timesheet table tbody tr:nth-child(n) {
-    background-color: transparent;
+/* How much of the text color the entries' shade takes: more in dark mode */
+.pm-timesheet {
+    --pm-timesheet-entry-mix: 4%;
 }
 
-/* Day rows take the alternating rows' shade, or the color you set */
+.theme-dark .pm-timesheet {
+    --pm-timesheet-entry-mix: 12%;
+}
+
+/* No alternating shade in a timesheet's table: every entry takes the band's shade, or the color you set */
+.pm-timesheet table tbody tr:nth-child(n) {
+    background-color: var(--pm-timesheet-entry-background,
+        color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-timesheet-entry-mix)));
+}
+
+/* Day rows are plain: the note's own background, painted rather than clear, since a theme can shade the
+   table under its rows (Baseline gives the table's body --background-primary-alt) */
 .pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong) {
-    background-color: var(--pm-timesheet-day-background, var(--table-row-alt-background));
+    background-color: var(--background-primary);
 }
 
 /* With the Selectable Tables plugin, frozen cells are painted solid, row by row, as the table's first odd
    and even rows look. In a timesheet those are always a day row and an entry under it, so each row's frozen
-   cells take the look of its own kind: the day's shade, or the entries' plain background. */
+   cells take the look of its own kind: the day's plain background, or the entries' shade. */
 .markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n) {
     --selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
     --selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
