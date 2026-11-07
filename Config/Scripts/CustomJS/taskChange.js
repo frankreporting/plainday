@@ -52,14 +52,16 @@ class TaskChange {
     }
 
     // The top-level lines in the system whose ⋯ links `note`, or whose title is wrapped in a link to it:
-    // [{ file, at }], through its backlinks, and every note the cache may be behind on
-    async linking(note, memo) {
+    // [{ file, at }], through its backlinks, and every note the cache may be behind on. With `self`, a line in
+    // `note` itself that links it counts too (DueDate's search, OBS-229).
+    async linking(note, memo, { self = false } = {}) {
         const tasks = customJS.TaskIds, T = tasks.constructor, tr = customJS.TimeReport, helper = customJS.AddTaskNote;
         const files = new Map(customJS.MoveToProject.linkingNotes(note).map((f) => [f.path, f]));
         for (const f of tasks.nowFiles()) files.set(f.path, f);
+        if (self) files.set(note.path, note);
         const out = [];
         for (const file of files.values()) {
-            if (tasks.ignored(file) || file.path === note.path) continue;
+            if (tasks.ignored(file) || (file.path === note.path && !self)) continue;
             const { visible, hidden } = await this.shown(file, memo);
             visible.forEach((text, at) => {
                 if (hidden[at] || !text.includes("[[") || !(T.CHECKBOX.test(text) || tr.eventKind(text)) || !T.isTop(visible, at)) return;
@@ -79,6 +81,16 @@ class TaskChange {
         const cache = app.metadataCache.getFileCache(note);
         const tags = cache ? helper.tagsOf(cache) : TaskChange.frontTags((await this.shown(note, memo)).raw);
         return tags.includes("task") || tags.includes("log");
+    }
+
+    // Whether `note` is a task note: tagged #task, and not a log (tagged #log, or in a `›logs` folder); read from
+    // its own text when the cache doesn't know it yet. Wherever it is: the caller asks whether it's in the system.
+    async isTaskNote(note, memo = new Map()) {
+        const helper = customJS.AddTaskNote;
+        if (note?.extension !== "md" || helper.isLogsFolderName(note.parent?.name)) return false;
+        const cache = app.metadataCache.getFileCache(note);
+        const tags = cache ? helper.tagsOf(cache) : TaskChange.frontTags((await this.shown(note, memo)).raw);
+        return tags.includes("task") && !tags.includes("log");
     }
 
     // The tags a note's frontmatter gives, lowercased and without #: `tags:` (or `tag:`) as a list, inline
@@ -114,11 +126,20 @@ class TaskChange {
     //   every line that links it; and each task in a note that moves, with its lines by ID.
     //   Nothing else ties: a ↗ alone, a link in a line's text, a nested line, or a plain, project or periodic
     //   note as a parent. A note in Archive or outside the system, or an invoice or timesheet, never moves.
-    async find(start, { note = null } = {}) {
+    //   With `family: false`, it stops at the start's task: its lines, `own` and `stays` are all DueDate reads,
+    //   since a deadline is the task's alone and a subtask keeps its own (OBS-229). Its lines then include
+    //   those whose ⋯ links a task note no change moves (in Archive or outside the system), which share that
+    //   deadline though they can't share a project, and they don't depend on which line it starts from.
+    async find(start, { note = null, family = true } = {}) {
         const tasks = customJS.TaskIds, T = tasks.constructor, mover = customJS.MoveToProject;
-        const ids = tasks.map(), memo = new Map();
+        // Every task ID's lines, one pass over the cache, made the first time a line has an ID: a line with none
+        // (a task of its own) costs nothing here
+        let ids = null;
+        const memo = new Map();
         const found = { notes: [], stays: [], lines: [], own: start.note ? null : [] };
         const held = new Set(), idsDone = new Set(), queued = new Set(), queue = [];
+        // Without the family, the notes whose linking lines were walked: `queued` also holds the notes a line sits in
+        const walked = new Set();
         const addNote = (n) => {
             if (!found.notes.includes(n)) found.notes.push(n);
             if (!queued.has(n)) { queued.add(n); queue.push(n); }
@@ -135,15 +156,22 @@ class TaskChange {
                 const id = T.idOf(visible[at])?.toLowerCase();
                 if (id && !idsDone.has(id)) {
                     idsDone.add(id);
-                    for (const l of (await tasks.gatherMany([id], ids)).get(id) ?? []) todo.push({ file: l.file, at: l.line });
+                    for (const l of (await tasks.gatherMany([id], ids ??= tasks.map())).get(id) ?? []) todo.push({ file: l.file, at: l.line });
                 }
                 for (const own of this.linked(visible[at], file.path)) {
                     if (!this.ours(own)) {
                         if ((!tasks.inSystem(own) || mover.billingNote(own)) && !found.stays.includes(own)) found.stays.push(own);
+                        if (!family && task && !tasks.inSystem(own) && !walked.has(own) && await this.isTaskNote(own, memo)) {
+                            walked.add(own);
+                            todo.push(...await this.linking(own, memo, { self: true }));
+                        }
                         continue;
                     }
                     // The start's own note: the lines that link it are the start's task's lines
-                    if (task && !queued.has(own)) todo.push(...await this.linking(own, memo));
+                    if (task && !family && !walked.has(own)) {
+                        walked.add(own);
+                        todo.push(...await this.linking(own, memo, { self: true }));
+                    } else if (task && family && !queued.has(own)) todo.push(...await this.linking(own, memo));
                     if (task && !found.own.includes(own)) found.own.push(own);
                     addNote(own);
                 }
@@ -159,6 +187,7 @@ class TaskChange {
             }
             if (note && !found.own.includes(note)) found.own.push(note);
         }
+        if (!family) return found;
         while (queue.length) {
             const n = queue.shift();
             // A note that moves takes its tasks along, a plain note's too; only a task note or log is a parent

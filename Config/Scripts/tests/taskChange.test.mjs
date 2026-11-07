@@ -1194,6 +1194,59 @@ const clean = () => ({
     [day("2026-09-15")]: "- [ ] Follow up [[Beta|⭕]] [[2026-09-10 Standup#^fu0001|↗]] ^fu0001\n",
 });
 
+// After DueDate on line `at` of `path` with `date`: what disagrees with it. Every line of that task, found here
+// apart from TaskChange (top-level checklist lines in the system sharing its ID, or a ⋯ to the same note, one a
+// change moves or a task note in Archive or outside the system, until nothing new turns up), shows one 🚩, that
+// date, an event line none; and each of its task notes in the system is due that day. A subtask's lines aren't
+// the task's: every line outside the task keeps the 🚩 it had `before` (the notes before DueDate, which adds no
+// line but a `due:` in a note's properties).
+const deadlines = (v, path, at, date, before) => {
+    const tr = v.customJS.TimeReport, ids = v.customJS.TaskIds, T = ids.constructor, change = v.customJS.TaskChange;
+    const taskNote = (n) => { const tags = change.constructor.frontTags(v.notes()[n].split("\n")); return tags.includes("task") && !tags.includes("log") && !n.includes("/›logs/"); };
+    if (!/^- \[/.test(v.notes()[path].split("\n")[at]) || tr.eventKind(v.notes()[path].split("\n")[at])) return [];
+    const all = [];
+    for (const [p, text] of Object.entries(v.notes())) {
+        if (!ids.inSystem(v.file(p))) continue;
+        const lines = text.split("\n");
+        lines.forEach((l, i) => {
+            if (!T.CHECKBOX.test(l) || !T.isTop(lines, i)) return;
+            const own = tr.lineLinks(tr.classify(l).body).notes.map((n) => v.app.metadataCache.getFirstLinkpathDest(n.target, p))
+                .filter((n) => n && (change.ours(n) || (!ids.inSystem(n) && taskNote(n.path))));
+            all.push({ p, i, l, id: T.idOf(l)?.toLowerCase() ?? null, own: own.map((n) => n.path), task: l.match(T.CHECKBOX)[1] });
+        });
+    }
+    const tasks = new Set([...new Set(all.map((x) => x.id).filter(Boolean))].filter((id) => T.isTask(all.filter((x) => x.id === id).map((x) => ({ task: x.task, text: x.l })))));
+    const reached = new Set([all.find((x) => x.p === path && x.i === at)]);
+    for (let grew = true; grew;) {
+        grew = false;
+        for (const x of all) {
+            if (reached.has(x)) continue;
+            if ([...reached].some((r) => (x.id && x.id === r.id && tasks.has(x.id)) || x.own.some((n) => r.own.includes(n)))) { reached.add(x); grew = true; }
+        }
+    }
+    const want = `[[${date}|🚩 ${Number(date.slice(5, 7))}/${Number(date.slice(8))}]]`, out = [];
+    const flagsOf = (l) => [...(l ?? "").matchAll(/\[\[\d{4}-\d{2}-\d{2}\|🚩 [^\]]*\]\]/gu)].map((m) => m[0]).join(" ");
+    for (const x of reached) {
+        const right = tr.eventKind(x.l) ? "" : want;
+        if (flagsOf(x.l) !== right) out.push(`deadline ${x.p}:${x.i + 1} ${flagsOf(x.l) || "none"}`);
+    }
+    // The lines under the properties line up, a `due:` added to them aside
+    const below = (lines) => (lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0);
+    for (const [p, text] of Object.entries(v.notes())) {
+        const was = (before[p] ?? "").split("\n"), now = text.split("\n"), shift = below(now) - below(was);
+        now.forEach((l, i) => {
+            if (i < below(now) || [...reached].some((x) => x.p === p && x.i === i)) return;
+            if (flagsOf(l) !== flagsOf(was[i - shift])) out.push(`not this task's ${p}:${i + 1} ${flagsOf(l)}`);
+        });
+    }
+    for (const n of new Set([...reached].flatMap((x) => x.own))) {
+        if (!taskNote(n)) continue;
+        const due = v.notes()[n].match(/^due:(.*)$/m)?.[1].trim();
+        if (ids.inSystem(v.file(n)) ? due !== date : v.notes()[n] !== before[n]) out.push(`due ${n}`);
+    }
+    return out;
+};
+
 const sequence = async (seed, { lag, plant = null, steps = 18 }) => {
     let s = seed;
     const roll = (n) => { s = (s * 9301 + 49297) % 233280; return Math.floor((s / 233280) * n); };
@@ -1209,7 +1262,7 @@ const sequence = async (seed, { lag, plant = null, steps = 18 }) => {
         if (!lines.length) continue;
         const at = pick(lines);
         const home = pick(HOMES);
-        const what = pick(["link", "link", "move", "note", "schedule"]);
+        const what = pick(["link", "link", "move", "note", "schedule", "due"]);
         trail.push(`${what} ${path.split("/").pop()}:${at} ${home.split("/")[1]}`);
         if (what === "link") {
             v.open(path, at);
@@ -1225,9 +1278,20 @@ const sequence = async (seed, { lag, plant = null, steps = 18 }) => {
             const on = where === path ? at : pick(top(where));
             v.open(where, on, "- [ ] ".length);
             await v.addTaskNote(pick(["move", "leave"]));
-        } else {
+        } else if (what === "schedule") {
             v.open(path, at);
             await v.schedule(pick(["2026-09-21", "2026-09-22", "2026-09-23"])).catch(() => {});
+        } else {
+            const date = pick(["2026-09-24", "2026-09-25", "2026-09-26"]);
+            // From a day, or from a task's line in a project note or task note
+            const where = pick([path, path, ...paths((p) => /^Projects\//.test(p) && top(p).length)]);
+            const on = where === path ? at : pick(top(where));
+            trail[trail.length - 1] += where === path ? "" : ` (from ${where.split("/").pop()}:${on})`;
+            v.open(where, on);
+            const before = v.notes();
+            await v.dueDate(date);
+            const wrong = deadlines(v, where, on, date, before);
+            if (wrong.length) return { problems: wrong, trail };
         }
         const problems = v.problems();
         if (problems.length) return { problems, trail };
@@ -1235,7 +1299,7 @@ const sequence = async (seed, { lag, plant = null, steps = 18 }) => {
     return { problems: [], trail };
 };
 
-scenario("random sequences of AddProjectLink, MoveToProject, AddTaskNote and Schedule leave clean notes clean", async ({ lag }) => {
+scenario("random sequences of AddProjectLink, MoveToProject, AddTaskNote, Schedule and DueDate leave clean notes clean, and DueDate's deadline on every line of its task", async ({ lag }) => {
     for (let seed = 1; seed <= 40; seed++) {
         const { problems, trail } = await sequence(seed * 97, { lag });
         assert.deepEqual(problems, [], `seed ${seed}:\n${trail.join("\n")}`);
@@ -1244,7 +1308,7 @@ scenario("random sequences of AddProjectLink, MoveToProject, AddTaskNote and Sch
 
 test("planted bugs: the sequences catch each one", async () => {
     const bugs = {
-        "a task's ID isn't followed": ["for (const l of (await tasks.gatherMany([id], ids)).get(id) ?? []) todo.push({ file: l.file, at: l.line });", ""],
+        "a task's ID isn't followed": ["for (const l of (await tasks.gatherMany([id], ids ??= tasks.map())).get(id) ?? []) todo.push({ file: l.file, at: l.line });", ""],
         "a note's ⋯ lines aren't found": ["if (this.linked(text, file.path).some((n) => helper.isSameNote(n, note))) out.push({ file, at });", ""],
         "a project-note line stays behind": ["if (await this.intoToDo(l, home)) {", "if (true) {"],
         "the note doesn't move": ["await app.fileManager.renameFile(step.note, step.to);", ""],
@@ -1257,6 +1321,27 @@ test("planted bugs: the sequences catch each one", async () => {
             if (script !== "taskChange") return text;
             assert.ok(text.includes(from), `${name}: nothing to plant`);
             return text.replace(from, to);
+        };
+        let caught = false;
+        for (let seed = 1; seed <= 40 && !caught; seed++) caught = (await sequence(seed * 97, { lag: false, plant })).problems.length > 0;
+        assert.ok(caught, name);
+    }
+});
+
+test("planted bugs in DueDate: the sequences catch each one", async () => {
+    const bugs = {
+        "DueDate skips the lines found by ⋯": ["if (!l.task || tr.eventKind(l.seen)", "if (!l.task || !T.idOf(l.seen) || tr.eventKind(l.seen)"],
+        "DueDate writes a subtask's lines": ["if (!l.task || tr.eventKind(l.seen)", "if (tr.eventKind(l.seen)"],
+        "DueDate leaves the task note's due": ["const done = await this.setDue(note, date);", 'const done = "same";'],
+        "DueDate leaves the task's other lines": ["const done = await change.rewrite(file, list, (text) => this.placed(text, dueLink));", "const done = { changed: [], missed: [] };"],
+    };
+    for (const [name, [from, to]] of Object.entries(bugs)) {
+        const plant = (script, text) => {
+            if (script !== "setDueDate") return text;
+            assert.ok(text.includes(from), `${name}: nothing to plant`);
+            // A subtask's lines are found only past the start's task
+            const planted = text.replace(from, to).replace("const change = customJS.TaskChange, tr = customJS.TimeReport;", "const change = customJS.TaskChange, tr = customJS.TimeReport, T = customJS.TaskIds.constructor;");
+            return name.includes("subtask") ? planted.replace("change.find(start, { family: false })", "change.find(start)") : planted;
         };
         let caught = false;
         for (let seed = 1; seed <= 40 && !caught; seed++) caught = (await sequence(seed * 97, { lag: false, plant })).problems.length > 0;

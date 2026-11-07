@@ -1,5 +1,5 @@
-// OBS-225's QA steps on the demo's own notes, in the test plan's order, on the stand-in vault: what each
-// command writes and asks, before anyone opens the app. Run from the vault root:
+// OBS-225's and OBS-229's QA steps on the demo's own notes, in each test plan's order, on the stand-in vault:
+// what each command writes and asks, before anyone opens the app. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -219,5 +219,72 @@ for (const lag of [false, true]) {
         assert.equal(v.notices.at(-1), "Kestrel Outfitters 2026 timesheet stays where it is: a timesheet belongs to the time report");
         assert.deepEqual(plain(v.menus), [], "no menu opened");
         assert.notEqual(before, undefined);
+    });
+}
+
+const WIREFRAMES = "Projects/Freelance/Kestrel Outfitters 2026/Draft homepage wireframes.md";
+const REVIEW = "Projects/Freelance/Kestrel Outfitters 2026/›logs/2026-09-14 Homepage review with Imogen.md";
+for (const lag of [false, true]) {
+    test(`OBS-229's QA steps on the demo, in order${lag ? " (the cache a command behind)" : ""}`, async () => {
+        const v = standIn({ notes: notes(), today: "2026-09-20", lag });
+        const start = v.notes();
+        const line = (p, text) => v.notes()[p].split("\n").find((l) => l.includes(text));
+        const flags = (p, text) => [...line(p, text).matchAll(/\[\[\d{4}-\d{2}-\d{2}\|🚩 [^\]]*\]\]/gu)].map((m) => m[0]);
+        const due = (p) => v.notes()[p].match(/^due:(.*)$/m)[1].trim();
+        const run = async (p, text, date, ch = null) => {
+            const at = v.lineOf(p, text);
+            assert.notEqual(at, -1, `${p}: ${text}`);
+            v.open(p, at, ch);
+            v.notices.length = 0;
+            assert.equal(await v.dueDate(date), "Due date");
+        };
+        const changed = () => Object.keys(v.notes()).filter((p) => v.notes()[p] !== start[p]).sort();
+
+        // Every line of the task, and its note: from 9/15, the cursor in the middle of the task's text
+        const mid = "- [x] Draft homepage".length;
+        await run(day("2026-09-15"), "Draft homepage wireframes", "2026-09-25", mid);
+        assert.equal(line(day("2026-09-15"), "Draft homepage wireframes"), "- [x] Draft homepage wireframes [[2026-09-25|🚩 9/25]] [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|⋯]] ^w2h5nf");
+        assert.deepEqual(v.placed(), { line: v.lineOf(day("2026-09-15"), "Draft homepage wireframes"), ch: mid }, "the cursor on the same words");
+        assert.equal(line(day("2026-09-14"), "Draft homepage wireframes"), "- [>] Draft homepage wireframes [[2026-09-25|🚩 9/25]] [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes|⋯]] ^w2h5nf");
+        assert.equal(line(KESTREL, "Draft homepage wireframes"), "- [x] Draft homepage wireframes [[2026-09-25|🚩 9/25]] [[Draft homepage wireframes|⋯]]", "before its ⋯");
+        assert.equal(v.notes()[WIREFRAMES], start[WIREFRAMES].replace("due: 2026-09-18", "due: 2026-09-25"), "its due, and nothing else in the note");
+        assert.equal(line(REVIEW, "Mobile layout for"), "- [x] Mobile layout for [[Draft homepage wireframes]]");
+        assert.deepEqual(changed(), [KESTREL, WIREFRAMES, day("2026-09-14"), day("2026-09-15")].sort());
+        assert.deepEqual(v.notices, [], "nothing to say when it all went through");
+
+        // Again, from the task's line in the project note
+        await run(KESTREL, "Draft homepage wireframes", "2026-09-26");
+        for (const [p, text] of [[KESTREL, "Draft homepage wireframes"], [day("2026-09-14"), "Draft homepage wireframes"], [day("2026-09-15"), "Draft homepage wireframes"]]) {
+            assert.deepEqual(flags(p, text), ["[[2026-09-26|🚩 9/26]]"], p);
+        }
+        assert.equal(due(WIREFRAMES), "2026-09-26");
+
+        // A task found by its note alone: none of its lines has an ID
+        await run(PINECREST, "Write brochure copy", "2026-09-23");
+        for (const [p, text] of [[PINECREST, "Write brochure copy"], [day("2026-09-11"), "Brochure copy: first draft"], [day("2026-09-15"), "Brochure copy: revisions"]]) {
+            assert.deepEqual(flags(p, text), ["[[2026-09-23|🚩 9/23]]"], p);
+        }
+        assert.equal(due(BROCHURE), "2026-09-23");
+        assert.deepEqual(flags(BROCHURE, "Send final copy to Rafe"), [], "its subtask, in the note");
+        assert.deepEqual(flags(day("2026-09-17"), "Send final copy to Rafe"), [], "and on its day");
+        assert.deepEqual(v.notices, []);
+
+        // A subtask keeps its own deadline
+        await run(day("2026-09-17"), "Send final copy to Rafe", "2026-09-24");
+        assert.equal(line(day("2026-09-17"), "Send final copy to Rafe"), "- [ ] Send final copy to Rafe [[2026-09-24|🚩 9/24]] [[Pinecrest Library Brochure|⭕]] [[Write brochure copy#^p7d2qe|↗]] ^p7d2qe");
+        assert.equal(line(BROCHURE, "Send final copy to Rafe"), "- [>] Send final copy to Rafe [[2026-09-24|🚩 9/24]] [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe", "before its forward date");
+        assert.equal(due(BROCHURE), "2026-09-23");
+        for (const [p, text] of [[PINECREST, "Write brochure copy"], [day("2026-09-11"), "Brochure copy: first draft"], [day("2026-09-15"), "Brochure copy: revisions"]]) {
+            assert.deepEqual(flags(p, text), ["[[2026-09-23|🚩 9/23]]"], p);
+        }
+        assert.deepEqual(v.notices, []);
+
+        // One line on its own: no ID and no ⋯
+        const before = v.notes();
+        await run(day("2026-09-14"), "Reply to Rafe about proof dates", "2026-09-19");
+        assert.equal(line(day("2026-09-14"), "Reply to Rafe"), "- [x] Reply to Rafe about proof dates [[2026-09-19|🚩 9/19]] [[Pinecrest Library Brochure|⭕]]");
+        assert.deepEqual(Object.keys(v.notes()).filter((p) => v.notes()[p] !== before[p]), [day("2026-09-14")]);
+        assert.deepEqual(v.notices, []);
+        assert.deepEqual(v.problems(), []);
     });
 }

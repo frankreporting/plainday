@@ -59,7 +59,8 @@ export const momentOn = (today) => {
 // status, parent), list items with their checkbox and block ID, every block ID (on a list item or any
 // other line) by its lowercased ID, and its links, whose displayText is a link's alias, or else its text
 export const parseCache = (text) => {
-    const lines = text.split("\n");
+    // Windows line ends read as Obsidian reads them
+    const lines = text.split("\n").map((l) => l.replace(/\r$/, ""));
     let frontmatter = null, start = 0;
     if (lines[0] === "---") {
         const end = lines.indexOf("---", 1);
@@ -208,7 +209,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
                 for (const key of Object.keys(after)) {
                     if (key === "tags" || after[key] === before[key]) continue;
                     const at = ls.findIndex((l, i) => i < end && l.startsWith(`${key}:`));
-                    const line = `${key}: "${after[key]}"`;
+                    // A date as Obsidian writes it, bare (OBS-229); anything else quoted, as a link must be
+                    const line = /^\d{4}-\d{2}-\d{2}$/.test(after[key]) ? `${key}: ${after[key]}` : `${key}: "${after[key]}"`;
                     if (at === -1) ls.splice(ls.indexOf("---", 1), 0, line); else ls[at] = line;
                 }
                 put(file.path, ls.join("\n"));
@@ -239,8 +241,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         },
     };
     // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
-    const frontMatter = (text) => { const m = text.match(/^---\n([\s\S]*?)\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
-    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y}---\n`).frontmatter } };
+    const frontMatter = (text) => { const m = text.match(/^---\r?\n([\s\S]*?)\r?\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
+    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter } };
     const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, console: { ...console, error: () => {}, info: () => {} } });
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
@@ -285,6 +287,16 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             customJS.DatePrompt.open = (title, onPick, opts) => { prompt = { title, onPick, opts }; return {}; };
             await customJS.Schedule.invoke();
             if (prompt) await prompt.onPick(customJS.DatePrompt.result(date, unit), { close() {} });
+            return prompt?.title ?? null;
+        },
+        // DueDate, the date box handing on `date` ("YYYY-MM-DD") and the whole pick awaited, the search after it
+        // included. The date box's title, or null when it didn't open.
+        async dueDate(date) {
+            tick();
+            let prompt = null;
+            customJS.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
+            await customJS.DueDate.invoke();
+            if (prompt) await prompt.onPick(customJS.DatePrompt.result(date, "day"), { close() {} });
             return prompt?.title ?? null;
         },
         check: () => JSON.parse(JSON.stringify(checkAll())),

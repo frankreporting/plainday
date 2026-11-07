@@ -661,11 +661,17 @@ What the words mean, typed on Sunday 9/27/26:
 
 Asks for a date (see *Typing a date*) and adds ` [[2026-09-30|🚩 9/30]] ` before the links that end the line (the forward date, ⭕, 🗃️, ⋯ or ↗), or else at the end. The task's ID stays last: the 🚩 goes in ahead of it.
 
-- **A line that already has a 🚩** gets the new date in its place, so running DueDate again changes the deadline instead of adding a second one. It changes only that line: the task's lines on other days, and its note's `due`, keep the date they have.
-- **On a nested task,** or any line under a task, the 🚩 goes on the task: the line at the top of the nest.
+- **A line that already has a 🚩** gets the new date in its place, so running DueDate again changes the deadline instead of adding a second one.
+- **Every line of the task gets it:** the lines with the task's ID, and those whose ⋯ links its note, days already worked on and done lines included. Each gets the 🚩 where it would go on the line you're on, an old one replaced. The line you're on changes the moment you pick the date; the others follow a moment later. In the demo, DueDate with `9/25/26` on 9/15's *Draft homepage wireframes* changes 9/14's and 9/15's lines, which share the ID `^w2h5nf`, and the task's line in Kestrel Outfitters 2026's `## To Do`, which links the note with ⋯.
+- **Its task note's `due`** is set to the date too, written as the Task template writes it (`due: 2026-09-25`). Only that line changes, or it's added at the end of the note's properties when there's none, so its other properties stay exactly as they were. A `due` written in a way the Task template and Obsidian's property editor don't (as a list, with a comment on its line, with its key in quotes) is left as it is, and a notice says to set it by hand; so are properties Obsidian can't read. Only a task note in the system gets one: not a log, a plain note, or a project's or area's own note. A task note in `Archive` or outside the system keeps its `due`, and a notice says so, since no command works there; the lines in the system that link it with ⋯ still get the 🚩.
+- **A subtask keeps its own deadline.** On a task's line, the subtasks in its note and their days aren't touched. On a subtask's day, DueDate writes that subtask's lines, the day and its `[>]` line in the note, and leaves the task note's `due` alone: in the demo, 9/17's *Send final copy to Rafe* links *Write brochure copy* only with ↗.
+- **Nothing else joins a task's lines,** as for *AddProjectLink*: not a ↗ by itself, a link in a line's text, a nested line, or a line in `Archive` or outside the system. A line with no ID and no ⋯ is a task of its own, and only it changes. An event line among a task's lines gets no 🚩.
+- **No notice when it all went through:** the 🚩 on every line and the note's `due` are what you'd expect. A notice shows only for what didn't happen. A line that changed while DueDate was writing (a synced edit arriving in that moment) keeps its old date, and so does a note it couldn't write; the notice names each, and running DueDate again finishes. A task note's `due` left as it is says why, as above.
+- **⌘Z** undoes only what DueDate changed in the note you're in, one change a press: your line's 🚩, and any other line of the task or the `due` in that note. The task's other notes keep the new date; running DueDate again sets them all to the date you pick.
+- **On a nested task,** or any line under a task, the 🚩 goes on the task: the line at the top of the nest, and the task's other lines. A nested task's own 🚩 stays as it is.
 - **The cursor stays where it was,** on the same words, whichever line the 🚩 goes on.
 - **An event has no deadline:** on an event line, or a line under one, DueDate does nothing and says so.
-- If the line changes while the date box is open, nothing is written, and a notice says so.
+- If the line changes while the date box is open, nothing is written, and a notice says so. While Obsidian is still indexing the vault at startup, DueDate changes nothing and says to try again in a moment.
 
 ### AddTaskNote
 

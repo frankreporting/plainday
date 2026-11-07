@@ -20,13 +20,12 @@ const NOTES = {
     "Projects/Freelance/Kestrel/Draft wireframes.md": "---\ntags: [task]\n---\n- [ ] Mobile layout\n\t- [ ] Nav first\n",
 };
 
-// DueDate on line `at` of `path`, column `ch`, the date box handing on 9/25/26
+// DueDate on line `at` of `path`, column `ch`, the date box handing on 9/25/26, the whole pick awaited: since
+// OBS-229 it goes on to search for the task's other lines
 const dueDate = async (path, at, ch = null) => {
     const v = standIn({ notes: NOTES, open: path, at });
     v.open(path, at, ch);
-    let picked = false;
-    v.customJS.DatePrompt.open = (title, onPick) => { picked = true; onPick({ m: { format: (f) => ({ "YYYY-MM-DD": "2026-09-25", "M/D": "9/25" })[f] } }, { close() {} }); return {}; };
-    await v.customJS.DueDate.invoke();
+    const picked = await v.dueDate("2026-09-25") !== null;
     return { v, picked, lines: v.notes()[path].split("\n") };
 };
 
