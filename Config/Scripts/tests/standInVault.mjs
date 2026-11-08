@@ -130,7 +130,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     const cacheText = (p) => (lag && seen ? seen.get(p) : vault.get(p));
     const flush = () => { if (editing && vault.has(editing)) disk.set(editing, vault.get(editing)); };
     const tick = () => { flush(); seen = started; started = new Map(disk); };
-    const notices = [], left = [], asked = [], menus = [];
+    const notices = [], left = [], asked = [], menus = [], questions = [], origins = [];
     // What a question covers, which it doesn't list (Brian, 2026-11-03): the days whose lines change, whose time
     // moves and whose time stops counting, as the tests check them. Set while TaskChange.ask runs.
     let covers = null;
@@ -141,7 +141,9 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         getCursor: (which) => ({ line: cursor, ch: which === "to" && selected ? selected.to : selected ? selected.from : cursorCh ?? lines[cursor]?.length ?? 0 }), setCursor(c) { placed = { line: c.line, ch: c.ch }; }, getSelection: () => (selected ? lines[cursor].slice(selected.from, selected.to) : ""),
         getLine: (n) => lines[n], lineCount: () => lines.length, getValue: () => lines.join("\n"),
         offsetToPos(o) { let line = 0; while (line < lines.length - 1 && o > lines[line].length) { o -= lines[line].length + 1; line++; } return { line, ch: o }; },
-        replaceRange(text, from, to = from) {
+        // `origin`, the edit's tag (CodeMirror's userEvent), recorded: the system's writes carry Schedule.ORIGIN
+        replaceRange(text, from, to = from, origin = undefined) {
+            origins.push(origin ?? null);
             const all = lines.join("\n");
             lines = (all.slice(0, offset(from)) + text + all.slice(offset(to))).split("\n");
             save();
@@ -256,6 +258,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
+        CheckOff: make("checkOff", "CheckOff"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
     const ask = customJS.TaskChange.ask.bind(customJS.TaskChange);
@@ -316,6 +319,32 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         // With no cursor placed (open's `ch`), it's in the task's text, as you'd run the command
         async addTaskNote(answer = "move", pick = null) { tick(); answering(pick, answer); cursorCh ??= customJS.AddTaskNote.afterCheckbox(lines[cursor]); await customJS.AddTaskNote.invoke(); },
         async moveToProject(pick, answer = "move", files = null) { tick(); answering(pick, answer); await customJS.MoveToProject.move(files ? files.map(fileOf) : [view.file]); },
+        // CheckOff (OBS-232): the box on the cursor's line set to `mark` by your own edit (a click, ⌘⏎, Task
+        // Status's picker, typing), then what CheckOff does. A [>] box about to become [ ] or [/] is held and
+        // asked about, as CheckOff's click listener and edit filter do: the question answered with `answer`
+        // (a button's text, or null for Esc) and Schedule's date prompt, if it opens, with `date`. `before(spec)`
+        // runs while the question is up. Returns the question's spec, or null when none was asked.
+        async box(mark, { answer = null, date = null, before = null } = {}) {
+            tick();
+            const C = customJS.CheckOff, text = lines[cursor], file = view.file;
+            const at = text.match(/^\s*[-*+]\s+\[/)[0].length;
+            const write = () => editor.replaceRange(mark, { line: cursor, ch: at }, { line: cursor, ch: at + 1 });
+            if (C.constructor.markOf(text) === ">" && " /".includes(mark) && C.actsOn(file, (n) => lines[n], cursor)) {
+                let spec = null, prompt = null;
+                C.choose = async (s) => { spec = s; questions.push(s); await before?.(s); return answer; };
+                customJS.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
+                await C.ask({ file, line: cursor, text, editor, want: mark });
+                if (prompt) { spec = { ...spec, dated: prompt.title }; if (date) await prompt.onPick(customJS.DatePrompt.result(date, "day"), { close() {} }); }
+                return spec;
+            }
+            const line = cursor;
+            write();
+            await C.follow(file, { line, before: text, after: lines[line] });
+            return null;
+        },
+        // A click on the cursor's line's box, as Obsidian toggles it: [ ] becomes [x], anything else [ ]
+        async click(options = {}) { return this.box(customJS.CheckOff.constructor.markOf(lines[cursor]) === " " ? "x" : " ", options); },
+        questions, origins,
         file: fileOf,
     };
     function ownNotes() {

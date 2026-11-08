@@ -157,6 +157,7 @@ Startup scripts (run when Obsidian starts):
 | RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
 | MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
 | TrailingLinks | Draws the 🚩, forward date, ⭕, 🗃️, ⋯ and ↗ links that end a task or event line small, at the right of the line, and hides a task's ID until the cursor reaches it (Live Preview) |
+| CheckOff | A tick on either line of a sent task (its `[>]` source line or its open line on a day) checks off both, where they are, and a click on a `[>]` box asks first: Mark done, Cancel it or Do nothing |
 | TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian

@@ -4,6 +4,9 @@ class Schedule {
     static NOTE_MARK = "⋯";
     // The link to the note a line was sent from (rule 13, OBS-208), after the line's own ⋯
     static FROM_MARK = "↗";
+    // The tag on every write the system makes through an editor (CodeMirror's userEvent), so CheckOff tells it
+    // from your own edits and leaves it alone (OBS-232). A write through the vault reaches an editor as "set".
+    static ORIGIN = "obsidian-pm";
 
     async invoke() {
         const { MarkdownView } = customJS.obsidian;
@@ -81,7 +84,7 @@ class Schedule {
                 const others = found.filter((l) => l.file.path !== srcFile.path);
                 const started = Schedule.nest(Schedule.editorLines(editor), lineNum).time || await this.started(others);
                 if (editor.getLine(lineNum) !== lineText) { new Notice("The line changed before it could be scheduled, so it wasn't"); return; }
-                editor.replaceRange(started ? "/" : " ", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 });
+                editor.replaceRange(started ? "/" : " ", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 }, Schedule.ORIGIN);
                 tasks.touched(srcFile);
                 if (id) {
                     await this.followForward(id, dest, others.filter((l) => tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task)), { reopen: true });
@@ -179,7 +182,7 @@ class Schedule {
             try {
                 reopened = there ? await this.reopen(file, taskId, outgoing, { started }) : false;
                 if (!reopened) {
-                    const before = await app.vault.cachedRead(file);
+                    const before = await tasks.readNow(file);
                     const prevFolds = this.captureFolds(file, before.split("\n").length);
                     const { content, at, count, item } = dest.unit === "day"
                         ? await this.appendToTopChecklist(file, outgoing)
@@ -202,16 +205,16 @@ class Schedule {
                 return;
             }
             if (lineSurvives) {
-                editor.replaceRange(kept.join("\n"), { line: lineNum, ch: 0 }, { line: end, ch: editor.getLine(end).length });
+                editor.replaceRange(kept.join("\n"), { line: lineNum, ch: 0 }, { line: end, ch: editor.getLine(end).length }, Schedule.ORIGIN);
             } else {
                 // Moved whole: the line and its sub-bullets come out
                 if (end + 1 < editor.lineCount()) {
-                    editor.replaceRange("", { line: lineNum, ch: 0 }, { line: end + 1, ch: 0 });
+                    editor.replaceRange("", { line: lineNum, ch: 0 }, { line: end + 1, ch: 0 }, Schedule.ORIGIN);
                 } else if (lineNum > 0) {
                     const prev = lineNum - 1;
-                    editor.replaceRange("", { line: prev, ch: editor.getLine(prev).length }, { line: end, ch: editor.getLine(end).length });
+                    editor.replaceRange("", { line: prev, ch: editor.getLine(prev).length }, { line: end, ch: editor.getLine(end).length }, Schedule.ORIGIN);
                 } else {
-                    editor.replaceRange("", { line: 0, ch: 0 }, { line: end, ch: editor.getLine(end).length });
+                    editor.replaceRange("", { line: 0, ch: 0 }, { line: end, ch: editor.getLine(end).length }, Schedule.ORIGIN);
                 }
                 // Park the cursor after the checkbox (or bullet) of whatever line is now here
                 const landing = Math.min(lineNum, editor.lineCount() - 1);
@@ -316,9 +319,11 @@ class Schedule {
     }
 
     // Rewrites `file` with `fn(text) → text`: through its editor when it's open in one, changing only
-    // the span that differs so the editor keeps its cursor and folds, else through the vault (OBS-181)
+    // the span that differs so the editor keeps its cursor and folds, else through the vault (OBS-181). Only an
+    // editor in editing view: one in reading view still has an editor, but an edit there never reaches the file
+    // (as ToggleTimeEntry found, 2026-09-15).
     async rewrite(file, fn) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         customJS.TaskIds?.touched?.(file);
         if (!view) return app.vault.process(file, fn);
         const before = view.editor.getValue(), after = fn(before);
@@ -330,19 +335,20 @@ class Schedule {
         // Never split an emoji's two halves
         if (s > 0 && /[\uDC00-\uDFFF]/.test(before[s] ?? "")) s--;
         if (e > 0 && /[\uD800-\uDBFF]/.test(before[before.length - e - 1] ?? "")) e--;
-        view.editor.replaceRange(after.slice(s, after.length - e), view.editor.offsetToPos(s), view.editor.offsetToPos(before.length - e));
+        view.editor.replaceRange(after.slice(s, after.length - e), view.editor.offsetToPos(s), view.editor.offsetToPos(before.length - e), Schedule.ORIGIN);
         return after;
     }
 
     // Points the forward date on a task's source lines (`sources`, from TaskIds.gather) at `dest`, where its open
     // line is now (OBS-181). Only a sent line still ending in the task's ID changes, and an older
-    // breadcrumb in front of it comes off (TaskIds.setForwardIn).
-    async followForward(id, dest, sources, { reopen = false } = {}) {
+    // breadcrumb in front of it comes off (TaskIds.setForwardIn). `reopen` sets a finished one to [>]; `mark`
+    // ("x" or "-") finishes each one instead (CheckOff, OBS-232).
+    async followForward(id, dest, sources, { reopen = false, mark = null } = {}) {
         const T = customJS.TaskIds.constructor;
         const link = T.forwardLink(dest.linktext(), dest.label, id);
         for (const file of new Map(sources.map((s) => [s.file.path, s.file])).values()) {
             try {
-                await this.rewrite(file, (text) => T.setForwardIn(text, id, link, { reopen }).text);
+                await this.rewrite(file, (text) => T.setForwardIn(text, id, link, { reopen, mark }).text);
             } catch (e) {
                 console.error(`Schedule: couldn't update the forward date in ${file.path}`, e);
             }
@@ -385,7 +391,7 @@ class Schedule {
         } else return null;
         // An ID the line had that isn't the task's comes off first, so the task's is the one it ends in
         const kept = T.withForward(T.withId(T.withoutId(old.line), id), link ?? T.forwardLink(old.linkpath, old.label, id));
-        editor.replaceRange(kept, { line: lineNum, ch: 0 }, { line: lineNum, ch: lineText.length });
+        editor.replaceRange(kept, { line: lineNum, ch: 0 }, { line: lineNum, ch: lineText.length }, Schedule.ORIGIN);
         // Its editor saves this edit only in a moment, so the next lookup reads the note itself
         tasks.touched(srcFile);
         return id;
@@ -402,16 +408,10 @@ class Schedule {
     // refused (while the line is as it was). `named`: the task's name, for the notice, when run from under it.
     async reschedule({ editor, srcFile, lineNum, lineText, id, lines: given = null, restore = null, named = null }) {
         const tasks = customJS.TaskIds, T = tasks.constructor;
-        const fromSource = tasks.kindOf(srcFile) === "other";
         const fwd = T.forwardOf(lineText);
         const pointed = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, srcFile.path) : null;
         const lines = given ?? await tasks.gather(id, [pointed]);
-        const periodic = (l) => tasks.kindOf(l.file) !== "other";
-        const open = lines.find((l) => " /".includes(l.task) && periodic(l));
-        // Scheduling a finished task reopens it (rule 13): its done or canceled line moves when it has no open one
-        const done = open ? null : lines.find((l) => "xX-".includes(l.task) && periodic(l));
-        const current = open ?? done;
-        const sources = lines.filter((l) => !periodic(l) && ">xX-".includes(l.task));
+        const { open, done } = this.whereIs(lines);
         const rules = customJS.DatePrompt.weekRules();
         const jump = customJS.JumpToDate;
         const title = open ? `Scheduled for ${this.labelOf(open.file)}. Move it to`
@@ -419,103 +419,142 @@ class Schedule {
         customJS.DatePrompt.open(title, async (result, modal) => {
             const dest = this.destination(result, rules);
             modal.close();
-            // A source clicked back to [ ] is a sent line still when nothing moves: its [>] comes back, while
-            // it's the line it was. True when it did.
-            const putBack = () => {
-                if (restore === null || editor.getLine(lineNum) !== lineText) return false;
-                editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 });
-                tasks.touched(srcFile);
-                return true;
-            };
-            const refuse = (message) => { putBack(); new Notice(message); };
-            const started = await this.started(lines);
-            if (current && dest.path === current.file.path) {
-                // Its task is on that day. And a forward date that says otherwise (the line moved there by hand)
-                // points there now. A done or canceled line there reopens where it is.
-                const back = putBack();
-                if (done) {
-                    await this.rewrite(done.file, (t) => {
-                        const ls = t.split("\n"), at = Schedule.taskLine(ls, id, "xX-");
-                        return at === -1 ? t : Schedule.reopenIn(t, id, [ls[at].trimStart()], { started });
-                    });
-                    await this.followForward(id, dest, back ? [...sources, { file: srcFile }] : sources, { reopen: true });
-                    await this.reopenFinished(id, lines, [done.file]);
-                    new Notice(Schedule.said({ reopened: true, named, label: dest.label }));
-                    return;
-                }
-                await this.followForward(id, dest, back ? [...sources, { file: srcFile }] : sources);
-                new Notice(`Already on ${dest.label}`);
-                return;
-            }
-            // A source clicked back to [ ] is set to [>] again below, so it must still be the line it was
-            if (restore !== null && editor.getLine(lineNum) !== lineText) { new Notice("The line changed before it could be scheduled, so it wasn't"); return; }
-            // The task's line on that day, read as that note is now and found by the ID among its top lines,
-            // since the prompt may have been open a while: a [>], done or canceled line is reopened; an open
-            // one means the task is there already
-            const destFile = app.vault.getFileByPath(dest.path);
-            const there = destFile ? await this.taskLineIn(destFile, id) : null;
-            if (there && " /".includes(there.task)) { refuse(`This task is already open on ${dest.label}`); return; }
-            const taken = (text) => {
-                const ls = text.split("\n");
-                const at = Schedule.taskLine(ls, id, open ? " /" : "xX-");
-                return at === -1 ? null : { at, before: ls, ...Schedule.leaveBehind(ls, at, { daily: this.isDailyNote(current.file), started }) };
-            };
-            let outgoing, moved = "forwarded", plan = null;
-            if (current) {
-                plan = taken(await tasks.readNow(current.file));
-                if (!plan) { refuse("The task's line changed before it could be moved, so it wasn't"); return; }
-                ({ outgoing, moved } = plan);
-            } else {
-                // A fresh copy: from a note, as a first send makes it; from a day's [>] line, that line, open.
-                // An older line's breadcrumb stays behind.
-                const body = T.withoutId(T.withForward((T.oldForward(lineText)?.line ?? lineText).replace(/^\s*[-*+]\s+\[.\]\s*/, ""), null));
-                outgoing = [fromSource ? this.sentLine(`- [ ] ${body} ^${id}`, srcFile) : T.withId(`- [ ] ${body}`, id)];
-            }
-            let file;
-            try {
-                file = await dest.ensure();
-            } catch (err) {
-                console.error(err);
-                refuse(`Couldn't make the ${dest.kind} note, so nothing was scheduled — check console`);
-                return;
-            }
-            try {
-                // Reopened there (as in invoke), or in as usual when that line is gone by now
-                const reopened = there ? await this.reopen(file, id, outgoing, { started }) : false;
-                let said = null;
-                if (!reopened) {
-                    const before = await app.vault.cachedRead(file);
-                    const prevFolds = this.captureFolds(file, before.split("\n").length);
-                    const { content, at, count, item } = dest.unit === "day" ? await this.appendToTopChecklist(file, outgoing) : await this.appendToPeriodNote(file, outgoing);
-                    await this.semiFold(file, content, prevFolds, at, count, item);
-                    tasks.touched(file);
-                }
-                if (current) {
-                    // Only while the task's lines there are as they were read: a sub-task added meanwhile isn't lost
-                    const nest = (p) => p.before.slice(p.at, p.end + 1).join("\n");
-                    let changed = false;
-                    await this.rewrite(current.file, (t) => {
-                        const p = taken(t);
-                        if (!p || nest(p) !== nest(plan)) { changed = true; return t; }
-                        return p.lines.join("\n");
-                    });
-                    if (changed) said = `The task changed while it was scheduled: it's on ${dest.label} now, so take it out of ${this.labelOf(current.file)} by hand`;
-                    else if (this.isDailyNote(current.file)) await customJS.RefoldDailyNotes?.onLeave?.(current.file);
-                }
-                // A source clicked back to [ ] is a sent line again, now that the task has moved, while it's the line it was
-                if (restore !== null && editor.getLine(lineNum) === lineText) editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 });
-                await this.followForward(id, dest, restore !== null ? [...sources, { file: srcFile }] : sources, { reopen: true });
-                await this.reopenFinished(id, lines, [current?.file, file]);
-                new Notice(said ?? Schedule.said({ reopened: reopened || (done ? true : false), forwarded: moved !== "moved", named, label: dest.label }));
-            } catch (err) {
-                console.error(err);
-                new Notice(`Couldn't write to the ${dest.kind} note — check console`);
-            }
+            const moved = await this.moveTask({ editor, srcFile, lineNum, lineText, id, lines, restore, named, dest });
+            new Notice(moved.notice);
         }, {
             periods: true,
             name: (text) => jump.fromName(text, rules, { ahead: true }),
             label: (r) => (r.unit === "week" ? jump.periodName(r, rules) : null),
         });
+    }
+
+    // Where task `id` is, among `lines` (its lines, from gather): { open, done, current, sources }. `open`: its
+    // open line in a periodic note; `done`: with none, its done or canceled line there, since scheduling a
+    // finished task reopens it (rule 13); `current`: whichever of the two it has; `sources`: its sent lines
+    // outside the periodic notes ([>], or done or canceled once finished).
+    whereIs(lines) {
+        const tasks = customJS.TaskIds;
+        const periodic = (l) => tasks.kindOf(l.file) !== "other";
+        const open = lines.find((l) => " /".includes(l.task) && periodic(l)) ?? null;
+        const done = open ? null : lines.find((l) => "xX-".includes(l.task) && periodic(l)) ?? null;
+        return { open, done, current: open ?? done, sources: lines.filter((l) => !periodic(l) && ">xX-".includes(l.task)) };
+    }
+
+    // Moves task `id`'s open line (or, with none, its done or canceled line, which reopens) to `dest`
+    // (destination()), as Schedule does from its prompt, and points its forward dates there: the move reschedule
+    // and CheckOff share (OBS-232). The destination is written first and the line taken out last, so a write that
+    // fails can't lose the task. With no line on a periodic note (deleted by hand), a fresh copy goes.
+    // `lines`: the task's lines (gather), read before the prompt. `restore`, with `editor`, `srcFile`, `lineNum`
+    // and `lineText`: a source clicked back to [ ] (reschedule). A refusal writes nothing. Returns { ok, notice,
+    // reopened, moved, from }: what Schedule says, whether a line on `dest` was reopened, "moved" or "forwarded"
+    // (null when nothing moved), and the note the line came from.
+    async moveTask({ editor = null, srcFile = null, lineNum = null, lineText = null, id, lines, restore = null, named = null, dest }) {
+        const tasks = customJS.TaskIds, T = tasks.constructor;
+        const { open, done, current, sources } = this.whereIs(lines);
+        const fromSource = !!srcFile && tasks.kindOf(srcFile) === "other";
+        const none = { reopened: false, moved: null, from: null };
+        // A source clicked back to [ ] is a sent line still when nothing moves: its [>] comes back, while
+        // it's the line it was. True when it did.
+        const putBack = () => {
+            if (restore === null || editor.getLine(lineNum) !== lineText) return false;
+            editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 }, Schedule.ORIGIN);
+            tasks.touched(srcFile);
+            return true;
+        };
+        const refuse = (notice) => { putBack(); return { ok: false, notice, ...none }; };
+        // A fresh copy needs the line it's made from
+        if (!current && lineText === null) return refuse("This task's line is gone, so nothing was moved");
+        const started = await this.started(lines);
+        if (current && dest.path === current.file.path) {
+            // Its task is on that day. And a forward date that says otherwise (the line moved there by hand)
+            // points there now. A done or canceled line there reopens where it is.
+            const back = putBack();
+            const sent = back ? [...sources, { file: srcFile }] : sources;
+            if (done) {
+                await this.rewrite(done.file, (t) => {
+                    const ls = t.split("\n"), at = Schedule.taskLine(ls, id, "xX-");
+                    return at === -1 ? t : Schedule.reopenIn(t, id, [ls[at].trimStart()], { started });
+                });
+                await this.followForward(id, dest, sent, { reopen: true });
+                await this.reopenFinished(id, lines, [done.file]);
+                return { ok: true, notice: Schedule.said({ reopened: true, named, label: dest.label }), ...none, reopened: true };
+            }
+            await this.followForward(id, dest, sent);
+            return { ok: true, notice: `Already on ${dest.label}`, ...none };
+        }
+        // A source clicked back to [ ] is set to [>] again below, so it must still be the line it was
+        if (restore !== null && editor.getLine(lineNum) !== lineText) return { ok: false, notice: "The line changed before it could be scheduled, so it wasn't", ...none };
+        // The task's line on that day, read as that note is now and found by the ID among its top lines,
+        // since the prompt may have been open a while: a [>], done or canceled line is reopened; an open
+        // one means the task is there already
+        const destFile = app.vault.getFileByPath(dest.path);
+        const there = destFile ? await this.taskLineIn(destFile, id) : null;
+        if (there && " /".includes(there.task)) return refuse(`This task is already open on ${dest.label}`);
+        const taken = (text) => {
+            const ls = text.split("\n");
+            const at = Schedule.taskLine(ls, id, open ? " /" : "xX-");
+            return at === -1 ? null : { at, before: ls, ...Schedule.leaveBehind(ls, at, { daily: this.isDailyNote(current.file), started }) };
+        };
+        let outgoing, moved = "forwarded", plan = null;
+        if (current) {
+            plan = taken(await tasks.readNow(current.file));
+            if (!plan) return refuse("The task's line changed before it could be moved, so it wasn't");
+            ({ outgoing, moved } = plan);
+        } else {
+            // A fresh copy: from a note, as a first send makes it; from a day's [>] line, that line, open.
+            // An older line's breadcrumb stays behind.
+            const body = T.withoutId(T.withForward((T.oldForward(lineText)?.line ?? lineText).replace(/^\s*[-*+]\s+\[.\]\s*/, ""), null));
+            outgoing = [fromSource ? this.sentLine(`- [ ] ${body} ^${id}`, srcFile) : T.withId(`- [ ] ${body}`, id)];
+        }
+        let file;
+        try {
+            file = await dest.ensure();
+        } catch (err) {
+            console.error(err);
+            return refuse(`Couldn't make the ${dest.kind} note, so nothing was scheduled — check console`);
+        }
+        try {
+            // Reopened there (as in invoke), or in as usual when that line is gone by now
+            const reopened = there ? await this.reopen(file, id, outgoing, { started }) : false;
+            let said = null;
+            if (!reopened) {
+                const before = await tasks.readNow(file);
+                const prevFolds = this.captureFolds(file, before.split("\n").length);
+                const { content, at, count, item } = dest.unit === "day" ? await this.appendToTopChecklist(file, outgoing) : await this.appendToPeriodNote(file, outgoing);
+                await this.semiFold(file, content, prevFolds, at, count, item);
+                tasks.touched(file);
+            }
+            if (current) {
+                // Only while the task's lines there are as they were read: a sub-task added meanwhile isn't lost
+                const nest = (p) => p.before.slice(p.at, p.end + 1).join("\n");
+                let changed = false;
+                await this.rewrite(current.file, (t) => {
+                    const p = taken(t);
+                    if (!p || nest(p) !== nest(plan)) { changed = true; return t; }
+                    return p.lines.join("\n");
+                });
+                if (changed) said = `The task changed while it was scheduled: it's on ${dest.label} now, so take it out of ${this.labelOf(current.file)} by hand`;
+                else if (this.isDailyNote(current.file)) await customJS.RefoldDailyNotes?.onLeave?.(current.file);
+            }
+            // A source clicked back to [ ] is a sent line again, now that the task has moved, while it's the line it was
+            if (restore !== null && editor.getLine(lineNum) === lineText) editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 }, Schedule.ORIGIN);
+            await this.followForward(id, dest, restore !== null ? [...sources, { file: srcFile }] : sources, { reopen: true });
+            await this.reopenFinished(id, lines, [current?.file, file]);
+            return { ok: !said, notice: said ?? Schedule.said({ reopened: reopened || (done ? true : false), forwarded: moved !== "moved", named, label: dest.label }), reopened: !!reopened, moved, from: current?.file ?? null };
+        } catch (err) {
+            console.error(err);
+            return { ok: false, notice: `Couldn't write to the ${dest.kind} note — check console`, ...none };
+        }
+    }
+
+    // Where `file`, a periodic note, puts a task, as destination() gives it for that day, week, month or year:
+    // how CheckOff moves a task onto a note it has (OBS-232). Null for any other note.
+    destinationOf(file) {
+        const rules = customJS.DatePrompt.weekRules();
+        if (this.isDailyNote(file)) return this.destination(customJS.DatePrompt.result(window.moment(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
+        const unit = this.periodOf(file);
+        if (!unit) return null;
+        return this.destination(customJS.DatePrompt.result(window.moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD"), unit), rules);
     }
 
     // Reopens the [>], done or canceled line ending in `id` in `file` with `outgoing`, the lines moving there
@@ -530,7 +569,8 @@ class Schedule {
         await this.rewrite(file, (t) => {
             const before = t.split("\n"), at = Schedule.taskLine(before, id, ">xX-");
             const next = Schedule.reopenIn(t, id, outgoing, { started });
-            if (next === t) return t;
+            // The line is there and already says what the move would write: it's reopened, so no second line goes in
+            if (next === t) { if (at !== -1) reopened = { counts: null }; return t; }
             const was = tr.lineProject(note, at, before, index), now = tr.lineProject(note, at, next.split("\n"), index);
             // Only when that day has time logged under the line is there time whose project changed
             reopened = { counts: now !== was && Schedule.nest(before, at).time ? name(now) : null };
@@ -798,10 +838,12 @@ class Schedule {
     }
 
     // Insert after the last item of the first checklist.
-    // Returns the new content plus where the block landed, so the fold pass can find it.
+    // Returns the new content plus where the block landed, so the fold pass can find it. Written through the
+    // note's editor when it's open (rewrite), so an edit there not yet saved is never merged with this one: a
+    // line just taken out in that editor would come back (OBS-232).
     async appendToTopChecklist(file, newLines) {
         let out;
-        await app.vault.process(file, (content) => {
+        await this.rewrite(file, (content) => {
             const lines = content.split("\n");
             const first = lines.findIndex(l => Schedule.CHECKBOX.test(l));
             if (first === -1) {
@@ -831,7 +873,7 @@ class Schedule {
     // The same for a weekly, monthly or yearly note (placeInPeriod)
     async appendToPeriodNote(file, newLines) {
         let out;
-        await app.vault.process(file, (content) => {
+        await this.rewrite(file, (content) => {
             out = Schedule.placeInPeriod(content, newLines);
             return out.content;
         });

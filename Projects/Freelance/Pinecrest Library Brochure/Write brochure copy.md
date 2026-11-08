@@ -8,7 +8,7 @@ due: 2026-09-22
 Copy for the six panels: welcome, kids' programs, adult classes, the maker space, hours, and how to get a card.
 
 - [x] First draft
-- [x] Revisions from Rafe
+- [x] Revisions from Rafe [[2026-09-16#^r3v1sn|9/16]] ^r3v1sn
 - [>] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe
 
 ## Notes

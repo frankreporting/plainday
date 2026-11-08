@@ -46,7 +46,7 @@ for (const lag of [false, true]) {
         const shown = (q) => [q.title, `${q.label}: ${q.name}`, ...q.words];
         const KES = "⭕ Kestrel Outfitters 2026";
         assert.deepEqual(plain(v.asked).map(shown), [["Moving a subtask requires moving its parent", "Parent: Write brochure copy", `Move this task? Any other subtasks and task notes will also move, and time entries will now count toward ${KES}.`]]);
-        assert.deepEqual(plain(v.asked).map((q) => [q.lines, q.time]), [["9/11, 9/15, 9/17", "9/11, 9/15"]]);
+        assert.deepEqual(plain(v.asked).map((q) => [q.lines, q.time]), [["9/11, 9/15, 9/16, 9/17", "9/11, 9/15"]]);
         assert.deepEqual(v.notes(), untouched);
 
         // A task with a note moves with its note, its days and its subtasks
@@ -54,12 +54,14 @@ for (const lag of [false, true]) {
         go(day("2026-09-11"), "Brochure copy: first draft");
         await v.addProjectLink(KESTREL);
         assert.deepEqual(plain(v.asked).map(shown), [["Move task?", "Task: Write brochure copy", `Any subtasks and task notes will also move, and time entries will now count toward ${KES}.`]]);
-        assert.deepEqual(plain(v.asked).map((q) => [q.lines, q.time]), [["9/11, 9/15, 9/17", "9/11, 9/15"]]);
+        assert.deepEqual(plain(v.asked).map((q) => [q.lines, q.time]), [["9/11, 9/15, 9/16, 9/17", "9/11, 9/15"]]);
         const moved = "Projects/Freelance/Kestrel Outfitters 2026/Write brochure copy.md";
         assert.ok(v.notes()[moved] && !v.notes()[BROCHURE]);
         assert.match(line(day("2026-09-11"), "first draft"), /\[\[Kestrel Outfitters 2026\|⭕\]\] \[\[Write brochure copy\|⋯\]\]$/);
         assert.match(line(day("2026-09-15"), "revisions"), /\[\[Kestrel Outfitters 2026\|⭕\]\] \[\[Write brochure copy\|⋯\]\]$/);
         assert.equal(line(day("2026-09-17"), "Send final copy"), "- [ ] Send final copy to Rafe [[Kestrel Outfitters 2026|⭕]] [[Write brochure copy#^p7d2qe|↗]] ^p7d2qe");
+        // A subtask finished from its source line (OBS-232) moves with it too
+        assert.equal(line(day("2026-09-16"), "Revisions from Rafe"), "- [x] Revisions from Rafe [[Kestrel Outfitters 2026|⭕]] [[Write brochure copy#^r3v1sn|↗]] ^r3v1sn");
         assert.ok(v.notes()["Projects/Freelance/Pinecrest Library Brochure/›logs/2026-09-02 Brochure kickoff.md"], "a log that names the note only in its text stays");
         assert.equal(line(PINECREST, "Write brochure copy"), undefined);
         assert.equal(line(KESTREL, "Write brochure copy"), "- [x] Write brochure copy [[Write brochure copy|⋯]]");

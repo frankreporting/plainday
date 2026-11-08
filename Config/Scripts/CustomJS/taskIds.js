@@ -132,8 +132,9 @@ class TaskIds {
 
     // `text` (a note) with the forward date on each top-level checklist line ending in `id` set to `link`,
     // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
-    // too, since the task is open elsewhere now (rule 13). { text, changed }. Line endings are kept.
-    static setForwardIn(text, id, link, { reopen = false } = {}) {
+    // too, since the task is open elsewhere now (rule 13); with `mark` ("x" or "-"), each one is finished
+    // instead, since the task was (CheckOff, OBS-232). { text, changed }. Line endings are kept.
+    static setForwardIn(text, id, link, { reopen = false, mark = null } = {}) {
         let changed = false;
         const all = text.split("\n");
         const lines = all.map((l, i) => {
@@ -143,7 +144,8 @@ class TaskIds {
             const box = bare.match(TaskIds.CHECKBOX);
             if (!box || !">xX-".includes(box[1]) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
             let next = TaskIds.withForward(TaskIds.oldForward(bare)?.line ?? bare, link);
-            if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
+            if (mark) next = next.replace(/^(\s*[-*+]\s+)\[.\]/, `$1[${mark}]`);
+            else if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
             if (next === bare) return l;
             changed = true;
             return next + cr;
@@ -293,10 +295,11 @@ class TaskIds {
         return lines.some((l) => l.task === ">" || TaskIds.forwardOf(l.text));
     }
 
-    // A note's text as it is now: from its editor when it's open in one (ahead of the saved file and
-    // the cache while you type), else as the vault has it
+    // A note's text as it is now: from its editor when it's open in one in editing view (ahead of the saved
+    // file and the cache while you type), else as the vault has it. Reading view writes the file itself and its
+    // editor catches up only later (Schedule.rewrite writes the same way).
     async readNow(file) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
