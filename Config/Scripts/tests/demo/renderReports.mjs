@@ -48,18 +48,15 @@ export const NOTE_FOLDERS = ["Inbox/", "Projects/", "Reference/", "Archive/"];
 // The vm contexts timeReport.js was loaded into, so planReports can give each the vault it runs on
 const contexts = new WeakMap();
 
-// TimeReport, with TaskIds loaded beside it for the task checks (OBS-185). The context also gets the
-// stubs keepsProject reads: app.vault.getFileByPath(p) returns { path: p }, and
-// customJS.AddTaskNote.isLiveHome(f) reads the demo note's tags and status (set by planReports).
+// TimeReport, with TaskIds loaded beside it for the task checks (OBS-185), and AddTaskNote, which says what a
+// logs folder is called (OBS-233: a note in one is a log)
 export function loadTimeReport(root = ROOT) {
     const ctx = vm.createContext({});
-    ctx.demo = { live: () => true };
-    ctx.app = { vault: { getFileByPath: (p) => ({ path: p }) } };
-    ctx.customJS = { AddTaskNote: { isLiveHome: (f) => ctx.demo.live(f.path) } };
     const load = (file, name) => vm.runInContext(fs.readFileSync(path.join(root, `Config/Scripts/CustomJS/${file}.js`), "utf8") + `\n;${name}`, ctx);
+    ctx.customJS = { AddTaskNote: new (load("addTaskNote", "AddTaskNote"))() };
     const TimeReport = load("timeReport", "TimeReport");
     const tr = new TimeReport();
-    contexts.set(tr, { ctx, TaskIds: load("taskIds", "TaskIds") });
+    contexts.set(tr, { TaskIds: load("taskIds", "TaskIds") });
     return tr;
 }
 
@@ -221,20 +218,11 @@ export function checkedNotes(tr, vault) {
     return [...byPath.values()];
 }
 
-// The task checks over the demo's notes (OBS-185). A live project is one under Projects/ tagged project
-// or area whose status isn't Done or Canceled, as AddTaskNote.isLiveHome says.
+// The task checks over the demo's notes (OBS-185), and the report's own (OBS-233)
 export function addDemoTaskProblems(tr, vault, model, index, checked = checkedNotes(tr, vault)) {
     const loaded = contexts.get(tr);
     if (!loaded) return;
-    const { ctx, TaskIds } = loaded;
-    ctx.demo.live = (p) => {
-        const fm = vault.notes.get(p)?.fm;
-        if (!fm || !p.startsWith("Projects/")) return false;
-        const tags = [].concat(fm.tags ?? []).map((t) => String(t).replace(/^#/, ""));
-        const done = [].concat(fm.status ?? []).some((x) => ["done", "canceled", "cancelled"].includes(String(x).trim().toLowerCase()));
-        return !done && tags.some((t) => t === "area" || t === "project");
-    };
-    tr.addTaskProblems(model, index, checked, TaskIds);
+    tr.addTaskProblems(model, index, checked, loaded.TaskIds);
 }
 
 // Everything a TimeReport run would do to the vault:
@@ -290,7 +278,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
             targets.sheet.push(sheetPath);
             sheet = basename(sheetPath);
         }
-        write(p, tr.render(model, { kind: "project", path: p, linkTarget, sheet }, stamp, link));
+        write(p, tr.render(model, { kind: "project", path: p, linkTarget, sheet, area: tr.isAreaOnly(p, index) }, stamp, link));
     }
 
     // writePeriodNotes (with create, as on the desktop)

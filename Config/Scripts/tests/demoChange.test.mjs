@@ -288,3 +288,103 @@ for (const lag of [false, true]) {
         assert.deepEqual(v.problems(), []);
     });
 }
+
+// OBS-233's QA steps: the report's own checks, read through the demo's render (renderReports.mjs) on the demo's notes
+// as the stand-in leaves them, with the commands run on the stand-in
+const SITEMAP = "Sitemap and content inventory";
+for (const lag of [false, true]) {
+    test(`OBS-233's QA steps on the demo, in order${lag ? " (the cache a command behind)" : ""}`, async () => {
+        const { readVault, planReports, loadTimeReport, frontmatter, ROOT } = await import("./demo/renderReports.mjs");
+        const v = standIn({ notes: notes(), today: "2026-09-20", lag });
+        const line = (p, text) => v.notes()[p].split("\n").find((l) => l.includes(text));
+        const edit = (p, text, change) => {
+            const at = v.lineOf(p, text);
+            assert.notEqual(at, -1, `${p}: ${text}`);
+            v.open(p, at);
+            const was = v.notes()[p].split("\n")[at];
+            v.app.workspace.activeLeaf.view.editor.replaceRange(change(was), { line: at, ch: 0 }, { line: at, ch: was.length });
+            assert.notEqual(line(p, text), was);
+        };
+        const go = (p, text) => { assert.notEqual(v.lineOf(p, text), -1, `${p}: ${text}`); v.open(p, v.lineOf(p, text)); };
+        // A TimeReport run on the demo as the stand-in has it now: each note's Problems callout, by path
+        const report = () => {
+            const vault = readVault(ROOT);
+            for (const [p, text] of Object.entries(v.notes())) vault.notes.set(p, { text, fm: frontmatter(text) });
+            const plan = planReports(loadTimeReport(), vault);
+            const problems = (p) => (plan.blocks.get(p) ?? "").split("\n").filter((l) => l.startsWith("> - "));
+            const hours = (p) => plan.model.entries.filter((e) => e.project === p).reduce((m, e) => m + e.minutes, 0);
+            return { plan, problems, hours, rules: plan.model.problems.concat(plan.model.projectProblems).filter((x) => ["stray", "subtaskProject", "deadline", "project"].includes(x.rule)) };
+        };
+        const W38 = `${PLANNER}/weeks/2026w38.md`, SEP = `${PLANNER}/months/2026-09.md`, YEAR = `${PLANNER}/years/2026.md`;
+        const start = report();
+
+        // The demo lists nothing new
+        assert.deepEqual(plain(start.rules), []);
+
+        // A ⭕ outside a periodic note
+        edit(KESTREL, "Proposal and estimate", (l) => `${l} [[Pinecrest Library Brochure|⭕]]`);
+        let r = report();
+        assert.deepEqual(r.problems(KESTREL).filter((l) => l.includes("says nothing outside")).length, 1, r.problems(KESTREL).join("\n"));
+        // On its own note: "This project note", not the note's name twice (Brian, the test round)
+        assert.ok(r.problems(KESTREL).includes("> - This project note has a task line (line 27) that ends in a ⭕, which says nothing outside a daily, weekly, monthly or yearly note. Take the ⭕ off or move the task to the other project"), r.problems(KESTREL).join("\n"));
+        assert.ok(!r.problems(PINECREST).some((l) => l.includes("says nothing outside")));
+        for (const p of [KESTREL, PINECREST]) assert.equal(r.hours(p), start.hours(p), "neither project's hours change");
+        edit(KESTREL, "Proposal and estimate", (l) => l.replace(" [[Pinecrest Library Brochure|⭕]]", ""));
+        assert.deepEqual(plain(report().rules), []);
+
+        // A subtask's day in another project than its task note
+        edit(day("2026-09-17"), "Send final copy to Rafe", (l) => l.replace("[[Pinecrest Library Brochure|⭕]]", "[[Kestrel Outfitters 2026|⭕]]"));
+        r = report();
+        for (const p of [PINECREST, KESTREL, W38, SEP, YEAR]) {
+            // Brian's words from the test round, as the step says
+            const said = r.problems(p).filter((l) => l.includes("Send final copy to Rafe"));
+            assert.deepEqual(said, ["> - Project disagreement on [[2026-09-17|9/17/26]] line 14: `Send final copy to Rafe` names and counts toward [[Kestrel Outfitters 2026]], but it's a subtask of [[Write brochure copy]], which is filed in [[Pinecrest Library Brochure]]. Choose one project by running AddProjectLink on one of its task lines or MoveToProject on the task note"], `${p}:\n${r.problems(p).join("\n")}`);
+        }
+        v.asked.length = 0;
+        go(day("2026-09-17"), "Send final copy to Rafe");
+        await v.addProjectLink(PINECREST);
+        assert.deepEqual(plain(v.asked), [], "nothing is asked");
+        assert.match(line(day("2026-09-17"), "Send final copy to Rafe"), /\[\[Pinecrest Library Brochure\|⭕\]\]/);
+        assert.deepEqual(plain(report().rules), []);
+
+        // Two projects, with billed time
+        go(day("2026-09-11"), SITEMAP);
+        await v.schedule("2026-09-18");
+        // A sent line in a periodic note has no forward date: its ID ties it to the day it went to
+        assert.match(line(day("2026-09-11"), SITEMAP), /^- \[>\] Sitemap and content inventory \[\[Kestrel Outfitters 2026\|⭕\]\] \^[a-z0-9]{6}$/);
+        const id = line(day("2026-09-11"), SITEMAP).match(/\^([a-z0-9]{6})$/)[1];
+        assert.equal(line(day("2026-09-18"), SITEMAP), `- [/] Sitemap and content inventory [[Kestrel Outfitters 2026|⭕]] ^${id}`);
+        assert.equal(report().rules.length, 0);
+        edit(day("2026-09-18"), SITEMAP, (l) => l.replace("[[Kestrel Outfitters 2026|⭕]]", "[[Pinecrest Library Brochure|⭕]]"));
+        r = report();
+        // Each week lists its own day's line: 9/11 is in 2026w37
+        for (const [p, days] of [[KESTREL, ["2026-09-11", "2026-09-18"]], [PINECREST, ["2026-09-11", "2026-09-18"]], [`${PLANNER}/weeks/2026w37.md`, ["2026-09-11"]], [W38, ["2026-09-18"]]]) {
+            const said = r.problems(p).filter((l) => l.includes("don't name the same project"));
+            assert.deepEqual(said.map((l) => l.match(/^> - \[\[(2026-09-\d\d)\|/)?.[1]).sort(), days, `${p}:\n${r.problems(p).join("\n")}`);
+            for (const l of said) assert.ok(l.endsWith("and they don't name the same project: run AddProjectLink on one of its lines and pick the task's one project"), l);
+        }
+        v.asked.length = 0;
+        go(day("2026-09-18"), SITEMAP);
+        await v.addProjectLink(KESTREL);
+        assert.deepEqual(plain(v.asked), [], "nothing is asked: 9/18 has no time and 9/11 names Kestrel already");
+        assert.match(line(day("2026-09-18"), SITEMAP), /\[\[Kestrel Outfitters 2026\|⭕\]\]/);
+        assert.deepEqual(plain(report().rules), []);
+
+        // Deadlines that differ
+        edit(day("2026-09-14"), "Draft homepage wireframes", (l) => l.replace("[[2026-09-18|🚩 9/18]]", "[[2026-09-27|🚩 9/27]]"));
+        r = report();
+        for (const p of [KESTREL, W38, SEP, YEAR]) {
+            const said = r.problems(p).filter((l) => l.includes("deadlines differ"));
+            assert.equal(said.length, 1, `${p}:\n${r.problems(p).join("\n")}`);
+            assert.ok(said[0].endsWith("` belongs to a task whose deadlines differ, 9/18/26 and 9/27/26: run DueDate on any of its lines to give it one"), said[0]);
+        }
+        go(day("2026-09-15"), "Draft homepage wireframes");
+        assert.equal(await v.dueDate("2026-09-26"), "Due date");
+        for (const [p, text] of [[day("2026-09-14"), "Draft homepage wireframes"], [day("2026-09-15"), "Draft homepage wireframes"], [KESTREL, "Draft homepage wireframes"]]) {
+            assert.deepEqual([...line(p, text).matchAll(/\[\[\d{4}-\d{2}-\d{2}\|🚩 [^\]]*\]\]/gu)].map((m) => m[0]), ["[[2026-09-26|🚩 9/26]]"], p);
+        }
+        assert.match(v.notes()["Projects/Freelance/Kestrel Outfitters 2026/Draft homepage wireframes.md"], /^due: 2026-09-26$/m);
+        assert.deepEqual(plain(report().rules), []);
+        assert.deepEqual(v.problems(), []);
+    });
+}

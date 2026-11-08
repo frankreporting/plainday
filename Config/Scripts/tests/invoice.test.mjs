@@ -356,6 +356,14 @@ test("changeItems and beforeSendingItems: plain lines for the check block", () =
     ]);
 });
 
+test("OBS-233: under Fix first, a Problem on a line in a week's, month's or year's note links that note, not its first day", () => {
+    const problems = [{ date: "2026-09-13", note: "Reference/Planner/weeks/2026w38.md", line: 1, text: "- [ ] Send it", kind: "task", rule: "subtaskProject", message: "names and counts toward…" }];
+    assert.deepEqual(plain(inv.beforeSendingItems({ problems, changed: [], heldBack: [] }, tr)), ["[[Reference/Planner/weeks/2026w38|2026w38]] line 1: `- [ ] Send it` names and counts toward…"]);
+    // With the report's opening words and the line's title, as the report writes check 3
+    const led = [{ ...problems[0], lead: "Project disagreement on", title: "Send it" }];
+    assert.deepEqual(plain(inv.beforeSendingItems({ problems: led, changed: [], heldBack: [] }, tr)), ["Project disagreement on [[Reference/Planner/weeks/2026w38|2026w38]] line 1: `Send it` names and counts toward…"]);
+});
+
 test("OBS-215: a gone billed row says it's missing from the daily note, linked; under Fix first, another project's names that project", () => {
     const row = { ...billed[0] };
     assert.deepEqual(plain(inv.changeItems({ changes: [{ row, kind: "gone" }], late: [] }, tr)), [

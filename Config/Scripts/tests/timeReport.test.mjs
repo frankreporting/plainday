@@ -3134,26 +3134,23 @@ test("OBS-185: a project disagreement shows on every project the task names, and
     }
 });
 
-test("OBS-185: a line whose time is on a sent or paid invoice may keep its project; so may one in a finished project", () => {
-    for (const status of ["sent", "paid"]) {
-        const { DAY, tr, list } = DISAGREE();
+test("OBS-233: a task in two projects is listed even when a line's time is on a sent or paid invoice, or its project is finished", () => {
+    for (const status of ["draft", "sent", "paid"]) {
+        const { KES, HOME, DAY, tr, list } = DISAGREE();
         const entries = [{ path: DAY, context: [{ line: 1 }] }];
         const billing = { billing: { standing: () => ({ invoice: { status } }) }, ledger: {} };
         const model = { problems: [], projectProblems: [], entries, billing };
         tr.addTaskProblems(model, tr.appIndex(), list);
-        assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project")), [], `invoiced (${status})`);
-        const draft = { problems: [], projectProblems: [], entries, billing: { billing: { standing: () => ({ invoice: { status: "draft" } }) }, ledger: {} } };
-        tr.addTaskProblems(draft, tr.appIndex(), list);
-        assert.equal(draft.problems.filter((p) => p.rule === "project").length, 1, "a draft invoice is no exemption");
+        assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project").map((p) => p.projects.slice().sort())), [[HOME, KES].sort()], `invoiced (${status})`);
     }
-    // Household is Done: the stand-in's own AddTaskNote.isLiveHome says it's finished
+    // Household is Done, which let its line off before OBS-233
     const { tr, list } = DISAGREE({ homeStatus: "Done" });
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, tr.appIndex(), list);
-    assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project")), [], "finished");
+    assert.equal(model.problems.filter((p) => p.rule === "project").length, 1, "finished");
 });
 
-test("OBS-213: a task moved off an archived project reads it as the report does, and keeps it like a finished one", () => {
+test("OBS-213: a task moved off an archived project reads it as the report does, and is listed on both (OBS-233)", () => {
     const OLD = "Archive/Freelance/Kestrel/Kestrel.md", HOME = "Projects/Personal/Household/Household.md";
     const D16 = `${PLANNER}/days/2026-09-16.md`, D17 = `${PLANNER}/days/2026-09-17.md`;
     const notes = {
@@ -3169,7 +3166,8 @@ test("OBS-213: a task moved off an archived project reads it as the report does,
     assert.equal(tr.lineProject(list[2], 0, notes[D16].split("\n"), index), null, "a command passes over it");
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, index, list);
-    assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project")), [], "the archived line keeps its project, as a finished one does");
+    assert.deepEqual(plain(model.problems.filter((p) => p.rule === "project").map((p) => [p.line, p.projects.slice().sort()])), [[1, [OLD, HOME].sort()], [1, [OLD, HOME].sort()]],
+        "both days, on the archived project and the live one: an archived line is let off no more than a finished one");
 });
 
 test("OBS-185: a task Problem on no day and no project is listed too, dated by its note's period or its forward date, and linked to its note", () => {

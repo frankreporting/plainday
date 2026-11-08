@@ -209,7 +209,7 @@ const projectOf = (note, i, lines) => {
     return m ? PROJ[m[1]] : note.kind === "other" ? "P/Kestrel.md" : null;
 };
 const resolve = (linkpath) => (/^\d{4}-\d{2}-\d{2}$/.test(linkpath) ? `days/${linkpath}.md` : null);
-const run = (notes, exempt) => plain(TaskIds.check(notes, { projectOf, resolve, exempt }).map((v) => [v.rule, v.lines.map((l) => `${l.path}:${l.line}`)]));
+const run = (notes, opts = {}) => plain(TaskIds.check(notes, { projectOf, resolve, ...opts }).map((v) => [v.rule, v.lines.map((l) => `${l.path}:${l.line}`)]));
 const SRC = { path: "P/Kestrel.md", kind: "other", text: "- [>] Book it [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2" };
 const OPEN = { path: "days/2026-10-08.md", kind: "day", text: "- [ ] Book it [[Kestrel|⭕]] ^k3x9m2" };
 
@@ -243,10 +243,12 @@ test("check: a line in a task note, log or plain note is compared with nothing, 
     assert.deepEqual(rules((n) => n.kind !== "other"), []);
 });
 
-test("check 1: two projects (an invoiced or finished line excepted)", () => {
+test("check 1: two projects, with no line let off (OBS-233)", () => {
     const other = { ...OPEN, text: "- [ ] Book it [[Household|⭕]] ^k3x9m2" };
     assert.deepEqual(run([SRC, other]), [["project", ["P/Kestrel.md:0", "days/2026-10-08.md:0"]]]);
-    assert.deepEqual(run([SRC, other], (n) => (n.kind === "day" ? "invoiced" : null)), []);
+    // The option that let an invoiced or finished line keep its project is gone: a project change writes every line
+    // of the task and refuses to move billed time, so two projects are always something to fix
+    assert.deepEqual(run([SRC, other], { exempt: () => "invoiced" }), [["project", ["P/Kestrel.md:0", "days/2026-10-08.md:0"]]]);
 });
 test("check 2 and 4: a copy on an earlier day is only open twice; the forward date may name either open line, but not neither (OBS-185)", () => {
     const earlier = { path: "days/2026-10-07.md", kind: "day", text: OPEN.text };

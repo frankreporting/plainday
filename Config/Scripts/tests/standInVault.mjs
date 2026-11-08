@@ -72,7 +72,12 @@ export const parseCache = (text) => {
                 key = kv[1];
                 const v = kv[2].trim();
                 if (key === "tags") frontmatter.tags = v.startsWith("[") ? v.slice(1, -1).split(",").map((t) => t.trim()).filter(Boolean) : v ? [v] : [];
-                else frontmatter[key] = v.replace(/^"|"$/g, "");
+                // A quoted value as YAML reads it, a # inside included and a comment after it left out; an unquoted
+                // one without a comment after it
+                else {
+                    const quoted = v.match(/^(["'])(.*?)\1\s*(?:#.*)?$/);
+                    frontmatter[key] = quoted ? quoted[2] : v.replace(/(^|\s+)#.*$/, "").trim();
+                }
             // A YAML list item, indented or not, as the demo's notes write `tags:` then `- project`
             } else if (key === "tags" && /^\s*-\s+/.test(l)) frontmatter.tags.push(l.replace(/^\s*-\s+/, "").trim());
         }
@@ -300,7 +305,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             return prompt?.title ?? null;
         },
         check: () => JSON.parse(JSON.stringify(checkAll())),
-        // What the checks say, and every line that disagrees with its own note, as the report lists them
+        // What the checks say, every line that disagrees with its own note, and the report's own checks (parents),
+        // as the report lists them
         problems: () => JSON.parse(JSON.stringify([...checkAll().map((x) => x.rule), ...ownNotes(), ...parents()])),
         // What the question asked, as confirmMove was called, and what each menu was given
         asked, menus,
@@ -317,38 +323,18 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         const notes = [...vault.keys()].filter((p) => customJS.TaskIds.inSystem(fileOf(p))).map((p) => ({ path: p, text: vault.get(p) }));
         return [...new Set(tr.ownNoteProblems(notes, index).map((p) => `${p.conflict.path}:${p.conflict.line}`))].map((at) => `own note ${at}`);
     }
-    // Every subtask's day line that names another project than the task note or log it sits in, which the
-    // commands keep together (Brian, 2026-11-02). The report's own check for it is OBS-233's.
+    // The report's own checks (OBS-233) over the notes checkAll reads: every subtask's day line that names
+    // another project than the task note or log it's a subtask of, which the commands keep together (Brian,
+    // 2026-11-02); every task whose deadlines differ, which DueDate keeps the same; and every ⭕ at the end of
+    // a task line outside the periodic notes, which no command writes since OBS-225
     function parents() {
-        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor, ids = customJS.TaskIds, index = tr.appIndex();
-        const holds = (p, text) => {
-            const fm = (text.startsWith("---") ? text.split(/^---\s*$/m)[1] ?? "" : "").split("\n");
-            const at = fm.findIndex((l) => /^tags?:/.test(l));
-            const inline = at === -1 ? "" : fm[at].replace(/^tags?:/, "").trim();
-            const tags = at === -1 ? [] : inline ? inline.replace(/^\[|\]$/g, "").split(/[,\s]+/) : fm.slice(at + 1).filter((l, i, all) => all.slice(0, i + 1).every((x) => /^\s*-\s/.test(x))).map((l) => l.replace(/^\s*-\s*/, ""));
-            return p.includes("/›logs/") || tags.some((t) => ["task", "log"].includes(t.trim().replace(/^#/, "").toLowerCase()));
-        };
-        const parentOf = new Map();
-        for (const [p, text] of vault) {
-            const f = fileOf(p);
-            if (!ids.inSystem(f) || ids.kindOf(f) !== "other" || !holds(p, text)) continue;
-            const { visible, hidden } = tr.scan(text.split("\n"));
-            visible.forEach((l, i) => {
-                const id = !hidden[i] && T.CHECKBOX.test(l) && T.isTop(visible, i) ? T.idOf(l)?.toLowerCase() : null;
-                if (id) parentOf.set(id, tr.projectOfNote(p, index) ?? null);
-            });
-        }
-        const out = [];
-        for (const [p, text] of vault) {
-            const f = fileOf(p);
-            if (!ids.inSystem(f) || ids.kindOf(f) === "other") continue;
-            const { visible, hidden } = tr.scan(text.split("\n"));
-            visible.forEach((l, i) => {
-                const id = !hidden[i] && T.CHECKBOX.test(l) && T.isTop(visible, i) ? T.idOf(l)?.toLowerCase() : null;
-                if (id && parentOf.has(id) && (tr.resolve((n) => visible[n], i, p, index).project ?? null) !== parentOf.get(id)) out.push(`parent ${p}:${i + 1}`);
-            });
-        }
-        return out;
+        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor, index = tr.appIndex();
+        const notes = checked();
+        return [
+            ...tr.subtaskProjectProblems(notes, index, T).map((l) => `parent ${l.path}:${l.line + 1}`),
+            ...tr.deadlineProblems(notes, index, T).map((t) => `deadline ${t.at[0].path}:${t.at[0].line + 1}`),
+            ...tr.strayMarkProblems(notes, index).map((l) => `stray ${l.path}:${l.line + 1}`),
+        ];
     }
     function answering(pick, answer) {
         const answers = [].concat(answer);
@@ -361,11 +347,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // Every task's lines over the notes the report's checks read (the system and Archive, OBS-208), as
     // the live text says (`vault`, not `disk`: the notes as you'd see them open, which is what must agree;
     // disk lags by design), projects read as the time report reads them
+    function checked() {
+        const T = customJS.TaskIds.constructor;
+        const read = (p) => !p.startsWith("Config/") && (customJS.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
+        return [...vault.keys()].filter(read).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
+    }
     function checkAll() {
         const tr = customJS.TimeReport, T = customJS.TaskIds.constructor;
         const index = tr.appIndex();
-        const read = (p) => !p.startsWith("Config/") && (customJS.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
-        const notes = [...vault.keys()].filter(read).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
+        const notes = checked();
         return T.check(notes, {
             projectOf: (note, i, lines) => tr.lineProject(note, i, lines, index, false),
             compared: (note) => tr.comparedNote(note, index),

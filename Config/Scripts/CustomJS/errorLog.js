@@ -23,7 +23,8 @@ class ErrorLog {
         "Area with a rate and no rate_type", "Earned date problem", "Projects inside each other",
         "Note's parent differs from its folder", "Project setting",
         "Line and note name different projects", "Two project links on one line", "Line's note waits in the Inbox",
-        "Mark on a nested task", "Task lines disagree", "Task in two notes", "Two ⋯ notes on one task",
+        "Subtask in another project than its note", "⭕ outside a periodic note",
+        "Mark on a nested task", "Task lines disagree", "Task in two notes", "Two ⋯ notes on one task", "Two deadlines on one task",
         "Held back changes", "Skipped lines",
     ];
     // An entry Problem's kind (TimeReport.parseNote, build, the task checks)
@@ -33,8 +34,12 @@ class ErrorLog {
         subtime: "Time under a nested task", subtask: "Mark on a nested task", markers: "Unmatched time marker",
         unclosed: "Unclosed code block or comment", task: "Task lines disagree",
     };
-    // A task Problem's rule, where it isn't the plain "Task lines disagree" (TaskIds.check)
-    static RULE = { notes: "Task in two notes", ownNotes: "Two ⋯ notes on one task" };
+    // A task Problem's rule, where it isn't the plain "Task lines disagree" (TaskIds.check, and the report's
+    // own checks since OBS-233)
+    static RULE = {
+        notes: "Task in two notes", ownNotes: "Two ⋯ notes on one task",
+        stray: "⭕ outside a periodic note", subtaskProject: "Subtask in another project than its note", deadline: "Two deadlines on one task",
+    };
     // A billed row's change (Billing.changes)
     static CHANGE = {
         gone: "Billed entry missing", times: "Billed times changed", project: "Billed entry on another project",
@@ -64,7 +69,19 @@ class ErrorLog {
         const out = [];
         const add = (kind, path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
         const label = (p) => ErrorLog.RULE[p.rule] ?? ErrorLog.ENTRY[p.kind];
-        for (const p of model.problems ?? []) add(label(p) ?? "Bad formatting", p.note ?? p.path);
+        // A task Problem on a line in a note that isn't a day is copied onto each of its projects, and a
+        // line that disagrees, or a `parent`, onto both of its: once, at the note it's in. A Problem about a
+        // whole task (`group`, two deadlines) is on each of its days: once, at the first
+        const seen = new Set();
+        const once = (kind, path, key) => {
+            if (!path || seen.has(key)) return;
+            seen.add(key);
+            add(kind, path);
+        };
+        for (const p of model.problems ?? []) {
+            if (p.group) once(label(p), p.note ?? p.path, `group:${p.group}`);
+            else add(label(p) ?? "Bad formatting", p.note ?? p.path);
+        }
         const b = model.billing;
         const home = (invoice) => invoice.project ?? invoice.path;
         for (const invoice of b?.invoices ?? []) {
@@ -76,18 +93,10 @@ class ErrorLog {
             for (const c of list) if (c.kind !== "wording") add(ErrorLog.CHANGE[c.kind] ?? "Billed times changed", home(invoice));
         }
         for (const twice of b?.ledger?.twice ?? []) add("Entry on two invoices", twice.invoices[1].project ?? twice.invoices[0].project ?? twice.invoices[1].path);
-        // A task Problem on a line in a note that isn't a day is copied onto each of its projects, and a
-        // line that disagrees, or a `parent`, onto both of its: once, at the note it's in
-        const seen = new Set();
-        const once = (kind, path, key) => {
-            if (!path || seen.has(key)) return;
-            seen.add(key);
-            add(kind, path);
-        };
         for (const p of model.projectProblems ?? []) {
             if (p.invoice || p.twice) continue;
             if (p.kind === "task" || p.kind === "subtask") {
-                once(label(p), p.path, `${p.path}:${p.line}:${p.message}`);
+                once(label(p), p.path, p.group ? `group:${p.group}` : `${p.path}:${p.line}:${p.message}`);
             } else if (p.kind === "parent") {
                 once("Note's parent differs from its folder", p.path, `parent:${p.path}`);
             } else if (p.conflict) {

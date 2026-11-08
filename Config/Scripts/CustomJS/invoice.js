@@ -403,7 +403,9 @@ class Invoice {
             return other(c) ? `${tr.basename(whose(c))}'s ${line}` : line;
         };
         return [
-            ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `[[${p.date}|${tr.shortDate(p.date)}]] line ${p.line}: \`${String(p.text).replace(/`/g, "'")}\` ${p.message}`),
+            // A Problem on a line in a week's, month's or year's note links that note, as the reports do, with the
+            // report's opening words and quoted title where it has them (OBS-233)
+            ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `${p.lead ? `${p.lead} ` : ""}${p.note ? `[[${p.note.replace(/\.md$/, "")}|${tr.basename(p.note)}]]` : `[[${p.date}|${tr.shortDate(p.date)}]]`} line ${p.line}: \`${String(p.title ?? p.text).replace(/`/g, "'")}\` ${p.message}`),
             ...sel.changed.filter((c) => others || !other(c)).map((c) => (c.change.kind === "gone" ? gone(c) : `${when(c.change.row)} on [[${c.invoice.name}]] changed since it was billed (${c.change.kind})`)),
             ...sel.heldBack.map((h) => `Held back: ${when(h.entry)} ${why[h.why](h)}`),
         ];

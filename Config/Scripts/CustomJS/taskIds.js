@@ -354,7 +354,6 @@ class TaskIds {
 
     // The rule, checked over `notes` ([{ path, kind, text }], kind as kindOf says), with
     //   projectOf(note, i, lines): the project or area line i counts toward, or null;
-    //   exempt(note, i): why line i may name another project ("finished", "invoiced"), or null;
     //   compared(note): whether its lines are compared at all: a line in a task note, log or plain note
     //     isn't (Brian, 2026-10-25), so a subtask's day line can go its own way;
     //   resolve(linkpath, fromPath): the path a link points at, or null;
@@ -366,7 +365,7 @@ class TaskIds {
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
     // notes), "ownNotes" (two different ⋯ notes), "twice" (an ID twice in a note), "trailing" (text after
     // a task's ID, which Obsidian then doesn't read).
-    static check(notes, { projectOf, exempt = () => null, compared = () => true, resolve, ownNote = () => [] }) {
+    static check(notes, { projectOf, compared = () => true, resolve, ownNote = () => [] }) {
         const found = [], out = [], twice = [];
         const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
         for (const note of notes) {
@@ -394,10 +393,10 @@ class TaskIds {
             if (!isTask(hits)) continue;
             const open = hits.filter(isOpen);
             const finished = hits.filter((h) => h.task === "x" || h.task === "-");
-            // Exemptions are only worked out for a task whose lines disagree. A line with a ⋯ and no project
-            // is Unassigned and isn't listed (rule 4)
-            const all = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
-            const named = new Set(all.map((n) => n.project)).size > 1 ? all.filter((n) => !exempt(n.h.note, n.h.line)) : all;
+            // No line is let off (OBS-233): a project change writes every line of the task and refuses to move
+            // billed time, so two projects are always something to fix. A line with a ⋯ and no project is
+            // Unassigned and isn't listed (rule 4)
+            const named = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
             if (new Set(named.map((n) => n.project)).size > 1) out.push({ rule: "project", id, lines: named.map((n) => TaskIds.where(n.h)), detail: { projects: named.map((n) => n.project) } });
             // `clicked`: which of them, if any, is a sent line a click turned from [>] into [ ] (a line outside
             // the periodic notes with a forward date), so the Problem can say to set it back rather than take off its ID
