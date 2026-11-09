@@ -1,0 +1,9 @@
+{
+  "id": "plainday",
+  "name": "Plainday",
+  "version": "0.0.1",
+  "minAppVersion": "1.11.4",
+  "description": "Turn your daily notes into a robust planner. Sync your calendars, schedule tasks, set deadlines, organize tasks into areas and projects, add task notes, track your time and generate invoices. All with Markdown.",
+  "author": "Brian Frank",
+  "isDesktopOnly": false
+}

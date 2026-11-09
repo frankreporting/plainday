@@ -46,3 +46,8 @@
 # Personal instructions for Claude Code
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Plainday's build (npm run build) and its tools: npm runs in worktrees and CI, never in a folder
+# Obsidian opens as a vault (plugin/preinstall.mjs)
+node_modules/
+/main.js

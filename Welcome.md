@@ -8,29 +8,29 @@ This is a small, made-up vault that shows the Obsidian PM system at work: a free
 
 ## Where to look first
 
-1. **A full working day:** [[2026-09-16|9/16/26]]. Calendar events with a meeting log and a ⭕ project link, tasks with time entries and notes, and one deliberately mistyped entry that the report flags under Problems.
+1. **A full working day:** [[2026-09-16|9/16/26]]. Calendar events with a log note and a ⭕ project link, tasks with time entries and notes, and one deliberately mistyped entry that the report flags under Problems.
 2. **A task worked on over two days:** [[2026-09-14|9/14/26]] and [[2026-09-15|9/15/26]]. The wireframes task is forwarded (`[>]`) from Monday to Tuesday, both lines link its project with ⭕ and its task note with ⋯, and Tuesday's time goes under the task, with two nested tasks and a 🆓 entry. Monday also has a canceled `[-]` event.
 3. **A project's time report:** [[Kestrel Outfitters 2026|⭕ Kestrel Outfitters 2026]]. Its sub-project [[Kestrel Fall Catalog|⭕ Kestrel Fall Catalog]] bills at the parent's rate. Compare [[Pinecrest Library Brochure|⭕ Pinecrest Library Brochure]] (flat fee) and [[Garden Club Newsletter|⭕ Garden Club Newsletter]] (non-billable). [[Block Party Poster|⭕ Block Party Poster]] has a deliberate mistake: its `rate_type` was never filled in, so its hour counts as billable and the report lists the project under Problems, on its own note and on the week, month and year of that hour.
 4. **An invoice and a timesheet:** [[1001-KES]], billed from Kestrel's time through 9/11 and paid. [[Kestrel Outfitters 2026 timesheet]] lists every entry with the invoice that billed it. One billed entry on [[2026-09-11|9/11/26]] was edited afterward, on purpose: the timesheet marks it ⚠️ and the project's note lists it under Problems.
 5. **The week's report:** [[2026w38]], then [[2026-09]] and [[2026]].
 6. **Archived work:** [[Marlowe Bakery Rebrand|⭕ Marlowe Bakery Rebrand]] sits in Archive. Its entries on [[2026-08-27|8/27/26]] and [[2026-08-28|8/28/26]] are left out of every report.
 
-Everything under "## Time Report" is written by the TimeReport command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
+Everything under "## Time Report" is written by the *Time report* command, not by hand. On the desktop it runs at startup too; the reports here are already current, so opening the vault changes nothing until you log more time.
 
 ## Basic commands
 
 | Command | Action | Shortcut |
 | --- | --- | --- |
-| ToggleTimeEntry | Log time | `⌘T` |
+| Toggle time entry | Log time | `⌘T` |
 | Schedule | Move a task to another day | `⌘S` |
-| DueDate | Add a due date | `⇧⌘D` |
-| AddTaskNote | Make or link a task note | Command palette |
-| TimeReport | Refresh the reports | Command palette |
+| Due date | Add a due date | `⇧⌘D` |
+| Add note | Make or link a task's note, or an event's log note | Command palette |
+| Time report | Refresh the reports | Command palette |
 | Invoice | Invoice a project's time, or move an invoice along | Command palette |
 | New note | Type the whole title in the quick switcher, then Shift+Enter: `!task …`, `!project …`, a date + title like `2026-09-21 Kickoff call`, or a plain date like `2026-09-21`, and its template is applied. (A note made with ⌘N is *Untitled* when the templates look at it.) | `⌘O`, then `⇧↩` |
 | Plan | Plan ahead: the next few daily notes side by side | Command palette |
-| JumpToDate | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
+| Jump to date | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
 
-Run the task commands with the cursor on a task line. ToggleTimeEntry times tasks in today's daily note; press it again to stop. In the command palette, the commands are "CustomJS: …".
+Run the task commands with the cursor on a task line. *Toggle time entry* times tasks in today's daily note; press it again to stop. In the command palette, the commands are "Plainday: …" (or "CustomJS: …", with no spaces in their names, in a vault that runs them through CustomJS; see [[README]]).
 
-The calendar sync (CalendarSync) reads macOS calendars, so it needs setup first; see [[README]].
+The calendar sync (*Sync calendars*) reads macOS calendars, so it needs setup first; see [[README]].

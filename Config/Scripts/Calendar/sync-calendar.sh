@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Keeps the daily notes' calendar events current: by hand, or on a schedule from launchd.
 #
-# Obsidian does the work. Its *Calendar sync* command reads this Mac's calendars and writes the
+# Obsidian does the work. Its *Sync calendars* command reads this Mac's calendars and writes the
 # events into the daily notes, using Obsidian's own calendar permission. A process launchd starts
 # has no calendar permission of its own, so fetching here only works when someone has granted it
 # in System Settings; it's kept as a fallback, which at least refreshes the events file for the
@@ -39,7 +39,14 @@ LABEL="$([ -n "$PLIST" ] && [ -f "$PLIST" ] && "$PLUTIL" -extract Label raw -o -
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # The CLI only answers while the app is running
 running() { [ "$("$OBSIDIAN" vault="$VAULT_NAME" vault info=path 2>/dev/null)" = "$VAULT" ]; }
-sync_now() { "$OBSIDIAN" vault="$VAULT_NAME" command id=customjs:invoke-CalendarSync >/dev/null 2>&1; }
+# The command's id: Plainday's when the vault has Plainday on, CustomJS's otherwise (OBS-226)
+PLUGINS="$VAULT/.obsidian/community-plugins.json"
+sync_id() {
+    if [ -f "$PLUGINS" ] && grep -q '"plainday"' "$PLUGINS"; then print -r -- plainday:sync-calendars
+    else print -r -- customjs:invoke-CalendarSync
+    fi
+}
+sync_now() { "$OBSIDIAN" vault="$VAULT_NAME" command id="$(sync_id)" >/dev/null 2>&1; }
 
 schedule() {
     case "$1" in

@@ -24,7 +24,8 @@ class CalendarSync {
     // The two JSON files live beside the fetcher in `Scripts/Calendar`. They're deliberately
     // not hidden: Obsidian Sync skips dotfiles, and the phone needs the events file.
     //
-    // Run it after fetching: `obsidian command id=customjs:invoke-CalendarSync`.
+    // Run it after fetching: `obsidian command id=plainday:sync-calendars` (under CustomJS,
+    // `customjs:invoke-CalendarSync`).
     // Notes are changed through app.vault.process, which reads and writes in one step, so this
     // can't overwrite what you're typing. The ledger only ever claims a line the sync has seen
     // in the note afterwards, so a write that doesn't land is retried rather than forgotten.
@@ -34,8 +35,8 @@ class CalendarSync {
     static MAX_REMOVALS = 10;   // a run that would remove or forward more than this does neither
     static FETCHER = "Config/Scripts/Calendar/fetchCalendar.swift";
     static FETCH_TIMEOUT_MS = 120000;
-    // How far ahead to sync. The Calendar Sync note holds the choice; *Calendar sync (range)*
-    // sets it from a dropdown, and you can edit the line by hand.
+    // How far ahead to sync. The Calendar Sync note holds the choice: edit the line by hand, or
+    // under CustomJS, CalendarSyncRange sets it from a dropdown.
     static RANGES = [["1 week", 7], ["2 weeks", 14], ["3 weeks", 21], ["1 month", 31], ["2 months", 62], ["3 months", 92], ["6 months", 183]];
     static DEFAULT_RANGE = "6 months";
     // A time entry under an event, the way TimeReport reads one: `4:00pm - 4:30pm: note`, or a

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadCustomJS, checkAll as checkScripts } from "./checkScripts.mjs";
+import { loadCustomJS, checkAll as checkScripts, checkPlainday } from "./checkScripts.mjs";
 import { scanLine, scanDiff, scanText, describe } from "./privacy.mjs";
 import { docsSection, checkLinearLink, checkDocs } from "./checkPR.mjs";
 import { oldFolderLines, checkAll as checkFolders } from "./checkFolders.mjs";
@@ -157,4 +157,53 @@ test("OBS-81: a numbered folder the vault dropped is caught, in any case; plain 
 
 test("OBS-81: no tracked file names a numbered folder", () => {
     assert.deepEqual(checkFolders(), []);
+});
+
+// ------------------------------------------------------------------ Plainday (OBS-226)
+
+test("the docs gate counts Plainday's source and manifest as system files", () => {
+    assert.match(checkDocs({ body: "", changed: ["plugin/src/main.js"] })[0], /system files changed \(plugin\/src\/main\.js\)/);
+    assert.match(checkDocs({ body: "", changed: ["manifest.json"] })[0], /system files changed/);
+    assert.deepEqual(checkDocs({ body: "", changed: ["plugin/src/main.js", "Config/Manual.md"] }), []);
+    assert.deepEqual(checkDocs({ body: "", changed: ["package-lock.json"] }), [], "the build's tools aren't");
+});
+
+test("Plainday's command list must name the classes CustomJS's settings do, apart from CustomJS's own", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
+    const commands = (body) => {
+        fs.mkdirSync(path.join(root, "plugin/src"), { recursive: true });
+        fs.writeFileSync(path.join(root, "plugin/src/commands.js"), body);
+        fs.writeFileSync(path.join(root, "plugin/package.json"), '{"type":"module"}\n');
+    };
+    const settings = (o) => {
+        fs.mkdirSync(path.join(root, ".obsidian/plugins/customjs"), { recursive: true });
+        fs.writeFileSync(path.join(root, ".obsidian/plugins/customjs/data.json"), JSON.stringify(o));
+    };
+    try {
+        assert.deepEqual(await checkPlainday(root), ["plugin/src/commands.js: missing"]);
+        commands(`export const COMMANDS = [
+    { id: "schedule", name: "Schedule", script: "Schedule" },
+    { id: "plan", name: "Plan", script: "Plan" },
+    { id: "plan", name: "Schedule", script: "Invoice" },
+];
+export const STARTUP = ["SyncArea", "CheckOff"];
+export const CUSTOMJS_ONLY = ["RefoldDailyNotes", "Gone"];
+`);
+        settings({ registeredInvocableScriptNames: ["Schedule", "Plan", "RefoldDailyNotes", "TimeReport"], startupScriptNames: ["CheckOff", "SyncArea"] });
+        const problems = await checkPlainday(root);
+        const has = (re) => assert.ok(problems.some((p) => re.test(p)), `${re}\n${problems.join("\n")}`);
+        has(/data\.json has a command for TimeReport, and plugin\/src\/commands\.js doesn't/);
+        has(/commands\.js has a command for Invoice, and .*data\.json doesn't/);
+        has(/CUSTOMJS_ONLY names Gone, which isn't a command/);
+        has(/STARTUP is SyncArea, CheckOff, and .* runs CheckOff, SyncArea: they must be the same, in the same order/);
+        has(/two commands have the id "plan"/);
+        has(/two commands have the name "Schedule"/);
+        assert.equal(problems.length, 6, problems.join("\n"));
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("the repository's own Plainday command list matches CustomJS's settings", async () => {
+    assert.deepEqual(await checkPlainday("."), []);
 });

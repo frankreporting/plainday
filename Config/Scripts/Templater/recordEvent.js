@@ -1,5 +1,5 @@
 // Records a new log in its daily note (OBS-10), called from the Log template as
-//     tp.user.recordEvent(dailyNoteText, { log, title, time, home }, customJS.CalendarSync, fresh)
+//     tp.user.recordEvent(dailyNoteText, { log, title, time, home }, sync, fresh)
 // `log` is the note's name ("2026-09-16 Planning"), `title` the title without the date, and `time`
 // (optional) the start to prefer when several lines share the title. `sync` is the calendar sync,
 // whose line shape, matching and sort order this borrows rather than copies. `home` (optional) is

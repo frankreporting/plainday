@@ -6,7 +6,7 @@
 // (or, from before OBS-57, `1:30pm⇥[[2026-09-09 Intro call with Imogen Fenwick|…]]`)
 // and returns { time: "1:30pm", endTime: "1:40pm" }. The line under it is the calendar sync's end
 // time, or a time entry ("1:30pm - 2:15pm") once you've edited it, whose last time is the end.
-// The start is followed by the sync's tab, or by spaces on a line typed by hand, as Add task note
+// The start is followed by the sync's tab, or by spaces on a line typed by hand, as Add note
 // reads it.
 // Older daily notes have no end line ("4:30pm ⇥[[…]]"), so endTime can be "". Returns null if no
 // line with a time links to the log. All-day events have no time, so they don't count.

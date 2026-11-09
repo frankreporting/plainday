@@ -18,12 +18,14 @@ class RefoldDailyNotes {
     // - no snapshot: saved folds that still fit are left as they are; otherwise (none saved on
     //   this device, or gone stale) every item folds, whatever the note's date (Schedule's
     //   fallback). Folds are saved by path, so a moved note has none until it's folded again.
-    // As a command it refolds daily notes that are already open. Obsidian carries an open note's
+    // invoke() refolds daily notes that are already open. Obsidian carries an open note's
     // folds through an outside change (verified 2026-09-11), so those stay. Within two hours of
     // SnapshotDailyNotes it folds only what was added since; run on its own, it folds the events.
-    // The calendar sync runs SnapshotDailyNotes before writing and this after:
-    //   obsidian command id=customjs:invoke-SnapshotDailyNotes
-    //   obsidian command id=customjs:invoke-RefoldDailyNotes
+    // Inside Obsidian the calendar sync, Schedule and the rest call this class's methods directly.
+    // A tool outside Obsidian (the Raycast timer) runs SnapshotDailyNotes before writing and this
+    // after, by eval (`customJS.` in place of `plainday.` under CustomJS, where both are commands):
+    //   obsidian vault=<v> eval code="plainday.SnapshotDailyNotes.invoke()"
+    //   obsidian vault=<v> eval code="plainday.RefoldDailyNotes.invoke()"
     static RELOAD_WAIT_MS = 3000;
     static STORE = "refold-snapshots";
     static SYNC_KEY = "refold-sync-started";

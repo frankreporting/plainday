@@ -1,0 +1,16 @@
+{
+  "name": "plainday",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Turn your daily notes into a robust planner. Sync your calendars, schedule tasks, set deadlines, organize tasks into areas and projects, add task notes, track your time and generate invoices. All with Markdown.",
+  "license": "MIT",
+  "scripts": {
+    "preinstall": "node plugin/preinstall.mjs",
+    "build": "node plugin/esbuild.config.mjs",
+    "dev": "node plugin/esbuild.config.mjs --watch",
+    "test": "node --test plugin/test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

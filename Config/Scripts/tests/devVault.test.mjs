@@ -381,3 +381,205 @@ test("a copy of the script in a worktree refuses to run: only the clone is the d
     assert.equal(r.status, 1);
     assert.match(r.stdout + r.stderr, /not the dev vault/);
 });
+
+// ------------------------------------------------------------------ Plainday (OBS-226)
+
+const PLUGINS = ".obsidian/community-plugins.json";
+const PLAINDAY = ".obsidian/plugins/plainday";
+const MANIFEST = '{"id":"plainday","version":"0.0.1"}\n';
+
+// The setUp above, plus what switching plugins needs: a CLI stub that turns plugins on and off in
+// community-plugins.json as Obsidian does, and an npm stub that records where it ran. Its build
+// copies manifest.json to main.js, so the copy in the vault shows which commit was built.
+function withPlainday(f) {
+    const calls = path.join(f.dir, "calls"), state = path.join(f.dir, "state"), plugins = path.join(f.clone, PLUGINS);
+    stub(f.dir, "bin/obsidian", `echo "obsidian $*" >> ${calls}
+[ "$(cat ${state})" = closed ] && exit 1
+case "$1" in
+  vault=clone) ;;
+  *) echo "/some/other/vault"; exit 0 ;;
+esac
+case "$2" in
+  plugin:enable|plugin:disable)
+    id="\${3#id=}"
+    [ "$2" = plugin:enable ] && [ -f ${f.dir}/enable-fails-$id ] && { echo "Error: not found"; exit 1; }
+    ids="$(grep -o '"[^"]*"' ${plugins} 2>/dev/null | tr -d '"' | grep -v -x "$id")"
+    [ "$2" = plugin:enable ] && ids="$ids $id"
+    printf '[%s]\\n' "$(for i in $ids; do printf '"%s"\\n' "$i"; done | paste -sd, -)" > ${plugins}
+    ;;
+esac
+if [ "$2" = vault ]; then echo "${f.clone}"; else echo ok; fi`);
+    stub(f.dir, "bin/npm", `echo "npm $* in $(pwd)" >> ${calls}
+case "$1" in
+  ci) [ -f ${f.dir}/ci-fails ] && { rm -f ${f.dir}/ci-fails; mkdir -p node_modules; echo "invented network error" >&2; exit 1; }; mkdir -p node_modules ;;
+  run) [ -f ${f.dir}/build-fails ] && { echo "invented build error" >&2; exit 1; }; cp manifest.json main.js ;;
+esac`);
+    const run = (...args) => {
+        const r = spawnSync("/bin/zsh", [path.join(f.clone, REL), ...args], {
+            encoding: "utf8",
+            env: {
+                ...process.env, HOME: f.dir, OBSIDIAN_CLI: path.join(f.dir, "bin/obsidian"), OPEN_CMD: path.join(f.dir, "bin/open"),
+                NPM_CMD: path.join(f.dir, "bin/npm"), OBSIDIAN_WAIT: "2", DEV_VAULT_SETTLE: "3",
+            },
+        });
+        return { status: r.status, out: r.stdout + r.stderr, calls: fs.readFileSync(calls, "utf8") };
+    };
+    write(f.clone, PLUGINS, '["templater-obsidian","customjs"]\n');
+    // The branch is Plainday's: manifest.json at the root, and its build files
+    write(f.wt, "package.json", "{}\n");
+    write(f.wt, "package-lock.json", '{"lockfileVersion":3}\n');
+    commit(f.wt, "manifest.json", MANIFEST, "OBS-7: Plainday");
+    const buildFails = () => fs.writeFileSync(path.join(f.dir, "build-fails"), "");
+    const marker = (name) => fs.writeFileSync(path.join(f.dir, name), "");
+    return { run, buildFails, marker, on: () => JSON.parse(read(f.clone, PLUGINS)) };
+}
+
+const order = (calls, ...lines) => {
+    const at = lines.map((l) => calls.split("\n").indexOf(l));
+    assert.ok(at.every((i) => i >= 0), `all of these were called:\n${lines.join("\n")}\n---\n${calls}`);
+    assert.deepEqual([...at].sort((a, b) => a - b), at, `in this order:\n${lines.join("\n")}\n---\n${calls}`);
+};
+
+test("test: a commit with manifest.json is built outside the vault, copied in as Plainday, and switched to", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    const { status, out, calls } = p.run("test", "me/obs-7-thing", "--plan", f.plan);
+    assert.equal(status, 0, out);
+    assert.equal(head(f.clone), head(f.wt));
+    assert.equal(read(f.clone, `${PLAINDAY}/main.js`), MANIFEST, "the branch's commit, built");
+    assert.equal(read(f.clone, `${PLAINDAY}/manifest.json`), MANIFEST);
+    assert.deepEqual(p.on(), ["templater-obsidian", "plainday"], "CustomJS off, Plainday on");
+    order(calls, "obsidian vault=clone plugin:disable id=customjs filter=community",
+        "obsidian vault=clone eval code=app.plugins.loadManifests().then(() => !!app.plugins.manifests.plainday)",
+        "obsidian vault=clone plugin:enable id=plainday filter=community", "obsidian vault=clone open path=OBS-7 Test Plan.md");
+    assert.doesNotMatch(calls, /plugin:reload/, "turning Plainday on loaded the build; no second load");
+    const tree = path.join(f.clone, ".dev-vault/build/tree");
+    order(calls, `npm ci --no-audit --no-fund in ${tree}`, `npm run --silent build in ${tree}`);
+    assert.equal(exists(f.clone, "node_modules"), false, "npm never runs in the vault itself");
+    assert.equal(git(f.clone, "status", "--porcelain"), "", "the build and the plugin leave the tree clean");
+    for (const line of calls.split("\n").filter((l) => l.startsWith("obsidian "))) assert.match(line, /^obsidian vault=clone /);
+    assert.match(p.run("status").out, /^Plugin: Plainday on; this commit runs on Plainday$/m);
+});
+
+test("test: the next round rebuilds, and runs npm ci again only when the lockfile changed", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    assert.equal(p.run("test", "me/obs-7-thing").status, 0);
+    f.forget();
+    commit(f.wt, "manifest.json", MANIFEST.replace("0.0.1", "0.0.2"), "OBS-7: a fix");
+    let { status, out, calls } = p.run("test", "me/obs-7-thing");
+    assert.equal(status, 0, out);
+    assert.match(read(f.clone, `${PLAINDAY}/main.js`), /0\.0\.2/);
+    assert.doesNotMatch(calls, /npm ci/);
+    assert.match(calls, /npm run --silent build/);
+    assert.doesNotMatch(calls, /plugin:(enable|disable)/, "already on");
+    assert.match(calls, /^obsidian vault=clone plugin:reload id=plainday$/m);
+
+    f.forget();
+    commit(f.wt, "package-lock.json", '{"lockfileVersion":3,"changed":true}\n', "OBS-7: a new tool");
+    ({ status, out, calls } = p.run("test", "me/obs-7-thing"));
+    assert.equal(status, 0, out);
+    assert.match(calls, /npm ci/);
+});
+
+test("test: a build that fails leaves the dev vault as it was, and says why", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    p.buildFails();
+    const before = head(f.clone);
+    const { status, out, calls } = p.run("test", "me/obs-7-thing", "--plan", f.plan);
+    assert.notEqual(status, 0);
+    assert.match(out, /invented build error/);
+    assert.match(out, /dev vault is unchanged/);
+    assert.equal(head(f.clone), before);
+    assert.equal(branch(f.clone), "main");
+    assert.equal(exists(f.clone, ".dev-vault/testing"), false, "no lock");
+    assert.equal(exists(f.clone, "OBS-7 Test Plan.md"), false);
+    assert.deepEqual(p.on(), ["templater-obsidian", "customjs"]);
+    assert.doesNotMatch(calls, /plugin:/);
+});
+
+test("done: back on a main without manifest.json, Plainday goes off and CustomJS comes back", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    assert.equal(p.run("test", "me/obs-7-thing", "--plan", f.plan).status, 0);
+    f.forget();
+    const { status, out, calls } = p.run("done");
+    assert.equal(status, 0, out);
+    assert.equal(branch(f.clone), "main");
+    assert.deepEqual(p.on(), ["templater-obsidian", "customjs"]);
+    order(calls, "obsidian vault=clone plugin:disable id=plainday filter=community", "obsidian vault=clone plugin:enable id=customjs filter=community",
+        "obsidian vault=clone plugin:reload id=customjs");
+    assert.doesNotMatch(calls, /npm /, "nothing to build for CustomJS");
+    assert.equal(git(f.clone, "status", "--porcelain"), "");
+    assert.match(p.run("status").out, /^Plugin: CustomJS on; this commit runs on CustomJS$/m);
+});
+
+test("done: once main has Plainday, it's built from main and stays on", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    assert.equal(p.run("test", "me/obs-7-thing").status, 0);
+    // The PR merged meanwhile
+    git(f.wt, "push", "-q", "origin", "me/obs-7-thing:main");
+    f.forget();
+    const { status, out, calls } = p.run("done");
+    assert.equal(status, 0, out);
+    assert.equal(head(f.clone), head(f.wt));
+    assert.deepEqual(p.on(), ["templater-obsidian", "plainday"]);
+    assert.match(calls, /npm run --silent build/);
+    assert.match(calls, /^obsidian vault=clone plugin:reload id=plainday$/m);
+    assert.doesNotMatch(calls, /plugin:(enable|disable)/);
+});
+
+test("test: when Plainday won't turn on, CustomJS goes back on and it says so", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    p.marker("enable-fails-plainday");
+    const { out, calls } = p.run("test", "me/obs-7-thing");
+    assert.match(out, /Couldn't turn Plainday on, so CustomJS is back on/);
+    assert.deepEqual(p.on(), ["templater-obsidian", "customjs"], "never neither");
+    order(calls, "obsidian vault=clone plugin:disable id=customjs filter=community", "obsidian vault=clone plugin:enable id=plainday filter=community",
+        "obsidian vault=clone plugin:enable id=customjs filter=community");
+});
+
+test("test: an npm ci that failed runs again next time, instead of building with half the tools", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    p.marker("ci-fails");
+    let { status, out } = p.run("test", "me/obs-7-thing");
+    assert.notEqual(status, 0);
+    assert.match(out, /npm ci failed/);
+    f.forget();
+    ({ status, out } = p.run("test", "me/obs-7-thing"));
+    assert.equal(status, 0, out);
+    assert.match(fs.readFileSync(path.join(f.dir, "calls"), "utf8"), /npm ci/);
+});
+
+test("done: with Obsidian closed, main's Plainday is still built and copied in, for the next open", (t) => {
+    const f = setUp();
+    cleanUp(t, f);
+    const p = withPlainday(f);
+    f.setState("running");
+    assert.equal(p.run("test", "me/obs-7-thing").status, 0);
+    commit(f.wt, "manifest.json", MANIFEST.replace("0.0.1", "0.0.3"), "OBS-7: merged");
+    git(f.wt, "push", "-q", "origin", "me/obs-7-thing:main");
+    f.setState("closed");
+    const { status, out } = p.run("done");
+    assert.equal(status, 0, out);
+    assert.match(read(f.clone, `${PLAINDAY}/main.js`), /0\.0\.3/, "main's build, not the branch's");
+    assert.doesNotMatch(out, /weren't switched/, "Plainday is on already, so there's nothing to switch");
+});

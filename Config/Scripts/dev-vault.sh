@@ -5,9 +5,10 @@
 #
 #   dev-vault.sh test <branch> [--plan <file>] [--issue OBS-N]
 #       Checks the branch out (detached, since the agent's worktree holds the branch), records
-#       which issue is being tested in `.dev-vault/testing`, reloads CustomJS (or the vault, when
-#       a settings file changed), and copies the test plan to `<ISSUE> Test Plan.md` at the vault
-#       root, opened in front. The issue comes from the branch name (`obs-N`) or `--issue`.
+#       which issue is being tested in `.dev-vault/testing`, puts the plugin in place (below) and
+#       reloads it (or the vault, when a settings file changed), and copies the test plan to
+#       `<ISSUE> Test Plan.md` at the vault root, opened in front. The issue comes from the branch
+#       name (`obs-N`) or `--issue`.
 #       Refused while another issue holds the lock, or while the tree has changes and `done`
 #       hasn't run. The issue that holds the lock can run it again after a fix round.
 #   dev-vault.sh done
@@ -18,7 +19,17 @@
 #       restores once more: the next thing to read this clone is UpdateObsidianPM, which refuses
 #       to install from a tree that isn't clean.
 #   dev-vault.sh status
-#       The lock, HEAD, and what's changed.
+#       The lock, HEAD, the plugin that's on, and what's changed.
+#
+# The plugin: a commit with manifest.json at the root runs on Plainday (OBS-226), one without it
+# on CustomJS, so a branch that started before Plainday stays testable. For Plainday, the commit
+# is built first, in .dev-vault/build/ (Obsidian skips folders whose names start with a dot, and
+# npm never runs in the vault itself: plugin/preinstall.mjs), with `npm ci` only when the lockfile
+# changed. A build that fails leaves the dev vault as it was. Then main.js and manifest.json go
+# into .obsidian/plugins/plainday/, CustomJS is turned off and Plainday on, and Plainday is
+# reloaded. For CustomJS it's the reverse, then CustomJS is reloaded. The first `test` of a
+# branch with Plainday runs main's copy of this script, which doesn't know Plainday yet; run
+# `test` again, and the branch's own copy switches.
 #
 # Every run installs the repository's pre-commit hook, which refuses a commit made from the demo
 # vault: nothing here is checked for real data, and `done` restores it all. The hook is shared by
@@ -34,8 +45,12 @@ LOCK_DIR="$VAULT/.dev-vault"
 LOCK="$LOCK_DIR/testing"
 MAIN=main
 HOOK_MARK="installed by dev-vault.sh"
+BUILD="$LOCK_DIR/build"
+PLUGINS="$VAULT/.obsidian/community-plugins.json"
+PLAINDAY="$VAULT/.obsidian/plugins/plainday"
 # The tests point these at stubs
 OBSIDIAN="${OBSIDIAN_CLI:-$(command -v obsidian || echo /usr/local/bin/obsidian)}"
+NPM="${NPM_CMD:-$(command -v npm || echo npm)}"
 OPEN="${OPEN_CMD:-/usr/bin/open}"
 WAIT="${OBSIDIAN_WAIT:-60}"   # seconds to wait for Obsidian to answer after opening the vault
 SETTLE="${DEV_VAULT_SETTLE:-12}"   # seconds to watch for writes from the app after a reload
@@ -110,6 +125,96 @@ reload() {
     fi
 }
 
+# The plugin a commit runs on: Plainday when it has manifest.json at the root
+plugin_at() { g cat-file -e "$1:manifest.json" 2>/dev/null && say plainday || say customjs; }
+# Is the plugin on? Obsidian lists the plugins that are on in community-plugins.json
+enabled() { [ -f "$PLUGINS" ] && grep -q "\"$1\"" "$PLUGINS"; }
+
+# Builds Plainday from commit $1 in .dev-vault/build/tree, leaving main.js there. The tools
+# (node_modules) stay between builds; `npm ci` runs again only when the lockfile changed.
+build_plainday() {
+    local tree="$BUILD/tree" lockfile
+    mkdir -p "$tree" || return 1
+    find "$tree" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} + || return 1
+    g archive "$1" | tar -x -C "$tree" || { say "Couldn't export $1 to build it"; return 1; }
+    lockfile="$(g rev-parse "$1:package-lock.json" 2>/dev/null)"
+    if [ ! -d "$tree/node_modules" ] || [ "$(cat "$BUILD/lockfile" 2>/dev/null)" != "$lockfile" ]; then
+        say "Installing Plainday's build tools (npm ci)"
+        rm -f "$BUILD/lockfile"
+        if ! (cd "$tree" && "$NPM" ci --no-audit --no-fund) > "$BUILD/npm.log" 2>&1; then
+            say "npm ci failed:"; tail -n 20 "$BUILD/npm.log"
+            return 1
+        fi
+        print -r -- "$lockfile" > "$BUILD/lockfile"
+    fi
+    if ! (cd "$tree" && PLAINDAY_OUT= "$NPM" run --silent build) > "$BUILD/build.log" 2>&1 || [ ! -f "$tree/main.js" ]; then
+        say "The build failed:"; tail -n 20 "$BUILD/build.log"
+        return 1
+    fi
+    say "Built Plainday from $(g rev-parse --short "$1")"
+}
+
+# Copies the build build_plainday made into the plugin folder. Needs no Obsidian.
+install_plainday() {
+    mkdir -p "$PLAINDAY" || return 1
+    cp "$BUILD/tree/main.js" "$BUILD/tree/manifest.json" "$PLAINDAY/" || return 1
+    if [ -f "$BUILD/tree/styles.css" ]; then cp "$BUILD/tree/styles.css" "$PLAINDAY/"; else rm -f "$PLAINDAY/styles.css"; fi
+}
+
+# Obsidian saves which plugins are on a moment after the CLI answers, and a vault reloaded before
+# then would read the old list. Waits up to 5 seconds for plugin $1 to be saved as $2 (on or off).
+saved() {
+    local i
+    for i in {1..10}; do
+        if [ "$2" = on ]; then enabled "$1" && return 0; else enabled "$1" || return 0; fi
+        sleep 0.5
+    done
+    return 1
+}
+
+# Puts the plugin that HEAD runs on in place and reloads it; $1 is HEAD before the move. For
+# Plainday, build_plainday has built HEAD already. Best-effort, like reload: the message says.
+use_plugin() {
+    if [ "$(plugin_at HEAD)" = plainday ]; then
+        install_plainday || { say "Couldn't copy Plainday into $PLAINDAY"; return 1; }
+        local was_customjs=0 fresh=0
+        # Off before on: with both on, every command shows twice
+        if enabled customjs; then
+            was_customjs=1
+            if cli plugin:disable id=customjs filter=community >/dev/null 2>&1 && saved customjs off; then say "Turned CustomJS off"
+            else say "Couldn't turn CustomJS off; turn it off by hand"
+            fi
+        fi
+        if ! enabled plainday; then
+            # Obsidian finds a plugin folder that's new since it started only once it rescans them
+            cli eval code="app.plugins.loadManifests().then(() => !!app.plugins.manifests.plainday)" >/dev/null 2>&1
+            if cli plugin:enable id=plainday filter=community >/dev/null 2>&1 && saved plainday on; then
+                say "Turned Plainday on"
+                fresh=1
+            elif [ "$was_customjs" -eq 1 ]; then
+                cli plugin:enable id=customjs filter=community >/dev/null 2>&1
+                say "Couldn't turn Plainday on, so CustomJS is back on; turn Plainday on by hand, after turning CustomJS off"
+                return 1
+            else
+                say "Couldn't turn Plainday on; turn it on by hand"
+                return 1
+            fi
+        fi
+        if [ -n "$(g diff --name-only "$1" HEAD -- '.obsidian/*.json' '.obsidian/plugins/*/data.json')" ]; then
+            cli reload >/dev/null 2>&1 && say "Reloaded the vault (settings changed)" || say "Couldn't reload the vault; reload it by hand"
+        elif [ "$fresh" -eq 0 ]; then
+            # Turning it on just now loaded this build already
+            cli plugin:reload id=plainday >/dev/null 2>&1 && say "Reloaded Plainday" || say "Couldn't reload Plainday; reload it by hand"
+        fi
+    else
+        if enabled plainday; then
+            cli plugin:disable id=plainday filter=community >/dev/null 2>&1 && saved plainday off && say "Turned Plainday off" || say "Couldn't turn Plainday off; turn it off by hand"
+            cli plugin:enable id=customjs filter=community >/dev/null 2>&1 && saved customjs on && say "Turned CustomJS on" || say "Couldn't turn CustomJS on; turn it on by hand"
+        fi
+        reload "$1" HEAD
+    fi
+}
+
 cmd_test() {
     local branch="" plan="" issue=""
     while [ $# -gt 0 ]; do
@@ -148,19 +253,30 @@ cmd_test() {
     fi
 
     reach_obsidian
+    # One commit for the build and the checkout, even if the branch moves while npm runs. Built
+    # before anything moves, so a build that fails leaves the dev vault as it was.
+    local sha was_plainday=0
+    sha="$(g rev-parse "${ref}^{commit}")" || die "couldn't read $ref"
+    enabled plainday && was_plainday=1
+    if [ "$(plugin_at "$sha")" = plainday ]; then
+        build_plainday "$sha" || die "couldn't build Plainday from $ref; the dev vault is unchanged"
+    fi
 
     local before
     before="$(g rev-parse HEAD)"
     # A second round for the same issue: put the tracked notes back before moving HEAD
     [ -n "$holder" ] && { g checkout -q -- . || die "couldn't restore the tracked files"; }
-    g checkout -q --detach "$ref" || die "couldn't check out $ref"
+    g checkout -q --detach "$sha" || die "couldn't check out $ref"
     local since
     since="$(lock_value since)"
     [ -n "$since" ] || since="$(date '+%Y-%m-%d %H:%M')"
     mkdir -p "$LOCK_DIR"
     printf 'issue=%s\nbranch=%s\ncommit=%s\nsince=%s\n' "$issue" "$branch" "$(g rev-parse --short HEAD)" "$since" > "$LOCK"
 
-    reload "$before" HEAD
+    use_plugin "$before"
+    if [ "$was_plainday" -eq 1 ] && [ "$(plugin_at HEAD)" = customjs ]; then
+        say "This branch is from before Plainday, and its own copy of this script, which \`done\` runs, doesn't know Plainday: run \`dev-vault.sh done\` twice to put $MAIN's Plainday back"
+    fi
 
     local note="$VAULT/$issue Test Plan.md"
     [ -n "$plan" ] && cp "$plan" "$note"
@@ -207,9 +323,20 @@ cmd_done() {
     before="$(g rev-parse HEAD)"
     g checkout -q "$MAIN" || die "couldn't check out $MAIN"
     g pull -q --ff-only 2>/dev/null || say "Couldn't pull $MAIN; it's as it was"
+    local built=1
+    if [ "$(plugin_at HEAD)" = plainday ] && ! build_plainday HEAD; then
+        built=0
+        say "Couldn't build Plainday from $MAIN, so the dev vault keeps the build it had"
+    fi
     if [ "$(answer)" = "$VAULT" ]; then
-        reload "$before" HEAD
+        [ "$built" -eq 1 ] && use_plugin "$before"
         settle
+    else
+        # The build goes in anyway: Obsidian loads it when the vault next opens
+        [ "$built" -eq 1 ] && [ "$(plugin_at HEAD)" = plainday ] && install_plainday
+        if { [ "$(plugin_at HEAD)" = plainday ] && ! enabled plainday; } || { [ "$(plugin_at HEAD)" = customjs ] && enabled plainday; }; then
+            say "Obsidian isn't answering for $VAULT_NAME, so the plugins weren't switched for $MAIN; open the dev vault and run \`dev-vault.sh done\` again"
+        fi
     fi
     left="$(changes)"
     if [ -n "$left" ]; then
@@ -230,6 +357,12 @@ cmd_status() {
     else say "No test in progress"
     fi
     say "HEAD: $(head_desc)"
+    if [ -f "$PLUGINS" ]; then
+        local on=()
+        enabled plainday && on+=(Plainday)
+        enabled customjs && on+=(CustomJS)
+        say "Plugin: ${on[*]:-neither Plainday nor CustomJS} on; this commit runs on $([ "$(plugin_at HEAD)" = plainday ] && say Plainday || say CustomJS)"
+    fi
     local c
     c="$(changes)"
     if [ -n "$c" ]; then say "Changes:"; say "$c"; else say "Changes: none"; fi

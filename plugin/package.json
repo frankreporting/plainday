@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Plainday's own source: ES modules, which plugin/esbuild.config.mjs bundles with the class files into main.js. The repository's package.json is at the root.",
+  "type": "module",
+  "scripts": {
+    "preinstall": "node preinstall.mjs"
+  }
+}

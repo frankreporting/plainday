@@ -1,6 +1,6 @@
 # Obsidian PM
 
-An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, meeting logs, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and CustomJS scripts.
+An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, log notes, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and CustomJS scripts.
 
 This repository **is** a vault: the system in `Config/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference, not a plugin: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
 
@@ -17,7 +17,7 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS"): *ToggleTimeEntry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *DueDate* `⇧⌘D`, *JumpToDate* `⌘J`, *AddProjectLink* `⌥⌘P`, *MoveToProject* `⌥⌘M`, and *Daily notes: Open today's daily note*.
+6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS", where each name is written without spaces: *ToggleTimeEntry* for *Toggle time entry*): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 7. Open `Welcome.md`.
 
 Optional: the `writing` class and `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in `Config/Table Settings.md` (see the manual's *Freezing tables*).
@@ -45,7 +45,7 @@ Projects/
       Kestrel Outfitters 2026.md
       Kestrel Outfitters 2026 timesheet.md   every entry, with its invoice (the time report writes it)
       Draft homepage wireframes.md a task note (#task)
-      ›logs/                       meeting logs for the project
+      ›logs/                       log notes for the project
         2026-09-14 Homepage review with Imogen.md
       Kestrel Fall Catalog/        a sub-project: a project folder inside a project
     Pinecrest Library Brochure/
@@ -62,6 +62,8 @@ Reference/
   Planner/
     days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
 Welcome.md                         start here
+plugin/                            Plainday, the plugin built from Config/Scripts/CustomJS (build, host, command list, tests)
+manifest.json, package.json        Plainday's manifest, and its build (npm run build)
 ```
 
 Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
@@ -76,9 +78,9 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `2026w38` | Weekly Note | Moved to `Planner/weeks`, alias `Week of 9/13/26` |
 | `2026-09` | Monthly Note | Moved to `Planner/months`, alias `September 2026` |
 | `2026` | Yearly Note | Moved to `Planner/years` |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Meeting log: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *AddProjectLink* or *MoveToProject*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|⋯]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
-| `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *MoveToProject*; dates are dropped from the title |
-| `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *MoveToProject*; dates become `start`/`due` |
+| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Log note: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *Add project link* or *Move to project*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|⋯]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
+| `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *Move to project*; dates are dropped from the title |
+| `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *Move to project*; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
 | `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `People` / `Entities` |
 | anything else | Empty Note | `id` and `tags` frontmatter |
@@ -118,31 +120,29 @@ A daily note is one checklist, events first, then tasks; anything else goes unde
 - [ ] Pick the paper stock [[Pinecrest Library Brochure|⭕]] [[Write brochure copy#^p7d2qe|↗]] ^p7d2qe
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `⋯` the line's own note (a task's note, or an event's meeting log), filed in that project, and `↗` the note *Schedule* sent the line from, if any. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
+`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `⋯` the line's own note (a task's note, or an event's log note), filed in that project, and `↗` the note *Schedule* sent the line from, if any. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
 
-The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, meeting logs, the calendar sync and folding.
+The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, log notes, the calendar sync and folding.
 
-## Commands (CustomJS)
+## Commands
 
-Run from the command palette ("CustomJS: …"), a hotkey, or `obsidian command id=customjs:invoke-<Name>`.
+Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts. Until it has a release to install, the steps above run the same scripts through CustomJS, which names each command by its older name, without spaces ("CustomJS: AddTaskNote", `customjs:invoke-AddTaskNote`, for *Add note*, and *CalendarSync* for *Sync calendars*), and also has *SnapshotDailyNotes*, *RefoldDailyNotes* and *CalendarSyncRange*.
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
 | Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; on a nested task it moves the task above it. One already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line; a finished task reopens |
-| DueDate | `⇧⌘D` | Sets the `🚩 M/D` due date on every line of the task, replacing one already there, and its task note's `due` |
-| AddTaskNote | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and puts its ⋯ on every line of the task; on an event line, links a meeting log |
-| AddProjectLink | `⌥⌘P` | On a line in a daily, weekly, monthly or yearly note, says which project (`⭕`) or area (`🗃️`) its task belongs to: every line of the task changes, its note moves with the task note or log it's a subtask of, and its line in a project note goes to the new `## To Do`. It asks before a note leaves a project or time moves, and refuses to move billed time |
-| MoveToProject | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area, and its tasks and subtasks follow: a log into its `›logs/`, a project with its whole folder. Picking the project a note is already in puts its lines right. Also *Move to project…* in the file menus |
-| ToggleTimeEntry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
+| Due date | `⇧⌘D` | Sets the `🚩 M/D` due date on every line of the task, replacing one already there, and its task note's `due` |
+| Add note | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and puts its ⋯ on every line of the task; on an event line, links a log note |
+| Add project link | `⌥⌘P` | On a line in a daily, weekly, monthly or yearly note, says which project (`⭕`) or area (`🗃️`) its task belongs to: every line of the task changes, its note moves with the task note or log it's a subtask of, and its line in a project note goes to the new `## To Do`. It asks before a note leaves a project or time moves, and refuses to move billed time |
+| Move to project | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area, and its tasks and subtasks follow: a log into its `›logs/`, a project with its whole folder. Picking the project a note is already in puts its lines right. Also *Move to project…* in the file menus |
+| Toggle time entry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
-| ConvertToProject | | Turns the selection into a new project folder and note |
-| CalendarSync | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
-| CalendarSyncRange | | Picks how far ahead to sync, then syncs |
-| TimeReport | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note, and lists every Problem in the error log |
-| ViewErrorLogs | | Opens the error log: every Problem the time report and the calendar sync found, one line per kind per note |
+| Convert to project | | Turns the selection into a new project folder and note |
+| Sync calendars | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
+| Time report | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note, and lists every Problem in the error log |
+| View error logs | | Opens the error log: every Problem the time report and the calendar sync found, one line per kind per note |
 | Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick (on a flat-fee project, records the day its fee was earned); on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
-| UpdateObsidianPM | | Installs this repository's system files into your vault from a local clone (see below) |
-| RefoldDailyNotes / SnapshotDailyNotes | | Keep daily notes folded around outside edits (the calendar sync calls them) |
+| Update Obsidian PM | | Installs this repository's system files into your vault from a local clone (see below) |
 
 The manual's *Commands* section says exactly what each one does.
 
@@ -155,13 +155,13 @@ Startup scripts (run when Obsidian starts):
 | MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
 | TrailingLinks | Draws the 🚩, forward date, ⭕, 🗃️, ⋯ and ↗ links that end a task or event line small, at the right of the line, and hides a task's ID until the cursor reaches it (Live Preview) |
 | CheckOff | A tick on either line of a sent task (its `[>]` source line or its open line on a day) checks off both, where they are, and a click on a `[>]` box asks first: Mark done, Cancel it or Do nothing |
-| TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While CustomJS is still reloading its scripts, it waits a few seconds for them, and otherwise skips with a console warning |
+| TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While the scripts are still loading, it waits a few seconds for them, and otherwise skips with a console warning |
 
 ## Scripts outside Obsidian
 
 | Script | What it does |
 | --- | --- |
-| `Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`, each event with its status and its free/busy availability; *CalendarSync* runs it |
+| `Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`, each event with its status and its free/busy availability; *Sync calendars* runs it |
 | `Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
 | `Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
 
@@ -177,13 +177,15 @@ From the vault root, with Node 20 or later:
 node --test "Config/Scripts/tests/*.test.mjs"
 ```
 
+For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and nothing left of CustomJS's hooks.
+
 Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
 
 ## Working on it
 
 Changes go through pull requests from a git worktree outside the vault, and are tested one at a time in the clone itself, opened in Obsidian as a vault of its own and driven by `dev-vault.sh`. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
 
-GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top.
+GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that Plainday builds and its bundle tests pass, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top.
 
 ### Using it for your own notes
 

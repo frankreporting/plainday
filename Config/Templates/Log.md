@@ -20,9 +20,11 @@ if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.h
 // AddTaskNote files a task's note. Otherwise it waits in Inbox, with no menu (OBS-55), and is filed
 // afterwards: AddProjectLink on its line or MoveToProject on the log moves it and sets the line's
 // ⭕, so the line and its log agree on where the meeting's time counts (OBS-90).
-const sync = typeof customJS !== "undefined" ? customJS.CalendarSync : null;
-const schedule = typeof customJS !== "undefined" ? customJS.Schedule : null;
-const tasks = typeof customJS !== "undefined" ? customJS.AddTaskNote : null;
+// The system's classes: Plainday's, or CustomJS's in a vault that hasn't moved to Plainday (OBS-226)
+const system = typeof plainday !== "undefined" ? plainday : typeof customJS !== "undefined" ? customJS : null;
+const sync = system?.CalendarSync ?? null;
+const schedule = system?.Schedule ?? null;
+const tasks = system?.AddTaskNote ?? null;
 const day = window.moment(logDate, "YYYY-MM-DD", true);
 const dailyPath = schedule && day.isValid() ? schedule.dailyNotePath(day) : null;
 const dailyFile = dailyPath ? app.vault.getFileByPath(dailyPath) : null;
@@ -85,10 +87,10 @@ if (pending) {
 // calendar sync's own helpers do the matching and the sorting.
 let times = null;
 if (!sync || !schedule) {
-	new Notice("CustomJS isn't loaded, so this log wasn't recorded in its daily note");
+	new Notice("Plainday isn't on, so this log wasn't recorded in its daily note");
 } else if (!day.isValid()) {
 	new Notice(logDate + " isn't a date, so this log wasn't recorded in a daily note");
-} else if (dailyFile && customJS.TimeReport?.oldMarkLines?.([{ text: await app.vault.cachedRead(dailyFile) }])) {
+} else if (dailyFile && system.TimeReport?.oldMarkLines?.([{ text: await app.vault.cachedRead(dailyFile) }])) {
 	// Until the one-time conversion has run, a 🗒️ link isn't read as a log's (OBS-208), so the line that
 	// already links this log wouldn't be found, and a second one would be added
 	new Notice(dailyPath + " still has lines ending in a 🗒️ or 🔗 link, so this log wasn't recorded there: run the one-time conversion first (see the manual's Links at the end of a line)", 0);
@@ -118,7 +120,7 @@ if (!sync || !schedule) {
 			dailyText = recorded;
 		} else {
 			await app.vault.process(dailyNote, (text) => (dailyText = record(text).text));
-			try { await customJS.RefoldDailyNotes?.onLeave?.(dailyNote); } catch (e) { console.error("Log template: couldn't snapshot the folds", e); }
+			try { await system.RefoldDailyNotes?.onLeave?.(dailyNote); } catch (e) { console.error("Log template: couldn't snapshot the folds", e); }
 		}
 		times = tp.user.eventTimes(dailyText, logName);
 	} catch (e) {

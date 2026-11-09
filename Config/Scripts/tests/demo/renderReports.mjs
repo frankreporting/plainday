@@ -67,12 +67,13 @@ export function loadBilling(root = ROOT) {
     return new Billing();
 }
 
-// Every file in the vault, as vault-relative paths; dot folders (.obsidian, .git) are skipped
+// Every file in the vault, as vault-relative paths; dot folders (.obsidian, .git) are skipped, and
+// so is node_modules, which Plainday's build puts in a worktree
 export function listFiles(root = ROOT) {
     const out = [];
     const walk = (dir) => {
         for (const d of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
-            if (d.name.startsWith(".")) continue;
+            if (d.name.startsWith(".") || d.name === "node_modules") continue;
             const rel = dir ? `${dir}/${d.name}` : d.name;
             if (d.isDirectory()) walk(rel);
             else out.push(rel);

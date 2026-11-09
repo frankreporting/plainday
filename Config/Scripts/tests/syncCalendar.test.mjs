@@ -162,3 +162,20 @@ test("on without a plist says so and changes nothing", () => {
         return true;
     });
 });
+
+test("a vault with Plainday on is synced through Plainday's command; with CustomJS on, through CustomJS's (OBS-226)", () => {
+    const { dir, run, forget } = setUp({ running: true });
+    const plugins = path.join(dir, "vault", ".obsidian", "community-plugins.json");
+    fs.mkdirSync(path.dirname(plugins), { recursive: true });
+    fs.writeFileSync(plugins, JSON.stringify(["templater-obsidian", "plainday"], null, 2));
+    let { out, calls } = run();
+    assert.match(out, /Obsidian synced the calendar/);
+    assert.match(calls, /^obsidian vault=vault command id=plainday:sync-calendars$/m);
+    assert.doesNotMatch(calls, /customjs/);
+
+    forget();
+    fs.writeFileSync(plugins, JSON.stringify(["templater-obsidian", "customjs"], null, 2));
+    ({ calls } = run());
+    assert.match(calls, /^obsidian vault=vault command id=customjs:invoke-CalendarSync$/m);
+    assert.doesNotMatch(calls, /plainday/);
+});

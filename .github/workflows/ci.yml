@@ -38,6 +38,21 @@ jobs:
       - name: No numbered folders (OBS-81)
         run: node .github/ci/checkFolders.mjs
 
+  plugin:
+    name: Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build Plainday (main.js)
+        run: npm run build
+      - name: Bundle tests
+        run: npm test
+
   privacy:
     name: Privacy
     if: github.event_name == 'pull_request'
