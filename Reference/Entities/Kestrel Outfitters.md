@@ -1,7 +1,6 @@
 ---
 id: 2026082710385571
 aliases:
-- "@Kestrel Outfitters"
 tags: 
 email: hello@kestrel-outfitters.example
 phone: 555-0100

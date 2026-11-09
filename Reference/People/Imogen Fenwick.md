@@ -1,7 +1,6 @@
 ---
 id: 2026082710412290
 aliases:
-- "@Imogen Fenwick"
 tags: 
 phone: 555-0142
 email: imogen@kestrel-outfitters.example

@@ -1,7 +1,6 @@
 ---
 id: 2026090109281204
 aliases:
-  - "@Friends of Pinecrest Library"
 tags: 
 email: 
 phone: 555-0172

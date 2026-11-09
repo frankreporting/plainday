@@ -54,19 +54,17 @@ Projects/
     Garden Club Newsletter/
     Block Party Poster/
 Reference/
-  Entities/                        organizations (@)
+  Entities/                        organizations
   Invoices/                        every invoice, with Invoices.base as the folder's note (Invoice Settings' `folder`)
     1001-KES.md
   Notes/                           general notes
-  People/                          people (@)
+  People/                          people
   Planner/
     days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
-  Sources/                         source notes (¶)
-  Subjects/                        maps of content (§)
 Welcome.md                         start here
 ```
 
-Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`, `@Person`, `§ Subject`, `¶ Source`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
+Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
 
 ## Creating notes: the title picks the template
 
@@ -89,7 +87,6 @@ Other templates, inserted with Templater:
 
 | Template | Purpose |
 | --- | --- |
-| Subject | Prompts for a subject and creates its note in `Subjects` |
 | Writing Mode | Toggles a `writing` CSS class on the note (hotkey) |
 | Metadata Callout | Inserts a `[!metadata]` callout |
 | Formula | Inserts a table formula comment |

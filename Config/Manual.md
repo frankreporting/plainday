@@ -50,8 +50,6 @@ Reference/
   People/
   Planner/
     days/ weeks/ months/ years/  the periodic notes
-  Sources/
-  Subjects/
 ```
 
 Area and project names are yours; the top-level folders and `Planner` are what the scripts expect.
@@ -60,15 +58,12 @@ Area and project names are yours; the top-level folders and `Planner` are what t
 
 | Type | Symbol | Alias | Where | Typed with (US Mac keyboard) |
 | --- | --- | --- | --- | --- |
-| Source note | ¶ | `¶ Source Note` (in the filename) | `Reference/Sources` | `⌥7` |
-| Person or entity | @ | `@Imogen Fenwick`, `@Kestrel Outfitters` | `People`, `Entities` | `⇧2` |
-| Subject | § | `§ Pricing` | `Subjects` | `⌥6` |
 | Project | ⭕ | `⭕.Freelance.Kestrel Outfitters 2026` | a folder inside an area or project | dot notation |
 | Area | 🗃️ | `🗃️.Freelance` | a folder inside `Projects` | dot notation |
 
 - Special note types get an alias that starts with their symbol. The Quick Switcher then groups them, and typing the symbol filters to that type.
-- Source notes are the exception: the symbol is in the filename itself.
-- The symbols are all on the iOS emoji and symbol keyboards, so they're easy to type on a phone too.
+- The symbols are all on the iOS emoji keyboard, so they're easy to type on a phone too.
+- The marks on a line are explained where they're used: ⋯, ↗, ⭕, 🗃️ and 🚩 under *Links at the end of a line*, and 🆓 under *Tasks and time tracking*.
 
 ## Note properties
 
@@ -76,10 +71,9 @@ Area and project names are yours; the top-level folders and `Planner` are what t
 - Daily and monthly notes are the exception: their frontmatter is only an alias (see *The periodic notes*).
 - Notes are made by Templater, and `Config/Templates/Get Template.md` picks the template from the title you type. A note made any other way (a script, the CLI) needs its frontmatter written the same way by hand.
 
-## Subjects, people and entities
+## People and entities
 
-- A **subject** is any topic, broad or narrow, with enough notes around it to deserve a hub: what's often called a map of content. Subjects are the top of the reference hierarchy and live in `Subjects`, tagged `subject`. `§ Pricing` in the demo is one.
-- **People** (`People`) and **entities** (`Entities`: companies, organizations) both take an `@` alias. A person's `affiliation` links their entity. A project's `client` links the entity the work is for, and its `bill_to` the one that pays, when that's someone else.
+- **People** go in `People` and **entities** (companies, organizations) in `Entities`; `!person` and `!entity` make their notes. A person's `affiliation` links their entity. A project's `client` links the entity the work is for, and its `bill_to` the one that pays, when that's someone else.
 
 ## Areas, projects and task notes
 
@@ -346,14 +340,14 @@ With the [Selectable Tables](https://github.com/frankreporting/selectable-tables
 
 In daily notes, links to other notes go at the **end** of the line, each with a symbol alias:
 
-| Suffix | Points to | Added by |
-| --- | --- | --- |
-| `[[Task name\|⋯]]` | The line's own note: a task's note, or an event's meeting log | *AddTaskNote*, *Schedule*, the calendar sync, the Log template |
-| `[[Note#^id\|↗]]` | The task's line in the note *Schedule* sent the line from: a task note, a log or a plain note (never a project or area note, which the line's ⭕ names). Clicking it opens that note at the line. | *Schedule* |
-| `[[Project\|⭕]]` | The project the line's time counts toward, where its note is filed | *AddProjectLink*; *AddTaskNote*, *Schedule* and the Log template, for the note's project; *Schedule*, when the source is tagged `#project` |
-| `[[Area\|🗃️]]` | The area the line's time counts toward, where its note is filed | The same, for an area; *Schedule*, when the source is tagged `#area` |
-| `[[YYYY-MM-DD\|🚩 M/D]]` | The due date (that day's daily note) | *DueDate* |
-| `[[YYYY-MM-DD#^id\|M/D]]` | The forward date: where a sent task is now, with its line | *Schedule* |
+| Symbol | Points to | Added by | Example |
+| --- | --- | --- | --- |
+| ⋯ | The line's own note: a task's note, or an event's meeting log | *AddTaskNote*, *Schedule*, the calendar sync, the Log template | `[[Task name\|⋯]]` |
+| ↗ | The task's line in the note *Schedule* sent the line from: a task note, a log or a plain note (never a project or area note, which the line's ⭕ names). Clicking it opens that note at the line. | *Schedule* | `[[Note#^id\|↗]]` |
+| ⭕ | The project the line's time counts toward, where its note is filed | *AddProjectLink*; *AddTaskNote*, *Schedule* and the Log template, for the note's project; *Schedule*, when the source is tagged `#project` | `[[Project\|⭕]]` |
+| 🗃️ | The area the line's time counts toward, where its note is filed | The same, for an area; *Schedule*, when the source is tagged `#area` | `[[Area\|🗃️]]` |
+| 🚩 | The due date (that day's daily note) | *DueDate* | `[[YYYY-MM-DD\|🚩 M/D]]` |
+| M/D | The forward date: where a sent task is now, with its line | *Schedule* | `[[YYYY-MM-DD#^id\|M/D]]` |
 
 ```markdown
 - [<] 10:00am	Homepage review with Imogen [[Kestrel Outfitters 2026|⭕]] [[2026-09-14 Homepage review with Imogen|⋯]]
