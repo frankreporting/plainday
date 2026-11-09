@@ -150,6 +150,16 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         },
     };
     const view = { editor, file: fileOf(open), currentMode: { getFoldInfo: () => null } };
+    // Reading view (OBS-245), as CheckOff reads it: the note as drawn (its renderer's text, here the live text, since
+    // reading view has no edits of its own), the section a box is drawn in, and whether a box is this view's own or
+    // an embed's. A box (readingBox) says which view drew it. reading(true) switches the open note to it.
+    let readingMode = false;
+    view.getMode = () => (readingMode ? "preview" : "source");
+    view.previewMode = {
+        containerEl: { contains: (el) => el?.view === view },
+        // `lastText`, the text the page was drawn from, is the live text unless a test sets it (a redraw pending)
+        renderer: { get text() { return vault.get(editing) ?? ""; }, lastText: undefined, getSectionContainer: (el) => el?.section ?? null, belongsToMe: (el) => !el?.embedded },
+    };
     const byName = (name) => [...vault.keys()].map(fileOf).find((f) => f.path.replace(/\.md$/, "").toLowerCase() === name.toLowerCase() || f.basename.toLowerCase() === name.toLowerCase()) ?? null;
     const listeners = new Set();
     const changed = (file) => { for (const l of [...listeners]) if (l.name === "changed") l.fn(file); };
@@ -250,7 +260,13 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
     const frontMatter = (text) => { const m = text.match(/^---\r?\n([\s\S]*?)\r?\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
     const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter } };
-    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, console: { ...console, error: () => {}, info: () => {} } });
+    // MutationObserver for CheckOff's watch on Task Status's menu: `observers` lets a test say a dialog opened or closed
+    const observers = [];
+    // A dialog up: Task Status's picker ("prompt", a SuggestModal) or the system's own question ("question")
+    let dialogUp = false;
+    const page = { body: {}, querySelector: (sel) => (dialogUp && (sel === ".modal-container" || (sel === ".modal-container .prompt" && dialogUp === "prompt")) ? {} : null) };
+    const MutationObserver = class { constructor(fn) { this.fn = fn; this.on = false; observers.push(this); } observe() { this.on = true; } disconnect() { this.on = false; } };
+    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, MutationObserver, console: { ...console, error: () => {}, info: () => {} } });
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
     Object.assign(customJS, {
@@ -344,6 +360,76 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         },
         // A click on the cursor's line's box, as Obsidian toggles it: [ ] becomes [x], anything else [ ]
         async click(options = {}) { return this.box(customJS.CheckOff.constructor.markOf(lines[cursor]) === " " ? "x" : " ", options); },
+        // The open note in reading view (true) or editing view (false)
+        reading(on = true) { flush(); readingMode = on; },
+        // A dialog up ("prompt", Task Status's picker, or "question", the system's) or not (false), on the page
+        // readingBox's boxes are drawn on, telling the observers
+        dialog(on) { dialogUp = on === true ? "prompt" : on; for (const o of observers) if (o.on) o.fn(); },
+        // The box of line `line` (default the cursor's) as reading view draws it: in the section that starts at
+        // `start` (default the first line of the line's block, the paragraph or list it's in), its `data-line`
+        // counted from there, and its list item's `data-task` the line's mark (or `mark`), empty for a space, as
+        // Obsidian draws it. `inside` names what it's
+        // drawn in (".callout", ".markdown-embed"), `embedded` a box an embed's renderer drew, and `modal` a dialog up.
+        readingBox({ line = cursor, start = null, dataLine = null, mark = null, inside = [], embedded = false, modal = false } = {}) {
+            // Drawn from the text the page shows: the renderer's lastText while a redraw is pending
+            const ls = (view.previewMode.renderer.lastText ?? vault.get(editing) ?? "").split("\n");
+            let s0 = start ?? line;
+            if (start === null) while (s0 > 0 && ls[s0 - 1].trim() !== "" && ls[s0 - 1] !== "---") s0--;
+            // Obsidian draws `[ ]`'s data-task empty (seen in 1.15.1)
+            const drawn = mark ?? customJS.CheckOff.constructor.markOf(ls[line]), task = drawn === " " ? "" : drawn;
+            const matches = (sel) => sel.split(",").map((x) => x.trim()).some((x) => inside.includes(x));
+            return {
+                view, embedded, section: { start: { line: s0 } },
+                getAttribute: (name) => (name === "data-line" ? String(dataLine ?? line - s0) : null),
+                closest: (sel) => (sel === "li" ? { getAttribute: (name) => (name === "data-task" ? task : null) } : matches(sel) ? {} : null),
+                ownerDocument: modal ? { body: {}, querySelector: (sel) => (sel.startsWith(".modal-container") ? {} : null) } : page,
+            };
+        },
+        // A click on a box in reading view (readingBox's options), then what CheckOff does, as its click listener
+        // runs it: the question answered with `answer`, `before(spec)` run while it's up. A click CheckOff leaves
+        // alone is Obsidian's: it toggles the box and saves the note. { asked, left }: the question's spec or null,
+        // and whether the click was left to Obsidian.
+        async readClick({ answer = null, before = null, ...where } = {}) {
+            tick();
+            const C = customJS.CheckOff, file = view.file, box = this.readingBox(where);
+            const job = C.readingClick(box);
+            if (!job) {
+                const at = box.section.start.line + Number(box.getAttribute("data-line"));
+                await app.vault.process(file, (t) => { const ls = t.split("\n"); ls[at] = ls[at].replace(/\[(.)\]/, (m, c) => `[${c === " " ? "x" : " "}]`); return ls.join("\n"); });
+                return { asked: null, left: true };
+            }
+            if (job.tick) { await C.tickRead(job.tick); return { asked: null, left: false }; }
+            let spec = null;
+            C.choose = async (s) => { spec = s; questions.push(s); await before?.(s); return answer; };
+            await C.ask(job.ask);
+            return { asked: spec, left: false };
+        },
+        // Task Status's menu opened from the box of line `press` (default the cursor's) in reading view, picking
+        // `mark`: the press noted (pressed), the menu's dialog up, its write of line `line` (default the pressed one)
+        // through the vault, as Task Status makes it, and CheckOff told of the change (modified), its jobs run in
+        // turn, a question it asks answered with `answer`. `between()` runs while the menu is up, before the pick.
+        // The question's spec, or null.
+        async menu(mark, { answer = null, press = cursor, line = press, between = null } = {}) {
+            tick();
+            const C = customJS.CheckOff, file = view.file;
+            const jobs = [], asks = [], enqueue = C.enqueue, askLater = C.askLater;
+            C.enqueue = (job) => jobs.push(job);
+            C.askLater = (args) => asks.push(args);
+            try {
+                C.pressed(this.readingBox({ line: press }));
+                this.dialog(true);
+                await between?.();
+                await app.vault.process(file, (t) => { const ls = t.split("\n"); ls[line] = ls[line].replace(/\[(.)\]/, `[${mark}]`); return ls.join("\n"); });
+                this.dialog(false);
+                await C.modified(file);
+                while (jobs.length) await jobs.shift()();
+            } finally { C.enqueue = enqueue; C.askLater = askLater; this.dialog(false); C.unwatch(); }
+            let spec = null;
+            C.choose = async (s) => { spec = s; questions.push(s); return answer; };
+            for (const a of asks) await C.ask(a);
+            return spec;
+        },
+        observers,
         questions, origins,
         file: fileOf,
     };

@@ -570,3 +570,417 @@ test("a note open in reading view is written and read through the vault, never t
     assert.equal(lineOf(v, day("2026-09-18"), "Send final copy"), OPEN);
     assert.equal(lineOf(v, COPY, "Send final copy"), "- [>] Send final copy to Rafe [[2026-09-18#^p7d2qe|9/18]] ^p7d2qe");
 });
+
+// ------------------------------------------------------------------ reading view (OBS-245)
+
+// The stand-in with `path` open in reading view, its box on line `at` the one clicked
+const reading = (n, path, at, lag) => {
+    const v = standIn({ notes: n, open: path, at, lag });
+    v.reading();
+    return v;
+};
+
+scenario("reading view: a click on the open line checks off the source, unticking puts it back, and every write goes through the vault", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const origins = v.origins.length;
+    assert.deepEqual(plain(await v.readClick()), { asked: null, left: false });
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+    await v.readClick();
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN);
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE);
+    assert.deepEqual(v.check(), []);
+    assert.equal(v.origins.length, origins, "nothing went through an editor");
+    assert.deepEqual(plain(v.notices), []);
+    assert.equal(v.notes()[TODAY], "- [ ] Water the plants\n");
+});
+
+scenario("reading view: a click on the source's [>] box asks, with the box held at [>], and Do nothing or Esc changes nothing", async ({ lag }) => {
+    for (const answer of ["Do nothing", null]) {
+        const v = reading(notes(), COPY, 7, lag);
+        const before = v.notes();
+        const { asked, left } = await v.readClick({ answer, before: () => assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE, "held while asked") });
+        assert.deepEqual(plain(asked), ASKED);
+        assert.equal(left, false);
+        assert.deepEqual(v.notes(), before, String(answer));
+        assert.deepEqual(v.check(), []);
+    }
+});
+
+scenario("reading view: Mark done, then unticking the source, then Cancel it and a click on the canceled open line, as in Live Preview", async ({ lag }) => {
+    const v = reading(notes(), COPY, 7, lag);
+    await v.readClick({ answer: "Mark done" });
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+    // The source, now [x], unticked: no question, and both are open again where they are
+    assert.equal((await v.readClick()).asked, null);
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN);
+    assert.deepEqual(v.check(), []);
+    await v.readClick({ answer: "Cancel it" });
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[-]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [-] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    v.open(day("2026-09-17"), 1);
+    v.reading();
+    await v.readClick();
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN);
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE);
+    assert.deepEqual(v.check(), []);
+    assert.deepEqual(plain(v.notices), []);
+});
+
+scenario("reading view: a task open in a monthly note asks with the month, and Mark done finishes it there", async ({ lag }) => {
+    const v = reading(notes(), GARDEN, 5, lag);
+    const { asked } = await v.readClick({ answer: "Mark done" });
+    assert.equal(asked.title, "This task is scheduled for Sep. 2026. What would you like to do?");
+    assert.equal(v.notes()[MONTH], `${PHOTOS_OPEN.replace("[ ]", "[x]")}\n`);
+    assert.equal(lineOf(v, GARDEN, "Collect member photos"), PHOTOS_SOURCE.replace("[>]", "[x]"));
+    await v.readClick();
+    assert.equal(v.notes()[MONTH], `${PHOTOS_OPEN}\n`);
+    assert.equal(lineOf(v, GARDEN, "Collect member photos"), PHOTOS_SOURCE);
+    assert.deepEqual(v.check(), []);
+});
+
+scenario("reading view: an earlier day's [>] line of a finished task asks Do nothing or Reopen today", async ({ lag }) => {
+    const v = reading(WIRE_NOTES(), day("2026-09-14"), 0, lag);
+    const before = v.notes();
+    const { asked } = await v.readClick({ answer: "Do nothing" });
+    assert.deepEqual(plain(asked), { title: "This task was completed on Tue 9/15. What would you like to do?", name: "Draft homepage wireframes", buttons: ["Do nothing", "Reopen today"], cta: "Do nothing" });
+    assert.deepEqual(v.notes(), before);
+    await v.readClick({ answer: "Reopen today" });
+    assert.equal(v.notes()[TODAY], `- [ ] Water the plants\n- [/] ${WIRE}\n`);
+    assert.deepEqual(plain(v.notices), ["Reopened on 9/16"]);
+    assert.deepEqual(v.check(), []);
+});
+
+scenario("reading view: a click CheckOff leaves alone is Obsidian's, changing only its line: no ID, nested, outside the system, an event, a callout, an embed, a dialog up", async ({ lag }) => {
+    const cases = [
+        { name: "no ID", notes: { [day("2026-09-15")]: "- [>] Call the printer\n" }, open: day("2026-09-15"), at: 0 },
+        { name: "nested", notes: { [day("2026-09-15")]: "- [ ] Brochure\n\t- [>] Book the studio [[2026-09-18#^b5st0d|9/18]] ^b5st0d\n", [day("2026-09-18")]: "- [ ] Book the studio ^b5st0d\n" }, open: day("2026-09-15"), at: 1 },
+        { name: "outside", notes: { "Reference/Ideas.md": "- [>] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe\n" }, open: "Reference/Ideas.md", at: 0 },
+        { name: "event", notes: { [day("2026-09-15")]: "- [>] [[2026-09-18|9/18]] 1:00pm\tCall with Rafe ^c1rafe\n", [day("2026-09-18")]: "- [<] 1:00pm\tCall with Rafe ^c1rafe\n" }, open: day("2026-09-15"), at: 0 },
+        { name: "callout", open: COPY, at: 7, where: { inside: [".callout"] } },
+        { name: "embed", open: COPY, at: 7, where: { inside: [".markdown-embed", ".internal-embed"] } },
+        { name: "embed's renderer", open: COPY, at: 7, where: { embedded: true } },
+        { name: "in the editor", open: COPY, at: 7, where: { inside: [".cm-editor"] } },
+        { name: "a dialog up", open: COPY, at: 7, where: { modal: true } },
+        { name: "drawn with another mark", open: COPY, at: 7, where: { mark: " " } },
+        // Its section's first line read wrong: the line found is First draft, whose mark isn't the box's
+        { name: "drawn on another line", open: COPY, at: 7, where: { start: 5, dataLine: 1 } },
+    ];
+    for (const c of cases) {
+        const v = reading(notes(c.notes), c.open, c.at, lag);
+        const before = v.notes();
+        const r = await v.readClick({ answer: "Mark done", ...c.where });
+        assert.deepEqual(plain(r), { asked: null, left: true }, c.name);
+        const at = c.at - (c.where?.start === 5 ? 1 : 0);
+        const line = before[c.open].split("\n")[at];
+        const want = { ...before, [c.open]: before[c.open].split("\n").map((l, i) => (i === at ? l.replace(/\[(.)\]/, (m, k) => `[${k === " " ? "x" : " "}]`) : l)).join("\n") };
+        assert.deepEqual(v.notes(), want, `${c.name}: only ${line} changed`);
+        assert.equal(v.notices.length, 0, c.name);
+    }
+});
+
+scenario("reading view: a line that changed since reading view drew it gets nothing written, and a notice says so", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const C = v.customJS.CheckOff;
+    const job = C.readingClick(v.readingBox());
+    assert.equal(job.tick.want, "x");
+    // A change reaching the note between the drawing and the click (Sync, say)
+    await v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace("Send final copy to Rafe [[Pine", "Send the final copy to Rafe [[Pine"));
+    const before = v.notes();
+    await C.tickRead(job.tick);
+    assert.deepEqual(v.notes(), before);
+    assert.deepEqual(plain(v.notices), ["This line changed just before the click, so nothing was written"]);
+});
+
+scenario("reading view: a line moved by a line added above it since the drawing is still found, by its ID", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const C = v.customJS.CheckOff;
+    const job = C.readingClick(v.readingBox());
+    await v.app.vault.process(v.file(day("2026-09-17")), (t) => `- [ ] Call the framer\n${t}`);
+    await C.tickRead(job.tick);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.notices.length, 0);
+});
+
+test("readingLine finds a box's line as Obsidian does, its section's first line plus its data-line, however long the note", () => {
+    const C = vm.runInContext(`${src("checkOff")}\n;CheckOff`, vm.createContext({}));
+    const long = Array.from({ length: 3000 }, (_, i) => (i === 2995 ? "- [>] Near the end [[2026-09-17#^e1nd00|9/17]] ^e1nd00" : i % 7 === 0 ? "" : `- [ ] Task ${i}`)).join("\n");
+    const at = C.readingLine(long, 2990, "5", ">");
+    assert.equal(at.line, 2995);
+    assert.equal(at.text, "- [>] Near the end [[2026-09-17#^e1nd00|9/17]] ^e1nd00");
+    assert.equal(at.lineAt(2994), "- [ ] Task 2994");
+    // The mark drawn must be the line's; no section, a bad data-line, a line past the end or not a box: nothing
+    assert.equal(C.readingLine(long, 2990, "5", " "), null);
+    for (const [start, dl, mark] of [[null, "5", ">"], [2990, null, ">"], [2990, "-1", ">"], [2990, "x5", ">"], [2990, "5", null], [2999, "5", " "], [0, "0", " "]]) assert.equal(C.readingLine(long, start, dl, mark), null, JSON.stringify([start, dl, mark]));
+    // Windows line ends, and `[ ]` drawn with an empty data-task, as Obsidian 1.15.1 draws it
+    assert.equal(C.readingLine("a\r\n- [ ] B ^bbbbbb\r\n", 1, "0", "").text, "- [ ] B ^bbbbbb");
+    assert.equal(C.readingLine("- [x] B ^bbbbbb", 0, "0", ""), null);
+});
+
+test("lineRange spans the lines that differ, past those both versions start and end with", () => {
+    const C = vm.runInContext(`${src("checkOff")}\n;CheckOff`, vm.createContext({}));
+    assert.equal(C.lineRange(["a", "b"], ["a", "b"]), null);
+    assert.deepEqual(plain(C.lineRange(["a", "- [ ] b", "c"], ["a", "- [x] b", "c"])), { fromA: 1, toA: 1, fromB: 1, toB: 1 });
+    assert.deepEqual(plain(C.lineRange(["a", "b", "c"], ["a", "x", "b", "c"])), { fromA: 1, toA: 0, fromB: 1, toB: 1 });
+});
+
+// ------------------------------------------------------------------ Task Status's menu in reading view
+
+scenario("reading view: Task Status's menu setting the open line done checks off the source, and todo puts it back", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    assert.equal(await v.menu("x"), null);
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+    await v.menu(" ");
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN);
+    assert.deepEqual(v.check(), []);
+    assert.equal(v.notices.length, 0);
+});
+
+scenario("reading view: Task Status's menu setting in progress or todo on the source's [>] box puts it back to [>] and asks; Do nothing leaves it", async ({ lag }) => {
+    for (const mark of ["/", " "]) {
+        const v = reading(notes(), COPY, 7, lag);
+        const before = v.notes();
+        const asked = await v.menu(mark, { answer: "Do nothing" });
+        assert.deepEqual(plain(asked), ASKED, JSON.stringify(mark));
+        assert.deepEqual(v.notes(), before, JSON.stringify(mark));
+        assert.deepEqual(v.check(), []);
+    }
+    const v = reading(notes(), COPY, 7, lag);
+    await v.menu("/", { answer: "Mark done" });
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+});
+
+scenario("reading view: Task Status's menu setting done on the source's [>] box completes the task at once, and on an earlier day's [>] line too", async ({ lag }) => {
+    const v = reading(notes(), COPY, 7, lag);
+    assert.equal(await v.menu("x"), null, "no question");
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+    const s = "- [>] Book the studio [[2026-09-18#^b5st0d|9/18]] ^b5st0d";
+    const worked = "- [>] Book the studio [[Pinecrest Library Brochure|⭕]] [[Write brochure copy#^b5st0d|↗]] ^b5st0d";
+    const w = reading(notes({ [COPY]: copyNote(`${SOURCE}\n${s}`), [day("2026-09-15")]: `${worked}\n\t- 9:00am - 9:30am\n`, [day("2026-09-18")]: `${worked.replace("[>]", "[/]")}\n` }), day("2026-09-15"), 0, lag);
+    assert.equal(await w.menu("x"), null);
+    assert.equal(w.notes()[day("2026-09-15")], `${worked}\n\t- 9:00am - 9:30am\n`, "that line goes back to [>]");
+    assert.equal(w.notes()[day("2026-09-18")], `${worked.replace("[>]", "[x]")}\n`);
+    assert.deepEqual(w.check(), []);
+});
+
+scenario("reading view: Task Status's menu changing another line than the one pressed (its count off in a long note) is followed on the line it changed", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 0, lag);
+    // Pressed on line 0, written on line 1
+    await v.menu("x", { line: 1 });
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+});
+
+test("the watch on Task Status's menu: a press noted in reading view, kept once a dialog opens, taken by that note's next change of boxes only; a click forgets it", async () => {
+    const v = reading(notes(), day("2026-09-17"), 1);
+    const C = v.customJS.CheckOff, file = v.file(day("2026-09-17"));
+    const jobs = [];
+    C.enqueue = (job) => jobs.push(job);
+    // A press that ends with no dialog up (a click) is forgotten
+    C.pressed(v.readingBox());
+    assert.equal(C.menu.path, file.path);
+    C.released();
+    assert.equal(C.menu, null);
+    // A press whose dialog opened: another note's change isn't it, and this note's first change is
+    C.pressed(v.readingBox());
+    const w = C.menu, ob = v.observers.at(-1);
+    assert.equal(ob.on, true);
+    v.dialog(true);
+    assert.equal(w.seen, true);
+    C.released();
+    assert.equal(C.menu, w, "a long press, released with the menu up");
+    // The menu closes: still the menu's change for MENU_MS (menuTakes)
+    v.dialog(false);
+    assert.equal(typeof w.closed, "number");
+    await C.modified(v.file(COPY));
+    assert.equal(jobs.length, 0, "another note's change");
+    // A change that isn't only boxes (a save from another pane) isn't the menu's: it's what the menu's is compared with
+    await v.app.vault.process(file, (t) => t.replace("Renew the car registration", "Renew the car registration today"));
+    await C.modified(file);
+    assert.equal(jobs.length, 0, "not only boxes");
+    assert.equal(C.menu, w);
+    await v.app.vault.process(file, (t) => t.replace(OPEN, OPEN.replace("[ ]", "[x]")));
+    await C.modified(file);
+    assert.equal(jobs.length, 1, "the menu's");
+    assert.equal(C.menu, null);
+    assert.equal(ob.on, false);
+    await C.modified(file);
+    assert.equal(jobs.length, 1, "only the first change");
+    // No press in the editor, an embed, or with a dialog already up
+    for (const where of [{ inside: [".cm-editor"] }, { embedded: true }, { modal: true }, { inside: [".callout"] }]) {
+        C.pressed(v.readingBox(where));
+        assert.equal(C.menu ?? null, null, JSON.stringify(where));
+    }
+    // A note outside the system
+    const o = reading(notes({ "Reference/Ideas.md": "- [ ] Send final copy to Rafe ^p7d2qe\n" }), "Reference/Ideas.md", 0);
+    o.customJS.CheckOff.pressed(o.readingBox());
+    assert.equal(o.customJS.CheckOff.menu ?? null, null);
+});
+
+test("menuTakes: once a dialog opened after the press, while it's up and until MENU_MS after it closes, for that note only", () => {
+    const C = vm.runInContext(`${src("checkOff")}\n;CheckOff`, vm.createContext({}));
+    const w = { path: "a.md", seen: true, closed: null };
+    assert.equal(C.menuTakes(w, "a.md", 5000), true);
+    assert.equal(C.menuTakes(w, "b.md", 5000), false);
+    assert.equal(C.menuTakes({ ...w, seen: false }, "a.md", 5000), false);
+    assert.equal(C.menuTakes({ ...w, closed: 1000 }, "a.md", 1000 + C.MENU_MS), true);
+    assert.equal(C.menuTakes({ ...w, closed: 1000 }, "a.md", 1001 + C.MENU_MS), false);
+    assert.equal(C.menuTakes(null, "a.md", 0), false);
+});
+
+test("menuChanges: only the lines whose box alone changed", () => {
+    const C = vm.runInContext(`${src("checkOff")}\n;CheckOff`, vm.createContext({}));
+    const a = "- [>] A ^aaaaaa\n- [ ] B ^bbbbbb\ntext", b = "- [/] A ^aaaaaa\n- [ ] B, now ^bbbbbb\ntext";
+    assert.deepEqual(plain(C.menuChanges(a, b)), [{ line: 0, was: 0, before: "- [>] A ^aaaaaa", after: "- [/] A ^aaaaaa" }]);
+    assert.deepEqual(plain(C.menuChanges(a, a)), []);
+    assert.deepEqual(plain(C.menuChanges("- [ ] A ^aaaaaa", "- [x] A, now ^aaaaaa")), []);
+    // Two changes far apart, as many lines as before: each line on its own, however far (no MAX_LINES)
+    const far = Array.from({ length: 400 }, (_, i) => `- [ ] T${i} ^t${String(i).padStart(5, "0")}`);
+    const farB = far.map((l, i) => (i === 3 ? l.replace("T3", "T3, typed") : i === 380 ? l.replace("[ ]", "[x]") : l));
+    assert.deepEqual(plain(C.menuChanges(far.join("\n"), farB.join("\n")).map((c) => c.line)), [380]);
+    // A line added as well: not the menu's
+    assert.deepEqual(plain(C.menuChanges(far.join("\n"), [...farB, "- [ ] new"].join("\n"))), []);
+});
+
+scenario("reading view: the calendar sync setting an event's box while Task Status's menu is up isn't the menu's: the pick that follows is", async ({ lag }) => {
+    const ev = "- [<] 3:00pm\tPrinter call ^p1nt3r";
+    const v = reading(notes({ [day("2026-09-17")]: `- [ ] Homepage build: category pages\n${OPEN}\n${ev}\n` }), day("2026-09-17"), 1, lag);
+    const sync = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace(ev, ev.replace("[<]", "[-]"))).then(() => v.customJS.CheckOff.modified(v.file(day("2026-09-17"))));
+    await v.menu("x", { between: sync });
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+});
+
+scenario("reading view: Task Status's menu while a save from another pane lands first: the save is passed over, and the pick followed", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const save = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace("- [ ] Homepage build: category pages", "- [ ] Homepage build: category pages, and the footer")).then(() => v.customJS.CheckOff.modified(v.file(day("2026-09-17"))));
+    await v.menu("x", { between: save });
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(v.check(), []);
+});
+
+test("the click listener's part for reading view stops a click only when CheckOff takes it, and runs what it takes", () => {
+    const v = reading(notes(), COPY, 7);
+    const C = v.customJS.CheckOff;
+    const jobs = [], asks = [];
+    C.enqueue = (job) => jobs.push(job);
+    C.askLater = (args) => asks.push(args);
+    const event = () => ({ stopped: 0, preventDefault() { this.stopped++; }, stopImmediatePropagation() { this.stopped++; } });
+    // A [>] box: stopped and asked about
+    const e1 = event();
+    assert.equal(C.readingClicked(e1, v.readingBox()), true);
+    assert.equal(e1.stopped, 2);
+    assert.deepEqual(plain(asks.map((a) => [a.line, a.text, a.want, a.read])), [[7, SOURCE, " ", true]]);
+    // A line it leaves alone: not stopped, nothing run
+    const e2 = event();
+    assert.equal(C.readingClicked(e2, v.readingBox({ line: 6 })), false);
+    assert.equal(e2.stopped, 0);
+    // A box on a day's open line: stopped, a tick run
+    const d = reading(notes(), day("2026-09-17"), 1);
+    const D = d.customJS.CheckOff, dj = [];
+    D.enqueue = (job) => dj.push(job);
+    const e3 = event();
+    assert.equal(D.readingClicked(e3, d.readingBox()), true);
+    assert.equal(e3.stopped, 2);
+    assert.equal(dj.length, 1);
+    // readingClick throwing (reading view changed): the click is Obsidian's
+    D.readingClick = () => { throw new Error("changed"); };
+    const e4 = event();
+    assert.equal(D.readingClicked(e4, d.readingBox()), false);
+    assert.equal(e4.stopped, 0);
+});
+
+scenario("reading view: a second click before the first was drawn finds its line already as it would make it, and does nothing", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const C = v.customJS.CheckOff;
+    const first = C.readingClick(v.readingBox()), second = C.readingClick(v.readingBox());
+    await C.tickRead(first.tick);
+    await C.tickRead(second.tick);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+    assert.deepEqual(plain(v.notices), [], "no notice");
+});
+
+scenario("reading view: a click while a change waits to be drawn reads the line the page shows, and finds it in the note by its ID", async ({ lag }) => {
+    const v = reading(notes(), day("2026-09-17"), 1, lag);
+    const R = v.app.workspace.activeLeaf.view.previewMode.renderer;
+    // Sync adds a line at the top; the page still shows the note as it was, its sections' lines unmoved
+    R.lastText = R.text;
+    await v.app.vault.process(v.file(day("2026-09-17")), (t) => `- [ ] Call the framer ^c4fr4m\n${t}`);
+    const job = v.customJS.CheckOff.readingClick(v.readingBox({ start: 0, dataLine: 1, mark: " " }));
+    assert.equal(job.tick.text, OPEN, "the line the page shows, not the one now under it");
+    await v.customJS.CheckOff.tickRead(job.tick);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
+    assert.equal(lineOf(v, day("2026-09-17"), "Homepage build"), "- [ ] Homepage build: category pages");
+    assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
+});
+
+scenario("reading view: a double click on a done source unticks it once, with no notice", async ({ lag }) => {
+    const v = reading(notes(), COPY, 7, lag);
+    await v.readClick({ answer: "Mark done" });
+    const C = v.customJS.CheckOff;
+    const first = C.readingClick(v.readingBox()), second = C.readingClick(v.readingBox());
+    await C.tickRead(first.tick);
+    await C.tickRead(second.tick);
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE);
+    assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN);
+    assert.deepEqual(plain(v.notices), []);
+});
+
+scenario("reading view: a [>] line that changed since reading view drew it asks nothing, and a notice says so", async ({ lag }) => {
+    const v = reading(notes(), COPY, 7, lag);
+    const C = v.customJS.CheckOff;
+    const job = C.readingClick(v.readingBox());
+    await v.app.vault.process(v.file(COPY), (t) => t.replace(SOURCE, SOURCE.replace("Send final copy", "Send the final copy")));
+    let asked = 0;
+    C.choose = async () => { asked++; return "Mark done"; };
+    const before = v.notes();
+    await C.ask(job.ask);
+    assert.equal(asked, 0);
+    assert.deepEqual(v.notes(), before);
+    assert.deepEqual(plain(v.notices), ["This line changed just before the click, so nothing was written"]);
+});
+
+test("only Task Status's picker keeps a press noted: the system's own question opening after it doesn't", () => {
+    const v = reading(notes(), COPY, 7);
+    const C = v.customJS.CheckOff;
+    C.pressed(v.readingBox({ line: 6 }));
+    const w = C.menu;
+    v.dialog("question");
+    assert.equal(w.seen, false);
+    C.released();
+    assert.equal(C.menu, null, "forgotten on release");
+    v.dialog(false);
+    C.pressed(v.readingBox({ line: 6 }));
+    v.dialog("prompt");
+    assert.equal(C.menu.seen, true);
+    v.dialog(false);
+    C.unwatch();
+});
+
+scenario("Task Status opening a [>] box is put back and asked about on its line where it is now, after a job before it moved it", async ({ lag }) => {
+    const v = reading(notes(), COPY, 7, lag);
+    const C = v.customJS.CheckOff, f = v.file(COPY);
+    const before = await v.app.vault.cachedRead(f);
+    await v.app.vault.process(f, (t) => t.replace(SOURCE, SOURCE.replace("[>]", "[/]")));
+    const changes = C.constructor.menuChanges(before, await v.app.vault.cachedRead(f));
+    assert.equal(changes[0].line, 7);
+    // A line added above it before the follow runs
+    await v.app.vault.process(f, (t) => t.replace("Copy for the six panels.", "Copy for the six panels.\nAnd a map."));
+    const asks = [];
+    C.askLater = (args) => asks.push(args);
+    await C.followMenu(f, changes);
+    assert.deepEqual(plain(asks.map((a) => [a.line, a.text, a.want])), [[8, SOURCE, "/"]]);
+    assert.equal(lineOf(v, COPY, "Send final copy"), SOURCE, "back to [>]");
+});
