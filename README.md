@@ -8,12 +8,12 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 
 ## Try it
 
-1. Clone or download this repository into a folder named `Plainday Demo`, for example `git clone https://github.com/frankreporting/obsidian-pm.git "Plainday Demo"`, and in Obsidian choose **Open folder as vault**. Obsidian names a vault after its folder.
+1. Clone or download this repository into a folder named `Plainday Demo`, for example `git clone https://github.com/frankreporting/plainday.git "Plainday Demo"`, and in Obsidian choose **Open folder as vault**. Obsidian names a vault after its folder.
 2. **Settings → Community plugins:** turn on community plugins, then install and enable:
 	- [Templater](https://github.com/SilentVoid13/Templater), whose settings for this vault are already in the repository
 	- [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
 	- [BRAT](https://github.com/TfTHacker/obsidian42-brat), which installs Plainday until the community directory lists it
-3. **Install Plainday:** run **BRAT: Plugins: Add a beta plugin for testing (with or without version)** from the command palette, enter `frankreporting/obsidian-pm`, choose *Latest version*, leave *Enable after installing the plugin* on, and click *Add plugin*. BRAT installs the latest release into `.obsidian/plugins/plainday/` and keeps it up to date. While this repository is private, BRAT first needs a GitHub personal access token that can read it: a classic token (`ghp_…`) with the `repo` scope, or a fine-grained one (`github_pat_…`) with read access to the repository's contents. Add it under Settings → BRAT → *GitHub Personal Access Token*; Obsidian keeps it in its secret storage, apart from the vault's files. Without one, BRAT reports a 404 and installs nothing.
+3. **Install Plainday:** run **BRAT: Plugins: Add a beta plugin for testing (with or without version)** from the command palette, enter `frankreporting/plainday`, choose *Latest version*, leave *Enable after installing the plugin* on, and click *Add plugin*. BRAT installs the latest release into `.obsidian/plugins/plainday/` and keeps it up to date.
 4. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
 5. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
 6. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `Inbox`.
@@ -169,7 +169,7 @@ Startup scripts (run when Obsidian starts):
 
 ## Raycast
 
-[Obsidian PM for Raycast](https://github.com/frankreporting/obsidian-pm-raycast), a separate extension, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with this vault's own `timeReport.js`, the logic behind ⌘T.
+*Obsidian PM for Raycast*, a separate extension that isn't published yet, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with this vault's own `timeReport.js`, the logic behind ⌘T.
 
 ## Tests
 
