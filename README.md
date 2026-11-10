@@ -1,8 +1,8 @@
 # Obsidian PM
 
-An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, log notes, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and CustomJS scripts.
+An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, log notes, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and the scripts in Plainday, the plugin this repository builds.
 
-This repository **is** a vault: the system in `Config/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference, not a plugin: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
+This repository **is** a vault: the system in `Config/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference: it assumes the folder layout and conventions below, and the calendar fetcher is macOS-only.
 
 This README covers trying it and installing it. **[The manual](<Config/Manual.md>)** (`Config/Manual.md`) is the full description: how daily notes are written, what every command and script does to them, and how the time report and calendar sync decide what they do.
 
@@ -10,15 +10,15 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 
 1. Clone or download this repository into a folder named `Plainday Demo`, for example `git clone https://github.com/frankreporting/obsidian-pm.git "Plainday Demo"`, and in Obsidian choose **Open folder as vault**. Obsidian names a vault after its folder.
 2. **Settings → Community plugins:** turn on community plugins, then install and enable:
-	- [Templater](https://github.com/SilentVoid13/Templater)
-	- [CustomJS](https://github.com/saml-dev/obsidian-custom-js)
+	- [Templater](https://github.com/SilentVoid13/Templater), whose settings for this vault are already in the repository
 	- [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
-   Their settings for this vault are already in the repository.
-3. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
-4. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
-5. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `Inbox`.
-6. **Optional hotkeys** (Settings → Hotkeys, search "CustomJS", where each name is written without spaces: *ToggleTimeEntry* for *Toggle time entry*): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
-7. Open `Welcome.md`.
+	- [BRAT](https://github.com/TfTHacker/obsidian42-brat), which installs Plainday until the community directory lists it
+3. **Install Plainday:** run **BRAT: Plugins: Add a beta plugin for testing (with or without version)** from the command palette, enter `frankreporting/obsidian-pm`, choose *Latest version*, leave *Enable after installing the plugin* on, and click *Add plugin*. BRAT installs the latest release into `.obsidian/plugins/plainday/` and keeps it up to date. While this repository is private, BRAT first needs a GitHub personal access token that can read it: a classic token (`ghp_…`) with the `repo` scope, or a fine-grained one (`github_pat_…`) with read access to the repository's contents. Add it under Settings → BRAT → *GitHub Personal Access Token*; Obsidian keeps it in its secret storage, apart from the vault's files. Without one, BRAT reports a 404 and installs nothing.
+4. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
+5. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
+6. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `Inbox`.
+7. **Optional hotkeys** (Settings → Hotkeys, search "Plainday"): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
+8. Open `Welcome.md`.
 
 Optional: the `writing` class and `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in `Config/Table Settings.md` (see the manual's *Freezing tables*).
 
@@ -64,6 +64,8 @@ Reference/
 Welcome.md                         start here
 plugin/                            Plainday, the plugin built from Config/Scripts/CustomJS (build, host, command list, tests)
 manifest.json, package.json        Plainday's manifest, and its build (npm run build)
+versions.json                      each release's oldest Obsidian (npm version)
+eslint.config.mjs                  Obsidian's lint, and its baseline in eslint-suppressions.json (npm run lint)
 ```
 
 Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
@@ -126,7 +128,7 @@ The manual's *Daily notes* section is the full spec, and the one agents follow: 
 
 ## Commands
 
-Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts. Until it has a release to install, the steps above run the same scripts through CustomJS, which names each command by its older name, without spaces ("CustomJS: AddTaskNote", `customjs:invoke-AddTaskNote`, for *Add note*, and *CalendarSync* for *Sync calendars*), and also has *SnapshotDailyNotes*, *RefoldDailyNotes* and *CalendarSyncRange*.
+Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts. A vault that still runs the same scripts through CustomJS, as installs did before Plainday's first release, names each command by its older name, without spaces ("CustomJS: AddTaskNote", `customjs:invoke-AddTaskNote`, for *Add note*, and *CalendarSync* for *Sync calendars*), and also has *SnapshotDailyNotes*, *RefoldDailyNotes* and *CalendarSyncRange*.
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
@@ -177,7 +179,7 @@ From the vault root, with Node 20 or later:
 node --test "Config/Scripts/tests/*.test.mjs"
 ```
 
-For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and nothing left of CustomJS's hooks.
+For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and nothing left of CustomJS's hooks. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
 
 Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
 
@@ -185,16 +187,16 @@ Scripts are loaded the way CustomJS and Templater load them, and the parts that 
 
 Changes go through pull requests from a git worktree outside the vault, and are tested one at a time in the clone itself, opened in Obsidian as a vault of its own and driven by `dev-vault.sh`. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
 
-GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that Plainday builds and its bundle tests pass, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top.
+GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that Plainday builds, its bundle tests and Obsidian's lint pass, what merging would release, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top. Merging a pull request that raises Plainday's version publishes a release (`.github/workflows/release.yml`); `CLAUDE.md` (*Releases*) says how to cut one.
 
 ### Using it for your own notes
 
 Don't make your own vault a copy of this repository: it carries the sample notes, and their paths (daily notes, weekly notes, `Projects/`) would collide with yours.
 
-Instead, clone this repository somewhere outside your vault, and install the system with the **Update Obsidian PM** command:
+Instead, install Plainday in your vault, clone this repository somewhere outside it, and install the rest of the system (the templates, bases and manual) with the **Update Obsidian PM** command:
 
-1. Copy `Config/Scripts/CustomJS/updateObsidianPM.js` from the clone into your vault's `Config/Scripts/CustomJS/` (once, by hand), and add `UpdateObsidianPM` to the CustomJS plugin's invocable scripts.
-2. Run **CustomJS: UpdateObsidianPM** from the command palette. It asks where your clone is the first time.
+1. Install Templater, Natural Language Dates (Revived) and BRAT, then Plainday through BRAT, as in *Try it* (steps 2 and 3).
+2. Run **Plainday: Update Obsidian PM** from the command palette. It asks where your clone is the first time.
 3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
 
 What it installs: everything the repository has under `Config/` (the manual included), plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.

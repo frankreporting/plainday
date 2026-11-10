@@ -645,7 +645,7 @@ Copy `Config/Scripts/Style Settings/pm-invoice.css` into `.obsidian/snippets/` a
 
 ## Commands
 
-The system's commands come from the Plainday plugin, and run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id: `obsidian command id=plainday:add-note`. Each id is the command's name in lower case with hyphens (`plainday:due-date`), apart from *Sync calendars* (`plainday:sync-calendars`). A vault that runs the system through CustomJS instead, as the README's install does until Plainday has a release, shows the older names and ids, with no spaces: *Add note* is "CustomJS: AddTaskNote" there (`customjs:invoke-AddTaskNote`), and *Sync calendars* is *CalendarSync*. The hotkeys below are suggestions; set them under Settings → Hotkeys. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
+The system's commands come from the Plainday plugin, and run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id: `obsidian command id=plainday:add-note`. Each id is the command's name in lower case with hyphens (`plainday:due-date`), apart from *Sync calendars* (`plainday:sync-calendars`). A vault that still runs the system through CustomJS, as installs did before Plainday's first release, shows the older names and ids, with no spaces: *Add note* is "CustomJS: AddTaskNote" there (`customjs:invoke-AddTaskNote`), and *Sync calendars* is *CalendarSync*. The hotkeys below are suggestions; set them under Settings → Hotkeys. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
 
 ### Typing a date
 
@@ -839,7 +839,7 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 ## Plugins
 
-**Required:** Plainday, the plugin this repository builds from the scripts in `Config/Scripts/CustomJS/`, or until it has a release, CustomJS (script folder `Config/Scripts/CustomJS/`), which runs the same scripts; Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
+**Required:** Plainday, the plugin this repository builds from the scripts in `Config/Scripts/CustomJS/`, installed through BRAT from the repository's releases until the community directory lists it (see the README), or in a vault installed before Plainday's first release, CustomJS (script folder `Config/Scripts/CustomJS/`), which runs the same scripts; Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
 
 **Recommended:**
 

@@ -52,6 +52,31 @@ jobs:
         run: npm run build
       - name: Bundle tests
         run: npm test
+      # Obsidian's lint (OBS-230; CLAUDE.md, "Lint"). The summary never fails: it puts the
+      # warnings' count by rule on the job's page. The lint fails on an error the baseline
+      # (eslint-suppressions.json) doesn't let through, on a baseline entry whose error is
+      # fixed, and on any warning in Plainday's own code.
+      - name: Obsidian lint summary
+        run: |
+          npx eslint . --format json --output-file "$RUNNER_TEMP/lint.json" || true
+          node .github/ci/lintSummary.mjs "$RUNNER_TEMP/lint.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Obsidian lint
+        run: npm run lint
+      # What merging would release (CLAUDE.md, "Releases"): the same script and files as
+      # .github/workflows/release.yml, kept for a week to download
+      - name: Release dry run
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/ci/release.mjs dry-run --out "$RUNNER_TEMP/release"
+      - name: Keep the release's files
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plainday-release
+          path: ${{ runner.temp }}/release/
+          retention-days: 7
+          if-no-files-found: error
 
   privacy:
     name: Privacy
@@ -92,3 +117,11 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: node .github/ci/checkPR.mjs
+      - name: Plainday's version files agree, and the version doesn't go down
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/ci/checkVersion.mjs
+      - name: The lint baseline doesn't grow
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/ci/checkBaseline.mjs

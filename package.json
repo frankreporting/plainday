@@ -8,9 +8,16 @@
     "preinstall": "node plugin/preinstall.mjs",
     "build": "node plugin/esbuild.config.mjs",
     "dev": "node plugin/esbuild.config.mjs --watch",
-    "test": "node --test plugin/test/*.test.mjs"
+    "test": "node --test plugin/test/*.test.mjs",
+    "lint": "eslint --quiet . && eslint --max-warnings 0 plugin/src manifest.json package.json LICENSE",
+    "lint:prune": "eslint --quiet . --prune-suppressions",
+    "version": "node plugin/version-bump.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "eslint": "10.14.0",
+    "eslint-plugin-obsidianmd": "0.5.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2"
   }
 }

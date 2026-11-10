@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { build, rewrite, CLASSES } from "../esbuild.config.mjs";
+import { build, rewrite, CLASSES, ROOT } from "../esbuild.config.mjs";
 import { COMMANDS, STARTUP, CUSTOMJS_ONLY } from "../src/commands.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "plainday-bundle-"));
@@ -127,6 +127,12 @@ test("no CustomJS hook or customJS global is left in the bundle", () => {
         assert.doesNotMatch(text, p);
     }
     assert.doesNotMatch(text, /disablePlugin|enablePlugin/, "UpdateObsidianPM's offer to reload CustomJS is left out");
+});
+
+test("the bundle names no folder on the machine that built it, so a build anywhere matches the release (OBS-230)", () => {
+    const text = fs.readFileSync(BUNDLE, "utf8");
+    assert.ok(!text.includes(ROOT), `main.js names ${ROOT}`);
+    assert.match(text, /^\/\/ plainday-class:schedule\.js$/m, "each class by its file name");
 });
 
 test("unloading runs every deconstructor and removes the global", () => {

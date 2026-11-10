@@ -131,7 +131,9 @@ function classesPlugin(dir, rewrites) {
         name: "plainday-classes",
         setup(build) {
             build.onResolve({ filter: /^plainday:classes$/ }, () => ({ path: "classes", namespace: "plainday" }));
-            build.onResolve({ filter: /^plainday:class\// }, (args) => ({ path: path.join(dir, args.path.slice("plainday:class/".length)), namespace: "plainday-class" }));
+            // By file name, not the absolute path: esbuild writes the path into main.js as a comment, and
+            // the community directory rebuilds the release in its own folder to compare (OBS-230)
+            build.onResolve({ filter: /^plainday:class\// }, (args) => ({ path: args.path.slice("plainday:class/".length), namespace: "plainday-class" }));
             build.onLoad({ filter: /.*/, namespace: "plainday" }, () => {
                 const files = classFiles(dir);
                 const missing = rewrites.flatMap((r) => Object.keys(r.files).filter((f) => !files.includes(f)).map((f) => `${f}: REWRITES names it, but there's no such class file`));
@@ -141,11 +143,12 @@ function classesPlugin(dir, rewrites) {
                 return { contents: lines.join("\n"), loader: "js", resolveDir: here, watchDirs: [dir] };
             });
             build.onLoad({ filter: /.*/, namespace: "plainday-class" }, async (args) => {
-                const file = path.basename(args.path);
-                const { text, problems } = rewrite(file, await fs.promises.readFile(args.path, "utf8"), rewrites);
-                if (problems.length) return { errors: problems.map((p) => ({ text: p })), watchFiles: [args.path] };
+                const file = args.path;
+                const abs = path.join(dir, file);
+                const { text, problems } = rewrite(file, await fs.promises.readFile(abs, "utf8"), rewrites);
+                if (problems.length) return { errors: problems.map((p) => ({ text: p })), watchFiles: [abs] };
                 const host = "import { customJS, app, loaded as plainday$loaded, registerEditorExtension as plainday$registerEditorExtension }";
-                return { contents: `${host} from ${JSON.stringify(HOST)}; export default (${text}\n);\n`, loader: "js", resolveDir: dir, watchFiles: [args.path] };
+                return { contents: `${host} from ${JSON.stringify(HOST)}; export default (${text}\n);\n`, loader: "js", resolveDir: dir, watchFiles: [abs] };
             });
         },
     };
