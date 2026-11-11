@@ -57,7 +57,7 @@ class DatePrompt {
 
         // Revived says when the words name a whole period ("next week", "this month"); the original
         // plugin doesn't, and everything is a day
-        let period = null;
+        let period;
         try { period = nld.parser?.getParsedPeriod?.(t, nld.settings?.weekStart) ?? null; } catch (e) { period = null; }
         if (period && period.granularity !== "day" && typeof period.date?.getTime === "function" && !isNaN(period.date.getTime())) {
             const start = DatePrompt.localDate(period.date);
@@ -101,7 +101,7 @@ class DatePrompt {
     chronoRead(nld, text, now) {
         const parser = nld.parser;
         if (typeof parser?.getParsedDateResult !== "function") return null;
-        let date = null, words = "", yearless = false;
+        let date, words, yearless;
         try {
             const d = parser.getParsedDateResult(text, now, { forwardDate: true });
             date = d ? DatePrompt.localDate(d) : null;

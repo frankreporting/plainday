@@ -6,7 +6,7 @@
 // because Templater loads its own scripts, and CustomJS can be mid-reload, with every class gone,
 // exactly when synced notes and script updates arrive together.
 
-const FRONTMATTER = /^﻿?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
+const FRONTMATTER = /^\uFEFF?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
 
 function arrivedNote(text) {
     const s = String(text ?? "");

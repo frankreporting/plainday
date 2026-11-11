@@ -285,9 +285,10 @@ test("check 5: a block ID of your own twice in one note, never sent, isn't a tas
     assert.deepEqual(run([{ path: "days/2026-10-08.md", kind: "day", text: "- [ ] Weekly review ^review\n- [ ] Weekly review ^review" }]), []);
 });
 
-test("TRAIL_ITEM is AddTaskNote.TRAIL_ITEM, kept as a copy by hand (OBS-185)", () => {
+test("TRAIL_ITEM and trailItem are AddTaskNote's, kept as copies by hand (OBS-185, OBS-199)", () => {
     const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({}));
     // One writes the U+FE0F as itself, the other as ️
     assert.equal(TaskIds.TRAIL_ITEM.source.replace(/️/g, "\\uFE0F"), AddTaskNote.TRAIL_ITEM.source);
     assert.equal(TaskIds.TRAIL_ITEM.flags, AddTaskNote.TRAIL_ITEM.flags);
+    assert.equal(TaskIds.trailItem.toString().replaceAll("TaskIds.", "AddTaskNote."), AddTaskNote.trailItem.toString());
 });

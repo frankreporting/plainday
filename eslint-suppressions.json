@@ -1,17 +1,4 @@
 {
-  "Config/Scripts/CustomJS/addTaskNote.js": {
-    "obsidianmd/regex-lookbehind": {
-      "count": 1
-    }
-  },
-  "Config/Scripts/CustomJS/billing.js": {
-    "no-control-regex": {
-      "count": 1
-    },
-    "obsidianmd/regex-lookbehind": {
-      "count": 1
-    }
-  },
   "Config/Scripts/CustomJS/calendarSync.js": {
     "preserve-caught-error": {
       "count": 1
@@ -22,15 +9,7 @@
       "count": 1
     }
   },
-  "Config/Scripts/CustomJS/checkOff.js": {
-    "no-empty": {
-      "count": 1
-    }
-  },
   "Config/Scripts/CustomJS/datePrompt.js": {
-    "no-useless-assignment": {
-      "count": 4
-    },
     "obsidianmd/no-static-styles-assignment": {
       "count": 3
     }
@@ -40,44 +19,8 @@
       "count": 2
     }
   },
-  "Config/Scripts/CustomJS/newNoteGuard.js": {
-    "no-irregular-whitespace": {
-      "count": 1
-    }
-  },
   "Config/Scripts/CustomJS/plan.js": {
     "obsidianmd/no-static-styles-assignment": {
-      "count": 1
-    }
-  },
-  "Config/Scripts/CustomJS/schedule.js": {
-    "no-useless-assignment": {
-      "count": 1
-    }
-  },
-  "Config/Scripts/CustomJS/setDueDate.js": {
-    "no-irregular-whitespace": {
-      "count": 1
-    }
-  },
-  "Config/Scripts/CustomJS/taskIds.js": {
-    "obsidianmd/regex-lookbehind": {
-      "count": 2
-    }
-  },
-  "Config/Scripts/CustomJS/timeReport.js": {
-    "no-useless-assignment": {
-      "count": 1
-    },
-    "no-useless-escape": {
-      "count": 3
-    },
-    "obsidianmd/regex-lookbehind": {
-      "count": 6
-    }
-  },
-  "Config/Scripts/CustomJS/trailingLinks.js": {
-    "obsidianmd/regex-lookbehind": {
       "count": 1
     }
   },
@@ -90,16 +33,6 @@
     },
     "obsidianmd/no-static-styles-assignment": {
       "count": 2
-    }
-  },
-  "Config/Scripts/Templater/arrivedNote.js": {
-    "no-irregular-whitespace": {
-      "count": 1
-    }
-  },
-  "Config/Scripts/Templater/recordEvent.js": {
-    "obsidianmd/regex-lookbehind": {
-      "count": 1
     }
   }
 }

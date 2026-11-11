@@ -578,7 +578,7 @@ class CheckOff {
         ev.preventDefault();
         ev.stopImmediatePropagation();
         // As Obsidian's own click there does, on a phone that can
-        try { navigator.vibrate?.(100); } catch (e) {}
+        try { navigator.vibrate?.(100); } catch (e) { /* none on this device: nothing to do */ }
         if (job.ask) this.askLater(job.ask);
         else this.enqueue(() => this.tickRead(job.tick));
         return true;

@@ -49,7 +49,7 @@ class Billing {
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the invoice or draw anything (as TimeReport.tableText)
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/((?:\\\\)*)\\?\|/g, "$1\\|")
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 
@@ -351,7 +351,9 @@ class Billing {
         if (raw === undefined || raw === null) return { folder: "", error: null };
         const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
         const bad = { folder: "", error: `isn't a folder in the vault (${shown})` };
-        if (typeof raw !== "string" || /[\u0000-\u001f\u007f]/.test(raw)) return bad;
+        // A control character, U+0000 to U+001F or U+007F, found by its code: a pattern holding one
+        // fails the lint (OBS-199)
+        if (typeof raw !== "string" || [...raw].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return bad;
         const folder = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
         if (!folder) return { folder: "", error: null };
         const parts = folder.split("/");

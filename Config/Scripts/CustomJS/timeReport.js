@@ -109,11 +109,13 @@ class TimeReport {
     // as its src/editor/freeze-mark.ts reads it: the first one counts, spaces inside are fine, and one in a
     // code span is text. Beside it the report writes a label saying whose freeze it is: `%%default 2 1%%`,
     // its own default, or `%%custom%%`, yours. FREEZE_COMMENT is a comment as the report writes it, which
-    // defuse leaves whole: never next to another `%`, or after a `<` (Templater's `<%`).
+    // defuse leaves whole: never next to another `%`, or after a `<` (Templater's `<%`), which
+    // splitFreeze checks.
     static TABLE_SETTINGS = "Config/Table Settings.md";
     static FREEZE_MARK = /%%\s*freeze\s+(\d+)\s+(\d+)\s*%%/;
     static FREEZE_LABEL = /%%\s*(?:default\s+(\d+)\s+(\d+)|custom)\s*%%/;
-    static FREEZE_COMMENT = /((?<![%<])%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%))/;
+    static FREEZE_COMMENT = /%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%)/;
+    static FREEZE_COMMENTS = new RegExp(TimeReport.FREEZE_COMMENT.source, "g");
     static MAX_FROZEN_COLUMNS = 9;
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
@@ -143,10 +145,12 @@ class TimeReport {
     // The calendar sync's end-time line under an event: `4:30pm` on its own, or with a note after a
     // colon like an entry's (`4:30pm: 🆓 not billing this`)
     static END_LINE = new RegExp(String.raw`^(${TimeReport.TIME})(?:\s*:\s*(.*?))?\s*$`, "i");
-    // 🆓 as a word of its own on a task or event line (a phone may add U+FE0F); links come out first
-    static FREE_WORD = /(?<=^|[\s(\[])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/u;
-    static FREE_WORDS = /(?<=^|[\s(\[])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/gu;
-    static EMPTY_BRACKETS = /\s*[(\[]\s*[)\]]/g;
+    // 🆓 as a word of its own on a task or event line (a phone may add U+FE0F); links come out first.
+    // The character before it is part of the match, since older iPhones can't run a lookbehind
+    // (OBS-199): a replace of FREE_WORDS puts it back with "$1".
+    static FREE_WORD = /(?:^|[\s([])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/u;
+    static FREE_WORDS = /(^|[\s([])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/gu;
+    static EMPTY_BRACKETS = /\s*[([]\s*[)\]]/g;
     static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
@@ -159,8 +163,12 @@ class TimeReport {
     // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
     // note's ⋯ or ↗, a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
     // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
-    // its date. A phone may add or drop the U+FE0F.
-    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    // its date. A phone may add or drop the U+FE0F. A date label (group 3) counts only on a link to a
+    // periodic note's line, which trailLink checks: read the links with it.
+    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
+    // name, then `#^` and an ID, `2026-09-17#^p7d2qe` (see periodicLine)
+    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/;
     // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
     static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
     // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
@@ -245,7 +253,7 @@ class TimeReport {
             while (rest) {
                 if (comment) {
                     const at = rest.indexOf(closer[comment]);
-                    if (at === -1) { rest = ""; break; }
+                    if (at === -1) break;
                     rest = rest.slice(at + closer[comment].length);
                     comment = null;
                     continue;
@@ -303,7 +311,7 @@ class TimeReport {
 
     // Whether an event line's body carries the free mark after its title (its ⭕ links and a 🆓 aside)
     freeEvent(body) {
-        return TimeReport.FREE_MARK.test(body.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
+        return TimeReport.FREE_MARK.test(body.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "$1").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
     }
 
     // Whether a task or event line carries 🆓 as a word of its own (links aside), which frees every
@@ -570,7 +578,7 @@ class TimeReport {
             .replace(TimeReport.SYMBOL_LINK, "")
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
             .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1");
-        return text.replace(TimeReport.FREE_WORDS, "").replace(TimeReport.EMPTY_BRACKETS, "")
+        return text.replace(TimeReport.FREE_WORDS, "$1").replace(TimeReport.EMPTY_BRACKETS, "")
             .replace(/\s+/g, " ")
             .trim()
             .replace(TimeReport.FREE_MARK, "")
@@ -691,7 +699,7 @@ class TimeReport {
         const marks = [], own = [], from = [], due = [];
         let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
         for (;;) {
-            const link = rest.match(TimeReport.TRAIL_LINK);
+            const link = this.trailLink(rest);
             if (link) {
                 const target = link[1].split(/[#^]/)[0].trim();
                 const symbol = link[2].replace(/[️\s]/g, "");
@@ -710,6 +718,29 @@ class TimeReport {
         const wrapped = notes.length ? null : rest.trim().match(TimeReport.WRAPPED_TITLE);
         const title = wrapped ? { target: wrapped[1].split(/[#^]/)[0].trim(), alias: "" } : null;
         return { marks: marks.filter((l) => l.target), notes, from, due, title: title?.target ? title : null };
+    }
+
+    // The link that ends `text` (TRAIL_LINK's match), or null. A date label counts only on a link to a
+    // periodic note's line: the text before the link's `|` ends with one (periodicLine). Older iPhones
+    // can't run that check in the pattern (a lookbehind), so it's made here (OBS-199). When it fails, no
+    // link ends the text: one starting later would need a `|` after this one's, and a date label has
+    // none. TrailingLinks.lastLink is the same.
+    trailLink(text) {
+        const m = text.match(TimeReport.TRAIL_LINK);
+        return m && (m[3] === undefined || this.periodicLine(text.slice(0, m.index + 2 + m[1].length))) ? m : null;
+    }
+
+    // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
+    // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
+    // ending in `/` with no `]`, `|` or `#`. It reads back from the ID, as the lookbehind did, so a line
+    // full of `[[` costs no more than its length.
+    periodicLine(before) {
+        const at = before.match(TimeReport.PERIODIC_LINE)?.index;
+        if (at === undefined) return false;
+        if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
+        if (before[at - 1] !== "/") return false;
+        for (let i = at - 2; i > 0 && !"]|#".includes(before[i]); i--) if (before[i] === "[" && before[i - 1] === "[") return true;
+        return false;
     }
 
     // Where a line's project is read when the line isn't one a top-level line can be: { project: null, … }
@@ -1703,12 +1734,28 @@ class TimeReport {
         return `${+m}/${+d}/${y.slice(2)}`;
     }
 
+    // The text split around its freeze comments, [text, comment, text, …, text], as a split on
+    // FREEZE_COMMENT would: one right after a `%` or a `<` isn't one. That's checked here, since older
+    // iPhones can't run a lookbehind (OBS-199).
+    splitFreeze(text) {
+        const re = TimeReport.FREEZE_COMMENTS, parts = [];
+        let at = 0;
+        re.lastIndex = 0;
+        for (let m; (m = re.exec(text));) {
+            if (m.index > 0 && "%<".includes(text[m.index - 1])) { re.lastIndex = m.index + 1; continue; }
+            parts.push(text.slice(at, m.index), m[0]);
+            at = re.lastIndex;
+        }
+        parts.push(text.slice(at));
+        return parts;
+    }
+
     // Text quoted from notes can't open a comment in the report and hide its end marker, or run as Templater.
     // Running it twice changes nothing more (OBS-184: a table's cells are defused before they're measured,
     // and the report's lines again after): `%%%` becomes `%`, a zero-width space, `%`, another, `%`, with no `%%` left.
     // A table's freeze comments are left whole (OBS-238): each closes itself, so it can't hide what follows.
     defuse(text) {
-        return String(text ?? "").split(TimeReport.FREEZE_COMMENT).map((part, i) => (i % 2 ? part
+        return this.splitFreeze(String(text ?? "")).map((part, i) => (i % 2 ? part
             : part.replace(/%(?=%)/g, "%\u200B").replace(/<!--/g, "<\u200B!--").replace(/-->/g, "--\u200B>")
                 .replace(/<%/g, "<\u200B%"))).join("");   // Templater syntax, which a device could run when the note syncs in
     }
@@ -2216,9 +2263,11 @@ class TimeReport {
 
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the note the table is in (a #project would make it a
-    // project) or draw anything. Billing.tableText does the same for invoices.
+    // project) or draw anything. Billing.tableText does the same for invoices. A `|` already escaped,
+    // after an odd number of backslashes, stays as it is: its last backslash is taken with it and
+    // written again.
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/(?<!\\)((?:\\\\)*)\|/g, "$1\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/((?:\\\\)*)\\?\|/g, "$1\\|")
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 
@@ -2543,7 +2592,8 @@ class TimeReport {
 
     // A header cell without its freeze comments, each with the spaces after it
     withoutFreeze(text) {
-        return String(text ?? "").replace(new RegExp(`${TimeReport.FREEZE_COMMENT.source}[ \\t]*`, "g"), "").trim();
+        return this.splitFreeze(String(text ?? "")).filter((_, i) => i % 2 === 0)
+            .map((part, i) => (i ? part.replace(/^[ \t]*/, "") : part)).join("").trim();
     }
 
     // How a table's heading is known from run to run: its numbers don't count (a timesheet's carry its
@@ -3690,9 +3740,10 @@ class TimeReport {
 
     // Refreshes the block in every project or area note that has entries or already has a block.
     // Returns { updated: how many were rewritten, broken: names of notes with broken markers }.
-    // A link for a table cell: the `|` before its alias escaped, so it doesn't end the cell
+    // A link for a table cell: the `|` before its alias escaped, so it doesn't end the cell (one
+    // escaped already is written again as it was)
     cell(text) {
-        return String(text).replace(/\[\[[^\]]*\]\]/g, (l) => l.replace(/(?<!\\)\|/g, "\\|"));
+        return String(text).replace(/\[\[[^\]]*\]\]/g, (l) => l.replace(/\\?\|/g, "\\|"));
     }
 
     // The project notes a report goes to: every project or area with time, counted or not, its parents, and
