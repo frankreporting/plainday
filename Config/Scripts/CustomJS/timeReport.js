@@ -167,8 +167,8 @@ class TimeReport {
     // periodic note's line, which trailLink checks: read the links with it.
     static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
-    // name, then `#^` and an ID, `2026-09-17#^p7d2qe` (see periodicLine)
-    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/;
+    // name, then `#^` and an ID, `2026-09-17#^p7d2qe`; periodicLine searches with it from a place
+    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/g;
     // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
     static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
     // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
@@ -732,10 +732,12 @@ class TimeReport {
 
     // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
     // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
-    // ending in `/` with no `]`, `|` or `#`. It reads back from the ID, as the lookbehind did, so a line
-    // full of `[[` costs no more than its length.
+    // ending in `/` with no `]`, `|` or `#`. It starts near the last `#`, as the lookbehind started at
+    // the end, so a long line costs no more than a short one.
     periodicLine(before) {
-        const at = before.match(TimeReport.PERIODIC_LINE)?.index;
+        const re = TimeReport.PERIODIC_LINE;
+        re.lastIndex = Math.max(0, before.lastIndexOf("#") - 10);
+        const at = re.exec(before)?.index;
         if (at === undefined) return false;
         if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
         if (before[at - 1] !== "/") return false;
@@ -2264,10 +2266,10 @@ class TimeReport {
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the note the table is in (a #project would make it a
     // project) or draw anything. Billing.tableText does the same for invoices. A `|` already escaped,
-    // after an odd number of backslashes, stays as it is: its last backslash is taken with it and
-    // written again.
+    // after an odd number of backslashes, stays as it is: a run of backslashes is read whole, with the
+    // pipe after it.
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/((?:\\\\)*)\\?\|/g, "$1\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/\\+\|?|\|/g, (m) => (m.endsWith("|") && m.length % 2 ? `${m.slice(0, -1)}\\|` : m))
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 

@@ -25,9 +25,9 @@ const arrivedNote = vm.runInContext(read("Templater/arrivedNote.js") + "\n;arriv
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const FE0F = String.fromCharCode(0xfe0f), BOM = String.fromCharCode(0xfeff), INFO = "ℹ" + FE0F;
 
-test("no lookbehind in a class file or a Templater script, in a pattern or a string made into one", () => {
+test("no lookbehind in a class file, a Templater script or Plainday's own code, in a pattern or a string made into one", () => {
     const found = [];
-    for (const dir of ["CustomJS", "Templater"]) {
+    for (const dir of ["CustomJS", "Templater", "../../plugin/src"]) {
         for (const name of fs.readdirSync(new URL(`../${dir}/`, here)).filter((n) => n.endsWith(".js"))) {
             read(`${dir}/${name}`).split("\n").forEach((line, i) => {
                 if (/\(\?<[=!]/.test(line)) found.push(`${dir}/${name}:${i + 1}`);
@@ -65,12 +65,20 @@ test("trailItem: the ℹ️ mark is part of a line's run after a space or a tab;
     }
 });
 
-test("trailItem: an item takes all the spaces before it, as the search's leftmost match", () => {
+test("trailItem: the Log template's is AddTaskNote's, read with its own pattern", () => {
+    const body = (f) => f.toString().replace(/^function /, "").replace(/AddTaskNote\./g, "").replace(/\s+/g, " ");
+    assert.equal(body(recordEvent.trailItem), body(AddTaskNote.trailItem));
+});
+
+test("trailItem: an item takes all the spaces before it, and a long run of them costs little", () => {
     const text = "- [ ] Book the venue   [[Kestrel Outfitters 2026|⭕]]";
     for (const trailItem of [(t) => AddTaskNote.trailItem(t), (t) => TaskIds.trailItem(t), (t) => recordEvent.trailItem(t)]) {
         const item = trailItem(text);
         assert.equal(item.index, text.indexOf("   ["));
         assert.equal(item[0], "   [[Kestrel Outfitters 2026|⭕]]");
+        const spaces = `- [ ] Book the venue${" ".repeat(20000)}x`, start = performance.now();
+        assert.equal(trailItem(spaces), null);
+        assert.ok(performance.now() - start < 50, "one pass over the spaces, not one from each");
     }
 });
 
@@ -155,6 +163,9 @@ test("tableText: a | already escaped stays as it is, the same in a report's tabl
         assert.equal(t.tableText(String.raw`a \\\| b`), String.raw`a \\\| b`, who);
         assert.equal(t.tableText("a || b"), String.raw`a \|\| b`, who);
         assert.equal(t.tableText(String.raw`a \ | b`), String.raw`a \ \| b`, who);
+        const backslashes = `a ${"\\".repeat(20000)} b`, start = performance.now();
+        assert.equal(t.tableText(backslashes), backslashes, `${who}: a long run of backslashes is read once`);
+        assert.ok(performance.now() - start < 50, who);
     }
 });
 
@@ -182,6 +193,7 @@ test("a freeze comment is kept whole, unless it's right after a % or a <", () =>
 test("Billing.folderOf refuses a folder name holding a control character", () => {
     for (const code of [0, 9, 31, 127]) assert.match(billing.folderOf(`Invoices${String.fromCharCode(code)}`).error ?? "", /isn't a folder/, `U+${code.toString(16)}`);
     assert.equal(billing.folderOf("Invoices").error, null);
+    for (const code of [32, 128, 160]) assert.equal(billing.folderOf(`My${String.fromCharCode(code)}Invoices`).error, null, `U+${code.toString(16)} is no control character`);
 });
 
 test("a byte-order mark before a note's properties is still read past", () => {

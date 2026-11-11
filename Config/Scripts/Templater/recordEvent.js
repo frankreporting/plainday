@@ -36,16 +36,17 @@ const LINE = /^(\s*[-*+]\s+\[(.)\]\s+)(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(
 const HOME_LINK = /\[\[[^[\]|]+\|\s*(?:⭕|🗃)️?\s*\]\]/gu;
 // A note link
 const NOTE_LINK = /\[\[[^[\]|]+\|\s*(?:⋯|↗\uFE0F?)\s*\]\]/u;
-// One item of the run that ends a line, with the spaces before it: a ⋯ or ↗, 🚩, ⭕ or 🗃️
+// One item of the run that ends a line: a ⋯ or ↗, 🚩, ⭕ or 🗃️
 // link, or the ℹ️ or 🆓 mark (AddTaskNote.TRAIL_ITEM)
-const TRAIL_ITEM = /[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
-// The item of the run that ends `text` (TRAIL_ITEM's match), or null: an ℹ️ or 🆓 only after a space
-// or a tab, checked here since older iPhones can't run a lookbehind (AddTaskNote.trailItem)
+const TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
+// The item of the run that ends `text`, with the spaces before it, or null: an ℹ️ or 🆓 only after a
+// space or a tab, found here since older iPhones can't run a lookbehind (AddTaskNote.trailItem)
 function trailItem(text) {
     const item = text.match(TRAIL_ITEM);
-    if (!item) return null;
-    const at = item.index + item[0].search(/[^ ]/);
-    return text[at] === "[" || /\s/.test(text[at - 1] ?? "") ? item : null;
+    if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
+    while (text[item.index - 1] === " ") item.index--;
+    item[0] = text.slice(item.index);
+    return item;
 }
 // A block ID ending a line, which stays last
 const BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;

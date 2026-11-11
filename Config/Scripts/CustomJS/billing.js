@@ -49,7 +49,7 @@ class Billing {
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the invoice or draw anything (as TimeReport.tableText)
     tableText(text) {
-        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/((?:\\\\)*)\\?\|/g, "$1\\|")
+        return String(text ?? "").replace(/\s+/g, " ").trim().replace(/\\+\|?|\|/g, (m) => (m.endsWith("|") && m.length % 2 ? `${m.slice(0, -1)}\\|` : m))
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
     }
 

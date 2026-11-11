@@ -34,21 +34,22 @@ class AddTaskNote {
     static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗\uFE0F?)\s*\]\]/u;
     static OWN_NOTE_LINK = /\[\[[^\]]*\|\s*⋯\s*\]\]/u;
     static FROM_LINK = /\[\[[^\]]*\|\s*↗\uFE0F?\s*\]\]/u;
-    // One item of the run that ends a line, with the spaces before it: a ⋯, ↗, 🚩, ⭕ or 🗃️ link
+    // One item of the run that ends a line: a ⋯, ↗, 🚩, ⭕ or 🗃️ link
     // shaped as the time report reads them (TimeReport.TRAIL_LINK), or the ℹ️ or 🆓 mark (OBS-90). And a
     // sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
     // `[[2026-10-08#^k3x9m2|10/8]]`, or one written with a ➡️ before its date. Read with trailItem,
-    // which checks what's before a mark.
-    static TRAIL_ITEM = /[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
-    // The item of the run that ends `text` (TRAIL_ITEM's match), or null. The match starts where its
-    // spaces start, since a search takes the leftmost one. An ℹ️ or 🆓 is one only after a space or a
-    // tab: stuck to a word, it's part of the text. That's checked here, not in the pattern, since older
-    // iPhones can't run a lookbehind (OBS-199). TaskIds.trailItem is a copy.
+    // which adds the spaces before it and checks what's before a mark.
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
+    // The item of the run that ends `text`, with the spaces before it, or null. An ℹ️ or 🆓 is one only
+    // after a space or a tab: stuck to a word, it's part of the text. Both are found here, not in the
+    // pattern: older iPhones can't run a lookbehind (OBS-199), and spaces in it would be tried again from
+    // each space of a long run. TaskIds.trailItem is a copy.
     static trailItem(text) {
         const item = text.match(AddTaskNote.TRAIL_ITEM);
-        if (!item) return null;
-        const at = item.index + item[0].search(/[^ ]/);
-        return text[at] === "[" || /\s/.test(text[at - 1] ?? "") ? item : null;
+        if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
+        while (text[item.index - 1] === " ") item.index--;
+        item[0] = text.slice(item.index);
+        return item;
     }
     // A block ID at the end of a line, ` ^abc123`, with the whitespace before it
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;

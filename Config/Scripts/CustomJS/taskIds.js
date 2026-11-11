@@ -17,17 +17,18 @@ class TaskIds {
     // written with a ➡️ before its date (before OBS-185's first test round) is read too, the ➡️ left
     // out of its label; a phone may drop the U+FE0F.
     static FORWARD = /^\[\[(?=(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
-    // One item of the run of links that ends a line, with the spaces before it: a 🚩, ⋯, ↗, ⭕ or
+    // One item of the run of links that ends a line: a 🚩, ⋯, ↗, ⭕ or
     // 🗃️ link, a forward date (or one written with a ➡️), or the ℹ️ or 🆓 mark. The same pattern as
     // AddTaskNote.TRAIL_ITEM, read with trailItem as AddTaskNote's is; TaskIds' statics must load in an
     // empty vm context, so they can't reach AddTaskNote, and these are copies that taskIds.test.mjs
     // checks against it.
-    static TRAIL_ITEM = /[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
     static trailItem(text) {
         const item = text.match(TaskIds.TRAIL_ITEM);
-        if (!item) return null;
-        const at = item.index + item[0].search(/[^ ]/);
-        return text[at] === "[" || /\s/.test(text[at - 1] ?? "") ? item : null;
+        if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
+        while (text[item.index - 1] === " ") item.index--;
+        item[0] = text.slice(item.index);
+        return item;
     }
     // The items a forward date goes before: a line's ⭕, 🗃️ and note links
     static HOME_OR_NOTE = /\|\s*(?:⭕|🗃|⋯|↗)/u;

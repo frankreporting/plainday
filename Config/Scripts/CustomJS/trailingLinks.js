@@ -138,8 +138,8 @@ class TrailingLinks {
     // read the links with it.
     static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
-    // name, then `#^` and an ID, `2026-09-17#^p7d2qe` (see periodicLine)
-    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/;
+    // name, then `#^` and an ID, `2026-09-17#^p7d2qe`; periodicLine searches with it from a place
+    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/g;
     // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
     static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
@@ -187,10 +187,12 @@ class TrailingLinks {
 
     // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
     // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
-    // ending in `/` with no `]`, `|` or `#`. It reads back from the ID, as the lookbehind did, so a line
-    // full of `[[` costs no more than its length.
+    // ending in `/` with no `]`, `|` or `#`. It starts near the last `#`, as the lookbehind started at
+    // the end, so a long line costs no more than a short one.
     static periodicLine(before) {
-        const at = before.match(TrailingLinks.PERIODIC_LINE)?.index;
+        const re = TrailingLinks.PERIODIC_LINE;
+        re.lastIndex = Math.max(0, before.lastIndexOf("#") - 10);
+        const at = re.exec(before)?.index;
         if (at === undefined) return false;
         if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
         if (before[at - 1] !== "/") return false;
