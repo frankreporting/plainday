@@ -436,7 +436,7 @@ class Invoice {
 
     async invoke() {
         const tr = customJS.TimeReport, billing = customJS.Billing;
-        if (!tr || !billing || !customJS.DatePrompt) { new Notice("Invoice: CustomJS is still loading; try again in a moment"); return; }
+        if (!tr || !billing || !customJS.DatePrompt) { new Notice("Invoice: Plainday is still loading; try again in a moment"); return; }
         try {
             const file = app.workspace.getActiveFile();
             if (file && this.isInvoice(file)) { await this.actions(file, tr, billing); return; }

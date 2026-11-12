@@ -1,7 +1,7 @@
 // Tests for CustomJS/timeReportOnStartup.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it, against a stub of the little it asks
-// of `app`: the layout is ready, the metadata cache is clean (unless a test holds it), CustomJS is on.
+// The class is loaded with vm against a stub of the little it asks of `app` and `customJS`: the
+// layout is ready, the metadata cache is clean (unless a test holds it), Plainday is loaded.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,8 +10,8 @@ import vm from "node:vm";
 const here = new URL(".", import.meta.url);
 const code = fs.readFileSync(new URL("../CustomJS/timeReportOnStartup.js", here), "utf8");
 
-// What CustomJS puts on `customJS` before it registers a single class
-const bare = () => ({ obsidian: { Platform: { isDesktop: true } } });
+// `customJS` with Plainday loaded and no class in it
+const bare = () => ({ obsidian: { Platform: { isDesktop: true } }, plugin: {} });
 // A TimeReport whose refresh records its calls
 const timeReport = (calls) => ({ refresh: async (opts) => { calls.push(opts); } });
 
@@ -22,7 +22,6 @@ function load(customJS, { hold = null } = {}) {
         app: {
             workspace: { onLayoutReady: (cb) => cb() },
             metadataCache: { onCleanCache: hold ? (cb) => { hold.release = cb; } : (cb) => cb() },
-            plugins: { enabledPlugins: new Set(["customjs"]) },
         },
         customJS,
         console: { ...console, warn: (m) => warnings.push(String(m)) },
@@ -46,14 +45,14 @@ test("refreshes at once when TimeReport and Schedule are registered", async () =
     assert.deepEqual(warnings, []);
 });
 
-test("OBS-41: a run that wakes up mid-reload waits for the classes CustomJS is registering again", async () => {
+test("OBS-41: a run that wakes up to find its classes gone waits a moment for them to come back", async () => {
     const oldCalls = [], newCalls = [];
     const hold = {};
     const { context, TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TaskIds: {}, TimeReport: timeReport(oldCalls) }, { hold });
     // Every class is there when the run starts; it then waits for the metadata cache
     const run = new TimeReportOnStartup().invoke();
     await new Promise((r) => setImmediate(r));
-    // A script is saved: CustomJS starts `customJS` over and registers the classes one file at a time
+    // The classes go, and come back one at a time
     context.customJS = bare();
     hold.release();
     after(50, () => { context.customJS.Schedule = {}; context.customJS.Billing = {}; context.customJS.TaskIds = {}; });
@@ -61,6 +60,19 @@ test("OBS-41: a run that wakes up mid-reload waits for the classes CustomJS is r
     await run;
     assert.deepEqual(oldCalls, []);
     assert.deepEqual(plain(newCalls), [{ quiet: true }]);
+    assert.deepEqual(warnings, []);
+});
+
+test("does nothing once Plainday has unloaded while it waited for the index", async () => {
+    const calls = [];
+    const hold = {};
+    const { context, TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TaskIds: {}, TimeReport: timeReport(calls) }, { hold });
+    const run = new TimeReportOnStartup().invoke();
+    await new Promise((r) => setImmediate(r));
+    context.customJS.plugin = null;
+    hold.release();
+    await run;
+    assert.deepEqual(calls, []);
     assert.deepEqual(warnings, []);
 });
 

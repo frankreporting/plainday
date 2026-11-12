@@ -28,7 +28,7 @@ class CheckOff {
     // there notes the note's text, and the menu's change to it is followed the same way. A box in an embedded note,
     // a hover preview or a canvas card is left to Obsidian (OBS-251).
     //
-    // It needs Obsidian's own CodeMirror, as TrailingLinks does. If that ever fails, a tick changes only its line.
+    // It needs Obsidian's own CodeMirror, which Plainday passes in, as TrailingLinks does.
 
     // Schedule.ORIGIN, the system's tag; a copy, since the class must load on its own (CI's check)
     static ORIGIN = "obsidian-pm";
@@ -686,29 +686,22 @@ class CheckOff {
     // ---------------------------------------------------------------- the editor extension
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so the handles live on window, to
-        // guarantee one set of listeners
+        // The handles live on window, so a second run undoes the first: one set of listeners, however
+        // often it runs
         this.deconstructor();
-        let view, state;
-        try {
-            view = require("@codemirror/view");
-            state = require("@codemirror/state");
-        } catch (e) {
-            console.warn("CheckOff: CodeMirror isn't available, so a tick changes only its own line", e);
-            return;
-        }
+        const { view, state } = customJS.codemirror;
         const C = CheckOff;
         const { EditorView } = view;
         const { EditorState, Transaction, StateEffect } = state;
         const { editorInfoField } = customJS.obsidian;
         const ws = app.workspace;
 
-        // One registered slot per CustomJS lifetime; a rerun swaps what's in it
+        // One registered slot per load of Plainday; a rerun swaps what's in it
         const kept = window.pmCheckOff;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [], refs: [], docs: new Set(), click: null };
         window.pmCheckOff = handles;
-        if (!slot) app.plugins.plugins.customjs.registerEditorExtension(handles.slot);
+        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
 
         // A [>] line an edit was about to open, held, to ask about once the edit is dispatched
         const asked = StateEffect.define();

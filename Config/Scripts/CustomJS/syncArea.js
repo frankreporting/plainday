@@ -17,8 +17,8 @@ class SyncArea {
     static TEMPLATER_WAIT_MS = 120000;
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so keep the
-        // handle on window to guarantee a single listener.
+        // The handle lives on window, so a second run undoes the first: a single listener, however
+        // often it runs.
         this.deconstructor();
         this.queue = new Map();
         this.renamedFolders = new Map();
@@ -32,8 +32,8 @@ class SyncArea {
     }
 
     onRename(file, oldPath) {
-        // The listener outlives CustomJS being switched off, so check on every event
-        if (!app.plugins.enabledPlugins.has("customjs")) return;
+        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
+        if (!customJS.plugin) return;
 
         const oldFolder = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/")) : "/";
         if (file.children) {

@@ -89,7 +89,7 @@ test("Obsidian running: its own Calendar sync does the work, and nothing else is
     const { run } = setUp({ running: true });
     const { out, calls } = run();
     assert.match(out, /Obsidian synced the calendar/);
-    assert.match(calls, /obsidian vault=vault command id=customjs:invoke-CalendarSync/);
+    assert.match(calls, /obsidian vault=vault command id=plainday:sync-calendars/);
     assert.doesNotMatch(calls, /swift|open /);
 });
 
@@ -98,7 +98,7 @@ test("Obsidian closed: it's opened in the background, then asked to sync", () =>
     const { out, calls } = run();
     assert.match(out, /opening this vault in the background/);
     assert.match(calls, /open -g obsidian:\/\/open\?vault=vault/, "opens this vault by name, not just the app");
-    assert.match(calls, /obsidian vault=vault command id=customjs:invoke-CalendarSync/);
+    assert.match(calls, /obsidian vault=vault command id=plainday:sync-calendars/);
     assert.match(out, /Obsidian synced the calendar/);
     assert.doesNotMatch(calls, /swift/);
 });
@@ -163,19 +163,16 @@ test("on without a plist says so and changes nothing", () => {
     });
 });
 
-test("a vault with Plainday on is synced through Plainday's command; with CustomJS on, through CustomJS's (OBS-226)", () => {
+test("the sync always runs Plainday's command, whatever the vault's plugin list says (OBS-257)", () => {
     const { dir, run, forget } = setUp({ running: true });
     const plugins = path.join(dir, "vault", ".obsidian", "community-plugins.json");
     fs.mkdirSync(path.dirname(plugins), { recursive: true });
-    fs.writeFileSync(plugins, JSON.stringify(["templater-obsidian", "plainday"], null, 2));
-    let { out, calls } = run();
-    assert.match(out, /Obsidian synced the calendar/);
-    assert.match(calls, /^obsidian vault=vault command id=plainday:sync-calendars$/m);
-    assert.doesNotMatch(calls, /customjs/);
-
-    forget();
-    fs.writeFileSync(plugins, JSON.stringify(["templater-obsidian", "customjs"], null, 2));
-    ({ calls } = run());
-    assert.match(calls, /^obsidian vault=vault command id=customjs:invoke-CalendarSync$/m);
-    assert.doesNotMatch(calls, /plainday/);
+    for (const list of [["templater-obsidian", "plainday"], ["templater-obsidian", "customjs"]]) {
+        forget();
+        fs.writeFileSync(plugins, JSON.stringify(list, null, 2));
+        const { out, calls } = run();
+        assert.match(out, /Obsidian synced the calendar/);
+        assert.match(calls, /^obsidian vault=vault command id=plainday:sync-calendars$/m, list.join(", "));
+        assert.doesNotMatch(calls, /customjs/);
+    }
 });

@@ -1,6 +1,6 @@
 // Tests for CustomJS/addTaskNote.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it; only the methods that don't touch
+// The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Creating the note through Templater is checked in a dev vault.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,9 +8,10 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
+// `customJS` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
 const AddTaskNote = vm.runInContext(
     fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-    vm.createContext({}),
+    vm.createContext({ customJS: {} }),
 );
 const add = new AddTaskNote();
 
@@ -273,18 +274,20 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
         assert.doesNotMatch(template, /tp\.system\.suggester|tp\.user\.pickParent|FuzzySuggestModal/, `${name} shows no menu`);
     }
     assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
-    // The Task template's parent is the command's preset, or none (Inbox), with or without CustomJS
+    // The Task template's parent is the command's preset, or none (Inbox), with or without Plainday
     const task = read("Task");
     const line = task.split("\n").find((l) => /^const pickedFile = /.test(l));
     assert.ok(line, "the Task template sets pickedFile in one line");
-    const pickedFor = (customJS, path) => vm.runInNewContext(line.replace(/^const pickedFile = /, "") .replace(/;$/, ""),
-        { customJS, tp: { config: { target_file: { path } } } });
+    const expr = line.replace(/^const pickedFile = /, "").replace(/;$/, "");
+    const pickedFor = (plainday, path) => vm.runInNewContext(expr, { plainday, tp: { config: { target_file: { path } } } });
     const tasks = { takePresetParent: (p) => (p === "Inbox/Order toner.md" ? "PROJECT" : null) };
     assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Order toner.md"), "PROJECT");
     assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Other.md"), null);
     assert.equal(pickedFor({}, "Inbox/Order toner.md"), null, "without AddTaskNote");
-    assert.equal(vm.runInNewContext(`typeof customJS !== "undefined" ? 1 : 0`, {}), 0);
-    assert.equal(vm.runInNewContext(line.replace(/^const pickedFile = /, "").replace(/;$/, ""), { tp: { config: { target_file: { path: "x" } } } }), null, "without CustomJS");
+    assert.equal(vm.runInNewContext(`typeof plainday !== "undefined" ? 1 : 0`, {}), 0);
+    assert.equal(vm.runInNewContext(expr, { tp: { config: { target_file: { path: "x" } } } }), null, "without Plainday");
+    // CustomJS's global isn't read any more (OBS-257)
+    assert.equal(vm.runInNewContext(expr, { customJS: { AddTaskNote: tasks }, tp: { config: { target_file: { path: "Inbox/Order toner.md" } } } }), null, "not from customJS");
     // The Log template: the line's one live home first, then the command's preset (Raycast's Inbox is null)
     const log = read("Log");
     const presetLine = log.split("\n").find((l) => /^const preset = /.test(l));
@@ -295,7 +298,7 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
     assert.equal(presetFor(project), project);
     assert.equal(presetFor(null), null);
     assert.equal(presetFor("inbox"), null, "an older AddTaskNote's Inbox preset files the log in Inbox");
-    assert.equal(vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""), { tasks: null, tp: { config: { target_file: { path: "x" } } } }), null, "without CustomJS");
+    assert.equal(vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""), { tasks: null, tp: { config: { target_file: { path: "x" } } } }), null, "without Plainday");
     assert.match(log, /const pickedFile = lineHome \?\? preset;/);
     // A new project or area gets its folder at the top of Projects/, and its note in it
     for (const name of ["Project", "Area"]) {

@@ -1,7 +1,7 @@
 // Tests for CustomJS/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The classes are loaded with vm beside AddTaskNote, AddProjectLink and TimeReport, whose helpers
-// they use through `customJS`, the way CustomJS evaluates them. The planning and the line edits
+// they use through `customJS`, the way Plainday gives it to them. The planning and the line edits
 // are pure; the move itself runs against a small stand-in for the vault that records what was
 // renamed and written. That checks the order of things and what's asked, not Obsidian's own move
 // and link updates, which are checked in a dev vault.
@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { COMMANDS, STARTUP } from "../../../plugin/src/commands.js";
 
 const here = new URL(".", import.meta.url);
 const notices = [];
@@ -84,9 +85,11 @@ function setup(notes, { texts = {}, links = {}, active = null } = {}) {
             },
         },
         workspace: { getActiveFile: () => (active ? byPath(active) : null), activeLeaf: null },
-        plugins: { enabledPlugins: new Set(["customjs"]), plugins: {} },
+        plugins: { enabledPlugins: new Set(), plugins: {} },
     };
     context.app = app;
+    // Plainday, loaded
+    context.customJS.plugin = {};
     const helper = new AddTaskNote();
     const mover = new MoveToProject();
     context.customJS.AddTaskNote = helper;
@@ -337,7 +340,7 @@ test("MoveToProjectMenu: adds the item to Obsidian's file menus and Notebook Nav
     const m = menus(t);
     const menu = new MoveToProjectMenu();
     await menu.invoke();
-    await menu.invoke();   // CustomJS runs startup scripts again when a script changes
+    await menu.invoke();   // a second run, as by eval
     assert.deepEqual(m.events.map((e) => e.name), ["file-menu", "files-menu", "layout-change"]);
     assert.equal(m.nn.file.size, 1);
     assert.equal(m.nn.folder.size, 1);
@@ -356,8 +359,8 @@ test("MoveToProjectMenu: adds the item to Obsidian's file menus and Notebook Nav
     assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel") })), ["Move to project…"]);
     assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel/›logs") })), [], "a plain folder");
 
-    t.app.plugins.enabledPlugins.delete("customjs");
-    assert.deepEqual(fileMenu(t.file("Inbox/Loose idea.md")), [], "CustomJS switched off: no item");
+    context.customJS.plugin = null;
+    assert.deepEqual(fileMenu(t.file("Inbox/Loose idea.md")), [], "Plainday unloaded, the listener left behind: no item");
 
     menu.deconstructor();
     assert.deepEqual(m.events, []);
@@ -387,11 +390,9 @@ test("MoveToProjectMenu: waits for Notebook Navigator to finish loading, and fol
 });
 
 test("MoveToProject and MoveToProjectMenu are registered, the menus before the time report's startup run", () => {
-    const settings = JSON.parse(fs.readFileSync(new URL("../../../.obsidian/plugins/customjs/data.json", here), "utf8"));
-    assert.ok(settings.registeredInvocableScriptNames.includes("MoveToProject"));
-    assert.ok(!settings.registeredInvocableScriptNames.includes("MoveToProjectMenu"));
-    const startup = settings.startupScriptNames;
-    assert.ok(startup.includes("MoveToProjectMenu") && startup.indexOf("MoveToProjectMenu") < startup.indexOf("TimeReportOnStartup"), "the report can take a while");
+    assert.ok(COMMANDS.some((c) => c.script === "MoveToProject"));
+    assert.ok(!COMMANDS.some((c) => c.script === "MoveToProjectMenu"));
+    assert.ok(STARTUP.includes("MoveToProjectMenu") && STARTUP.indexOf("MoveToProjectMenu") < STARTUP.indexOf("TimeReportOnStartup"), "the report can take a while");
 });
 
 test("OBS-125 isHome: a project or area whose status is Done or Canceled is no home; On Hold and completed alone still are", () => {

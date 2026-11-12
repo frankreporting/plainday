@@ -1,6 +1,6 @@
 class TimeReport {
     // Time reports built from the time entries in daily notes. Runs at startup on the desktop
-    // (TimeReportOnStartup), and as the command "CustomJS: TimeReport". It writes only to these
+    // (TimeReportOnStartup), and as the command "Plainday: Time report". It writes only to these
     // notes, whatever note is open, under "## Time Report" (OBS-133; "## Time tracking" before, renamed
     // where it heads a block):
     //   - each project or area note with entries (or with a block already): a link to its timesheet
@@ -925,7 +925,7 @@ class TimeReport {
 
     // A project or area whose `status` says it's finished, as AddTaskNote reads it; AddProjectLink's menu leaves it out
     isFinishedProject(path, index) {
-        return globalThis.customJS?.AddTaskNote?.isFinished?.({ frontmatter: index?.props?.(path) ?? {} }) === true;
+        return customJS?.AddTaskNote?.isFinished?.({ frontmatter: index?.props?.(path) ?? {} }) === true;
     }
 
     // Every subtask's day line that names another project than the task note or log it's a subtask of (OBS-233):
@@ -1097,7 +1097,7 @@ class TimeReport {
     // comment after it aside. Null for anything else, a list included.
     dueIn(text) {
         const raw = String(text ?? "");
-        const { getFrontMatterInfo, parseYaml } = globalThis.customJS?.obsidian ?? {};
+        const { getFrontMatterInfo, parseYaml } = customJS?.obsidian ?? {};
         if (getFrontMatterInfo && parseYaml) {
             try {
                 const info = getFrontMatterInfo(raw);
@@ -1118,7 +1118,7 @@ class TimeReport {
     // Whether DueDate can write `text`'s `due` (one plain `due:` line, as the Task template writes it): DueDate's own
     // test where it's loaded, else the same shapes by hand. A `due` written another way is set by hand.
     plainDue(text, date) {
-        const own = globalThis.customJS?.DueDate?.constructor?.withDue;
+        const own = customJS?.DueDate?.constructor?.withDue;
         if (own) return own(String(text), date) !== null;
         const lines = String(text).split("\n").map((l) => l.replace(/\r$/, ""));
         const end = lines.findIndex((l, i) => i > 0 && /^---[ \t]*$/.test(l));
@@ -1222,7 +1222,7 @@ class TimeReport {
     // Whether a note sits in a project's or area's logs folder, which makes it a log, as AddTaskNote says
     // (AddTaskNote.isLog). Where AddTaskNote isn't loaded (the demo's render), a log is known by its tag.
     inLogsFolder(path) {
-        return globalThis.customJS?.AddTaskNote?.isLogsFolderName?.(this.basename(this.dirname(path))) === true;
+        return customJS?.AddTaskNote?.isLogsFolderName?.(this.basename(this.dirname(path))) === true;
     }
 
     // A property's date as YYYY-MM-DD ("2026-09-30", "2026-09-30T09:00", a Date), a real day only, or null
@@ -3180,9 +3180,8 @@ class TimeReport {
     async refresh({ quiet }) {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
-        // A script saved while this runs makes CustomJS start `customJS` over and register the classes
-        // again one file at a time, so keep the Schedule and Billing this run began with instead of
-        // looking them up on the global part-way through (OBS-41)
+        // Keep the Schedule and Billing this run began with instead of looking them up on `customJS`
+        // part-way through, so the whole run uses the same ones (OBS-41)
         this.schedule = customJS.Schedule;
         const billing = customJS.Billing;
         const errorLog = customJS.ErrorLog;
@@ -3190,9 +3189,9 @@ class TimeReport {
 
         try {
             // Billing reads the invoice notes for the timesheets (OBS-5); without it they'd show every
-            // billed entry as unbilled, so nothing is written until CustomJS has it registered
+            // billed entry as unbilled, so nothing is written without it
             if (!billing) {
-                console.warn("TimeReport: customJS.Billing isn't registered (CustomJS still reloading?); nothing written");
+                console.warn("TimeReport: customJS.Billing isn't registered (Plainday couldn't start it?); nothing written");
                 if (!quiet) new Notice("Time report: the Billing script isn't loaded; try again in a moment");
                 return;
             }
@@ -3247,7 +3246,7 @@ class TimeReport {
                     console.error("TimeReport: couldn't update the error log", e);
                     trouble.push(`couldn't update ${errorLog.constructor.PATH} (${e.message})`);
                 }
-            } else console.warn("TimeReport: customJS.ErrorLog isn't registered (CustomJS still reloading?); the error log wasn't updated");
+            } else console.warn("TimeReport: customJS.ErrorLog isn't registered (Plainday couldn't start it?); the error log wasn't updated");
 
             if (trouble.length) new Notice(`Time report: ${trouble.join(" · ")}`, 0);
             else if (!quiet) new Notice(done.length ? `Time report updated: ${done.join(", ")}` : "Time report is already up to date");
@@ -3277,7 +3276,7 @@ class TimeReport {
     // (textOf: from its editor when it's open in one), as the daily notes are.
     async taskNotes(daily) {
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
-        const tasks = globalThis.customJS?.TaskIds;
+        const tasks = customJS?.TaskIds;
         if (!tasks?.allIds) return [...byPath.values()];
         const T = tasks.constructor;
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
@@ -3307,7 +3306,7 @@ class TimeReport {
     dailyDate(path) {
         const name = this.basename(path);
         try {
-            const format = globalThis.customJS?.Schedule?.dailyOpts?.().format;
+            const format = customJS?.Schedule?.dailyOpts?.().format;
             const m = format ? globalThis.window?.moment?.(name, format, true) : null;
             return m?.isValid() ? m.format("YYYY-MM-DD") : name;
         } catch {
@@ -3322,7 +3321,7 @@ class TimeReport {
     // the task's project, or, when the task counts toward none, a Problem on its note that the weekly,
     // monthly and yearly notes list under a day (problemDate).
     // Pure, so the demo's reports (renderReports.mjs) run it too, passing TaskIds as `T`.
-    addTaskProblems(model, index, notes, T = globalThis.customJS?.TaskIds?.constructor) {
+    addTaskProblems(model, index, notes, T = customJS?.TaskIds?.constructor) {
         if (!T?.check) return;
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const violations = T.check(notes, {
@@ -3407,7 +3406,7 @@ class TimeReport {
         if (unit === "month" && TimeReport.PERIOD_NAME.month.test(name)) return `${name}-01`;
         if (unit === "year" && TimeReport.PERIOD_NAME.year.test(name)) return `${name}-01-01`;
         try {
-            const rules = globalThis.customJS?.DatePrompt?.weekRules?.();
+            const rules = customJS?.DatePrompt?.weekRules?.();
             const m = rules ? globalThis.window?.moment?.(name, rules.format[unit], rules.locale, true) : null;
             return m?.isValid() ? m.format("YYYY-MM-DD") : null;
         } catch {
@@ -3669,8 +3668,7 @@ class TimeReport {
             isTaskNote: (path) => tagged(path, "task"),
             isLog: (path) => this.inLogsFolder(path) || tagged(path, "log"),
             kind,
-            // TaskIds.inSystem's test, through the `kind` above: it asks the global Schedule, which is gone
-            // for a moment when CustomJS starts over
+            // TaskIds.inSystem's test, through the `kind` above, so it uses the Schedule this run began with
             inSystem: (path) => !tasks || kind(path) !== "other" || tasks.constructor.FOLDERS.some((f) => path.startsWith(`${f}/`)),
             inInbox: (path) => !!tasks && path.startsWith(`${tasks.constructor.INBOX}/`),
             paths: () => app.vault.getMarkdownFiles().map((f) => f.path),
@@ -3695,7 +3693,7 @@ class TimeReport {
     // How many lines of `daily` ([{ text }]) the one-time conversion would change (TaskIds.linkBackPass):
     // a convertible line whose run ends in a 🗒️ or 🔗 link, the marks before OBS-208
     oldMarkLines(daily) {
-        const T = globalThis.customJS?.TaskIds?.constructor;
+        const T = customJS?.TaskIds?.constructor;
         const old = (l) => (T?.oldMarks ? T.oldMarks(l).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
         let n = 0;
         for (const d of daily) {

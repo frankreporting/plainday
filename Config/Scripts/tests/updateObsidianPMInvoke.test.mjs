@@ -10,7 +10,7 @@ import vm from "node:vm";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-// CustomJS scripts run in Obsidian, where `require` exists; an ES module has none
+// The class files run in Obsidian, where `require` exists; an ES module has none
 const nodeRequire = createRequire(import.meta.url);
 
 const here = new URL(".", import.meta.url);
@@ -28,7 +28,7 @@ const exists = (root, rel) => fs.existsSync(path.join(root, rel));
 function makeSource(dir) {
     write(dir, "Config/Scripts/CustomJS/timeReport.js", "new report\n");
     write(dir, "Config/Templates/Task.md", "task template\n");
-    write(dir, ".obsidian/plugins/customjs/data.json", '{"jsFolder":"Config/Scripts/CustomJS/"}\n');
+    write(dir, ".obsidian/plugins/templater-obsidian/data.json", '{"templates_folder":"Config/Templates"}\n');
     write(dir, "README.md", "readme\n");
     write(dir, "Welcome.md", "demo note\n");
     write(dir, "Reference/Planner/days/2026-09-16.md", "demo daily note\n");
@@ -44,7 +44,7 @@ function makeSource(dir) {
 
 // Obsidian, as much of it as the command uses. `answers` decides what the modals return.
 function stubs(vaultDir, answers = {}) {
-    const notices = [], trashed = [], moved = [];
+    const notices = [], trashed = [], moved = [], toggled = [];
     const rel = (p) => path.join(vaultDir, p);
     const app = {
         isMobile: false,
@@ -62,7 +62,8 @@ function stubs(vaultDir, answers = {}) {
             trashFile: async (f) => { trashed.push(f.path); fs.rmSync(rel(f.path), { force: true }); },
             renameFile: async (f, to) => { moved.push([f.path, to]); fs.renameSync(rel(f.path), rel(to)); },
         },
-        plugins: { disablePlugin: async () => {}, enablePlugin: async () => {} },
+        // Nothing turns a plugin off or on any more: the offer to reload CustomJS went with OBS-257
+        plugins: { disablePlugin: async (id) => toggled.push(`off ${id}`), enablePlugin: async (id) => toggled.push(`on ${id}`) },
     };
     const context = {
         app,
@@ -86,7 +87,7 @@ function stubs(vaultDir, answers = {}) {
         } },
     };
     context.globalThis = context;
-    return { context, notices, trashed, moved, answers };
+    return { context, notices, trashed, moved, toggled, answers };
 }
 
 // Loads the class in that context and replaces the three modal methods with the test's answers
@@ -98,7 +99,6 @@ function load(context, answers) {
         answers.sawSummary = summary;
         return (typeof answers.confirm === "function" ? answers.confirm() : answers.confirm) ?? null;
     };
-    up.confirmReload = async () => { answers.askedReload = true; return Boolean(answers.reload); };
     return up;
 }
 
@@ -119,7 +119,7 @@ test("invoke: a first install copies the system, and never a note or a demo test
     assert.equal(read(f.vault, "Config/Scripts/CustomJS/timeReport.js"), "new report\n");
     assert.equal(read(f.vault, "Config/Templates/Task.md"), "task template\n");
     assert.equal(read(f.vault, "README.md"), "readme\n");
-    assert.equal(exists(f.vault, ".obsidian/plugins/customjs/data.json"), true);
+    assert.equal(exists(f.vault, ".obsidian/plugins/templater-obsidian/data.json"), true);
     for (const note of ["Welcome.md", "Reference/Planner/days/2026-09-16.md",
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs"]) {
         assert.equal(exists(f.vault, note), false, note);
@@ -128,11 +128,13 @@ test("invoke: a first install copies the system, and never a note or a demo test
     assert.equal(read(f.vault, "Config/Scripts/update-source").trim(), f.source);
     const manifest = JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json"));
     assert.deepEqual(Object.keys(manifest.files).sort(), [
-        ".obsidian/plugins/customjs/data.json", "Config/Scripts/CustomJS/timeReport.js",
+        ".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/CustomJS/timeReport.js",
         "Config/Templates/Task.md", "README.md",
     ]);
     assert.match(manifest.commit, /^[0-9a-f]{7,}$/);
-    assert.match(f.notices.join(" "), /4 files copied/);
+    // A class file landed, and the update ends with its notice: no offer to reload a plugin
+    assert.match(f.notices.at(-1), /^Update Obsidian PM: 4 files copied/);
+    assert.deepEqual(f.toggled, []);
 });
 
 test("invoke: a real note in the vault is never touched, even at a path the repository uses", async (t) => {
@@ -249,15 +251,15 @@ test("invoke: an edit hidden with skip-worktree in the clone is still shown", as
     const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     // the clone's settings are edited and hidden from git, as a demo vault's were
-    const settings = ".obsidian/plugins/customjs/data.json";
-    write(f.source, settings, '{"jsFolder":"edited locally"}\n');
+    const settings = ".obsidian/plugins/templater-obsidian/data.json";
+    write(f.source, settings, '{"templates_folder":"edited locally"}\n');
     execFileSync("git", ["-C", f.source, "update-index", "--skip-worktree", settings], { stdio: "pipe" });
     // git itself reports nothing
     assert.equal(execFileSync("git", ["-C", f.source, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).trim(), "");
 
     await f.up.invoke();
     assert.match(f.answers.sawSummary, /\*\*Hidden from git in the clone: 1\*\*/);
-    assert.match(f.answers.sawSummary, /- \.obsidian\/plugins\/customjs\/data\.json/);
+    assert.match(f.answers.sawSummary, /- \.obsidian\/plugins\/templater-obsidian\/data\.json/);
 });
 
 test("invoke: nothing to do says so", async (t) => {
@@ -341,19 +343,19 @@ test("invoke: a copy that fails partway still records what landed, and names wha
     };
     await f.up.invoke();
     // copy order: .obsidian/…/data.json, Config/Scripts/…/timeReport.js, Config/Templates/Task.md, README.md
-    assert.equal(exists(f.vault, ".obsidian/plugins/customjs/data.json"), true);
+    assert.equal(exists(f.vault, ".obsidian/plugins/templater-obsidian/data.json"), true);
     assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), true);
     assert.equal(fs.statSync(path.join(f.vault, blocked)).isDirectory(), true, "the failed file");
     assert.equal(exists(f.vault, "README.md"), false, "stopped at the failure");
     const manifest = JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json"));
-    assert.deepEqual(Object.keys(manifest.files).sort(), [".obsidian/plugins/customjs/data.json", "Config/Scripts/CustomJS/timeReport.js"],
+    assert.deepEqual(Object.keys(manifest.files).sort(), [".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/CustomJS/timeReport.js"],
         "the manifest matches what's on disk");
     assert.equal(manifest.failed, blocked);
     assert.match(f.notices.at(-1), /2 of 4 files copied/);
     assert.match(f.notices.at(-1), /Task\.md failed/);
     assert.match(f.notices.at(-1), /EISDIR/);
     assert.equal(read(f.vault, "Config/Scripts/update-source").trim(), f.source, "the clone's path is kept too");
-    assert.equal(f.answers.askedReload, true, "a script landed, so the reload is offered");
+    assert.deepEqual(f.toggled, [], "no plugin reloaded");
 
     // once the folder is out of the way, the next run finishes the install: the two that landed
     // are up to date, the other two are new, and nothing is called a local edit
@@ -373,10 +375,10 @@ test("invoke: a file edited under skip-worktree while the dialog was open is not
     const f = fixture();
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     // git status, the branch and HEAD all read the same as when the plan was built
-    const settings = ".obsidian/plugins/customjs/data.json";
+    const settings = ".obsidian/plugins/templater-obsidian/data.json";
     f.answers.confirm = () => {
         execFileSync("git", ["-C", f.source, "update-index", "--skip-worktree", settings], { stdio: "pipe" });
-        write(f.source, settings, '{"jsFolder":"edited while the dialog was open"}\n');
+        write(f.source, settings, '{"templates_folder":"edited while the dialog was open"}\n');
         return { overwriteLocal: true, remove: true };
     };
     await f.up.invoke();

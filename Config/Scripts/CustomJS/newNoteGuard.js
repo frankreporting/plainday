@@ -31,8 +31,8 @@ class NewNoteGuard {
     static FRONTMATTER = /^\uFEFF?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so keep the handles on
-        // window to guarantee a single listener of each (as SyncArea does)
+        // The handles live on window, so a second run undoes the first: a single listener of each,
+        // however often it runs (as SyncArea does)
         this.deconstructor();
         window.newNoteGuardRef = app.vault.on("create", (file) => this.onCreate(file));
         window.newNoteGuardTemplateRef = app.workspace.on("templater:new-note-from-template", (e) => this.onTemplated(e?.file));
@@ -84,8 +84,8 @@ class NewNoteGuard {
 
     // A note appeared: held when it already has properties and nothing below them
     async onCreate(file) {
-        // The listener outlives CustomJS being switched off, so check on every event
-        if (!app.plugins.enabledPlugins.has("customjs")) return;
+        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
+        if (!customJS.plugin) return;
         if (file?.extension !== "md") return;
         // By the file itself, not its path: a new note is often renamed straight away
         if (file.stat?.size === 0) {
@@ -107,7 +107,7 @@ class NewNoteGuard {
     // Templater has written a template into a note (made from a template, or by its trigger): once it
     // has let the note go, hold it where it is now, through the trigger's 300ms check
     onTemplated(file) {
-        if (!app.plugins.enabledPlugins.has("customjs") || !file?.path) return;
+        if (!customJS.plugin || !file?.path) return;
         const started = Date.now();
         const wait = () => {
             const pending = this.pending();

@@ -2,8 +2,8 @@
 // No menu (OBS-55): a task note goes where the command that made it says (AddTaskNote, from the
 // task line's one ⭕ or 🗃️), and otherwise waits in Inbox, to be filed afterwards with
 // AddProjectLink on its line or MoveToProject on the note
-// Through Plainday's classes, or CustomJS's in a vault that hasn't moved to Plainday (OBS-226)
-const pickedFile = (typeof plainday !== "undefined" ? plainday : typeof customJS !== "undefined" ? customJS : null)?.AddTaskNote?.takePresetParent?.(tp.config.target_file.path) ?? null;
+// Through Plainday's classes (nothing while it's off)
+const pickedFile = (typeof plainday !== "undefined" ? plainday : null)?.AddTaskNote?.takePresetParent?.(tp.config.target_file.path) ?? null;
 
 const thisID = tp.date.now("YYYYMMDDHHmmssSS");
 const rxDates = /[0-9]{4}-[0-9]{2}-[0-9]{2}/g;

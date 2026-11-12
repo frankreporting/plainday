@@ -2,11 +2,11 @@
 //
 // Hotkeys, Commander buttons, the calendar sync and Raycast call a command by its id, which
 // Obsidian shows as `plainday:<id>`, so an id never changes once set (OBS-226). A palette name
-// ("Plainday: Add note") can change without breaking anything.
+// ("Plainday: Add note") can change without breaking anything. CI checks that each names a class
+// a class file defines (.github/ci/checkScripts.mjs).
 //
-// CustomJS still runs the same classes in a vault that hasn't moved to Plainday, from its own
-// list in .obsidian/plugins/customjs/data.json. CI checks that the two lists name the same
-// classes (.github/ci/checkScripts.mjs), apart from CUSTOMJS_ONLY.
+// Snapshot and Refold daily notes aren't commands: they're fold machinery, which the classes call
+// directly and a tool outside Obsidian calls by eval (`plainday.SnapshotDailyNotes.invoke()`).
 export const COMMANDS = [
     { id: "schedule", name: "Schedule", script: "Schedule" },
     { id: "due-date", name: "Due date", script: "DueDate" },
@@ -25,7 +25,7 @@ export const COMMANDS = [
     { id: "update-obsidian-pm", name: "Update Obsidian PM", script: "UpdateObsidianPM" },
 ];
 
-// Run once the layout is ready, one after the other, in this order (CustomJS's)
+// Run once the layout is ready, one after the other, in this order
 export const STARTUP = [
     "NewNoteGuard",
     "SyncArea",
@@ -36,9 +36,3 @@ export const STARTUP = [
     "CheckOff",
     "TimeReportOnStartup",
 ];
-
-// CustomJS's commands that aren't commands in Plainday. Snapshot and Refold daily notes are fold
-// machinery: the classes call them directly, and a tool outside Obsidian calls them by eval
-// (`plainday.SnapshotDailyNotes.invoke()`). The calendar sync's range is the `Sync range:` line
-// in the Calendar Sync note.
-export const CUSTOMJS_ONLY = ["SnapshotDailyNotes", "RefoldDailyNotes", "CalendarSyncRange"];

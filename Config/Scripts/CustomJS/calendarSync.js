@@ -24,8 +24,7 @@ class CalendarSync {
     // The two JSON files live beside the fetcher in `Scripts/Calendar`. They're deliberately
     // not hidden: Obsidian Sync skips dotfiles, and the phone needs the events file.
     //
-    // Run it after fetching: `obsidian command id=plainday:sync-calendars` (under CustomJS,
-    // `customjs:invoke-CalendarSync`).
+    // Run it after fetching: `obsidian command id=plainday:sync-calendars`.
     // Notes are changed through app.vault.process, which reads and writes in one step, so this
     // can't overwrite what you're typing. The ledger only ever claims a line the sync has seen
     // in the note afterwards, so a write that doesn't land is retried rather than forgotten.
@@ -35,8 +34,7 @@ class CalendarSync {
     static MAX_REMOVALS = 10;   // a run that would remove or forward more than this does neither
     static FETCHER = "Config/Scripts/Calendar/fetchCalendar.swift";
     static FETCH_TIMEOUT_MS = 120000;
-    // How far ahead to sync. The Calendar Sync note holds the choice: edit the line by hand, or
-    // under CustomJS, CalendarSyncRange sets it from a dropdown.
+    // How far ahead to sync. The Calendar Sync note holds the choice, on its `Sync range:` line.
     static RANGES = [["1 week", 7], ["2 weeks", 14], ["3 weeks", 21], ["1 month", 31], ["2 months", 62], ["3 months", 92], ["6 months", 183]];
     static DEFAULT_RANGE = "6 months";
     // A time entry under an event, the way TimeReport reads one: `4:00pm - 4:30pm: note`, or a
@@ -142,10 +140,6 @@ class CalendarSync {
         });
     }
 
-    ranges() {
-        return CalendarSync.RANGES;
-    }
-
     // The range written in the note, or the default when it says nothing sensible
     async rangeLabel() {
         const file = app.vault.getFileByPath(CalendarSync.NOTE);
@@ -159,19 +153,13 @@ class CalendarSync {
         return CalendarSync.RANGES.find(([l]) => l === label)[1];
     }
 
-    async setRange(label) {
-        if (!CalendarSync.RANGES.some(([l]) => l === label)) return;
-        await this.updateNote(CalendarSync.NOTE, (text) =>
-            text === null ? this.newNote(this.rangeSection(label)) : this.replaceSection(text, "## Range", this.rangeSection(label)));
-    }
-
     rangeSection(label) {
         return [
             "## Range",
             "",
             `Sync range: ${label}`,
             "",
-            `How far ahead to sync: ${CalendarSync.RANGES.map(([l]) => l).join(", ")}. *Calendar sync (range)* sets this from a dropdown; editing this line works just as well.`,
+            `How far ahead to sync: ${CalendarSync.RANGES.map(([l]) => l).join(", ")}. Edit this line to change it.`,
         ].join("\n") + "\n";
     }
 
@@ -1326,7 +1314,7 @@ class CalendarSync {
     // (AddTaskNote.isLogsFolderName), or tagged #log (in its frontmatter or its text) wherever it waits
     isLog(file, cache) {
         const folder = (file.path ?? "").split("/").slice(-2, -1)[0];
-        if (folder && globalThis.customJS?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
+        if (folder && customJS?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .concat((cache.tags ?? []).map((t) => t.tag))

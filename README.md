@@ -128,7 +128,7 @@ The manual's *Daily notes* section is the full spec, and the one agents follow: 
 
 ## Commands
 
-Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts. A vault that still runs the same scripts through CustomJS, as installs did before Plainday's first release, names each command by its older name, without spaces ("CustomJS: AddTaskNote", `customjs:invoke-AddTaskNote`, for *Add note*, and *CalendarSync* for *Sync calendars*), and also has *SnapshotDailyNotes*, *RefoldDailyNotes* and *CalendarSyncRange*.
+Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts.
 
 | Command | Suggested hotkey | What it does |
 | --- | --- | --- |
@@ -169,7 +169,7 @@ Startup scripts (run when Obsidian starts):
 
 ## Raycast
 
-*Obsidian PM for Raycast*, a separate extension that isn't published yet, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with this vault's own `timeReport.js`, the logic behind ⌘T.
+*Obsidian PM for Raycast*, a separate extension that isn't published yet, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with its own copy of `timeReport.js`, the logic behind ⌘T, kept in step with this repository's `main`.
 
 ## Tests
 
@@ -179,9 +179,9 @@ From the vault root, with Node 20 or later:
 node --test "Config/Scripts/tests/*.test.mjs"
 ```
 
-For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and nothing left of CustomJS's hooks. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
+For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and no line that reaches for the CustomJS plugin, which ran the scripts before Plainday. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
 
-Scripts are loaded the way CustomJS and Templater load them, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
+The scripts are loaded in Node, each class file and Templater script on its own, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
 
 ## Working on it
 
@@ -199,7 +199,7 @@ Instead, install Plainday in your vault, clone this repository somewhere outside
 2. Run **Plainday: Update Obsidian PM** from the command palette. It asks where your clone is the first time.
 3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
 
-What it installs: everything the repository has under `Config/` (the manual included), plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the three settings files the scripts depend on (`daily-notes.json`, and Templater's and CustomJS's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
+What it installs: everything the repository has under `Config/` (the manual included), plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the two settings files the scripts depend on (`daily-notes.json` and Templater's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `Config/Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 

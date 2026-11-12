@@ -32,7 +32,6 @@ test("each prompt focuses its control from onOpen, a frame later", () => {
         ["datePrompt.js", "input.inputEl.focus()"],   // Schedule, Due and JumpToDate
         ["jumpToDate.js", "yes.focus()"],
         ["plan.js", "dropdown.selectEl.focus()"],
-        ["calendarSyncRange.js", "dropdown.selectEl.focus()"],
         ["addTaskNote.js", "move.buttonEl.focus()"],
         ["invoice.js", "input.inputEl.focus()"],        // Invoice: the invoice code and first number
         ["invoice.js", "buttonEl.focus())"],           // Invoice: its confirmation and questions
@@ -65,15 +64,12 @@ const harness = () => {
         app: {},
         Notice: class {},
         requestAnimationFrame: (fn) => frames.push(fn),
-        customJS: {
-            obsidian: { Modal, DropdownComponent },
-            CalendarSync: { ranges: () => [["1 week"], ["1 month"]], rangeLabel: async () => "1 week" },
-        },
+        customJS: { obsidian: { Modal, DropdownComponent } },
     });
     return { log, frames, ctx };
 };
 
-for (const [f, name] of [["plan.js", "Plan"], ["calendarSyncRange.js", "CalendarSyncRange"]]) {
+for (const [f, name] of [["plan.js", "Plan"]]) {
     test(`${name}: the dropdown takes focus on the next frame, not during the command`, async () => {
         const { log, frames, ctx } = harness();
         const Cls = vm.runInContext(`${read(f)}\n;${name}`, ctx);

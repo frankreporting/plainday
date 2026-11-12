@@ -2,8 +2,8 @@ class RefoldOnOpen {
     // Startup script: keeps daily notes folded as they're opened, and snapshots them as they're
     // left or Obsidian quits (see RefoldDailyNotes), on every device.
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so keep the
-        // handles on window to guarantee a single set of listeners (same as SyncArea)
+        // The handles live on window, so a second run undoes the first: a single set of listeners,
+        // however often it runs (same as SyncArea)
         this.deconstructor();
         let current = app.workspace.getActiveFile();
         window.refoldOnOpenRefs = [
@@ -27,8 +27,8 @@ class RefoldOnOpen {
     }
 
     run(method, ...args) {
-        // The listeners outlive CustomJS being switched off, so check on every event
-        if (!app.plugins.enabledPlugins.has("customjs")) return;
+        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
+        if (!customJS.plugin) return;
         const log = (e) => console.error(`RefoldOnOpen: ${method} failed`, e);
         try {
             Promise.resolve(customJS.RefoldDailyNotes?.[method](...args)).catch(log);

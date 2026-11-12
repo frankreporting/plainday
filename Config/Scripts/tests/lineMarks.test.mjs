@@ -142,7 +142,7 @@ test("a line's own note is its ⋯ and nothing else: a ↗ is read by nobody (OB
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [KES], conflicts: 0 });
 });
 
-test("OBS-41: an index a run began with answers what a note is once CustomJS has started over", () => {
+test("OBS-41: an index a run began with answers what a note is once `customJS` has lost the classes it read", () => {
     const week = `${PLANNER}/weeks/2026w38.md`;
     const v = standIn({ notes: { [KES]: PROJECT, [week]: "", [day("2026-09-17")]: "", "Reference/People/Someone.md": "---\nparent: \"[[Kestrel]]\"\n---\n" } });
     const tr = v.customJS.TimeReport;
