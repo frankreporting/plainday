@@ -57,11 +57,12 @@ jobs:
         run: npm test
       # Obsidian's lint (OBS-230; CLAUDE.md, "Lint"). The summary never fails: it puts the
       # warnings' count by rule on the job's page. The lint fails on an error the baseline
-      # (eslint-suppressions.json) doesn't let through, on a baseline entry whose error is
-      # fixed, and on any warning in Plainday's own code.
+      # (.github/ci/eslint-suppressions.json) doesn't let through, on a baseline entry whose
+      # error is fixed, and on any warning in Plainday's own code. ESLint reads the baseline only
+      # where a command names it (OBS-268), so the summary names it too.
       - name: Obsidian lint summary
         run: |
-          npx eslint . --format json --output-file "$RUNNER_TEMP/lint.json" || true
+          npx eslint . --suppressions-location .github/ci/eslint-suppressions.json --format json --output-file "$RUNNER_TEMP/lint.json" || true
           node .github/ci/lintSummary.mjs "$RUNNER_TEMP/lint.json" >> "$GITHUB_STEP_SUMMARY"
       - name: Obsidian lint
         run: npm run lint
@@ -126,7 +127,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node .github/ci/checkVersion.mjs
-      - name: The lint baseline doesn't grow
+      - name: The lint baseline doesn't grow, and isn't at the root
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node .github/ci/checkBaseline.mjs

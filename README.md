@@ -65,7 +65,7 @@ Welcome.md                         start here
 plugin/                            Plainday, the plugin built from Config/Scripts/CustomJS (build, host, command list, tests)
 manifest.json, package.json        Plainday's manifest, and its build (npm run build)
 versions.json                      each release's oldest Obsidian (npm version)
-eslint.config.mjs                  Obsidian's lint, and its baseline in eslint-suppressions.json (npm run lint)
+eslint.config.mjs                  Obsidian's lint (npm run lint); its baseline is .github/ci/eslint-suppressions.json
 ```
 
 Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.

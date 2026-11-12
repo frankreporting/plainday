@@ -9,7 +9,9 @@
 //   is read: the class files and the Templater scripts, as well as Plainday's own code in
 //   plugin/src/, manifest.json, package.json and LICENSE.
 // - The baseline: errors the class files and the Templater scripts had when this lint started
-//   are in eslint-suppressions.json, which ESLint reads on its own. A new error fails, in any
+//   are in .github/ci/eslint-suppressions.json, which ESLint reads only where a command names it
+//   with --suppressions-location (`npm run lint` and CI do). Not at the root, where ESLint would
+//   read it on its own and the directory's scan stops on it (OBS-268). A new error fails, in any
 //   file; so does an error that's fixed but still in the baseline, until `npm run lint:prune`
 //   takes it out. Warnings never fail outside plugin/src/ (`npm run lint` passes
 //   --max-warnings only for Plainday's own code, in a second run).

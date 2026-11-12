@@ -12,7 +12,7 @@ import { scanLine, scanDiff, scanText, describe } from "./privacy.mjs";
 import { docsSection, checkLinearLink, checkDocs } from "./checkPR.mjs";
 import { oldFolderLines, checkAll as checkFolders } from "./checkFolders.mjs";
 import { checkVersionFiles, compareVersions, checkAll as checkVersion } from "./checkVersion.mjs";
-import { checkBaselineFiles, ruleTotals } from "./checkBaseline.mjs";
+import { checkBaselineFiles, ruleTotals, checkAll as checkBaseline, BASELINE, ROOT_BASELINE } from "./checkBaseline.mjs";
 import { run as release, FILES as RELEASE_FILES, manifestAt as releaseManifestAt } from "./release.mjs";
 import { summary as lintSummary } from "./lintSummary.mjs";
 import { spawnSync } from "node:child_process";
@@ -298,7 +298,7 @@ test("a bigger baseline fails, rule by rule, and a renamed file's entries pass",
     const bigger = baseline({ "a.js": { "obsidianmd/regex-lookbehind": 3, "no-empty": 1 }, "b.js": { "obsidianmd/regex-lookbehind": 1 } });
     const p = checkBaselineFiles({ base: MAIN, head: bigger, basePkg: PKG(), headPkg: PKG() }).problems;
     assert.equal(p.length, 1, p.join("\n"));
-    assert.match(p[0], /^eslint-suppressions\.json: obsidianmd\/regex-lookbehind: 4 errors let through, main has 3\. The baseline only shrinks/);
+    assert.match(p[0], /^\.github\/ci\/eslint-suppressions\.json: obsidianmd\/regex-lookbehind: 4 errors let through, main has 3\. The baseline only shrinks/);
     // The same total, with a lookbehind traded for a fixed empty block: still a new lookbehind
     const swapped = baseline({ "a.js": { "obsidianmd/regex-lookbehind": 3 }, "b.js": { "obsidianmd/regex-lookbehind": 1 } });
     assert.equal(checkBaselineFiles({ base: MAIN, head: swapped, basePkg: PKG(), headPkg: PKG() }).problems.length, 1);
@@ -323,9 +323,72 @@ test("the lint summary counts warnings by rule and the baseline's errors", () =>
         { filePath: "a.js", messages: [{ severity: 1, ruleId: "no-restricted-globals" }, { severity: 1, ruleId: "no-restricted-globals" }, { severity: 1, ruleId: "obsidianmd/prefer-window-timers" }] },
         { filePath: "b.js", messages: [] },
     ], JSON.parse(MAIN));
-    assert.match(md, /2 files\. 4 errors let through by the baseline \(`eslint-suppressions\.json`\), 3 warnings\./);
+    assert.match(md, /2 files\. 4 errors let through by the baseline \(`\.github\/ci\/eslint-suppressions\.json`\), 3 warnings\./);
     assert.match(md, /\| `no-restricted-globals` \| 2 \|\n\| `obsidianmd\/prefer-window-timers` \| 1 \|/);
     assert.match(lintSummary([{ filePath: "a.js", messages: [{ severity: 2, ruleId: "x" }] }], {}), /\*\*1 errors not in the baseline\.\*\*/);
+});
+
+// A git repository whose first commit has `files`; returns its root, that commit, and git
+function repoAt(files) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
+    const git = (...args) => spawnSync("git", ["-C", root, "-c", "user.name=CI", "-c", "user.email=ci@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" });
+    git("init", "-q");
+    for (const [f, text] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+        fs.writeFileSync(path.join(root, f), text);
+    }
+    git("add", "-A");
+    git("commit", "-q", "-m", "main");
+    return { root, sha: git("rev-parse", "HEAD").stdout.trim(), git };
+}
+
+test("main's baseline is read at its new path, or at the root from before the move (OBS-268)", () => {
+    for (const at of [BASELINE, ROOT_BASELINE]) {
+        const { root, sha, git } = repoAt({ [at]: MAIN, "package.json": PKG() });
+        try {
+            if (at === ROOT_BASELINE) {
+                fs.mkdirSync(path.join(root, path.dirname(BASELINE)), { recursive: true });
+                git("mv", ROOT_BASELINE, BASELINE);
+            }
+            const r = checkBaseline({ BASE_SHA: sha }, root);
+            assert.deepEqual(r.problems, [], at);
+            assert.deepEqual(r.notes, ["The lint baseline lets through 4 errors (main: 4)."], at);
+            fs.writeFileSync(path.join(root, BASELINE), baseline({ "a.js": { "obsidianmd/regex-lookbehind": 3, "no-empty": 1 }, "b.js": { "obsidianmd/regex-lookbehind": 1 } }));
+            assert.equal(checkBaseline({ BASE_SHA: sha }, root).problems.length, 1, `${at}: a bigger baseline still fails`);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    }
+});
+
+test("an eslint-suppressions.json at the root fails, where the directory's scan would stop on it (OBS-268)", () => {
+    const { root, sha } = repoAt({ [BASELINE]: MAIN, "package.json": PKG() });
+    try {
+        assert.deepEqual(checkBaseline({ BASE_SHA: sha }, root).problems, []);
+        assert.deepEqual(checkBaseline({}, root).problems, []);
+        fs.writeFileSync(path.join(root, ROOT_BASELINE), MAIN);
+        for (const env of [{ BASE_SHA: sha }, {}]) {
+            const p = checkBaseline(env, root).problems;
+            assert.equal(p.length, 1, p.join("\n"));
+            assert.match(p[0], /^eslint-suppressions\.json is at the repository's root, where the community directory's scan stops on it \(OBS-268\)\. The baseline is \.github\/ci\/eslint-suppressions\.json/);
+        }
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("the repository's lint commands name the baseline, and none is at the root (OBS-268)", () => {
+    const flag = `--suppressions-location ${BASELINE}`;
+    const { scripts } = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    // The first run reads the baseline; the second, Plainday's own code, has no entries
+    assert.ok(scripts.lint.split(" && ")[0].includes(flag), scripts.lint);
+    assert.ok(scripts["lint:prune"].includes(flag), scripts["lint:prune"]);
+    const ci = fs.readFileSync(".github/workflows/ci.yml", "utf8");
+    const eslintRuns = ci.split("\n").filter((l) => /\bnpx eslint\b/.test(l));
+    assert.ok(eslintRuns.length, "the lint summary step runs ESLint");
+    for (const l of eslintRuns) assert.ok(l.includes(flag), l);
+    assert.ok(fs.existsSync(BASELINE), BASELINE);
+    assert.equal(fs.existsSync(ROOT_BASELINE), false);
 });
 
 // ------------------------------------------------------------------ the release script (OBS-230)
