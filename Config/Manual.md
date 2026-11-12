@@ -645,7 +645,9 @@ Copy `Config/Scripts/Style Settings/pm-invoice.css` into `.obsidian/snippets/` a
 
 ## Commands
 
-The system's commands come from the Plainday plugin, and run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id: `obsidian command id=plainday:add-note`. Each id is the command's name in lower case with hyphens (`plainday:due-date`), apart from *Sync calendars* (`plainday:sync-calendars`). The hotkeys below are suggestions; set them under Settings → Hotkeys. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
+The system's commands come from the Plainday plugin, and run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id: `obsidian command id=plainday:add-note`. Each id is the command's name in lower case with hyphens (`plainday:due-date`). The hotkeys below are suggestions; set them under Settings → Hotkeys. *Complete* is Obsidian's own checklist toggle (`⌘⏎`).
+
+Each command has its own icon, from the icons Obsidian ships with. It shows when you put the command on a phone's toolbar (Settings → Toolbar), with no other plugin, and Commander takes it for a new button. After an update, a phone's toolbar shows a changed icon from the next time Obsidian starts there.
 
 ### Typing a date
 

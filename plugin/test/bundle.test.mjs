@@ -1,6 +1,6 @@
 // Plainday's bundle: built from the class files as they are, it loads in Node against stand-ins
 // for Obsidian's module and CodeMirror's. Every class is made by name, every command in the list is
-// added with its id and name, the startup scripts run in order once the layout is ready, a class
+// added with its id, name and icon, the startup scripts run in order once the layout is ready, a class
 // reaches Plainday and CodeMirror through `customJS`, no CustomJS hook is left, and unloading leaves
 // nothing of Plainday's behind. The build itself is tested too: a line in a class file that reaches
 // for CustomJS stops it, naming the file and line.
@@ -79,19 +79,24 @@ test("every class file is bundled, and made once by name", () => {
     }
 });
 
-test("each command in the list is added with its id and name, and runs its class", async () => {
+test("each command in the list is added with its id, name and icon, and runs its class", async () => {
     const { plugin } = load();
     plugin.onload();
     try {
-        assert.deepEqual(plugin.commands.map(({ id, name }) => ({ id, name })), COMMANDS.map(({ id, name }) => ({ id, name })));
+        const shown = ({ id, name, icon }) => ({ id, name, icon });
+        assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
         assert.equal(plugin.commands.length, 14);
         for (const c of plugin.commands) {
             assert.match(c.id, /^[a-z]+(-[a-z]+)*$/, "ids are lower case with hyphens, without the plugin's id");
+            // An icon name from Obsidian's set (OBS-263): without one, the phone's toolbar draws a question mark
+            assert.match(c.icon ?? "", /^[a-z]+(-[a-z0-9]+)*$/, `${c.id} has an icon, in lower case with hyphens`);
             // Sentence case: only the first word and proper names capitalized
             const [first, ...rest] = c.name.split(" ");
             assert.match(first, /^[A-Z][a-z]+$/, c.name);
             for (const w of rest) assert.ok(/^[a-z]+$/.test(w) || ["Obsidian", "PM"].includes(w), `sentence case: ${c.name}`);
         }
+        const icons = plugin.commands.map((c) => c.icon);
+        assert.deepEqual(icons.filter((icon, i) => icons.indexOf(icon) !== i), [], "no two commands share an icon");
         for (const name of NOT_COMMANDS) {
             assert.ok(!COMMANDS.some((c) => c.script === name), `${name} isn't a command`);
             assert.equal(typeof window.plainday[name]?.invoke, "function", `${name} can still be called by eval`);
