@@ -1,13 +1,15 @@
-# Publishes a release of Plainday when main's version doesn't have one yet (OBS-230). So to
-# release, a PR raises the version, and merging it publishes the release. CLAUDE.md
-# ("Releases") has the steps; .github/ci/release.mjs does the work, the same script as the PR's
-# dry run in ci.yml.
+# Publishes a release of Plainday when a merge to main raises its version (OBS-230, OBS-266). So
+# to release, a PR raises the version, and merging it publishes the release. A merge that leaves
+# the version as it was publishes nothing, even when that version has no release, so a release
+# deleted on purpose stays deleted. CLAUDE.md ("Releases") has the steps; .github/ci/release.mjs
+# does the work, the same script as the PR's dry run in ci.yml.
 name: Release
 
 on:
   push:
     branches: [main]
-  # Run again by hand: it publishes only a version that has no release yet
+  # Run by hand to retry a publish that failed: it publishes main's version when that has no
+  # release, whatever the last merge did
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The history, so the script can read the version before the push
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,7 +43,9 @@ jobs:
       - run: npm ci
       - name: Build Plainday (main.js)
         run: npm run build
-      - name: Publish, unless this version is released already
+      - name: Publish, when this merge raised the version (or by hand) and it has no release
         env:
           GH_TOKEN: ${{ github.token }}
+          # The commit before the push, to compare versions with (empty on a run by hand)
+          BEFORE_SHA: ${{ github.event.before }}
         run: node .github/ci/release.mjs publish --out "$RUNNER_TEMP/release"

@@ -13,7 +13,7 @@ import { docsSection, checkLinearLink, checkDocs } from "./checkPR.mjs";
 import { oldFolderLines, checkAll as checkFolders } from "./checkFolders.mjs";
 import { checkVersionFiles, compareVersions, checkAll as checkVersion } from "./checkVersion.mjs";
 import { checkBaselineFiles, ruleTotals } from "./checkBaseline.mjs";
-import { run as release, FILES as RELEASE_FILES } from "./release.mjs";
+import { run as release, FILES as RELEASE_FILES, manifestAt as releaseManifestAt } from "./release.mjs";
 import { summary as lintSummary } from "./lintSummary.mjs";
 import { spawnSync } from "node:child_process";
 
@@ -355,16 +355,88 @@ function releaseRoot({ version = "0.0.1", styles = false, main = "// main.js\n" 
     return { root, out: path.join(root, "out") };
 }
 
-test("the dry run says what merging would publish, and collects the release's files", () => {
-    const { root, out } = releaseRoot();
+// The version before the merge (or on the PR's base), as manifestAt reads it
+const before = (v) => ({ sha: "bef0123", readable: true, manifest: v === undefined ? undefined : JSON.stringify({ id: "plainday", version: v }) });
+
+test("the dry run says merging publishes only when the PR raises the version, and collects the release's files", () => {
+    const { root, out } = releaseRoot({ version: "0.0.2" });
     try {
-        const { gh, calls } = fakeGh();
-        const r = release({ mode: "dry-run", root, out, gh });
-        assert.equal(r.message, "Merging publishes 0.0.1, with main.js, manifest.json.");
+        const { gh, calls } = fakeGh({ releases: ["0.0.1"] });
+        const r = release({ mode: "dry-run", root, out, gh, before: before("0.0.1") });
+        assert.equal(r.message, "Merging publishes 0.0.2, with main.js, manifest.json.");
         assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json"]);
         assert.ok(!calls.some((c) => c[0] === "release"), "a dry run publishes nothing");
-        const done = release({ mode: "dry-run", root, out, gh: fakeGh({ releases: ["0.0.1"] }).gh });
-        assert.match(done.message, /^0\.0\.1 is already released, so merging publishes nothing\./);
+        // The same version as main's publishes nothing, even when it has no release (OBS-266)
+        const same = release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: before("0.0.2") });
+        assert.equal(same.published, false);
+        assert.match(same.message, /^This PR leaves the version at 0\.0\.2, so merging publishes nothing\./);
+        assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json"], "the files are kept either way");
+        const done = release({ mode: "dry-run", root, out, gh: fakeGh({ releases: ["0.0.2"] }).gh, before: before("0.0.1") });
+        assert.match(done.message, /^0\.0\.2 is already released, so merging publishes nothing\./);
+        assert.match(release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: before(undefined) }).message, /^Merging publishes 0\.0\.2/, "main without a manifest");
+        assert.throws(() => release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: { sha: "bef0123", readable: false } }), /couldn't read main's commit bef0123/);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("a merge publishes only when it raises the version; a run by hand publishes any version without a release (OBS-266)", () => {
+    const { root, out } = releaseRoot();
+    try {
+        // Unchanged, and released: nothing
+        const a = fakeGh({ releases: ["0.0.1"] });
+        const kept = release({ mode: "publish", root, out, sha: "abc1234", gh: a.gh, before: before("0.0.1") });
+        assert.equal(kept.published, false);
+        assert.ok(!a.calls.some((c) => c[0] === "release"));
+        // Unchanged, and no release (one deleted, or a publish that failed): still nothing, and says why
+        const b = fakeGh();
+        const gone = release({ mode: "publish", root, out, sha: "abc1234", gh: b.gh, before: before("0.0.1") });
+        assert.equal(gone.published, false);
+        assert.equal(gone.message, 'This merge left the version at 0.0.1, so it publishes nothing. To release, a PR raises the version (CLAUDE.md, "Releases").');
+        assert.ok(!b.calls.some((c) => c[0] === "release"));
+        // Lowered (only a push straight to main could): nothing
+        const lower = release({ mode: "publish", root, out, sha: "abc1234", gh: fakeGh().gh, before: before("0.0.2") });
+        assert.equal(lower.published, false);
+        assert.match(lower.message, /^This merge lowered the version from 0\.0\.2 to 0\.0\.1, so it publishes nothing\./);
+        // Raised: publishes
+        const c = fakeGh();
+        const raised = release({ mode: "publish", root, out, sha: "abc1234", gh: c.gh, before: before("0.0.0") });
+        assert.equal(raised.published, true);
+        assert.equal(c.calls.filter((x) => x[0] === "release").length, 1);
+        // The commit before can't be read (a new branch's zeros, or a force push): nothing, with a warning
+        const d = fakeGh();
+        const unread = release({ mode: "publish", root, out, sha: "abc1234", gh: d.gh, before: { sha: "bef0123", readable: false } });
+        assert.equal(unread.published, false);
+        assert.equal(unread.warning, true);
+        assert.match(unread.message, /^Couldn't read the commit before this push \(bef0123\), .* publishes nothing\. If it did, run the Release workflow by hand\./);
+        assert.ok(!d.calls.some((x) => x[0] === "release"));
+        // By hand (no `before`): publishes the manifest's version when it has no release, as before
+        const e = fakeGh();
+        assert.equal(release({ mode: "publish", root, out, sha: "abc1234", gh: e.gh }).published, true);
+        assert.equal(release({ mode: "publish", root, out, sha: "abc1234", gh: fakeGh({ releases: ["0.0.1"] }).gh }).published, false);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("manifestAt reads main's manifest.json at a commit, and tells a missing commit from a missing file", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
+    const git = (...args) => spawnSync("git", ["-C", root, "-c", "user.name=CI", "-c", "user.email=ci@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" });
+    try {
+        git("init", "-q");
+        fs.writeFileSync(path.join(root, "README.md"), "x\n");
+        git("add", "README.md");
+        git("commit", "-q", "-m", "first");
+        const first = git("rev-parse", "HEAD").stdout.trim();
+        fs.writeFileSync(path.join(root, "manifest.json"), JSON.stringify({ version: "0.0.1" }));
+        git("add", "manifest.json");
+        git("commit", "-q", "-m", "second");
+        const second = git("rev-parse", "HEAD").stdout.trim();
+        assert.deepEqual(releaseManifestAt(second, root), { sha: second, readable: true, manifest: JSON.stringify({ version: "0.0.1" }) });
+        assert.deepEqual(releaseManifestAt(first, root), { sha: first, readable: true, manifest: undefined }, "a commit from before the manifest");
+        for (const sha of ["", undefined, "0".repeat(40), "f".repeat(40)]) {
+            assert.equal(releaseManifestAt(sha, root).readable, false, String(sha));
+        }
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
