@@ -215,7 +215,7 @@ class DueDate {
         const lines = text.split("\n");
         const bare = (l) => l.replace(/\r$/, "");
         const fence = (l) => /^---[ \t]*$/.test(bare(l));
-        if (!fence((lines[0] ?? "").replace(/^﻿/, ""))) return null;
+        if (!fence((lines[0] ?? "").replace(/^\uFEFF/, ""))) return null;
         const end = lines.findIndex((l, i) => i > 0 && fence(l));
         if (end === -1) return null;
         const props = lines.slice(1, end).map(bare);

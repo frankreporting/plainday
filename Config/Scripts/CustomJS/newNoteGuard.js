@@ -28,7 +28,7 @@ class NewNoteGuard {
     static POLL_MS = 25;
     // A note with only properties is small; a bigger file is left alone without reading it
     static MAX_SIZE = 65536;
-    static FRONTMATTER = /^﻿?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
+    static FRONTMATTER = /^\uFEFF?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
 
     async invoke() {
         // CustomJS doesn't run deconstructors when the plugin itself reloads, so keep the handles on

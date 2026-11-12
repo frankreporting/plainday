@@ -137,7 +137,7 @@ class Schedule {
             modal.close();
 
             // `outgoing`: the lines that go; `kept`: what's left in place of lines lineNum to `end`
-            let outgoing, kept, end = lineNum, taskId = id;
+            let outgoing, kept, end, taskId = id;
             if (!periodic || status === ">") {
                 // A note that isn't a periodic note: the line stays as the trace, [>] with a forward date to where
                 // the task went at its end and the task's ID last, and its sub-tasks stay under it; the new line

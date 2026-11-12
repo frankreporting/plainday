@@ -134,7 +134,12 @@ class TrailingLinks {
     // an area's 🗃️; OBS-208); or Schedule's
     // forward date, a periodic note's line with a date for its label (TaskIds.FORWARD), drawn as that
     // date (one written with a ➡️ before its date too). A phone may add or drop the U+FE0F on an emoji.
-    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(?<=\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*)(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    // A date label (group 3) counts only on a link to a periodic note's line, which lastLink checks:
+    // read the links with it.
+    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
+    // name, then `#^` and an ID, `2026-09-17#^p7d2qe`; periodicLine searches with it from a place
+    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/g;
     // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
     static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
@@ -170,6 +175,31 @@ class TrailingLinks {
         return ch < end ? end : text.length;
     }
 
+    // The system link that ends `text` (LINK's match), or null. A date label counts only on a link to a
+    // periodic note's line: the text before the link's `|` ends with one (periodicLine). Older iPhones
+    // can't run that check in the pattern (a lookbehind), so it's made here (OBS-199). When it fails, no
+    // link ends the text: one starting later would need a `|` after this one's, and a date label has
+    // none. TimeReport.trailLink is the same.
+    static lastLink(text) {
+        const m = text.match(TrailingLinks.LINK);
+        return m && (m[3] === undefined || TrailingLinks.periodicLine(text.slice(0, m.index + 2 + m[1].length))) ? m : null;
+    }
+
+    // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
+    // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
+    // ending in `/` with no `]`, `|` or `#`. It starts near the last `#`, as the lookbehind started at
+    // the end, so a long line costs no more than a short one.
+    static periodicLine(before) {
+        const re = TrailingLinks.PERIODIC_LINE;
+        re.lastIndex = Math.max(0, before.lastIndexOf("#") - 10);
+        const at = re.exec(before)?.index;
+        if (at === undefined) return false;
+        if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
+        if (before[at - 1] !== "/") return false;
+        for (let i = at - 2; i > 0 && !"]|#".includes(before[i]); i--) if (before[i] === "[" && before[i - 1] === "[") return true;
+        return false;
+    }
+
     // The run of system links that ends a task or event line, before a task's ID: { bodyFrom
     // (where the text starts, after the checkbox), textEnd (where it ends, before the space ahead
     // of the run), runFrom, runTo, links: [{ from, to, kind, target, alias }] in line order }. Null
@@ -181,7 +211,7 @@ class TrailingLinks {
         let end = TrailingLinks.blockId(text)?.from ?? text.length;
         end = text.slice(0, end).trimEnd().length;
         for (;;) {
-            const m = text.slice(0, end).match(TrailingLinks.LINK);
+            const m = TrailingLinks.lastLink(text.slice(0, end));
             if (!m) break;
             const from = end - m[0].length;
             const kind = TrailingLinks.KINDS[String.fromCodePoint(m[2].codePointAt(0))] ?? "forward";

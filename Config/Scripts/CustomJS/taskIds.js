@@ -17,11 +17,19 @@ class TaskIds {
     // written with a ➡️ before its date (before OBS-185's first test round) is read too, the ➡️ left
     // out of its label; a phone may drop the U+FE0F.
     static FORWARD = /^\[\[(?=(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
-    // One item of the run of links that ends a line, with the spaces before it: a 🚩, ⋯, ↗, ⭕ or
+    // One item of the run of links that ends a line: a 🚩, ⋯, ↗, ⭕ or
     // 🗃️ link, a forward date (or one written with a ➡️), or the ℹ️ or 🆓 mark. The same pattern as
-    // AddTaskNote.TRAIL_ITEM; TaskIds' statics must load in an empty vm context, so they can't reach
-    // AddTaskNote, and this is a copy that taskIds.test.mjs checks against it.
-    static TRAIL_ITEM = /(?<![ ])[ ]*(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?<=\s)(?:ℹ|🆓)️?)$/u;
+    // AddTaskNote.TRAIL_ITEM, read with trailItem as AddTaskNote's is; TaskIds' statics must load in an
+    // empty vm context, so they can't reach AddTaskNote, and these are copies that taskIds.test.mjs
+    // checks against it.
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    static trailItem(text) {
+        const item = text.match(TaskIds.TRAIL_ITEM);
+        if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
+        while (text[item.index - 1] === " ") item.index--;
+        item[0] = text.slice(item.index);
+        return item;
+    }
     // The items a forward date goes before: a line's ⭕, 🗃️ and note links
     static HOME_OR_NOTE = /\|\s*(?:⭕|🗃|⋯|↗)/u;
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\]/;
@@ -68,7 +76,7 @@ class TaskIds {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
         const items = [];
         let at = bare.length;
-        for (let m; (m = bare.slice(0, at).match(TaskIds.TRAIL_ITEM));) {
+        for (let m; (m = TaskIds.trailItem(bare.slice(0, at)));) {
             items.unshift(m[0].trim());
             at = m.index;
         }
@@ -449,7 +457,7 @@ class TaskIds {
 
     // A link in the old marks, which mean nothing since OBS-208: 🗒️, a line's note or Schedule's link
     // back to the note it was sent from, and 🔗 before OBS-87. A phone may add or drop the U+FE0F.
-    static OLD_ITEM = /(?<![ ])[ ]*\[\[([^\]|]+)\|\s*(?:🗒|🔗)️?\s*\]\]$/u;
+    static OLD_ITEM = /[ ]*\[\[([^\]|]+)\|\s*(?:🗒|🔗)️?\s*\]\]$/u;
 
     // The old-mark links in the run that ends `line`: [{ from, to, target }] in line order, `target`
     // the link's text before its `|`
@@ -460,7 +468,7 @@ class TaskIds {
         for (;;) {
             const head = bare.slice(0, at);
             const old = head.match(TaskIds.OLD_ITEM);
-            const item = old ?? head.match(TaskIds.TRAIL_ITEM);
+            const item = old ?? TaskIds.trailItem(head);
             if (!item) break;
             if (old) out.unshift({ from: item.index + item[0].indexOf("[["), to: at, target: old[1].trim() });
             at = item.index;
