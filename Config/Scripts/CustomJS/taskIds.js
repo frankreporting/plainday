@@ -134,7 +134,7 @@ class TaskIds {
     // is a sub-task, and nothing on it counts, its ID included. TimeReport.nestTop decides, plain bullets
     // skipped; loaded alone (the statics in tests), a line with no indent.
     static isTop(lines, i) {
-        const tr = globalThis.customJS?.TimeReport;
+        const tr = customJS?.TimeReport;
         return tr ? tr.nestTop((n) => lines[n], i) === i : !/^\s/.test(lines[i]);
     }
 

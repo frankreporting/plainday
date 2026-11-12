@@ -31,6 +31,6 @@ Everything under "## Time Report" is written by the *Time report* command, not b
 | Plan | Plan ahead: the next few daily notes side by side | Command palette |
 | Jump to date | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
 
-Run the task commands with the cursor on a task line. *Toggle time entry* times tasks in today's daily note; press it again to stop. In the command palette, the commands are "Plainday: …" (or "CustomJS: …", with no spaces in their names, in a vault that runs them through CustomJS; see [[README]]).
+Run the task commands with the cursor on a task line. *Toggle time entry* times tasks in today's daily note; press it again to stop. In the command palette, the commands are "Plainday: …".
 
 The calendar sync (*Sync calendars*) reads macOS calendars, so it needs setup first; see [[README]].

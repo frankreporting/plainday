@@ -1,6 +1,6 @@
 // Tests for CustomJS/timeReport.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it; only the methods that don't touch
+// The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Checks against a real vault's data can go in
 // timeReport.private.test.mjs, which git ignores.
 import { test } from "node:test";
@@ -2149,7 +2149,7 @@ test("OBS-34: no conflict without a ⋯ note, or when the ⋯ is on a sub-task; 
     ]);
 });
 
-test("OBS-41: refresh keeps the Schedule it started with while CustomJS rebuilds customJS", async () => {
+test("OBS-41: refresh keeps the Schedule it started with, even when `customJS` loses it part-way through", async () => {
     const schedule = {
         dailyOpts: () => ({ folder: "Planner/days", format: "YYYY-MM-DD" }),
         isDailyNote: (f) => f.path.startsWith("Planner/days/"),
@@ -2170,7 +2170,7 @@ test("OBS-41: refresh keeps the Schedule it started with while CustomJS rebuilds
     const report = new Loaded();
     // With no project note in sight, refresh stops before it writes anything; it has started, though
     await report.refresh({ quiet: true });
-    // A script is saved: CustomJS starts `customJS` over, and Schedule isn't back yet
+    // `customJS` loses its Schedule part-way through
     context.customJS = { obsidian: {} };
     assert.deepEqual(plain(report.periodFolders()), { week: "Planner/weeks", month: "Planner/months", year: "Planner/years" });
     assert.deepEqual(plain(await report.readDailyNotes()), [{ date: "2026-09-01", path: day.path, text: "- 9:00am - 9:30am" }]);

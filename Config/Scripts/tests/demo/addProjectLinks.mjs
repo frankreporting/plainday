@@ -38,7 +38,7 @@ const TASK = /^\s*[-*+]\s+\[.\]/;
 // timeReport.js from before OBS-196, whose resolve took one, else off the note's `lines`
 const lookup = (tr, lines, ctx, i, p, index) => (tr.resolve.length === 3 ? tr.resolve(ctx, p, index, true) : tr.resolve((n) => lines[n], i, p, index).live);
 
-// The classes, as CustomJS evaluates them; only their text methods are used
+// The classes, loaded with vm; only their text methods are used
 function load(file, name) {
     return new (vm.runInContext(fs.readFileSync(file, "utf8") + `\n;${name}`, vm.createContext({})))();
 }

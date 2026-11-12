@@ -20,8 +20,8 @@ if (tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.h
 // AddTaskNote files a task's note. Otherwise it waits in Inbox, with no menu (OBS-55), and is filed
 // afterwards: AddProjectLink on its line or MoveToProject on the log moves it and sets the line's
 // ⭕, so the line and its log agree on where the meeting's time counts (OBS-90).
-// The system's classes: Plainday's, or CustomJS's in a vault that hasn't moved to Plainday (OBS-226)
-const system = typeof plainday !== "undefined" ? plainday : typeof customJS !== "undefined" ? customJS : null;
+// The system's classes, from Plainday (nothing while it's off)
+const system = typeof plainday !== "undefined" ? plainday : null;
 const sync = system?.CalendarSync ?? null;
 const schedule = system?.Schedule ?? null;
 const tasks = system?.AddTaskNote ?? null;

@@ -1,6 +1,6 @@
 // Tests for CustomJS/calendarSync.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it. The pure parts (applyOne, runOps,
+// The class is loaded with vm. The pure parts (applyOne, runOps,
 // findBlock) are tested on note text; whole runs go through run() against an in-memory vault, with
 // just enough of moment for the formats the sync uses.
 import { test } from "node:test";

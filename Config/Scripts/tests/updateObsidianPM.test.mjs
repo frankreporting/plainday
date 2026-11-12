@@ -1,6 +1,6 @@
 // Tests for CustomJS/updateObsidianPM.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it; only the planning, which doesn't
+// The class is loaded with vm; only the planning, which doesn't
 // touch `app`, the file system or git, is tested.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -19,17 +19,19 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const SCRIPT = "Config/Scripts/CustomJS/timeReport.js";
 const TEMPLATE = "Config/Templates/Task.md";
-const SETTINGS = ".obsidian/plugins/customjs/data.json";
+const SETTINGS = ".obsidian/plugins/templater-obsidian/data.json";
+// Installed until OBS-257, when the class files stopped running under CustomJS
+const CUSTOMJS_SETTINGS = ".obsidian/plugins/customjs/data.json";
 
 test("installs: the system, never notes, never the demo's own test files", () => {
     for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "Reference/Invoices/Invoices.base", "Projects/Projects.base",
-        ".obsidian/daily-notes.json", ".obsidian/plugins/templater-obsidian/data.json"]) {
+        ".obsidian/daily-notes.json"]) {
         assert.equal(up.installs(path), true, path);
     }
     for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "Projects/Projects.md", "Projects/Freelance/Projects.base", "Reference/Planner/days/2026-09-16.md",
         "Config/Invoice Settings.md", "Reference/Invoices/1001-KES.md",
         "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "Inbox/Desk lamp for the studio.md",
-        ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json",
+        ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json", CUSTOMJS_SETTINGS,
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs",
         "Config/Scripts/dev-vault.sh", "Config/Scripts/tests/devVault.test.mjs"]) {
         assert.equal(up.installs(path), false, path);
@@ -70,6 +72,14 @@ test("plan: a dropped file is removed only when it's still what was installed", 
     // a file the vault no longer has is neither
     const gone = up.plan(source, map({ [SCRIPT]: "new" }), installed);
     assert.deepEqual(plain([gone.remove, gone.keep]), [[], []]);
+});
+
+test("plan: CustomJS's settings and CalendarSyncRange, installed before OBS-257 and unchanged, are removed", () => {
+    const range = "Config/Scripts/CustomJS/calendarSyncRange.js";
+    const installed = map({ [SCRIPT]: "a", [CUSTOMJS_SETTINGS]: "s", [range]: "r" });
+    const plan = up.plan(map({ [SCRIPT]: "a" }), installed, installed);
+    assert.deepEqual(plain(plan.remove), [CUSTOMJS_SETTINGS, range]);
+    assert.deepEqual(plain([plan.add, plan.update, plan.local, plan.keep]), [[], [], [], []]);
 });
 
 test("plan: notes are never in any list, whatever the repository holds", () => {
@@ -279,7 +289,7 @@ test("refusal: only main with a clean tree installs", () => {
 
 test("summary: files hidden from git in the clone are called out too", () => {
     const plan = { add: ["Config/a.md"], update: [], local: [], remove: [], keep: [], same: [] };
-    const settings = ".obsidian/plugins/customjs/data.json";
+    const settings = SETTINGS;
     const text = up.summary(plan, { hidden: [settings, "Welcome.md"] });
     assert.ok(text.includes("**Hidden from git in the clone: 1** (skip-worktree: git shows no change, but this copies what's on disk)"));
     assert.ok(text.includes(`- ${settings}`));

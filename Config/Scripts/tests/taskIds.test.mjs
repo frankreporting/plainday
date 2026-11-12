@@ -6,7 +6,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-const TaskIds = vm.runInContext(fs.readFileSync(new URL("../CustomJS/taskIds.js", here), "utf8") + "\n;TaskIds", vm.createContext({}));
+// `customJS` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
+const TaskIds = vm.runInContext(fs.readFileSync(new URL("../CustomJS/taskIds.js", here), "utf8") + "\n;TaskIds", vm.createContext({ customJS: {} }));
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const F = "[[2026-10-08#^k3x9m2|10/8]]";
 

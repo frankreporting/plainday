@@ -2,9 +2,9 @@
 // and nothing below them. Called from Get Template and the Log template as
 // tp.user.arrivedNote(text) when Templater's trigger for new notes runs them, so a note that
 // arrived through Sync, a move or a restore isn't templated as if new.
-// The same rule as CustomJS's NewNoteGuard.arrived (tests keep the two the same). It's here too
-// because Templater loads its own scripts, and CustomJS can be mid-reload, with every class gone,
-// exactly when synced notes and script updates arrive together.
+// The same rule as Plainday's NewNoteGuard.arrived (tests keep the two the same). It's here too
+// because Templater loads its own scripts, and Plainday can be mid-reload, with every class gone,
+// exactly when synced notes and a new build arrive together.
 
 const FRONTMATTER = /^\uFEFF?---\r?\n(?:[\s\S]*?\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/;
 

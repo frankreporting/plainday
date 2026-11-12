@@ -13,8 +13,7 @@ class ListCursor {
     //   - A line is read on its own: `- ` in a code block, the properties or a table cell counts as a
     //     list line, and `> - ` doesn't.
     //
-    // It needs Obsidian's own CodeMirror, as TrailingLinks does. If that ever fails, the cursor moves
-    // as it always has.
+    // It needs Obsidian's own CodeMirror, which Plainday passes in, as TrailingLinks does.
 
     // A list line's marker. A checkbox only counts with a space after it, so one being typed by hand
     // (`- []`, with the cursor between the brackets) isn't pushed past.
@@ -41,18 +40,10 @@ class ListCursor {
     }
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so the handles live on
-        // window, to guarantee one copy running
+        // The handles live on window, so a second run undoes the first: one copy running, however
+        // often it runs
         this.deconstructor();
-        let view, state, language;
-        try {
-            view = require("@codemirror/view");
-            state = require("@codemirror/state");
-            language = require("@codemirror/language");
-        } catch (e) {
-            console.warn("ListCursor: CodeMirror isn't available, so the cursor moves as it always has", e);
-            return;
-        }
+        const { view, state, language } = customJS.codemirror;
         const L = ListCursor;
         const { keymap } = view;
         const { Prec, EditorSelection, EditorState } = state;
@@ -60,12 +51,12 @@ class ListCursor {
         const { editorLivePreviewField } = customJS.obsidian;
         const ws = app.workspace;
 
-        // One registered slot per CustomJS lifetime; a rerun swaps what's in it
+        // One registered slot per load of Plainday; a rerun swaps what's in it
         const kept = window.pmListCursor;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [] };
         window.pmListCursor = handles;
-        if (!slot) app.plugins.plugins.customjs.registerEditorExtension(handles.slot);
+        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
 
         // Whether `selection` is one plain cursor, in Live Preview
         const plain = (selection, s) => selection.ranges.length === 1 && selection.main.empty && s.field(editorLivePreviewField, false);

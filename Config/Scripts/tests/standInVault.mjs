@@ -1,4 +1,4 @@
-// A stand-in vault for tests: the real CustomJS scripts on a fake app whose metadata cache is parsed
+// A stand-in vault for tests: the real class files on a fake app whose metadata cache is parsed
 // from note text. Also the moment stand-in and periodic-note settings the Schedule tests share.
 import assert from "node:assert/strict";
 import fs from "node:fs";

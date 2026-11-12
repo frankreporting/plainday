@@ -1,6 +1,6 @@
 // Tests for CustomJS/errorLog.js (OBS-218). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it, next to TimeReport and Billing, whose
+// The class is loaded with vm, next to TimeReport and Billing, whose
 // model it reads. Every project, note and entry here is invented.
 import { test } from "node:test";
 import assert from "node:assert/strict";

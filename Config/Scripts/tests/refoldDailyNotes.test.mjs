@@ -1,6 +1,6 @@
 // Tests for CustomJS/refoldDailyNotes.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it, against a stub of what refold() asks
+// The class is loaded with vm, against a stub of what refold() asks
 // of `app`: the note's text, one open view of it, the saved fold record and local storage. Folds
 // come from Schedule's real foldableRanges.
 import { test } from "node:test";

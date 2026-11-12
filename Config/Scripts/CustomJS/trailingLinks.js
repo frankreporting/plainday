@@ -25,9 +25,7 @@ class TrailingLinks {
     // It only draws the lines on screen, and while you type only the edited line and the lines
     // nested under it; a cursor move redraws only the lines it left and reached that have an ID.
     //
-    // It needs Obsidian's own CodeMirror. CustomJS runs a script inside its own plugin code, where
-    // `require` is Obsidian's plugin loader, so require("@codemirror/view") works here (not in the
-    // developer console). If that ever fails, lines stay as they are.
+    // It needs Obsidian's own CodeMirror, which Plainday passes in as `customJS.codemirror`.
     static STYLE_ID = "pm-trailing-links";
     // Gaps and padding around the links, in px, for a first guess at their width until it's measured
     static PILL_PX = 14;
@@ -314,29 +312,22 @@ class TrailingLinks {
     // ---------------------------------------------------------------- the editor extension
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so the handles live on
-        // window, to guarantee one set of listeners
+        // The handles live on window, so a second run undoes the first: one set of listeners, however
+        // often it runs
         this.deconstructor();
-        let view, state;
-        try {
-            view = require("@codemirror/view");
-            state = require("@codemirror/state");
-        } catch (e) {
-            console.warn("TrailingLinks: CodeMirror isn't available, so lines stay as they are", e);
-            return;
-        }
+        const { view, state } = customJS.codemirror;
         const T = TrailingLinks;
         const { ViewPlugin, Decoration, EditorView, keymap } = view;
         const { Prec, EditorSelection, StateEffect, EditorState, Transaction } = state;
         const { editorLivePreviewField, editorInfoField, Keymap } = customJS.obsidian;
         const ws = app.workspace;
 
-        // One registered slot per CustomJS lifetime; a rerun swaps what's in it
+        // One registered slot per load of Plainday; a rerun swaps what's in it
         const kept = window.pmTrailingLinks;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [], refs: [], docs: new Set(), widths: new Map(), size: null, timer: null, midnight: null };
         window.pmTrailingLinks = handles;
-        if (!slot) app.plugins.plugins.customjs.registerEditorExtension(handles.slot);
+        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
 
         // Redraw every line on screen: a note moved or retagged, or the day changed
         const refresh = StateEffect.define();

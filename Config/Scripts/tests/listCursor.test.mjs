@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { COMMANDS, STARTUP } from "../../../plugin/src/commands.js";
 
 const here = new URL(".", import.meta.url);
 const ListCursor = vm.runInContext(fs.readFileSync(new URL("../CustomJS/listCursor.js", here), "utf8") + "\n;ListCursor", vm.createContext({}));
@@ -69,10 +70,8 @@ test("textStart: only list lines", () => {
 });
 
 test("ListCursor is a startup script, ahead of the time report's long run, and no command", () => {
-    const settings = JSON.parse(fs.readFileSync(new URL("../../../.obsidian/plugins/customjs/data.json", here), "utf8"));
-    const startup = settings.startupScriptNames;
-    assert.ok(startup.includes("ListCursor") && startup.indexOf("ListCursor") < startup.indexOf("TimeReportOnStartup"));
-    assert.ok(!settings.registeredInvocableScriptNames.includes("ListCursor"));
+    assert.ok(STARTUP.includes("ListCursor") && STARTUP.indexOf("ListCursor") < STARTUP.indexOf("TimeReportOnStartup"));
+    assert.ok(!COMMANDS.some((c) => c.script === "ListCursor"));
 });
 
 // The one method of CodeMirror's fold set these rules read: it calls back with each fold touching the span

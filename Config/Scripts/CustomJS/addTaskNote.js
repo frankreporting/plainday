@@ -90,7 +90,7 @@ class AddTaskNote {
             return;
         }
         // An event the calendar moved to another day keeps its log on its line there
-        if (globalThis.customJS?.TimeReport?.eventKind(lineText) === "forwarded") {
+        if (customJS?.TimeReport?.eventKind(lineText) === "forwarded") {
             new Notice("This event moved to another day: link its log from its line there");
             return;
         }
@@ -354,7 +354,7 @@ class AddTaskNote {
 
     // Whether line `at` of the note open in `editor` is hidden from the system, in a code block or a comment
     hiddenAt(editor, at) {
-        const tr = globalThis.customJS?.TimeReport;
+        const tr = customJS?.TimeReport;
         if (!tr) return false;
         const lines = editor.getValue ? editor.getValue().split("\n") : Array.from({ length: editor.lineCount() }, (_, n) => editor.getLine(n));
         return !!tr.scan(lines.map((l) => l.replace(/\r$/, ""))).hidden[at];
@@ -870,7 +870,7 @@ class AddTaskNote {
     // An event line: a [<] line, and, told by their form (rule 1, OBS-193), a [-] line the calendar sync wrote
     // and a meeting line in the form used before August 2025
     isEvent(lineText) {
-        return /^\s*[-*+]\s+\[<\]/.test(lineText) || ["canceled", "meeting"].includes(globalThis.customJS?.TimeReport?.eventKind(lineText));
+        return /^\s*[-*+]\s+\[<\]/.test(lineText) || ["canceled", "meeting"].includes(customJS?.TimeReport?.eventKind(lineText));
     }
 
     // " " when `followedBy` starts with something other than whitespace, so a link doesn't run into it

@@ -7,13 +7,13 @@ class MoveToProjectMenu {
     // An item only appears for something MoveToProject moves.
     static TITLE = "Move to project…";
     static ICON = "folder-input";
-    // Notebook Navigator can finish loading after CustomJS runs its startup scripts
+    // Notebook Navigator can finish loading after Plainday runs its startup scripts
     static RETRY_MS = 1000;
     static TRIES = 30;
 
     async invoke() {
-        // CustomJS doesn't run deconstructors when the plugin itself reloads, so the handles live on
-        // window to guarantee one set of menu items
+        // The handles live on window, so a second run undoes the first: one set of menu items, however
+        // often it runs
         this.deconstructor();
         const state = { refs: [], offs: [], api: null, timer: null };
         window.moveToProjectMenu = state;
@@ -61,8 +61,8 @@ class MoveToProjectMenu {
     // Adds the item through `addItem` (a menu's, or Notebook Navigator's) when MoveToProject would
     // move any of `files`. Menus are built synchronously; the move runs on the click.
     add(addItem, files, { homes = true } = {}) {
-        // The listeners outlive CustomJS being switched off, so check every time
-        if (!app.plugins.enabledPlugins.has("customjs")) return;
+        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
+        if (!customJS.plugin) return;
         const mover = customJS.MoveToProject;
         if (!mover || !files.length || !mover.movable(files, { homes })) return;
         addItem((item) => item.setTitle(MoveToProjectMenu.TITLE).setIcon(MoveToProjectMenu.ICON).onClick(() => {

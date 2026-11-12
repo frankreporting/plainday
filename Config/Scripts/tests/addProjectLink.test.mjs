@@ -1,12 +1,13 @@
 // Tests for CustomJS/addProjectLink.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `customJS`,
-// the way CustomJS evaluates them; only the methods that don't touch `app` are tested. The menu,
+// The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `customJS`;
+// only the methods that don't touch `app` are tested. The menu,
 // the move and the write into the editor are checked in a dev vault.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { COMMANDS } from "../../../plugin/src/commands.js";
 
 const here = new URL(".", import.meta.url);
 const context = vm.createContext({ customJS: {} });
@@ -75,8 +76,7 @@ test("label: the line's text for the menu, without checkbox, event time or symbo
 });
 
 test("AddProjectLink is registered as a command, and goes through the shared change code", () => {
-    const settings = JSON.parse(fs.readFileSync(new URL("../../../.obsidian/plugins/customjs/data.json", here), "utf8"));
-    assert.ok(settings.registeredInvocableScriptNames.includes("AddProjectLink"));
+    assert.ok(COMMANDS.some((c) => c.script === "AddProjectLink"));
     const source = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
     assert.match(source, /helper\.pickHome\(this\.label\(lineText\), /, "the same project-or-area menu");
     assert.match(source, /change\.run\(found, home, /, "the question, the refusal and the write are TaskChange's");

@@ -27,13 +27,12 @@ test("a class that evaluates cleanly passes; a syntax error and a missing class 
     assert.match(loadCustomJS("const m = moment();\nclass Thing {}\n", "thing.js"), /ReferenceError/);
 });
 
-test("checkAll reports a broken script and a settings name with no class", () => {
+test("checkAll reports a broken class file and a Templater script that doesn't parse", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
     const cjs = path.join(root, "Config/Scripts/CustomJS");
     const tpl = path.join(root, "Config/Scripts/Templater");
     fs.mkdirSync(cjs, { recursive: true });
     fs.mkdirSync(tpl, { recursive: true });
-    fs.mkdirSync(path.join(root, ".obsidian/plugins/customjs"), { recursive: true });
     fs.writeFileSync(path.join(cjs, "good.js"), "class Good {}\n");
     fs.writeFileSync(path.join(cjs, "bad.js"), "class Bad {\n");
     fs.writeFileSync(path.join(tpl, "user.js"), "function f( {}\n");
@@ -173,17 +172,16 @@ test("the docs gate counts Plainday's source and manifest as system files", () =
     assert.deepEqual(checkDocs({ body: "", changed: ["package-lock.json"] }), [], "the build's tools aren't");
 });
 
-test("Plainday's command list must name the classes CustomJS's settings do, apart from CustomJS's own", async () => {
+test("Plainday's command list must name classes that exist, with no id or name twice", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
     const commands = (body) => {
         fs.mkdirSync(path.join(root, "plugin/src"), { recursive: true });
         fs.writeFileSync(path.join(root, "plugin/src/commands.js"), body);
         fs.writeFileSync(path.join(root, "plugin/package.json"), '{"type":"module"}\n');
     };
-    const settings = (o) => {
-        fs.mkdirSync(path.join(root, ".obsidian/plugins/customjs"), { recursive: true });
-        fs.writeFileSync(path.join(root, ".obsidian/plugins/customjs/data.json"), JSON.stringify(o));
-    };
+    const cjs = path.join(root, "Config/Scripts/CustomJS");
+    fs.mkdirSync(cjs, { recursive: true });
+    for (const name of ["Schedule", "Plan", "SyncArea", "CheckOff"]) fs.writeFileSync(path.join(cjs, `${name}.js`), `class ${name} {}\n`);
     try {
         assert.deepEqual(await checkPlainday(root), ["plugin/src/commands.js: missing"]);
         commands(`export const COMMANDS = [
@@ -191,25 +189,21 @@ test("Plainday's command list must name the classes CustomJS's settings do, apar
     { id: "plan", name: "Plan", script: "Plan" },
     { id: "plan", name: "Schedule", script: "Invoice" },
 ];
-export const STARTUP = ["SyncArea", "CheckOff"];
-export const CUSTOMJS_ONLY = ["RefoldDailyNotes", "Gone"];
+export const STARTUP = ["SyncArea", "CheckOff", "Gone"];
 `);
-        settings({ registeredInvocableScriptNames: ["Schedule", "Plan", "RefoldDailyNotes", "TimeReport"], startupScriptNames: ["CheckOff", "SyncArea"] });
         const problems = await checkPlainday(root);
         const has = (re) => assert.ok(problems.some((p) => re.test(p)), `${re}\n${problems.join("\n")}`);
-        has(/data\.json has a command for TimeReport, and plugin\/src\/commands\.js doesn't/);
-        has(/commands\.js has a command for Invoice, and .*data\.json doesn't/);
-        has(/CUSTOMJS_ONLY names Gone, which isn't a command/);
-        has(/STARTUP is SyncArea, CheckOff, and .* runs CheckOff, SyncArea: they must be the same, in the same order/);
+        has(/the command "plan" runs Invoice, which no Config\/Scripts\/CustomJS file defines/);
+        has(/STARTUP names Gone, which no Config\/Scripts\/CustomJS file defines/);
         has(/two commands have the id "plan"/);
         has(/two commands have the name "Schedule"/);
-        assert.equal(problems.length, 6, problems.join("\n"));
+        assert.equal(problems.length, 4, problems.join("\n"));
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
 
-test("the repository's own Plainday command list matches CustomJS's settings", async () => {
+test("the repository's own Plainday command list names classes that exist", async () => {
     assert.deepEqual(await checkPlainday("."), []);
 });
 

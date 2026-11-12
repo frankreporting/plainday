@@ -343,7 +343,7 @@ test("the note a moving line links is read for its source lines, even with the c
     await v.schedule("2026-09-17");
     assert.deepEqual(v.check(), []);
     const id = idIn(v.notes()[KES]);
-    v.customJS.TaskIds.recent?.clear();   // as after CustomJS reloads its scripts
+    v.customJS.TaskIds.recent?.clear();   // as after Plainday reloads
     v.open(day("2026-09-17"), v.lineOf(day("2026-09-17"), "Book the photographer"));
     await v.schedule("2026-09-18");
     assert.deepEqual(v.check(), []);

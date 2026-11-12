@@ -1,6 +1,6 @@
 // Tests for CustomJS/billing.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it, next to TimeReport, whose parser and
+// The class is loaded with vm, next to TimeReport, whose parser and
 // model it reads. Every project, client, amount and entry here is invented.
 import { test } from "node:test";
 import assert from "node:assert/strict";

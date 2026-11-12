@@ -39,14 +39,7 @@ LABEL="$([ -n "$PLIST" ] && [ -f "$PLIST" ] && "$PLUTIL" -extract Label raw -o -
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # The CLI only answers while the app is running
 running() { [ "$("$OBSIDIAN" vault="$VAULT_NAME" vault info=path 2>/dev/null)" = "$VAULT" ]; }
-# The command's id: Plainday's when the vault has Plainday on, CustomJS's otherwise (OBS-226)
-PLUGINS="$VAULT/.obsidian/community-plugins.json"
-sync_id() {
-    if [ -f "$PLUGINS" ] && grep -q '"plainday"' "$PLUGINS"; then print -r -- plainday:sync-calendars
-    else print -r -- customjs:invoke-CalendarSync
-    fi
-}
-sync_now() { "$OBSIDIAN" vault="$VAULT_NAME" command id="$(sync_id)" >/dev/null 2>&1; }
+sync_now() { "$OBSIDIAN" vault="$VAULT_NAME" command id=plainday:sync-calendars >/dev/null 2>&1; }
 
 schedule() {
     case "$1" in

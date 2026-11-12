@@ -1,15 +1,16 @@
 // Tests for OBS-196: a line's project comes from the line alone (rules 3, 4, 5 and 7), and the checks
-// that list what disagrees (rule 15). The class is loaded with vm, the way CustomJS evaluates it.
+// that list what disagrees (rule 15). The class is loaded with vm.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-const context = vm.createContext({});
+// `customJS` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
+const context = vm.createContext({ customJS: {} });
 const TimeReport = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", context);
 const tr = new TimeReport();
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}.js`, here), "utf8") + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}.js`, here), "utf8") + `\n;${name}`, vm.createContext({ customJS: {} }));
 const billing = new (load("billing", "Billing"))();
 const TaskIds = load("taskIds", "TaskIds");
 const log = new (load("errorLog", "ErrorLog"))();

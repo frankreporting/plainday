@@ -61,7 +61,6 @@ class UpdateObsidianPM {
         "Reference/Invoices/Invoices.base",
         ".obsidian/daily-notes.json",
         ".obsidian/plugins/templater-obsidian/data.json",
-        ".obsidian/plugins/customjs/data.json",
     ];
     // Parts of the repository that belong to the demo vault only. demoVault.test.mjs asserts the
     // demo's own notes, and its render script writes report blocks into notes, so neither belongs
@@ -410,23 +409,11 @@ class UpdateObsidianPM {
             await this.record(new Map([...landed, ...held]), { source, commit, failed: rel });
             new Notice(`Update Obsidian PM: ${copied.length} of ${steps.copy.length} file${steps.copy.length === 1 ? "" : "s"} copied,`
                 + ` then ${rel} failed (${String(e?.message ?? e).split("\n")[0]}). The manifest records what landed; run this again.`, 0);
-            await this.offerReload(copied);
             return;
         }
         await this.record(new Map([...this.manifestAfter(sourceFiles, manifest, steps), ...held]), { source, commit });
 
         new Notice(`Update Obsidian PM: ${this.done(steps, commit)}`, 8000);
-        await this.offerReload(steps.copy);
-    }
-
-    // When a script or the CustomJS settings landed, the new versions only run after a reload
-    async offerReload(copied) {
-        if (!copied.some((p) => p.startsWith("Config/Scripts/CustomJS/") || p.endsWith("customjs/data.json"))) return;
-        if (await this.confirmReload()) {
-            await app.plugins.disablePlugin("customjs");
-            await app.plugins.enablePlugin("customjs");
-            new Notice("CustomJS reloaded");
-        }
     }
 
     // ---------------------------------------------------------------- the bits that touch the app
@@ -602,21 +589,6 @@ class UpdateObsidianPM {
                 .addButton((b) => b.setButtonText("Cancel").onClick(() => modal.close()))
                 .addButton((b) => b.setButtonText("Update").setCta().onClick(() => { answer = { overwriteLocal, remove }; modal.close(); }));
             modal.onClose = () => { component.unload(); resolve(answer); };
-            modal.open();
-        });
-    }
-
-    confirmReload() {
-        const { Modal, Setting } = customJS.obsidian;
-        return new Promise((resolve) => {
-            const modal = new Modal(app);
-            let yes = false;
-            modal.titleEl.setText("Reload CustomJS?");
-            modal.contentEl.setText("The scripts changed. Reloading CustomJS puts the new versions to work now.");
-            new Setting(modal.contentEl)
-                .addButton((b) => b.setButtonText("Later").onClick(() => modal.close()))
-                .addButton((b) => b.setButtonText("Reload").setCta().onClick(() => { yes = true; modal.close(); }));
-            modal.onClose = () => resolve(yes);
             modal.open();
         });
     }

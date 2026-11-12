@@ -5,12 +5,14 @@
 #
 #   dev-vault.sh test <branch> [--plan <file>] [--issue OBS-N]
 #       Checks the branch out (detached, since the agent's worktree holds the branch), records
-#       which issue is being tested in `.dev-vault/testing`, puts the plugin in place (below) and
+#       which issue is being tested in `.dev-vault/testing`, puts Plainday in place (below) and
 #       reloads it (or the vault, when a settings file changed), and copies the test plan to
 #       `<ISSUE> Test Plan.md` at the vault root, opened in front. The issue comes from the branch
 #       name (`obs-N`) or `--issue`.
 #       Refused while another issue holds the lock, or while the tree has changes and `done`
-#       hasn't run. The issue that holds the lock can run it again after a fix round.
+#       hasn't run. The issue that holds the lock can run it again after a fix round. A commit
+#       without manifest.json is refused: it's from before Plainday (OBS-226), and its class files
+#       run only under CustomJS, which the dev vault doesn't run since OBS-257.
 #   dev-vault.sh done
 #       Restores every tracked file (reports rewritten on startup, tables reformatted by the
 #       editor, synced event lines), removes the plan note and the lock, and returns to main,
@@ -19,17 +21,13 @@
 #       restores once more: the next thing to read this clone is UpdateObsidianPM, which refuses
 #       to install from a tree that isn't clean.
 #   dev-vault.sh status
-#       The lock, HEAD, the plugin that's on, and what's changed.
+#       The lock, HEAD, whether Plainday is on, and what's changed.
 #
-# The plugin: a commit with manifest.json at the root runs on Plainday (OBS-226), one without it
-# on CustomJS, so a branch that started before Plainday stays testable. For Plainday, the commit
-# is built first, in .dev-vault/build/ (Obsidian skips folders whose names start with a dot, and
-# npm never runs in the vault itself: plugin/preinstall.mjs), with `npm ci` only when the lockfile
-# changed. A build that fails leaves the dev vault as it was. Then main.js and manifest.json go
-# into .obsidian/plugins/plainday/, CustomJS is turned off and Plainday on, and Plainday is
-# reloaded. For CustomJS it's the reverse, then CustomJS is reloaded. The first `test` of a
-# branch with Plainday runs main's copy of this script, which doesn't know Plainday yet; run
-# `test` again, and the branch's own copy switches.
+# Plainday: the commit is built first, in .dev-vault/build/ (Obsidian skips folders whose names
+# start with a dot, and npm never runs in the vault itself: plugin/preinstall.mjs), with `npm ci`
+# only when the lockfile changed. A build that fails leaves the dev vault as it was. Then main.js
+# and manifest.json go into .obsidian/plugins/plainday/, and Plainday is reloaded, or turned on if
+# it was off.
 #
 # Every run installs the repository's pre-commit hook, which refuses a commit made from the demo
 # vault: nothing here is checked for real data, and `done` restores it all. The hook is shared by
@@ -115,18 +113,8 @@ reach_obsidian() {
     die "Obsidian didn't answer for $VAULT_NAME within ${WAIT}s; open the demo vault and run this again"
 }
 
-# After moving HEAD from $1 to $2: a settings file changed needs the vault reloaded; otherwise
-# CustomJS alone. Both are best-effort: the tree is what matters, and the message says.
-reload() {
-    if [ -n "$(g diff --name-only "$1" "$2" -- '.obsidian/*.json' '.obsidian/plugins/*/data.json')" ]; then
-        cli reload >/dev/null 2>&1 && say "Reloaded the vault (settings changed)" || say "Couldn't reload the vault; reload it by hand"
-    else
-        cli plugin:reload id=customjs >/dev/null 2>&1 && say "Reloaded CustomJS" || say "Couldn't reload CustomJS; reload it by hand"
-    fi
-}
-
-# The plugin a commit runs on: Plainday when it has manifest.json at the root
-plugin_at() { g cat-file -e "$1:manifest.json" 2>/dev/null && say plainday || say customjs; }
+# Does commit $1 have Plainday, manifest.json at the root? Every commit since OBS-226 does
+has_plainday() { g cat-file -e "$1:manifest.json" 2>/dev/null; }
 # Is the plugin on? Obsidian lists the plugins that are on in community-plugins.json
 enabled() { [ -f "$PLUGINS" ] && grep -q "\"$1\"" "$PLUGINS"; }
 
@@ -172,46 +160,28 @@ saved() {
     return 1
 }
 
-# Puts the plugin that HEAD runs on in place and reloads it; $1 is HEAD before the move. For
-# Plainday, build_plainday has built HEAD already. Best-effort, like reload: the message says.
+# Puts the Plainday that build_plainday built from HEAD in place, and reloads it, or the vault
+# when a settings file changed; $1 is HEAD before the move. Best-effort: the tree is what matters,
+# and the message says.
 use_plugin() {
-    if [ "$(plugin_at HEAD)" = plainday ]; then
-        install_plainday || { say "Couldn't copy Plainday into $PLAINDAY"; return 1; }
-        local was_customjs=0 fresh=0
-        # Off before on: with both on, every command shows twice
-        if enabled customjs; then
-            was_customjs=1
-            if cli plugin:disable id=customjs filter=community >/dev/null 2>&1 && saved customjs off; then say "Turned CustomJS off"
-            else say "Couldn't turn CustomJS off; turn it off by hand"
-            fi
+    install_plainday || { say "Couldn't copy Plainday into $PLAINDAY"; return 1; }
+    local fresh=0
+    if ! enabled plainday; then
+        # Obsidian finds a plugin folder that's new since it started only once it rescans them
+        cli eval code="app.plugins.loadManifests().then(() => !!app.plugins.manifests.plainday)" >/dev/null 2>&1
+        if cli plugin:enable id=plainday filter=community >/dev/null 2>&1 && saved plainday on; then
+            say "Turned Plainday on"
+            fresh=1
+        else
+            say "Couldn't turn Plainday on; turn it on by hand"
+            return 1
         fi
-        if ! enabled plainday; then
-            # Obsidian finds a plugin folder that's new since it started only once it rescans them
-            cli eval code="app.plugins.loadManifests().then(() => !!app.plugins.manifests.plainday)" >/dev/null 2>&1
-            if cli plugin:enable id=plainday filter=community >/dev/null 2>&1 && saved plainday on; then
-                say "Turned Plainday on"
-                fresh=1
-            elif [ "$was_customjs" -eq 1 ]; then
-                cli plugin:enable id=customjs filter=community >/dev/null 2>&1
-                say "Couldn't turn Plainday on, so CustomJS is back on; turn Plainday on by hand, after turning CustomJS off"
-                return 1
-            else
-                say "Couldn't turn Plainday on; turn it on by hand"
-                return 1
-            fi
-        fi
-        if [ -n "$(g diff --name-only "$1" HEAD -- '.obsidian/*.json' '.obsidian/plugins/*/data.json')" ]; then
-            cli reload >/dev/null 2>&1 && say "Reloaded the vault (settings changed)" || say "Couldn't reload the vault; reload it by hand"
-        elif [ "$fresh" -eq 0 ]; then
-            # Turning it on just now loaded this build already
-            cli plugin:reload id=plainday >/dev/null 2>&1 && say "Reloaded Plainday" || say "Couldn't reload Plainday; reload it by hand"
-        fi
-    else
-        if enabled plainday; then
-            cli plugin:disable id=plainday filter=community >/dev/null 2>&1 && saved plainday off && say "Turned Plainday off" || say "Couldn't turn Plainday off; turn it off by hand"
-            cli plugin:enable id=customjs filter=community >/dev/null 2>&1 && saved customjs on && say "Turned CustomJS on" || say "Couldn't turn CustomJS on; turn it on by hand"
-        fi
-        reload "$1" HEAD
+    fi
+    if [ -n "$(g diff --name-only "$1" HEAD -- '.obsidian/*.json' '.obsidian/plugins/*/data.json')" ]; then
+        cli reload >/dev/null 2>&1 && say "Reloaded the vault (settings changed)" || say "Couldn't reload the vault; reload it by hand"
+    elif [ "$fresh" -eq 0 ]; then
+        # Turning it on just now loaded this build already
+        cli plugin:reload id=plainday >/dev/null 2>&1 && say "Reloaded Plainday" || say "Couldn't reload Plainday; reload it by hand"
     fi
 }
 
@@ -251,16 +221,14 @@ cmd_test() {
     elif g rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then ref="origin/$branch"
     else die "no branch $branch here or on origin"
     fi
+    # One commit for the build and the checkout, even if the branch moves while npm runs
+    local sha
+    sha="$(g rev-parse "${ref}^{commit}")" || die "couldn't read $ref"
+    has_plainday "$sha" || die "$ref has no manifest.json: it's from before Plainday (OBS-226), and its class files run only under CustomJS, which the dev vault doesn't run any more (OBS-257). Rebase it on $MAIN to test it"
 
     reach_obsidian
-    # One commit for the build and the checkout, even if the branch moves while npm runs. Built
-    # before anything moves, so a build that fails leaves the dev vault as it was.
-    local sha was_plainday=0
-    sha="$(g rev-parse "${ref}^{commit}")" || die "couldn't read $ref"
-    enabled plainday && was_plainday=1
-    if [ "$(plugin_at "$sha")" = plainday ]; then
-        build_plainday "$sha" || die "couldn't build Plainday from $ref; the dev vault is unchanged"
-    fi
+    # Built before anything moves, so a build that fails leaves the dev vault as it was
+    build_plainday "$sha" || die "couldn't build Plainday from $ref; the dev vault is unchanged"
 
     local before
     before="$(g rev-parse HEAD)"
@@ -274,9 +242,6 @@ cmd_test() {
     printf 'issue=%s\nbranch=%s\ncommit=%s\nsince=%s\n' "$issue" "$branch" "$(g rev-parse --short HEAD)" "$since" > "$LOCK"
 
     use_plugin "$before"
-    if [ "$was_plainday" -eq 1 ] && [ "$(plugin_at HEAD)" = customjs ]; then
-        say "This branch is from before Plainday, and its own copy of this script, which \`done\` runs, doesn't know Plainday: run \`dev-vault.sh done\` twice to put $MAIN's Plainday back"
-    fi
 
     local note="$VAULT/$issue Test Plan.md"
     [ -n "$plan" ] && cp "$plan" "$note"
@@ -324,7 +289,7 @@ cmd_done() {
     g checkout -q "$MAIN" || die "couldn't check out $MAIN"
     g pull -q --ff-only 2>/dev/null || say "Couldn't pull $MAIN; it's as it was"
     local built=1
-    if [ "$(plugin_at HEAD)" = plainday ] && ! build_plainday HEAD; then
+    if ! build_plainday HEAD; then
         built=0
         say "Couldn't build Plainday from $MAIN, so the dev vault keeps the build it had"
     fi
@@ -333,9 +298,9 @@ cmd_done() {
         settle
     else
         # The build goes in anyway: Obsidian loads it when the vault next opens
-        [ "$built" -eq 1 ] && [ "$(plugin_at HEAD)" = plainday ] && install_plainday
-        if { [ "$(plugin_at HEAD)" = plainday ] && ! enabled plainday; } || { [ "$(plugin_at HEAD)" = customjs ] && enabled plainday; }; then
-            say "Obsidian isn't answering for $VAULT_NAME, so the plugins weren't switched for $MAIN; open the dev vault and run \`dev-vault.sh done\` again"
+        [ "$built" -eq 1 ] && install_plainday
+        if ! enabled plainday; then
+            say "Obsidian isn't answering for $VAULT_NAME, so Plainday wasn't turned on; open the dev vault and run \`dev-vault.sh done\` again"
         fi
     fi
     left="$(changes)"
@@ -357,12 +322,7 @@ cmd_status() {
     else say "No test in progress"
     fi
     say "HEAD: $(head_desc)"
-    if [ -f "$PLUGINS" ]; then
-        local on=()
-        enabled plainday && on+=(Plainday)
-        enabled customjs && on+=(CustomJS)
-        say "Plugin: ${on[*]:-neither Plainday nor CustomJS} on; this commit runs on $([ "$(plugin_at HEAD)" = plainday ] && say Plainday || say CustomJS)"
-    fi
+    say "Plainday: $(enabled plainday && say on || say off)"
     local c
     c="$(changes)"
     if [ -n "$c" ]; then say "Changes:"; say "$c"; else say "Changes: none"; fi

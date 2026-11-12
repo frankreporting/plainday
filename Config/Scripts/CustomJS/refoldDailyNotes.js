@@ -23,7 +23,7 @@ class RefoldDailyNotes {
     // SnapshotDailyNotes it folds only what was added since; run on its own, it folds the events.
     // Inside Obsidian the calendar sync, Schedule and the rest call this class's methods directly.
     // A tool outside Obsidian (the Raycast timer) runs SnapshotDailyNotes before writing and this
-    // after, by eval (`customJS.` in place of `plainday.` under CustomJS, where both are commands):
+    // after, by eval:
     //   obsidian vault=<v> eval code="plainday.SnapshotDailyNotes.invoke()"
     //   obsidian vault=<v> eval code="plainday.RefoldDailyNotes.invoke()"
     static RELOAD_WAIT_MS = 3000;

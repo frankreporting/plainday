@@ -1,12 +1,13 @@
 // Tests for CustomJS/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
 // the vault root: node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it, with a fake `app`. The last test reads
+// The class is loaded with vm, with a fake `app`. The last test reads
 // Templater's own code when it's installed in this folder (the dev vault), since the guard leans on
 // two of its internals; it skips where Templater isn't (CI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { STARTUP } from "../../../plugin/src/commands.js";
 import { createRequire } from "node:module";
 
 const here = new URL(".", import.meta.url);
@@ -42,13 +43,14 @@ test("arrivedNote, Get Template's copy of the rule, agrees with the guard", () =
     }
 });
 
-// A fake app: one vault listener list, file texts by path, and Templater's set
-function setup({ customjs = true, templater = true } = {}) {
+// A fake app: one vault listener list, file texts by path, and Templater's set. `loaded`: Plainday
+// is loaded (`customJS.plugin`), or has unloaded and left this listener behind.
+function setup({ loaded = true, templater = true } = {}) {
     const pending = new Set(), texts = new Map(), listeners = [];
     const ctx = vm.createContext({
+        customJS: { plugin: loaded ? {} : null },
         app: {
             plugins: {
-                enabledPlugins: new Set(customjs ? ["customjs"] : []),
                 plugins: templater ? { "templater-obsidian": { templater: { files_with_pending_templates: pending } } } : {},
             },
             workspace: {
@@ -109,8 +111,8 @@ test("onCreate: a new note, a note with text, another file type or a big file is
     assert.deepEqual([...pending], []);
 });
 
-test("onCreate: nothing happens with CustomJS off or Templater missing, and a file Templater already holds stays Templater's", async () => {
-    for (const opts of [{ customjs: false }, { templater: false }]) {
+test("onCreate: nothing happens once Plainday has unloaded or with Templater missing, and a file Templater already holds stays Templater's", async () => {
+    for (const opts of [{ loaded: false }, { templater: false }]) {
         const { guard, pending, file } = setup(opts);
         await guard.onCreate(file("Reference/People/Rafe Oakes.md", "---\ntags: person\n---\n"));
         assert.deepEqual([...pending], [], JSON.stringify(opts));
@@ -124,7 +126,7 @@ test("onCreate: nothing happens with CustomJS off or Templater missing, and a fi
     assert.ok(pending.has(mine.path), "the guard never removes an entry it didn't add");
 });
 
-test("invoke: one listener of each, however often CustomJS reruns its startup scripts", async () => {
+test("invoke: one listener of each, however often it runs", async () => {
     const { guard, listeners, ctx } = setup();
     await guard.invoke();
     await guard.invoke();
@@ -182,7 +184,7 @@ test("Get Template stops on a note that already has properties when Templater's 
     const guard = text.indexOf("tp.config.run_mode === 2");
     assert.ok(guard > 0, "the backstop is there");
     assert.ok(guard < text.indexOf("tp.file.include"), "before any template is chosen");
-    assert.match(text, /tp\.user\.arrivedNote\(await app\.vault\.read\(tp\.config\.target_file\)\)/, "Templater's own script, not CustomJS");
+    assert.match(text, /tp\.user\.arrivedNote\(await app\.vault\.read\(tp\.config\.target_file\)\)/, "Templater's own script, not one of Plainday's classes");
     assert.match(text, /!window\.newNoteGuardMadeHere\?\.has\(tp\.config\.target_file\)/, "a note made here passes");
     assert.match(text.slice(guard, guard + 900), /new Notice\(why, 10000\);\s*throw new Error\(why\)/, "says why in its own notice, then stops");
 });
@@ -201,8 +203,7 @@ test("the Log template trashes a same-named note only when it was empty when the
 });
 
 test("the startup scripts start the guard", () => {
-    const settings = JSON.parse(fs.readFileSync(new URL("../../../.obsidian/plugins/customjs/data.json", here), "utf8"));
-    assert.ok(settings.startupScriptNames.includes("NewNoteGuard"));
+    assert.ok(STARTUP.includes("NewNoteGuard"));
 });
 
 // Real-artifact check: the guard and the backstop rely on Templater checking its pending set after

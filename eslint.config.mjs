@@ -21,8 +21,8 @@ export default defineConfig([
     {
         files: ["**/*.{ts,cts,mts,tsx,js,cjs,mjs,jsx}"],
         rules: {
-            // The class files read `customJS`, `app` and `Notice` as globals, which CustomJS and
-            // the bundle provide
+            // The class files read `customJS`, `app` and `Notice` as globals, which the bundle
+            // provides
             "no-undef": "off",
             "import/no-unresolved": "off",
             // Plainday's command ids are set (OBS-226) and never change

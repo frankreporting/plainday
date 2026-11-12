@@ -1,13 +1,13 @@
 // Plainday: the system's classes as one plugin.
 //
-// What CustomJS does for the class files, and where Plainday does it:
+// What Plainday does for the class files:
 // - one instance of every class, by name: the build bundles the class files (plugin/esbuild.config.mjs)
 //   and onload makes the instances, on the host's `customJS` (src/host.js);
-// - a command for each class in the command list (src/commands.js), with Plainday's own ids;
+// - a command for each class in the command list (src/commands.js);
 // - the startup scripts' invoke(), one after the other, once the layout is ready;
 // - a script that throws shows a notice and logs the error, and never stops the next one.
-// Unlike CustomJS, unloading the plugin runs every class's deconstructor(), so the listeners the
-// startup scripts keep go with it. Obsidian itself removes the commands and editor extensions.
+// Unloading the plugin runs every class's deconstructor(), so the listeners the startup scripts
+// keep go with it. Obsidian itself removes the commands and editor extensions.
 import { Notice, Plugin } from "obsidian";
 import classes from "plainday:classes";
 import { COMMANDS, STARTUP } from "./commands.js";

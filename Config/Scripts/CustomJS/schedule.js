@@ -778,7 +778,7 @@ class Schedule {
     // "week", "month" or "year" for a weekly, monthly or yearly note, else null. One is named strictly
     // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in its folder
     // (TimeReport.periodFolders), so a note elsewhere with such a name isn't one. A report passes the
-    // two in, read when it began: they come off `customJS`, which CustomJS can start over during a run.
+    // two in, read when it began, so the whole run uses the same ones.
     periodOf(file, rules = customJS.DatePrompt.weekRules(), folders = customJS.TimeReport.periodFolders()) {
         const folder = file.parent?.path ?? "";
         for (const unit of ["week", "month", "year"]) {

@@ -1,6 +1,6 @@
 // Tests for CustomJS/syncArea.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm, the way CustomJS evaluates it; only the parts that don't touch `app`
+// The class is loaded with vm; only the parts that don't touch `app`
 // are tested: isInvoice, and how `parent` replaces the older `area` (OBS-175). SyncArea leaves an
 // invoice's `parent` alone because it's the project the invoice bills (OBS-114).
 import { test } from "node:test";
