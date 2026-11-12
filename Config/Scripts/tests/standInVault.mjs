@@ -286,6 +286,13 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // Templater's part: a task note or log made where the Task and Log templates would put it
     const made2 = (path, text) => { put(path, text); return fileOf(path); };
     customJS.AddTaskNote.createTaskNote = async (name, parent = null) => {
+        // Templater can't make a file whose name holds a character Obsidian refuses (OBS-111): on a Mac, `\ / :`
+        // ("Couldn't create md file", seen in the app 2026-11-12), and on Windows `* " < > | ?` too. It says so,
+        // and there's no note
+        if (/[*"\\/<>:|?]/.test(name)) {
+            notices.push(`Couldn't create a note named "${name}"`);
+            return null;
+        }
         // As the Task template names it: its dates and "!task" taken off and the ends trimmed, spaces left as they are
         const title = name.replaceAll(/[0-9]{4}-[0-9]{2}-[0-9]{2}/g, "").replace("!task", "").trim() || name;
         return made2(`${parent ? parent.parent.path : "Inbox"}/${title}.md`, `---\ntags: [task]\n${parent ? `parent: "[[${parent.basename}]]"\n` : ""}---\n`);

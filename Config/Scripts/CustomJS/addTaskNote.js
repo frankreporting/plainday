@@ -177,21 +177,26 @@ class AddTaskNote {
     // every line of the task takes the ⋯. `text` is what names the note; a date in it is the task's due date,
     // not part of its name, so the note is looked up without it, and a new one is made through the Task
     // template from the name with the dates after it, so the template can set `due` and the name keeps no
-    // doubled space where a date was. Settling on a project is a project change
+    // doubled space where a date was. The note's name is that name cleaned for a file name (fileName), so a
+    // colon doesn't stop it; the line keeps the name as typed. Settling on a project is a project change
     // (rule 9): a new note is made only once the question and the refusal are past.
     async linkTask(line, text, span, { selected = false } = {}) {
         const { editor, source, at, lineText, cursor } = line;
         const change = customJS.TaskChange;
         if (!change.ready()) return;
-        const name = this.withoutDates(text);
+        const name = this.withoutDates(text), noteName = this.fileName(name);
+        if (!noteName) {
+            new Notice("No task text to name the note");
+            return;
+        }
         // The note of that name outside Archive. One in Archive is an old one: this task gets a fresh note,
         // named apart from it so the old days' links keep pointing at it, and the old one is left alone
         // (Brian, 2026-11-02)
-        const named = this.namedNote(name, source.path);
+        const named = this.namedNote(noteName, source.path);
         let existing = named && !this.inArchive(named) ? named : null;
         let found = await change.find({ file: source, at }, { note: existing });
         // The fresh note an earlier run made for it, for the task's next line or after a run that stopped short
-        const madeBefore = named && !existing ? this.freshNote(name, this.homeOf(line, found)) : null;
+        const madeBefore = named && !existing ? this.freshNote(noteName, this.homeOf(line, found)) : null;
         if (madeBefore) {
             existing = madeBefore;
             found = await change.find({ file: source, at }, { note: existing });
@@ -215,14 +220,14 @@ class AddTaskNote {
         else {
             const home = this.homeOf(line, found);
             // The template takes the dates off the title for the note's name and keeps the last as its due date
-            const noteName = named ? this.freshName(name, home) : name;
-            const title = [noteName, ...(name.match(AddTaskNote.DATE) ? [] : text.match(AddTaskNote.DATE) ?? [])].join(" ");
+            const newName = named ? this.freshName(noteName, home) : noteName;
+            const title = [newName, ...(name.match(AddTaskNote.DATE) ? [] : text.match(AddTaskNote.DATE) ?? [])].join(" ");
             // With no project the note waits in the Inbox, which a line naming a project is warned about
-            const adds = home ? null : { path: `${customJS.TaskIds.constructor.INBOX}/${noteName}.md`, basename: noteName };
+            const adds = home ? null : { path: `${customJS.TaskIds.constructor.INBOX}/${newName}.md`, basename: newName };
             const make = async () => {
                 note = await this.createTaskNote(title, home);
                 if (!note) return false;
-                new Notice(`Created ${note.path.replace(/\.md$/, "")}`);
+                // No notice for the note itself: the ⋯ on the line shows it's there
                 // The template took a moment; don't write into a line that changed in the meantime
                 if (editor.getLine(at) === lineText) return true;
                 new Notice(`${note.basename} is ready, but the line changed, so it wasn't linked`);
@@ -663,8 +668,14 @@ class AddTaskNote {
 
     // Runs the Task template on a new note named `name` without opening it. With `parent` (a project
     // or area note), the template files it there; without, it stays in Inbox, unfiled. Resolves to the
-    // note once the template has filed it, or null when it couldn't be made.
-    async createTaskNote(name, parent = null) {
+    // note once the template has filed it, or null when it couldn't be made. The name is cleaned for a file
+    // name first (fileName), whoever calls.
+    async createTaskNote(title, parent = null) {
+        const name = this.fileName(title);
+        if (!name) {
+            new Notice("No task text to name the note");
+            return null;
+        }
         const templater = app.plugins.plugins["templater-obsidian"]?.templater;
         const template = app.vault.getFileByPath(AddTaskNote.TASK_TEMPLATE);
         if (!templater || !template) {
@@ -790,7 +801,7 @@ class AddTaskNote {
         const { editor, source, at, lineText, cursor } = line;
         const change = customJS.TaskChange;
         const date = this.dailyNoteDate();
-        const logName = `${date} ${this.logName(name)}`;
+        const logName = `${date} ${this.fileName(name)}`;
         const fresh = this.eventLine(lineText, name, date);
         if (fresh.error) {
             new Notice(fresh.error);
@@ -813,10 +824,11 @@ class AddTaskNote {
         if (await this.attach(line, existing, found, each, name)) this.keepCursor(editor, cursor, at, lineText);
     }
 
-    // A log's name from an event's title, as CalNav names them: ": " becomes " - ", a slash or bar
-    // becomes "-", and characters a file name can't hold are dropped. The title on the line stays
-    // as the calendar wrote it.
-    logName(title) {
+    // A note's name from a task's text or an event's title, as CalNav names logs: ": " becomes " - ", a
+    // slash or bar becomes "-", characters a file name or a link can't hold are dropped, and so are dots
+    // and spaces at the end. Cleaning a name twice changes nothing. The line keeps its text as typed
+    // (OBS-111).
+    fileName(title) {
         return title.replace(/\s*:\s*/g, " - ").replace(/[\\/|]/g, "-").replace(/[*"<>?#^[\]]/g, "")
             .replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
     }
@@ -848,7 +860,7 @@ class AddTaskNote {
     // (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
     eventLine(lineText, name, date, linktext = null) {
         if (this.linksLog(lineText)) return { error: "This event already links a log" };
-        const link = linktext ? `[[${linktext}|${AddTaskNote.NOTE_MARK}]]` : this.eventLink(date, this.logName(name));
+        const link = linktext ? `[[${linktext}|${AddTaskNote.NOTE_MARK}]]` : this.eventLink(date, this.fileName(name));
         return this.endWith(lineText, link);
     }
 

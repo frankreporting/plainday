@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { standIn, PLANNER } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
 // `customJS` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
@@ -609,10 +610,10 @@ test("an event time with nothing after it is a line with no title; a title a fil
         for (const ch of [line.length, 7]) assert.deepEqual(t(line, ch), { error: "This event has no title to name its log" }, `${line} at ${ch}`);
     }
     // The log's name, like CalNav's: ": " becomes " - ", and characters a file name can't hold go
-    assert.equal(add.logName("Sync: Q3 plan"), "Sync - Q3 plan");
-    assert.equal(add.logName("Re:call / follow-up | notes"), "Re - call - follow-up - notes");
-    assert.equal(add.logName('Review "final" #2 [draft]?'), "Review final 2 draft");
-    assert.equal(add.logName("Plain title"), "Plain title");
+    assert.equal(add.fileName("Sync: Q3 plan"), "Sync - Q3 plan");
+    assert.equal(add.fileName("Re:call / follow-up | notes"), "Re - call - follow-up - notes");
+    assert.equal(add.fileName('Review "final" #2 [draft]?'), "Review final 2 draft");
+    assert.equal(add.fileName("Plain title"), "Plain title");
     // The title on the line stays as the calendar wrote it; only the log's name changes
     assert.equal(add.eventLine("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", "Sync: Q3 plan", "2026-09-14"),
         "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|⋯]]");
@@ -689,3 +690,122 @@ test("invoke at the visible end of a line with an ID, where a click puts the cur
     // Text after the cursor still names the note
     assert.equal(add.target(line, "- [ ] Book".length).name, "Book it");
 });
+
+test("fileName: one cleanup for a task note's name and a log's; a time keeps the log rule; cleaning twice changes nothing (OBS-111)", () => {
+    for (const [title, want] of [
+        ["Draft: homepage copy", "Draft - homepage copy"],
+        ["Draft:homepage copy", "Draft - homepage copy"],
+        ["Print / fold", "Print - fold"],
+        ["Fix #12 bug?", "Fix 12 bug"],
+        ["Fix #12: order form", "Fix 12 - order form"],
+        ["Call back...", "Call back"],
+        ["Call Ana at 3:30", "Call Ana at 3 - 30"],
+        ["Ask *why* <first> ^now", "Ask why first now"],
+        ["Renew the domain 2026-09-30", "Renew the domain 2026-09-30"],
+        ["???", ""],
+    ]) {
+        assert.equal(add.fileName(title), want, title);
+        assert.equal(add.fileName(want), want, `${title}, cleaned twice`);
+    }
+});
+
+test("createTaskNote cleans the name for any caller, before Templater sees it; a name with nothing left makes nothing (OBS-111)", async () => {
+    const asked = [], notices = [];
+    const ctx = vm.createContext({
+        app: {
+            plugins: { plugins: { "templater-obsidian": { templater: { create_new_note_from_template: async (t, folder, name) => { asked.push({ folder, name }); return { path: `${folder}/${name}.md`, basename: name }; } } } } },
+            vault: { getFileByPath: () => ({ path: AddTaskNote.TASK_TEMPLATE }), getAvailablePath: (p, ext) => { asked.push({ path: `${p}.${ext}` }); return `${p}.${ext}`; } },
+        },
+        customJS: { obsidian: { normalizePath: (p) => p } },
+        Notice: class { constructor(m) { notices.push(m); } },
+    });
+    const fresh = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", ctx))();
+    const note = await fresh.createTaskNote("Fix #12: order form 2026-09-25");
+    assert.equal(note.basename, "Fix 12 - order form 2026-09-25", "the date stays for the template, which makes it `due`");
+    assert.deepEqual(asked, [{ path: `${AddTaskNote.STAGING_FOLDER}/Fix 12 - order form 2026-09-25.md` }, { folder: AddTaskNote.STAGING_FOLDER, name: "Fix 12 - order form 2026-09-25" }]);
+    assert.deepEqual(notices, []);
+    asked.length = 0;
+    assert.equal(await fresh.createTaskNote("???"), null);
+    assert.deepEqual(asked, [], "Templater isn't asked");
+    assert.deepEqual(notices, ["No task text to name the note"]);
+});
+
+// A colon and the other characters a file name can't hold, through Add note on the stand-in vault, whose
+// Templater refuses such a name the way the real one does (OBS-111)
+const PROJECT = "---\ntags: [project]\n---\n", NEW = "Projects/New/New.md";
+const day = (d) => `${PLANNER}/days/${d}.md`;
+const lineIn = (v, path, text) => v.notes()[path].split("\n").find((l) => l.includes(text));
+const notesIn = (v, folder) => Object.keys(v.notes()).filter((p) => p.startsWith(folder)).sort();
+
+for (const lag of [false, true]) {
+    const also = lag ? " (the cache a command behind)" : "";
+
+    test(`Add note on a task with a colon makes the note with the name cleaned, and the line keeps its colon (OBS-111)${also}`, async () => {
+        const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-17")]: "- [ ] Draft: homepage copy [[New|⭕]]\n- [ ] Print / fold\n" }, open: day("2026-09-17"), at: 0, lag });
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-17"), "Draft"), "- [ ] Draft: homepage copy [[New|⭕]] [[Draft - homepage copy|⋯]]");
+        assert.deepEqual(notesIn(v, "Projects/New/"), ["Projects/New/Draft - homepage copy.md", NEW]);
+        assert.deepEqual(v.notices, [], "no notice: the ⋯ shows the note is there");
+        // A slash, on a line with no project: the note waits in the Inbox
+        v.open(day("2026-09-17"), 1);
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-17"), "Print"), "- [ ] Print / fold [[Print - fold|⋯]]");
+        assert.ok(v.notes()["Inbox/Print - fold.md"]);
+        assert.ok(!v.notices.some((n) => n.startsWith("Couldn't create")), v.notices.join(" | "));
+        assert.deepEqual(v.problems(), []);
+    });
+
+    test(`a second line of that name links the note instead of making another, and so does a note made with a dash by hand (OBS-111)${also}`, async () => {
+        const notes = { [NEW]: PROJECT, [day("2026-09-17")]: "- [ ] Draft: homepage copy [[New|⭕]]\n", [day("2026-09-18")]: "- [ ] Draft: homepage copy\n" };
+        let v = standIn({ notes, open: day("2026-09-17"), at: 0, lag });
+        await v.addTaskNote();
+        const made = v.notices.length;
+        v.open(day("2026-09-18"), 0);
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-18"), "Draft"), "- [ ] Draft: homepage copy [[New|⭕]] [[Draft - homepage copy|⋯]]", "it takes the note's project");
+        assert.deepEqual(notesIn(v, "Projects/New/"), ["Projects/New/Draft - homepage copy.md", NEW]);
+        assert.ok(!v.notices.slice(made).some((n) => n.startsWith("Created")), v.notices.join(" | "));
+        // The note made with today's workaround, a dash typed for the colon, is the task's note
+        v = standIn({ notes: { [NEW]: PROJECT, "Projects/New/Draft - homepage copy.md": "---\ntags: [task]\nparent: \"[[New]]\"\n---\n", [day("2026-09-17")]: "- [ ] Draft: homepage copy [[New|⭕]]\n" }, open: day("2026-09-17"), at: 0, lag });
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-17"), "Draft"), "- [ ] Draft: homepage copy [[New|⭕]] [[Draft - homepage copy|⋯]]");
+        assert.deepEqual(notesIn(v, "Projects/New/"), ["Projects/New/Draft - homepage copy.md", NEW]);
+        assert.deepEqual(v.problems(), []);
+    });
+
+    test(`a # and a date: the # and the colon stay on the line, the date comes off it, and the template gets the date for \`due\` (OBS-111)${also}`, async () => {
+        const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-18")]: "- [ ] Fix #12: order form 2026-09-25 [[New|⭕]]\n" }, open: day("2026-09-18"), at: 0, lag });
+        const helper = v.customJS.AddTaskNote, make = helper.createTaskNote, titles = [];
+        helper.createTaskNote = async (title, parent) => { titles.push(title); return make(title, parent); };
+        await v.addTaskNote();
+        assert.deepEqual(titles, ["Fix 12 - order form 2026-09-25"]);
+        assert.ok(v.notes()["Projects/New/Fix 12 - order form.md"]);
+        assert.equal(lineIn(v, day("2026-09-18"), "Fix"), "- [ ] Fix #12: order form [[New|⭕]] [[Fix 12 - order form|⋯]]");
+    });
+
+    test(`a selection with a colon names the note cleaned and stays as typed; the cursor goes to its end (OBS-111)${also}`, async () => {
+        const text = "- [ ] Draft: homepage copy, then send it [[New|⭕]]";
+        const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-17")]: `${text}\n` }, open: day("2026-09-17"), at: 0, lag });
+        v.select("- [ ] ".length, "- [ ] Draft: homepage copy".length);
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-17"), "Draft"), `${text} [[Draft - homepage copy|⋯]]`);
+        assert.ok(v.notes()["Projects/New/Draft - homepage copy.md"]);
+        assert.deepEqual(v.placed(), { line: 0, ch: "- [ ] Draft: homepage copy".length });
+    });
+
+    test(`a note of the cleaned name in Archive: the fresh note's name starts from the cleaned name (OBS-111)${also}`, async () => {
+        const ARCHIVED = "Archive/Gone/Draft - homepage copy.md";
+        const v = standIn({ notes: { [NEW]: PROJECT, "Archive/Gone/Gone.md": PROJECT, [ARCHIVED]: "---\ntags: [task]\nparent: \"[[Gone]]\"\n---\n", [day("2026-09-17")]: "- [ ] Draft: homepage copy [[New|⭕]]\n" }, open: day("2026-09-17"), at: 0, lag });
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-17"), "Draft"), "- [ ] Draft: homepage copy [[New|⭕]] [[Draft - homepage copy (New)|⋯]]");
+        assert.ok(v.notes()["Projects/New/Draft - homepage copy (New).md"] && v.notes()[ARCHIVED]);
+    });
+
+    test(`a task with nothing left once its name is cleaned says so and changes nothing (OBS-111)${also}`, async () => {
+        const notes = { [NEW]: PROJECT, [day("2026-09-17")]: "- [ ] ??? [[New|⭕]]\n" };
+        const v = standIn({ notes, open: day("2026-09-17"), at: 0, lag });
+        await v.addTaskNote();
+        assert.deepEqual(v.notices, ["No task text to name the note"]);
+        assert.deepEqual(v.notes(), notes);
+    });
+}
