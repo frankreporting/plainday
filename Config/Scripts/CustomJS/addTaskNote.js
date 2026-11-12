@@ -227,7 +227,7 @@ class AddTaskNote {
             const make = async () => {
                 note = await this.createTaskNote(title, home);
                 if (!note) return false;
-                new Notice(`Created ${note.path.replace(/\.md$/, "")}`);
+                // No notice for the note itself: the ⋯ on the line shows it's there
                 // The template took a moment; don't write into a line that changed in the meantime
                 if (editor.getLine(at) === lineText) return true;
                 new Notice(`${note.basename} is ready, but the line changed, so it wasn't linked`);

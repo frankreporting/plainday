@@ -919,7 +919,7 @@ scenario("a task whose other line links its note in Archive gets a fresh note on
     assert.equal(lineOf(v, day("2026-09-15"), "Write copy"), "- [ ] Write copy [[New|⭕]] [[Write copy (New)|⋯]] ^abc123");
     // The whole task takes New; the archived day keeps its note, so its time stops counting, said afterwards
     assert.equal(lineOf(v, day("2026-09-11"), "Write copy"), "- [>] Write copy [[2026-09-15#^abc123|9/15]] [[New|⭕]] [[Write copy|⋯]] ^abc123");
-    assert.deepEqual(v.notices.slice(1), [
+    assert.deepEqual(v.notices, [
         "A line now links ⭕ New",
         "9/11's line now disagrees with its note Write copy, which is filed in Gone, so its time counts nowhere until you fix it. The report lists it under Problems",
         "This task's other line links Write copy, so the report lists it as linking two notes",

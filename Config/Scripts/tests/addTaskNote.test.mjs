@@ -745,7 +745,7 @@ for (const lag of [false, true]) {
         await v.addTaskNote();
         assert.equal(lineIn(v, day("2026-09-17"), "Draft"), "- [ ] Draft: homepage copy [[New|⭕]] [[Draft - homepage copy|⋯]]");
         assert.deepEqual(notesIn(v, "Projects/New/"), ["Projects/New/Draft - homepage copy.md", NEW]);
-        assert.ok(v.notices.includes("Created Projects/New/Draft - homepage copy"), v.notices.join(" | "));
+        assert.deepEqual(v.notices, [], "no notice: the ⋯ shows the note is there");
         // A slash, on a line with no project: the note waits in the Inbox
         v.open(day("2026-09-17"), 1);
         await v.addTaskNote();
