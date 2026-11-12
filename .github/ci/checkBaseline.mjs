@@ -1,21 +1,31 @@
-// CI: Obsidian's lint baseline only shrinks (CLAUDE.md, "Lint").
+// CI: Obsidian's lint baseline only shrinks, and stays off the repository's root (CLAUDE.md, "Lint").
 //
-// eslint-suppressions.json lists, for each file and rule, how many errors ESLint lets through.
+// .github/ci/eslint-suppressions.json lists, for each file and rule, how many errors ESLint lets through.
 // ESLint itself fails on a new error and on an entry whose error is fixed, but it would also
 // accept a baseline re-recorded with every new error in it (`--suppress-all`). So this compares
 // the baseline with main's, rule by rule: no rule may have more errors let through than on main.
 // Moving entries to a renamed file keeps each rule's count, so it passes.
 //
+// The baseline isn't at the root (OBS-268): ESLint's command line reads an eslint-suppressions.json
+// from the folder it runs in without being asked, and the community directory's scan runs ESLint
+// there with its own rule levels. At those levels some of the baseline's errors are warnings, so
+// ESLint stops with "There are suppressions left that do not occur anymore" and the scan reviews
+// nothing. A `--suppress-all` without `--suppressions-location` writes the file there again, and
+// CI's lint wouldn't notice, so this fails on it.
+//
 // The one exception is a PR that changes the version of a lint package (LINT_PACKAGES), since a
 // new version can find new things: it re-records the baseline, and says in the PR what changed.
 //
 // Inputs (environment): BASE_SHA, main's commit to compare with. Without it, or when main has no
-// baseline yet, there's nothing to compare. Exit 1 with one line per rule that grew.
+// baseline yet, there's nothing to compare. Exit 1 with one line per rule that grew, or when the
+// root has an eslint-suppressions.json.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-export const BASELINE = "eslint-suppressions.json";
+export const BASELINE = ".github/ci/eslint-suppressions.json";
+// Where ESLint reads one on its own, and where the baseline was before OBS-268
+export const ROOT_BASELINE = "eslint-suppressions.json";
 export const LINT_PACKAGES = ["eslint-plugin-obsidianmd", "eslint", "typescript-eslint", "typescript"];
 
 // { rule: count } summed over every file
@@ -76,20 +86,25 @@ export function checkBaselineFiles({ base, head, basePkg, headPkg }) {
     };
 }
 
-function show(sha, file) {
-    const r = spawnSync("git", ["show", `${sha}:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+function show(sha, file, root) {
+    const r = spawnSync("git", ["-C", root, "show", `${sha}:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
     return r.status === 0 ? r.stdout : undefined;
 }
 
+export const ROOT_PROBLEM = `${ROOT_BASELINE} is at the repository's root, where the community directory's scan stops on it (OBS-268). The baseline is ${BASELINE}: move any change into it, and name it with --suppressions-location when re-recording (CLAUDE.md, "Lint")`;
+
 export function checkAll(env = process.env, root = ".") {
-    if (!env.BASE_SHA) return { problems: [], notes: ["No BASE_SHA, so there's nothing to compare"] };
+    const atRoot = fs.existsSync(path.join(root, ROOT_BASELINE)) ? [ROOT_PROBLEM] : [];
+    if (!env.BASE_SHA) return { problems: atRoot, notes: ["No BASE_SHA, so there's nothing to compare"] };
     const read = (f) => (fs.existsSync(path.join(root, f)) ? fs.readFileSync(path.join(root, f), "utf8") : undefined);
-    return checkBaselineFiles({
-        base: show(env.BASE_SHA, BASELINE),
+    const r = checkBaselineFiles({
+        // A main from before the move has it at the root
+        base: show(env.BASE_SHA, BASELINE, root) ?? show(env.BASE_SHA, ROOT_BASELINE, root),
         head: read(BASELINE),
-        basePkg: show(env.BASE_SHA, "package.json"),
+        basePkg: show(env.BASE_SHA, "package.json", root),
         headPkg: read("package.json"),
     });
+    return { problems: [...atRoot, ...r.problems], notes: r.notes };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
