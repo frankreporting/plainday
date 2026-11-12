@@ -3,7 +3,7 @@
 // What Plainday does for the class files:
 // - one instance of every class, by name: the build bundles the class files (plugin/esbuild.config.mjs)
 //   and onload makes the instances, on the host's `customJS` (src/host.js);
-// - a command for each class in the command list (src/commands.js);
+// - a command for each class in the command list, with its icon (src/commands.js);
 // - the startup scripts' invoke(), one after the other, once the layout is ready;
 // - a script that throws shows a notice and logs the error, and never stops the next one.
 // Unloading the plugin runs every class's deconstructor(), so the listeners the startup scripts
@@ -31,7 +31,7 @@ export default class Plainday extends Plugin {
         window.plainday = customJS;
 
         for (const c of COMMANDS) {
-            this.addCommand({ id: c.id, name: c.name, callback: () => this.run(c.script) });
+            this.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: () => this.run(c.script) });
         }
 
         this.app.workspace.onLayoutReady(async () => {
