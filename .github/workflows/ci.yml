@@ -43,6 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The history, so the release dry run can read main's version at the PR's base
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -63,11 +66,13 @@ jobs:
       - name: Obsidian lint
         run: npm run lint
       # What merging would release (CLAUDE.md, "Releases"): the same script and files as
-      # .github/workflows/release.yml, kept for a week to download
+      # .github/workflows/release.yml, kept for a week to download. Merging publishes only when
+      # the PR raises the version past main's (OBS-266).
       - name: Release dry run
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node .github/ci/release.mjs dry-run --out "$RUNNER_TEMP/release"
       - name: Keep the release's files
         if: github.event_name == 'pull_request'
