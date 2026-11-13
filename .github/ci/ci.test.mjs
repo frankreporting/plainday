@@ -19,27 +19,46 @@ import { spawnSync } from "node:child_process";
 
 // ------------------------------------------------------------------ scripts load
 
-test("a class that evaluates cleanly passes; a syntax error and a missing class fail", () => {
-    assert.equal(loadClass("class Thing {\n  async invoke() {}\n}\n", "thing.js"), null);
-    assert.match(loadClass("class Thing {\n  async invoke( {}\n}\n", "thing.js"), /thing\.js: SyntaxError/);
-    assert.match(loadClass("const x = 1;\n", "x.js"), /no top-level class/);
-    // A top-level reference to something only Obsidian provides breaks at startup too
-    assert.match(loadClass("const m = moment();\nclass Thing {}\n", "thing.js"), /ReferenceError/);
+test("a class file with its shape that evaluates cleanly passes; a syntax error, a missing class and a loading class fail", () => {
+    assert.deepEqual(loadClass('import { Notice } from "obsidian";\nimport { app } from "../host.js";\n\nexport default class Thing {\n  async invoke() {}\n}\n', "thing.js"), []);
+    assert.match(loadClass("export default class Thing {\n  async invoke( {}\n}\n", "thing.js")[0], /thing\.js:3 holds more than its class at the top level, or doesn't parse/);
+    assert.match(loadClass("const x = 1;\n", "x.js")[0], /no `export default class <Name>`/);
+    assert.match(loadClass("export default class Thing {}\nThing.ready = true;\n", "thing.js")[0], /thing\.js:2 holds more than its class/);
+    // A class that needs something only Obsidian gives while its module loads breaks at startup too
+    assert.match(loadClass('import { moment } from "obsidian";\nexport default class Thing {\n  static today = moment();\n}\n', "thing.js")[0], /thing\.js: TypeError/);
 });
 
-test("checkAll reports a broken class file and a Templater script that doesn't parse", () => {
+// A tree with class files in the three folders, each listed in its index, and the command list
+function plaindayTree({ commands = ["Schedule", "Plan"], startup = ["SyncArea", "CheckOff"], shared = ["TaskIds"], list, order } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
-    const cjs = path.join(root, "plugin/src/classes");
+    const src = path.join(root, "plugin/src");
+    const lower = (n) => n[0].toLowerCase() + n.slice(1);
+    for (const [folder, names] of Object.entries({ commands, startup, shared })) {
+        fs.mkdirSync(path.join(src, folder), { recursive: true });
+        for (const n of names) fs.writeFileSync(path.join(src, folder, `${lower(n)}.js`), `import { app } from "../host.js";\n\nexport default class ${n} {}\n`);
+        let index = names.map((n) => `import ${n} from "./${lower(n)}.js";\n`).join("") + `\nexport const CLASSES = { ${names.join(", ")} };\n`;
+        if (folder === "commands") index += `export const COMMANDS = [\n${(list ?? names.map((n) => ({ id: lower(n), name: n, script: n }))).map((c) => `    ${JSON.stringify(c)},\n`).join("")}];\n`;
+        if (folder === "startup") index += `export const STARTUP = ${JSON.stringify(order ?? names)};\n`;
+        fs.writeFileSync(path.join(src, folder, "index.js"), index);
+    }
     const tpl = path.join(root, "Config/Scripts/Templater");
-    fs.mkdirSync(cjs, { recursive: true });
     fs.mkdirSync(tpl, { recursive: true });
-    fs.writeFileSync(path.join(cjs, "good.js"), "class Good {}\n");
-    fs.writeFileSync(path.join(cjs, "bad.js"), "class Bad {\n");
+    return { root, src, tpl };
+}
+
+test("checkAll reports a broken class file and a Templater script that doesn't parse", () => {
+    const { root, src, tpl } = plaindayTree();
+    fs.writeFileSync(path.join(src, "shared/bad.js"), "export default class Bad {\n");
+    fs.writeFileSync(path.join(src, "commands/second.js"), "export default class Second {}\nexport const more = 1;\n");
+    fs.writeFileSync(path.join(src, "startup/other.js"), 'import { Schedule } from "../commands/schedule.js";\nexport default class Other {}\n');
     fs.writeFileSync(path.join(tpl, "user.js"), "function f( {}\n");
     const problems = checkScripts(root);
-    assert.ok(problems.some((p) => p.includes("bad.js") && p.includes("SyntaxError")), problems.join("\n"));
-    assert.ok(problems.some((p) => p.includes("Templater/user.js")), problems.join("\n"));
-    assert.ok(!problems.some((p) => p.includes("good.js")), problems.join("\n"));
+    const has = (re) => assert.ok(problems.some((p) => re.test(p)), `${re}\n${problems.join("\n")}`);
+    has(/plugin\/src\/shared\/bad\.js:\d+ holds more than its class at the top level, or doesn't parse/);
+    has(/plugin\/src\/commands\/second\.js:2 holds more than its class/);
+    has(/plugin\/src\/startup\/other\.js:1 imports from "\.\.\/commands\/schedule\.js"/);
+    has(/Templater\/user\.js/);
+    assert.ok(!problems.some((p) => /schedule\.js:|plan\.js|syncArea\.js|checkOff\.js|taskIds\.js/.test(p)), problems.join("\n"));
     fs.rmSync(root, { recursive: true });
 });
 
@@ -52,7 +71,7 @@ test("home-folder paths block, ~ and repo paths don't", () => {
     assert.deepEqual(rulesOf("see /home/" + "somebody/vault"), ["block:home folder path"]);
     assert.deepEqual(rulesOf("log at ~/Library/Logs/calendar-sync.log"), []);
     assert.deepEqual(rulesOf("a site at https://example.com/home/page"), []);
-    assert.deepEqual(rulesOf("plugin/src/classes/plan.js"), []);
+    assert.deepEqual(rulesOf("plugin/src/commands/plan.js"), []);
 });
 
 test("emails block except the bot and GitHub noreply addresses", () => {
@@ -137,7 +156,7 @@ test("Linear link: a cluster lists its issues after one keyword", () => {
 });
 
 test("docs gate: only system changes need it; the manual, the README or a Docs section saying why", () => {
-    const script = ["plugin/src/classes/plan.js"];
+    const script = ["plugin/src/commands/plan.js"];
     assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "Config/Bases/Projects.base"] }), []);
     assert.match(checkDocs({ body: "Closes OBS-1", changed: script })[0], /## Docs/);
     assert.deepEqual(checkDocs({ body: "", changed: [...script, "Config/Manual.md"] }), []);
@@ -153,7 +172,7 @@ test("OBS-81: a numbered folder the vault dropped is caught, in any case; plain 
     for (const line of [`path: "${old("00", "Meta")}/Manual.md"`, `${old("30", "Reference")}/${old("36", "Planner")}/days`, `in ${old("90", "archive")}`, old("02", "Scripts"), old("37", "Journal")]) {
         assert.equal(oldFolderLines(line).length, 1, line);
     }
-    for (const line of ["plugin/src/classes", "Reference/Planner/days", "Archive", "20 Projects/Freelance", "40 Trailhead pack", "2026-09-14"]) {
+    for (const line of ["plugin/src/commands", "Reference/Planner/days", "Archive", "20 Projects/Freelance", "40 Trailhead pack", "2026-09-14"]) {
         assert.deepEqual(oldFolderLines(line), [], line);
     }
     assert.deepEqual(oldFolderLines(`a\nb ${old("10", "Inbox")}\nc`).map((l) => l.line), [2]);
@@ -172,32 +191,70 @@ test("the docs gate counts Plainday's source and manifest as system files", () =
     assert.deepEqual(checkDocs({ body: "", changed: ["package-lock.json"] }), [], "the build's tools aren't");
 });
 
-test("Plainday's command list must name classes that exist, with no id or name twice", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
-    const commands = (body) => {
-        fs.mkdirSync(path.join(root, "plugin/src"), { recursive: true });
-        fs.writeFileSync(path.join(root, "plugin/src/commands.js"), body);
-        fs.writeFileSync(path.join(root, "plugin/package.json"), '{"type":"module"}\n');
-    };
-    const cjs = path.join(root, "plugin/src/classes");
-    fs.mkdirSync(cjs, { recursive: true });
-    for (const name of ["Schedule", "Plan", "SyncArea", "CheckOff"]) fs.writeFileSync(path.join(cjs, `${name}.js`), `class ${name} {}\n`);
+test("a tree whose class files sit in their folders, listed in their indexes, passes", async () => {
+    const { root } = plaindayTree();
     try {
-        assert.deepEqual(await checkPlainday(root), ["plugin/src/commands.js: missing"]);
-        commands(`export const COMMANDS = [
-    { id: "schedule", name: "Schedule", script: "Schedule" },
-    { id: "plan", name: "Plan", script: "Plan" },
-    { id: "plan", name: "Schedule", script: "Invoice" },
-];
-export const STARTUP = ["SyncArea", "CheckOff", "Gone"];
-`);
+        assert.deepEqual(await checkPlainday(root), []);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("Plainday's command list must name classes that exist, with no id or name twice", async () => {
+    const { root } = plaindayTree({
+        list: [
+            { id: "schedule", name: "Schedule", script: "Schedule" },
+            { id: "plan", name: "Plan", script: "Plan" },
+            { id: "plan", name: "Schedule", script: "Invoice" },
+        ],
+        order: ["SyncArea", "CheckOff", "Gone"],
+    });
+    try {
         const problems = await checkPlainday(root);
         const has = (re) => assert.ok(problems.some((p) => re.test(p)), `${re}\n${problems.join("\n")}`);
-        has(/the command "plan" runs Invoice, which no plugin\/src\/classes file defines/);
-        has(/STARTUP names Gone, which no plugin\/src\/classes file defines/);
+        has(/commands\/index\.js: the command "plan" runs Invoice, which no class file declares/);
+        has(/startup\/index\.js: STARTUP names Gone, which no class file declares/);
         has(/two commands have the id "plan"/);
         has(/two commands have the name "Schedule"/);
         assert.equal(problems.length, 4, problems.join("\n"));
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("each class file sits in the folder its kind says, and its index lists it", async () => {
+    const { root, src } = plaindayTree();
+    const problems = async () => checkPlainday(root);
+    const has = (list, re) => assert.ok(list.some((p) => re.test(p)), `${re}\n${list.join("\n")}`);
+    const edit = (file, fn) => fs.writeFileSync(path.join(src, file), fn(fs.readFileSync(path.join(src, file), "utf8")));
+    try {
+        // Left out of its folder's index
+        fs.writeFileSync(path.join(src, "shared/billing.js"), "export default class Billing {}\n");
+        has(await problems(), /plugin\/src\/shared\/billing\.js: shared\/index\.js doesn't import it/);
+        fs.rmSync(path.join(src, "shared/billing.js"));
+
+        // A startup script moved into commands/: first the file alone, then the indexes too
+        fs.renameSync(path.join(src, "startup/checkOff.js"), path.join(src, "commands/checkOff.js"));
+        has(await problems(), /plugin\/src\/commands\/checkOff\.js: commands\/index\.js doesn't import it/);
+        has(await problems(), /startup\/index\.js: imports \.\/checkOff\.js as CheckOff, which isn't a class file in startup\//);
+        edit("startup/index.js", (t) => t.replace('import CheckOff from "./checkOff.js";\n', "").replace(", CheckOff }", " }"));
+        edit("commands/index.js", (t) => 'import CheckOff from "./checkOff.js";\n' + t.replace("CLASSES = { Schedule", "CLASSES = { CheckOff, Schedule"));
+        const moved = await problems();
+        has(moved, /plugin\/src\/commands\/checkOff\.js: STARTUP runs it, so CheckOff belongs in startup\//);
+        assert.equal(moved.length, 1, moved.join("\n"));
+
+        // A shared class in startup/, beside its copy in shared/
+        fs.writeFileSync(path.join(src, "startup/taskIds.js"), "export default class TaskIds {}\n");
+        edit("startup/index.js", (t) => 'import TaskIds from "./taskIds.js";\n' + t.replace("CLASSES = { SyncArea", "CLASSES = { TaskIds, SyncArea"));
+        const twice = await problems();
+        has(twice, /TaskIds is declared in plugin\/src\/s\w+\/taskIds\.js too/);
+        has(twice, /plugin\/src\/startup\/taskIds\.js: no command or startup script runs it, so TaskIds belongs in shared\//);
+
+        // An index that names a class it doesn't import
+        fs.writeFileSync(path.join(src, "shared/index.js"), 'import TaskIds from "./taskIds.js";\n\nexport const CLASSES = { TaskIds, Other: TaskIds };\n');
+        has(await problems(), /shared\/index\.js: CLASSES names Other, which it doesn't import/);
+        fs.writeFileSync(path.join(src, "shared/index.js"), 'import TaskIds from "./taskIds.js";\n\nexport const CLASSES = { TaskIds, Other };\n');
+        has(await problems(), /shared\/index\.js: ReferenceError: Other is not defined/);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

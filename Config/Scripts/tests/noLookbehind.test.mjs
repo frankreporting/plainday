@@ -7,10 +7,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { FOLDERS, loadClass } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
 const read = (file) => fs.readFileSync(new URL(`../${file}`, here), "utf8");
-const load = (file, name) => vm.runInContext(read(`../../plugin/src/classes/${file}`) + `\n;${name}`, vm.createContext({}));
+const load = (file) => loadClass(file, vm.createContext({}));
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 const TaskIds = load("taskIds.js", "TaskIds");
 const TrailingLinks = load("trailingLinks.js", "TrailingLinks");
@@ -27,7 +28,7 @@ const FE0F = String.fromCharCode(0xfe0f), BOM = String.fromCharCode(0xfeff), INF
 
 test("no lookbehind in a class file, a Templater script or Plainday's own code, in a pattern or a string made into one", () => {
     const found = [];
-    for (const dir of ["../../plugin/src/classes", "Templater", "../../plugin/src"]) {
+    for (const dir of [...FOLDERS.map((f) => `../../plugin/src/${f}`), "Templater", "../../plugin/src"]) {
         for (const name of fs.readdirSync(new URL(`../${dir}/`, here)).filter((n) => n.endsWith(".js"))) {
             read(`${dir}/${name}`).split("\n").forEach((line, i) => {
                 if (/\(\?<[=!]/.test(line)) found.push(`${dir.replace(/^(\.\.\/)+/, "")}/${name}:${i + 1}`);

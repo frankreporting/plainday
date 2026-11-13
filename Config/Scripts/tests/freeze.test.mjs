@@ -6,9 +6,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { obsidianPadded, segments, tablesIn as spans } from "./tables.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
 const TimeReport = load("timeReport.js", "TimeReport");
 const tr = new TimeReport();
 const billing = new (load("billing.js", "Billing"))();
@@ -458,7 +459,7 @@ function withOpenNote(file, editor) {
         app: { workspace: { getLeavesOfType: () => [{ view: { file, editor } }] } },
         Notice: class { constructor(message) { notices.push(message); } },
     });
-    const make = (file, name) => new (vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context))();
+    const make = (file, name) => new (vm.runInContext(classScript(`${file}`) + `\n;${name}`, context))();
     return { tr: make("timeReport.js", "TimeReport"), inv: make("invoice.js", "Invoice"), notices };
 }
 

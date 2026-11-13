@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/errorLog.js (OBS-218). Run from the vault root:
+// Tests for plugin/src/shared/errorLog.js (OBS-218). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, next to TimeReport and Billing, whose
 // model it reads. Every project, note and entry here is invented.
@@ -6,9 +6,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const source = (file) => fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8");
+const source = (file) => classScript(`${file}`);
 const load = (file, name, context = {}) => vm.runInContext(source(file) + `\n;${name}`, vm.createContext(context));
 const tr = new (load("timeReport.js", "TimeReport"))();
 const billing = new (load("billing.js", "Billing"))();
@@ -121,7 +122,7 @@ test("fromModel: a task line in a project note whose day doesn't have it reaches
         [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-09-16#^k3x9m2|9/16]] ^k3x9m2\n",
         [`${PLANNER}/days/2026-09-16.md`]: "- [x] Something else\n",
     };
-    const t = standIn({ notes }).customJS.TimeReport;
+    const t = standIn({ notes }).plainday.TimeReport;
     const model = { problems: [], projectProblems: [], entries: [] };
     t.addTaskProblems(model, t.appIndex(), Object.entries(notes).map(([path, text]) => ({ path, kind: path === KES ? "other" : "day", text })));
     assert.ok(model.projectProblems.length >= 1, "the task check finds it");
@@ -224,7 +225,7 @@ const harness = ({ text = null } = {}) => {
             },
             workspace: { getLeaf: () => ({ openFile: async (f) => state.opened.push(f.path) }) },
         },
-        window: { moment: () => ({ format: (f) => (f === "M/D h:mma" ? "10/29 9:14am" : "2026102909140000") }) },
+        moment: () => ({ format: (f) => (f === "M/D h:mma" ? "10/29 9:14am" : "2026102909140000") }),
         Notice: class { constructor(m, d) { state.notices.push({ m: typeof m === "string" ? m : m.text, d }); } },
         createFragment: (fn) => { const f = { text: "", appendText: (t) => { f.text += t; }, createEl: (_t, o) => { f.text += o.text; return { addEventListener: () => {} }; } }; fn(f); return f; },
     };
@@ -263,7 +264,7 @@ test("toast: one notice for a run's new lines, with a View Error Logs link; none
 
 test("the calendar sync's section: held-back changes and skipped lines, each one line with a count, linking the Calendar Sync note", async () => {
     const h = harness({ text: "" });
-    const Sync = load("calendarSync.js", "CalendarSync", { customJS: { ErrorLog: h.log }, app: { isMobile: false } });
+    const Sync = load("calendarSync.js", "CalendarSync", { plainday: { ErrorLog: h.log }, app: { isMobile: false } });
     await new Sync().logProblems({ held: ["a", "b"], skipped: ["c"] });
     assert.ok(h.state.text.includes("## Calendar sync\n\nUpdated 10/29 9:14am · 3 open\n\n- Held back changes (2) · [[Calendar Sync]]\n- Skipped lines · [[Calendar Sync]]"), h.state.text);
     assert.deepEqual(plain(h.state.notices.map((n) => n.m)), ["Calendar sync: 3 new problems: Held back changes ×2 (Calendar Sync), Skipped lines (Calendar Sync). View Error Logs"]);

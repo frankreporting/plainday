@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/calendarSync.js. Run from the vault root:
+// Tests for plugin/src/commands/calendarSync.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm. The pure parts (applyOne, runOps,
 // findBlock) are tested on note text; whole runs go through run() against an in-memory vault, with
@@ -7,8 +7,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
-const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
+const code = classScript("calendarSync.js");
 const TODAY = "2026-09-15";
 const DAYS = "Planner/days";
 const EVENTS = "Config/Scripts/Calendar/calendar-events.json";
@@ -92,8 +93,8 @@ function frontmatterOf(text) {
 function load(app = {}) {
     const context = vm.createContext({
         app,
-        window: { moment },
-        customJS: { Schedule: { dailyOpts: () => ({ folder: DAYS }) } },
+        moment,
+        plainday: { Schedule: { dailyOpts: () => ({ folder: DAYS }) } },
         console,
     });
     return new (vm.runInContext(code + "\n;CalendarSync", context))();
@@ -1240,8 +1241,8 @@ test("adopting a log's timeless line keeps its 🆓, in either form", () => {
 });
 
 test("isLog: a note in a ›logs folder (AddTaskNote's name, any case) or tagged #log; without AddTaskNote only the tag counts (OBS-164)", () => {
-    const helper = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
-    const context = vm.createContext({ app: {}, window: { moment }, customJS: { Schedule: { dailyOpts: () => ({ folder: DAYS }) }, AddTaskNote: helper }, console });
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({})))();
+    const context = vm.createContext({ app: {}, moment, plainday: { Schedule: { dailyOpts: () => ({ folder: DAYS }) }, AddTaskNote: helper }, console });
     const sync = new (vm.runInContext(code + "\n;CalendarSync", context))();
     const isLog = (path, tags = []) => sync.isLog({ path }, { frontmatter: { tags } });
     assert.deepEqual(["Projects/Studio/›logs/2026-09-16 Planning.md", "Projects/Studio/›Logs/2026-09-16 Planning.md", "Projects/Studio/logs/2026-09-16 Planning.md",

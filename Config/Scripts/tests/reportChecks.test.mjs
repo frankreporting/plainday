@@ -9,6 +9,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
 import { planReports, frontmatter, loadTimeReport } from "./demo/renderReports.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const day = (d) => `${PLANNER}/days/${d}.md`;
@@ -27,7 +28,7 @@ const run = (given) => {
         ...model.projectProblems.filter((p) => RULES.includes(p.rule)).map((p) => ["project", p.project, p.path, p.line, p.rule]),
     ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     const v = standIn({ notes });
-    const tr = v.customJS.TimeReport, ids = v.customJS.TaskIds;
+    const tr = v.plainday.TimeReport, ids = v.plainday.TaskIds;
     const list = Object.keys(notes).filter((p) => ids.inSystem(v.file(p)) || p.startsWith("Archive/")).map((path) => ({ path, kind: ids.kindOf(v.file(path)), text: notes[path] }));
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, tr.appIndex(), list);
@@ -321,8 +322,8 @@ test("check 4: a task note in Archive is compared, and the Problem says to chang
 
 test("check 4: a task note's due is read from its text, which can be ahead of the cache", () => {
     const { tr, v } = run(DEADLINES());
-    const T = v.customJS.TaskIds.constructor, index = tr.appIndex();
-    const notes = Object.entries(DEADLINES()).map(([path, text]) => ({ path, kind: v.customJS.TaskIds.kindOf(v.file(path)), text }));
+    const T = v.plainday.TaskIds.constructor, index = tr.appIndex();
+    const notes = Object.entries(DEADLINES()).map(([path, text]) => ({ path, kind: v.plainday.TaskIds.kindOf(v.file(path)), text }));
     // DueDate just wrote 9/27 everywhere; the cache still has 9/18
     const now = notes.map((n) => ({ ...n, text: n.text.replaceAll("2026-09-18|🚩 9/18", "2026-09-27|🚩 9/27").replace("due: 2026-09-18", "due: 2026-09-27") }));
     assert.equal(index.props(WIRE).due, "2026-09-18");
@@ -333,9 +334,9 @@ test("check 4: a task note's due is read from its text, which can be ahead of th
     for (const text of ["---\ndue:\n  - 2026-09-27\n---\n", "---\ndue: 2026-09-27\ndue: 2026-09-28\n---\n", "No properties.\ndue: 2026-09-27\n", "---\ndue: 2026-02-30\n---\n", "---\ndue:2026-09-27\n---\n"]) assert.equal(node.dueIn(text), null, text);
     // With it (the app; here the stand-in's parser), the properties as Obsidian reads them
     assert.equal(tr.dueIn("---\ntags: [task]\ndue: 2026-09-27\n---\n"), "2026-09-27");
-    v.customJS.obsidian.parseYaml = () => ({ due: "2026-10-01" });
+    v.globals.parseYaml = () => ({ due: "2026-10-01" });
     assert.equal(tr.dueIn("---\ndue: anything\n---\n"), "2026-10-01", "read through Obsidian's parser");
-    v.customJS.obsidian.parseYaml = () => { throw new Error("bad YAML"); };
+    v.globals.parseYaml = () => { throw new Error("bad YAML"); };
     assert.equal(tr.dueIn("---\ndue: [\n---\n"), null, "properties Obsidian can't read have no due");
 });
 
@@ -361,7 +362,7 @@ test("check 2: one fix, AddProjectLink, and by hand only where no command works:
 // ------------------------------------------------------------------ the error log
 
 test("the error log names each new check, and a task whose deadlines differ once", () => {
-    const ErrorLog = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/errorLog.js", import.meta.url), "utf8") + "\n;ErrorLog", vm.createContext({}));
+    const ErrorLog = vm.runInContext(classScript("errorLog.js") + "\n;ErrorLog", vm.createContext({}));
     const log = new ErrorLog();
     const link = (p) => `[[${p.replace(/\.md$/, "")}]]`;
     const kinds = (notes) => plain(log.fromModel({ ...run(notes).model, billing: null }, link).map((g) => [g.kind, g.name, g.count]));

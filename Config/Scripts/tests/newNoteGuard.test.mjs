@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
+// Tests for plugin/src/startup/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
 // the vault root: node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, with a fake `app`. The last test reads
 // Templater's own code when it's installed in this folder (the dev vault), since the guard leans on
@@ -7,11 +7,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { STARTUP } from "../../../plugin/src/commands.js";
 import { createRequire } from "node:module";
+import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+const { STARTUP } = readIndex("startup").exports;
 
 const here = new URL(".", import.meta.url);
-const SOURCE = fs.readFileSync(new URL("../../../plugin/src/classes/newNoteGuard.js", here), "utf8");
+const SOURCE = classScript("newNoteGuard.js");
 const NewNoteGuard = vm.runInContext(SOURCE + "\n;NewNoteGuard", vm.createContext({}));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const arrivedNote = createRequire(import.meta.url)("../Templater/arrivedNote.js");
@@ -44,11 +45,11 @@ test("arrivedNote, Get Template's copy of the rule, agrees with the guard", () =
 });
 
 // A fake app: one vault listener list, file texts by path, and Templater's set. `loaded`: Plainday
-// is loaded (`customJS.plugin`), or has unloaded and left this listener behind.
+// is loaded (`plainday.plugin`), or has unloaded and left this listener behind.
 function setup({ loaded = true, templater = true } = {}) {
     const pending = new Set(), texts = new Map(), listeners = [];
     const ctx = vm.createContext({
-        customJS: { plugin: loaded ? {} : null },
+        plainday: { plugin: loaded ? {} : null },
         app: {
             plugins: {
                 plugins: templater ? { "templater-obsidian": { templater: { files_with_pending_templates: pending } } } : {},

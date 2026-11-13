@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/billing.js. Run from the vault root:
+// Tests for plugin/src/shared/billing.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, next to TimeReport, whose parser and
 // model it reads. Every project, client, amount and entry here is invented.
@@ -7,9 +7,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { compactTable, obsidianPadded } from "./tables.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
 const TimeReport = load("timeReport.js", "TimeReport");
 const Billing = load("billing.js", "Billing");
 const tr = new TimeReport();

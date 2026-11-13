@@ -333,7 +333,7 @@ test("rewrite changes a note open in an editor through the editor: an edit not y
     const spans = [];
     const replace = editor.replaceRange;
     editor.replaceRange = (text, from, to) => { spans.push(text); return replace(text, from, to); };
-    await v.customJS.Schedule.rewrite(v.app.vault.getFileByPath(KES), (t) => t.replace("🚩", "🚀"));
+    await v.plainday.Schedule.rewrite(v.app.vault.getFileByPath(KES), (t) => t.replace("🚩", "🚀"));
     assert.equal(v.notes()[KES], "---\ntags: [project]\n---\n## To Do\n\n- [ ] Book the photographer 🚀 today\n");
     assert.deepEqual(spans, ["🚀"]);
 });
@@ -343,7 +343,7 @@ test("the note a moving line links is read for its source lines, even with the c
     await v.schedule("2026-09-17");
     assert.deepEqual(v.check(), []);
     const id = idIn(v.notes()[KES]);
-    v.customJS.TaskIds.recent?.clear();   // as after Plainday reloads
+    v.plainday.TaskIds.recent?.clear();   // as after Plainday reloads
     v.open(day("2026-09-17"), v.lineOf(day("2026-09-17"), "Book the photographer"));
     await v.schedule("2026-09-18");
     assert.deepEqual(v.check(), []);
@@ -495,8 +495,8 @@ scenario("an older line that takes its forwarded day line's ID points its forwar
             assert.equal(v.notes()[day("2026-09-21")].trim(), `- [/] Book the photographer [[Kestrel|⭕]] ^${id}`, "reopened as started: time was logged on 9/17");
         } else {
             v.tick();
-            v.customJS.DatePrompt.open = () => ({});
-            await v.customJS.Schedule.invoke();
+            v.plainday.DatePrompt.open = () => ({});
+            await v.plainday.Schedule.invoke();
             assert.equal(v.notes()[KES].split("\n")[5], `- [>] Book the photographer [[2026-09-18#^${id}|9/18]] ^${id}`, how);
         }
         assert.deepEqual(v.check(), [], how);
@@ -692,7 +692,7 @@ scenario("a day's [>] line under a plain bullet that names an archived ⭕ isn't
         [day("2026-09-16")]: "- Old work [[Old|⭕]]\n\t- [>] Call the printer ^abc123\n\t\t- 9:00am - 9:30am\n",
         [day("2026-09-18")]: "- [ ] Call the printer [[Kestrel|⭕]] ^abc123\n",
     }, open: day("2026-09-18"), at: 0, lag });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const counted = () => {
         const notes = Object.entries(v.notes()).filter(([p]) => p.includes("/days/")).map(([path, text]) => ({ path, text, date: path.slice(-13, -3) }));
         return tr.build(notes, tr.appIndex(), {}).entries.length;
@@ -706,7 +706,7 @@ scenario("a day's [>] line under a plain bullet that names an archived ⭕ isn't
 test("a reopen whose [>] line is gone by the time it's written says so, so the line goes in as usual", async () => {
     const v = standIn({ notes: { [day("2026-09-16")]: "- [ ] Call the printer [[Kestrel|⭕]] ^q1w2e3\n" } });
     const file = v.app.vault.getFileByPath(day("2026-09-16"));
-    assert.equal(await v.customJS.Schedule.reopen(file, "q1w2e3", ["- [ ] Call the printer [[Kestrel|⭕]] ^q1w2e3"]), false);
+    assert.equal(await v.plainday.Schedule.reopen(file, "q1w2e3", ["- [ ] Call the printer [[Kestrel|⭕]] ^q1w2e3"]), false);
     assert.equal(v.notes()[day("2026-09-16")], "- [ ] Call the printer [[Kestrel|⭕]] ^q1w2e3\n");
     assert.deepEqual(v.left, [], "no fold snapshot for a note left alone");
 });
@@ -718,11 +718,11 @@ scenario("a source clicked back to [ ] whose line moves while the date prompt is
     const editor = v.app.workspace.activeLeaf.view.editor;
     editor.replaceRange(" ", { line: 5, ch: 3 }, { line: 5, ch: 4 });
     let pick = null;
-    v.customJS.DatePrompt.open = (title, onPick) => { pick = onPick; return {}; };
-    await v.customJS.Schedule.invoke();
+    v.plainday.DatePrompt.open = (title, onPick) => { pick = onPick; return {}; };
+    await v.plainday.Schedule.invoke();
     editor.replaceRange("- [ ] Order prints\n", { line: 5, ch: 0 });   // a sync, say, while the prompt is open
     const before = v.notes();
-    await pick(v.customJS.DatePrompt.result("2026-09-21", "day"), { close() {} });
+    await pick(v.plainday.DatePrompt.result("2026-09-21", "day"), { close() {} });
     assert.deepEqual(v.notes(), before);
     assert.equal(v.notices.at(-1), "The line changed before it could be scheduled, so it wasn't");
 });
@@ -780,10 +780,10 @@ const backOnto916 = async (sixteen, meanwhile, lag) => {
         [day("2026-09-18")]: "- [ ] Book the photographer [[Kestrel|⭕]] ^abc123\n",
     }, open: KES, at: 5, lag });
     let pick = null;
-    v.customJS.DatePrompt.open = (title, onPick) => { pick = onPick; return {}; };
-    await v.customJS.Schedule.invoke();
+    v.plainday.DatePrompt.open = (title, onPick) => { pick = onPick; return {}; };
+    await v.plainday.Schedule.invoke();
     await v.app.vault.process(v.app.vault.getFileByPath(day("2026-09-16")), meanwhile);
-    await pick(v.customJS.DatePrompt.result("2026-09-16", "day"), { close() {} });
+    await pick(v.plainday.DatePrompt.result("2026-09-16", "day"), { close() {} });
     return v;
 };
 
@@ -954,7 +954,7 @@ scenario("the time report reads the notes as they are now: run right after a res
     // Its forward date is written through its editor, and 9/21 through the vault: the cache has seen neither
     await v.schedule("2026-09-21");
     assert.deepEqual(v.check(), []);
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, tr.appIndex(), await tr.taskNotes([]));
     assert.deepEqual(JSON.parse(JSON.stringify([model.problems, model.projectProblems])), [[], []]);
@@ -1166,7 +1166,7 @@ scenario("review: the task's day changes while its destination is written: its l
         [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book the photographer [[2026-09-16#^abc123|9/16]] ^abc123\n",
         [day("2026-09-16")]: "- [/] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- 9:00am - 9:30am\n\t- [ ] open step\n",
     }, open: KES, at: 5, lag });
-    const S = v.customJS.Schedule, append = S.appendToTopChecklist.bind(S);
+    const S = v.plainday.Schedule, append = S.appendToTopChecklist.bind(S);
     S.appendToTopChecklist = async (file, lines) => {
         const out = await append(file, lines);
         await v.app.vault.process(v.app.vault.getFileByPath(day("2026-09-16")), (t) => t.replace("\t- [ ] open step\n", "\t- [ ] open step\n\t- [ ] call the printer\n"));
@@ -1179,7 +1179,7 @@ scenario("review: the task's day changes while its destination is written: its l
 
 scenario("review round 2: a done line reopening on its own day that moves while the task's lines are read is left alone, and nothing else is changed (OBS-193)", async ({ lag }) => {
     const v = standIn({ notes: { [day("2026-09-16")]: "- [x] Task ^abc123\n" }, open: day("2026-09-16"), at: 0, lag });
-    const T = v.customJS.TaskIds, gather = T.gather.bind(T);
+    const T = v.plainday.TaskIds, gather = T.gather.bind(T);
     T.gather = async (...a) => { v.app.workspace.activeLeaf.view.editor.replaceRange("- [<] 8:00am\tStandup\n", { line: 0, ch: 0 }); return gather(...a); };
     await v.schedule("2026-09-16");
     assert.equal(v.notes()[day("2026-09-16")], "- [<] 8:00am\tStandup\n- [x] Task ^abc123\n");
@@ -1192,7 +1192,7 @@ scenario("review round 2: a source clicked back to [ ] is [>] again even when it
         [day("2026-09-16")]: "- [/] Book the photographer [[Kestrel|⭕]] ^abc123\n\t- 9:00am - 9:30am\n\t- [ ] open step\n",
     }, open: KES, at: 5, lag });
     v.app.workspace.activeLeaf.view.editor.replaceRange(" ", { line: 5, ch: 3 }, { line: 5, ch: 4 });
-    const S = v.customJS.Schedule, append = S.appendToTopChecklist.bind(S);
+    const S = v.plainday.Schedule, append = S.appendToTopChecklist.bind(S);
     S.appendToTopChecklist = async (file, lines) => {
         const out = await append(file, lines);
         await v.app.vault.process(v.app.vault.getFileByPath(day("2026-09-16")), (t) => t.replace("\t- [ ] open step\n", "\t- [ ] open step\n\t- [ ] call the printer\n"));
@@ -1251,7 +1251,7 @@ scenario("PR 54 review: a done line moved from a sent line says it was reopened"
 
 scenario("PR 54 review: a line typed just below the task while its destination is written stops the move from the day, so it isn't left under another line", async ({ lag }) => {
     const v = standIn({ notes: { [day("2026-09-16")]: "- [ ] Task\n\t- [ ] sub\n- [ ] Other\n" }, open: day("2026-09-16"), at: 0, lag });
-    const S = v.customJS.Schedule, append = S.appendToTopChecklist.bind(S);
+    const S = v.plainday.Schedule, append = S.appendToTopChecklist.bind(S);
     S.appendToTopChecklist = async (file, lines) => { const out = await append(file, lines); v.app.workspace.activeLeaf.view.editor.replaceRange("\n\t- [ ] typed meanwhile", { line: 1, ch: "\t- [ ] sub".length }); return out; };
     await v.schedule("2026-09-18");
     assert.equal(v.notes()[day("2026-09-16")], "- [ ] Task\n\t- [ ] sub\n\t- [ ] typed meanwhile\n- [ ] Other\n");
@@ -1279,7 +1279,7 @@ scenario("PR 54 confirmation: a task scheduled onto a CRLF day with no checklist
 
 scenario("PR 54 confirmation: a note added under a worked-on task while its destination is written stays under the [>] line, and the forward goes through", async ({ lag }) => {
     const v = standIn({ notes: { [day("2026-09-16")]: "- [/] Task ^abc123\n\t- 9:00am - 9:30am\n- [ ] Other\n" }, open: day("2026-09-16"), at: 0, lag });
-    const S = v.customJS.Schedule, append = S.appendToTopChecklist.bind(S);
+    const S = v.plainday.Schedule, append = S.appendToTopChecklist.bind(S);
     S.appendToTopChecklist = async (file, lines) => { const out = await append(file, lines); v.app.workspace.activeLeaf.view.editor.replaceRange("\n\t- added", { line: 1, ch: "\t- 9:00am - 9:30am".length }); return out; };
     await v.schedule("2026-09-18");
     assert.equal(v.notes()[day("2026-09-16")], "- [>] Task ^abc123\n\t- 9:00am - 9:30am\n\t- added\n- [ ] Other\n");

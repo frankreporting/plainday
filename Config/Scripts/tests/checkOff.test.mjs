@@ -165,7 +165,7 @@ scenario("unticking a source whose task has time logged reopens the done line as
 scenario("⌘⏎ over a source line and an open line below it, which Obsidian ticks together, completes the task at once", async ({ lag }) => {
     // Obsidian takes the [>] straight to [x] and the [ ] below it to [x], in one edit
     const v = standIn({ notes: notes({ [COPY]: copyNote(`${SOURCE}\n- [ ] Ask about the paper ^pp4p3r`) }), open: COPY, at: 7, lag });
-    const editor = v.app.workspace.activeLeaf.view.editor, C = v.customJS.CheckOff, file = v.file(COPY);
+    const editor = v.app.workspace.activeLeaf.view.editor, C = v.plainday.CheckOff, file = v.file(COPY);
     const a = [editor.getLine(7), editor.getLine(8)], b = a.map((l) => l.replace(/\[.\]/, "[x]"));
     editor.replaceRange(b.join("\n"), { line: 7, ch: 0 }, { line: 8, ch: a[1].length });
     const found = C.constructor.boxChanges((n) => a[n - 7], (n) => b[n - 7], [{ fromA: 7, toA: 8, fromB: 7, toB: 8 }]);
@@ -379,7 +379,7 @@ test("boxChanges reads each changed checklist line's mark before and after, on l
 test("typing the mark in two edits (through a line with no box) completes nothing: the source is left done and the task open, as today", async () => {
     const v = standIn({ notes: notes(), open: COPY, at: 7 });
     const editor = v.app.workspace.activeLeaf.view.editor;
-    const C = v.customJS.CheckOff, file = v.file(COPY);
+    const C = v.plainday.CheckOff, file = v.file(COPY);
     const steps = ["- [] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe", "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe"];
     let before = SOURCE;
     for (const after of steps) {
@@ -478,7 +478,7 @@ test("the editor's hold: two [>] boxes opened by one change over three lines are
 
 test("a write finds its line by the task's ID when lines above it came or went, and skips one that changed", () => {
     const v = standIn({ notes: notes() });
-    const C = v.customJS.CheckOff.constructor;
+    const C = v.plainday.CheckOff.constructor;
     const ls = ["- [ ] New line", "- [ ] Homepage build", OPEN];
     assert.equal(C.lineIn(ls, 1, OPEN), 2);
     assert.equal(C.lineIn(ls, 2, OPEN), 2);
@@ -504,10 +504,10 @@ scenario("a task finished or moved while the question was up gets nothing writte
 
 test("Mark done on a task that's finished already writes nothing", async () => {
     const v = standIn({ notes: notes({ [day("2026-09-17")]: `${OPEN.replace("[ ]", "[x]")}\n` }) });
-    const T = v.customJS.TaskIds;
+    const T = v.plainday.TaskIds;
     const lines = await T.gather("p7d2qe", []);
     const before = v.notes();
-    assert.equal(await v.customJS.CheckOff.complete("p7d2qe", lines, "x"), false);
+    assert.equal(await v.plainday.CheckOff.complete("p7d2qe", lines, "x"), false);
     assert.equal(v.notices.at(-1), "This task is already finished, so nothing changed");
     assert.deepEqual(v.notes(), before);
 });
@@ -527,7 +527,7 @@ scenario("two ticks in one edit both follow", async ({ lag }) => {
     const b = OPEN.replace("Send final copy to Rafe", "Proof the hours panel").replaceAll("p7d2qe", "h7p1qq");
     const v = standIn({ notes: notes({ [COPY]: copyNote(`- [>] Book the studio [[2026-09-17#^b5st0d|9/17]] ^b5st0d\n- [>] Proof the hours panel [[2026-09-16#^h7p1qq|9/16]] ^h7p1qq`), [TODAY]: `${a}\n\t- 9:00am - 9:30am\n${b}\n`, [day("2026-09-17")]: `${a.replace("[>]", "[ ]")}\n\t- [ ] Call about the price\n` }), open: TODAY, lag });
     const editor = v.app.workspace.activeLeaf.view.editor;
-    const C = v.customJS.CheckOff, file = v.file(TODAY);
+    const C = v.plainday.CheckOff, file = v.file(TODAY);
     editor.replaceRange("x", { line: 0, ch: 3 }, { line: 0, ch: 4 });
     editor.replaceRange("x", { line: 2, ch: 3 }, { line: 2, ch: 4 });
     await C.follow(file, { line: 0, before: a, after: a.replace("[>]", "[x]") });
@@ -548,7 +548,7 @@ test("unticking a source whose task is done on two days reopens the day its forw
 
 test("a second question about the same line while one is up isn't asked", async () => {
     const v = standIn({ notes: notes(), open: COPY, at: 7 });
-    const C = v.customJS.CheckOff, file = v.file(COPY);
+    const C = v.plainday.CheckOff, file = v.file(COPY);
     let release, asked = 0;
     C.choose = () => { asked++; return new Promise((ok) => { release = ok; }); };
     const first = C.ask({ file, line: 7, text: SOURCE, want: " " });
@@ -685,7 +685,7 @@ scenario("reading view: a click CheckOff leaves alone is Obsidian's, changing on
 
 scenario("reading view: a line that changed since reading view drew it gets nothing written, and a notice says so", async ({ lag }) => {
     const v = reading(notes(), day("2026-09-17"), 1, lag);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const job = C.readingClick(v.readingBox());
     assert.equal(job.tick.want, "x");
     // A change reaching the note between the drawing and the click (Sync, say)
@@ -698,7 +698,7 @@ scenario("reading view: a line that changed since reading view drew it gets noth
 
 scenario("reading view: a line moved by a line added above it since the drawing is still found, by its ID", async ({ lag }) => {
     const v = reading(notes(), day("2026-09-17"), 1, lag);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const job = C.readingClick(v.readingBox());
     await v.app.vault.process(v.file(day("2026-09-17")), (t) => `- [ ] Call the framer\n${t}`);
     await C.tickRead(job.tick);
@@ -784,7 +784,7 @@ scenario("reading view: Task Status's menu changing another line than the one pr
 
 test("the watch on Task Status's menu: a press noted in reading view, kept once a dialog opens, taken by that note's next change of boxes only; a click forgets it", async () => {
     const v = reading(notes(), day("2026-09-17"), 1);
-    const C = v.customJS.CheckOff, file = v.file(day("2026-09-17"));
+    const C = v.plainday.CheckOff, file = v.file(day("2026-09-17"));
     const jobs = [];
     C.enqueue = (job) => jobs.push(job);
     // A press that ends with no dialog up (a click) is forgotten
@@ -824,8 +824,8 @@ test("the watch on Task Status's menu: a press noted in reading view, kept once 
     }
     // A note outside the system
     const o = reading(notes({ "Reference/Ideas.md": "- [ ] Send final copy to Rafe ^p7d2qe\n" }), "Reference/Ideas.md", 0);
-    o.customJS.CheckOff.pressed(o.readingBox());
-    assert.equal(o.customJS.CheckOff.menu ?? null, null);
+    o.plainday.CheckOff.pressed(o.readingBox());
+    assert.equal(o.plainday.CheckOff.menu ?? null, null);
 });
 
 test("menuTakes: once a dialog opened after the press, while it's up and until MENU_MS after it closes, for that note only", () => {
@@ -856,7 +856,7 @@ test("menuChanges: only the lines whose box alone changed", () => {
 scenario("reading view: the calendar sync setting an event's box while Task Status's menu is up isn't the menu's: the pick that follows is", async ({ lag }) => {
     const ev = "- [<] 3:00pm\tPrinter call ^p1nt3r";
     const v = reading(notes({ [day("2026-09-17")]: `- [ ] Homepage build: category pages\n${OPEN}\n${ev}\n` }), day("2026-09-17"), 1, lag);
-    const sync = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace(ev, ev.replace("[<]", "[-]"))).then(() => v.customJS.CheckOff.modified(v.file(day("2026-09-17"))));
+    const sync = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace(ev, ev.replace("[<]", "[-]"))).then(() => v.plainday.CheckOff.modified(v.file(day("2026-09-17"))));
     await v.menu("x", { between: sync });
     assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
     assert.deepEqual(v.check(), []);
@@ -864,7 +864,7 @@ scenario("reading view: the calendar sync setting an event's box while Task Stat
 
 scenario("reading view: Task Status's menu while a save from another pane lands first: the save is passed over, and the pick followed", async ({ lag }) => {
     const v = reading(notes(), day("2026-09-17"), 1, lag);
-    const save = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace("- [ ] Homepage build: category pages", "- [ ] Homepage build: category pages, and the footer")).then(() => v.customJS.CheckOff.modified(v.file(day("2026-09-17"))));
+    const save = () => v.app.vault.process(v.file(day("2026-09-17")), (t) => t.replace("- [ ] Homepage build: category pages", "- [ ] Homepage build: category pages, and the footer")).then(() => v.plainday.CheckOff.modified(v.file(day("2026-09-17"))));
     await v.menu("x", { between: save });
     assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
     assert.deepEqual(v.check(), []);
@@ -872,7 +872,7 @@ scenario("reading view: Task Status's menu while a save from another pane lands 
 
 test("the click listener's part for reading view stops a click only when CheckOff takes it, and runs what it takes", () => {
     const v = reading(notes(), COPY, 7);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const jobs = [], asks = [];
     C.enqueue = (job) => jobs.push(job);
     C.askLater = (args) => asks.push(args);
@@ -888,7 +888,7 @@ test("the click listener's part for reading view stops a click only when CheckOf
     assert.equal(e2.stopped, 0);
     // A box on a day's open line: stopped, a tick run
     const d = reading(notes(), day("2026-09-17"), 1);
-    const D = d.customJS.CheckOff, dj = [];
+    const D = d.plainday.CheckOff, dj = [];
     D.enqueue = (job) => dj.push(job);
     const e3 = event();
     assert.equal(D.readingClicked(e3, d.readingBox()), true);
@@ -903,7 +903,7 @@ test("the click listener's part for reading view stops a click only when CheckOf
 
 scenario("reading view: a second click before the first was drawn finds its line already as it would make it, and does nothing", async ({ lag }) => {
     const v = reading(notes(), day("2026-09-17"), 1, lag);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const first = C.readingClick(v.readingBox()), second = C.readingClick(v.readingBox());
     await C.tickRead(first.tick);
     await C.tickRead(second.tick);
@@ -918,9 +918,9 @@ scenario("reading view: a click while a change waits to be drawn reads the line 
     // Sync adds a line at the top; the page still shows the note as it was, its sections' lines unmoved
     R.lastText = R.text;
     await v.app.vault.process(v.file(day("2026-09-17")), (t) => `- [ ] Call the framer ^c4fr4m\n${t}`);
-    const job = v.customJS.CheckOff.readingClick(v.readingBox({ start: 0, dataLine: 1, mark: " " }));
+    const job = v.plainday.CheckOff.readingClick(v.readingBox({ start: 0, dataLine: 1, mark: " " }));
     assert.equal(job.tick.text, OPEN, "the line the page shows, not the one now under it");
-    await v.customJS.CheckOff.tickRead(job.tick);
+    await v.plainday.CheckOff.tickRead(job.tick);
     assert.equal(lineOf(v, day("2026-09-17"), "Send final copy"), OPEN.replace("[ ]", "[x]"));
     assert.equal(lineOf(v, day("2026-09-17"), "Homepage build"), "- [ ] Homepage build: category pages");
     assert.equal(lineOf(v, COPY, "Send final copy"), "- [x] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe");
@@ -929,7 +929,7 @@ scenario("reading view: a click while a change waits to be drawn reads the line 
 scenario("reading view: a double click on a done source unticks it once, with no notice", async ({ lag }) => {
     const v = reading(notes(), COPY, 7, lag);
     await v.readClick({ answer: "Mark done" });
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const first = C.readingClick(v.readingBox()), second = C.readingClick(v.readingBox());
     await C.tickRead(first.tick);
     await C.tickRead(second.tick);
@@ -940,7 +940,7 @@ scenario("reading view: a double click on a done source unticks it once, with no
 
 scenario("reading view: a [>] line that changed since reading view drew it asks nothing, and a notice says so", async ({ lag }) => {
     const v = reading(notes(), COPY, 7, lag);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     const job = C.readingClick(v.readingBox());
     await v.app.vault.process(v.file(COPY), (t) => t.replace(SOURCE, SOURCE.replace("Send final copy", "Send the final copy")));
     let asked = 0;
@@ -954,7 +954,7 @@ scenario("reading view: a [>] line that changed since reading view drew it asks 
 
 test("only Task Status's picker keeps a press noted: the system's own question opening after it doesn't", () => {
     const v = reading(notes(), COPY, 7);
-    const C = v.customJS.CheckOff;
+    const C = v.plainday.CheckOff;
     C.pressed(v.readingBox({ line: 6 }));
     const w = C.menu;
     v.dialog("question");
@@ -971,7 +971,7 @@ test("only Task Status's picker keeps a press noted: the system's own question o
 
 scenario("Task Status opening a [>] box is put back and asked about on its line where it is now, after a job before it moved it", async ({ lag }) => {
     const v = reading(notes(), COPY, 7, lag);
-    const C = v.customJS.CheckOff, f = v.file(COPY);
+    const C = v.plainday.CheckOff, f = v.file(COPY);
     const before = await v.app.vault.cachedRead(f);
     await v.app.vault.process(f, (t) => t.replace(SOURCE, SOURCE.replace("[>]", "[/]")));
     const changes = C.constructor.menuChanges(before, await v.app.vault.cachedRead(f));

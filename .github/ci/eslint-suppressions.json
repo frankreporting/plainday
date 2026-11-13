@@ -1,25 +1,20 @@
 {
-  "plugin/src/classes/calendarSync.js": {
+  "plugin/src/commands/calendarSync.js": {
     "preserve-caught-error": {
       "count": 1
     }
   },
-  "plugin/src/classes/datePrompt.js": {
-    "obsidianmd/no-static-styles-assignment": {
-      "count": 3
-    }
-  },
-  "plugin/src/classes/invoice.js": {
+  "plugin/src/commands/invoice.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 2
     }
   },
-  "plugin/src/classes/plan.js": {
+  "plugin/src/commands/plan.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 1
     }
   },
-  "plugin/src/classes/updateObsidianPM.js": {
+  "plugin/src/commands/updateObsidianPM.js": {
     "no-control-regex": {
       "count": 1
     },
@@ -28,6 +23,11 @@
     },
     "obsidianmd/no-static-styles-assignment": {
       "count": 2
+    }
+  },
+  "plugin/src/shared/datePrompt.js": {
+    "obsidianmd/no-static-styles-assignment": {
+      "count": 3
     }
   }
 }

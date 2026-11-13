@@ -1,41 +1,54 @@
-// What the class files get from Plainday. The build imports these into every class file
-// (plugin/esbuild.config.mjs):
+// What the class files get from Plainday, by import: `import { app, plainday } from "../host.js";`
 //
-// - `customJS`: one instance of every class by name (`customJS.Schedule`), which the class files
-//   call each other through, and what they need from Obsidian:
-//   - `customJS.obsidian`: Obsidian's module;
-//   - `customJS.codemirror`: Obsidian's CodeMirror, as `.view`, `.state` and `.language`, for the
-//     editor features (TrailingLinks, ListCursor, CheckOff);
-//   - `customJS.app`: the app;
-//   - `customJS.plugin`: Plainday itself while it's loaded, and null once it unloads. The editor
+// - `app`: the plugin's own app.
+// - `plainday`: one instance of every class by name (`plainday.Schedule`), which the class files
+//   call each other through, plus:
+//   - `plainday.app`: the app;
+//   - `plainday.obsidian`: Obsidian's module, for scripts sent into Obsidian by eval, which have no
+//     other way to reach it (CalNav's Open Log Note calls `plainday.obsidian.normalizePath`). The
+//     class files import it instead;
+//   - `plainday.plugin`: Plainday itself while it's loaded, and null once it unloads. The editor
 //     features add their extensions through it, and a listener checks it before it acts.
 //   It's the same object Plainday puts on `window.plainday` for the templates and for tools
 //   outside Obsidian, which call a class by eval: `plainday.SnapshotDailyNotes.invoke()`.
-// - `app`: the plugin's own app.
 //
-// Obsidian provides its own module and CodeMirror's to every plugin, so the build leaves them out
-// of main.js, as plugins do. Each time Obsidian loads the plugin it runs main.js afresh, so a
-// listener left over from an earlier load sees its own copy of this module, whose
-// `customJS.plugin` is null once that load unbinds, and stops.
+// No class file imports another (plugin/classShape.mjs), so there's no import cycle, though many
+// call each other both ways: they reach each other here, at run time, once Plainday has made them.
+// They import what they need from Obsidian and CodeMirror themselves, which Obsidian provides to
+// every plugin, so the build leaves them out of main.js.
+//
+// Each time Obsidian loads the plugin it runs main.js afresh, so a listener left over from an
+// earlier load sees its own copy of this module, whose `plainday.plugin` is null once that load
+// unbinds, and stops.
 import * as obsidian from "obsidian";
-// Names no class file uses, so the bundle keeps the classes' own `view` and `state`
-import * as codemirrorView from "@codemirror/view";
-import * as codemirrorState from "@codemirror/state";
-import * as codemirrorLanguage from "@codemirror/language";
 
-export const customJS = {};
+/**
+ * @typedef {typeof import("./commands/index.js").CLASSES} CommandClasses
+ * @typedef {typeof import("./startup/index.js").CLASSES} StartupClasses
+ * @typedef {typeof import("./shared/index.js").CLASSES} SharedClasses
+ * @typedef {CommandClasses & StartupClasses & SharedClasses} Classes
+ * @typedef {keyof Classes} ClassName
+ * @typedef {{ [K in ClassName]: InstanceType<Classes[K]> } & {
+ *   app: import("obsidian").App,
+ *   obsidian: typeof obsidian,
+ *   plugin: import("obsidian").Plugin | null,
+ * }} Registry
+ */
+
+/** @type {Registry} */
+export const plainday = /** @type {Registry} */ ({});
+/** @type {import("obsidian").App} */
 export let app;
 
+/** @param {import("obsidian").Plugin} p */
 export function bind(p) {
     app = p.app;
-    for (const k of Object.keys(customJS)) delete customJS[k];
-    customJS.obsidian = obsidian;
-    customJS.codemirror = { view: codemirrorView, state: codemirrorState, language: codemirrorLanguage };
-    customJS.app = p.app;
-    customJS.plugin = p;
-    customJS.state = { _ready: false };
+    for (const k of Object.keys(plainday)) delete plainday[/** @type {keyof Registry} */ (k)];
+    plainday.app = p.app;
+    plainday.obsidian = obsidian;
+    plainday.plugin = p;
 }
 
 export function unbind() {
-    customJS.plugin = null;
+    plainday.plugin = null;
 }

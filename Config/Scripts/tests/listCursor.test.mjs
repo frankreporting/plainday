@@ -1,14 +1,16 @@
-// Tests for plugin/src/classes/listCursor.js. Run from the vault root:
+// Tests for plugin/src/startup/listCursor.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // Only the text and fold rules are pure; the editor extension is checked in a vault, with real key presses.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { COMMANDS, STARTUP } from "../../../plugin/src/commands.js";
+import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+const { COMMANDS } = readIndex("commands").exports;
+const { STARTUP } = readIndex("startup").exports;
 
 const here = new URL(".", import.meta.url);
-const ListCursor = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/listCursor.js", here), "utf8") + "\n;ListCursor", vm.createContext({}));
+const ListCursor = vm.runInContext(classScript("listCursor.js") + "\n;ListCursor", vm.createContext({}));
 
 // The line with the cursor drawn as | at its text start, or null on a line that isn't a list line
 const atStart = (line) => {

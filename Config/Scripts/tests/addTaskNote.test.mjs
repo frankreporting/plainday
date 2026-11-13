@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/addTaskNote.js. Run from the vault root:
+// Tests for plugin/src/commands/addTaskNote.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Creating the note through Templater is checked in a dev vault.
@@ -7,12 +7,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
+import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-// `customJS` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
+// `plainday` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
 const AddTaskNote = vm.runInContext(
-    fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-    vm.createContext({ customJS: {} }),
+    classScript("addTaskNote.js") + "\n;AddTaskNote",
+    vm.createContext({ plainday: {} }),
 );
 const add = new AddTaskNote();
 
@@ -363,8 +364,8 @@ test("confirmMove: the note to decide about, highlighted with what it is, then w
     }
     let opened;
     const Cls = vm.runInContext(
-        fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app: { metadataCache: { getFileCache: (f) => f.cache ?? null } }, customJS: { obsidian: { Modal, ButtonComponent } }, requestAnimationFrame: () => {}, setTimeout }),
+        classScript("addTaskNote.js") + "\n;AddTaskNote",
+        vm.createContext({ app: { metadataCache: { getFileCache: (f) => f.cache ?? null } }, Modal, ButtonComponent, requestAnimationFrame: () => {}, setTimeout }),
     );
     const helper = new Cls();
     helper.isArea = (f) => f.basename === "Household";
@@ -455,7 +456,7 @@ test("isLog: a note in a ›logs folder (any case), or one tagged #log wherever 
     ]);
     const folders = { "projects/a/›logs": "Projects/A/›logs", "projects/b/›logs": "Projects/B/›Logs", "projects/c/logs": "Projects/C/logs" };
     app.vault.getAbstractFileByPathInsensitive = (p) => (folders[p.toLowerCase()] ? { path: folders[p.toLowerCase()] } : null);
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({ app }));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ app }));
     const helper = new Cls();
     assert.deepEqual([0, 1, 2, 3, 6].map((i) => helper.isLog(files[i])), [true, true, true, false, false], "a folder still named logs isn't read");
     assert.equal(helper.logsFolder(files[4]), "Projects/A/›logs");
@@ -475,7 +476,7 @@ test("makeFolder: a logs folder it makes gets Navigator's history icon; another 
         },
         plugins: { plugins: { "notebook-navigator": { api: { metadata: { setFolderMeta: async (f, meta) => icons.push([f.path, meta]) } } } } },
     };
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({ app, console }));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ app, console }));
     const helper = new Cls();
     await helper.makeFolder("Projects/B/›logs");
     await helper.makeFolder("Projects/C");
@@ -487,7 +488,7 @@ test("makeFolder: a logs folder it makes gets Navigator's history icon; another 
     assert.deepEqual(made.at(-1), "Projects/D/›logs", "made without Navigator, and nothing fails");
     app.plugins.plugins["notebook-navigator"] = { api: { metadata: { setFolderMeta: async () => { throw new Error("no"); } } } };
     const errors = [];
-    const quiet = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
+    const quiet = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote",
         vm.createContext({ app, console: { error: (...a) => errors.push(a.join(" ")) } })))();
     await quiet.makeFolder("Projects/E/›logs");
     assert.equal(made.at(-1), "Projects/E/›logs", "an icon that can't be set doesn't stop the folder");
@@ -514,8 +515,8 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
         setPlaceholder(p) { this.placeholder = p; }
         open() { shown = { placeholder: this.placeholder, items: this.getItems().map((f) => this.getItemText(f)) }; this.onClose(); }
     }
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote",
-        vm.createContext({ app, customJS: { obsidian: { FuzzySuggestModal } }, setTimeout }));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote",
+        vm.createContext({ app, FuzzySuggestModal, setTimeout }));
     const helper = new Cls();
     await helper.pickHome("Order toner");
     assert.deepEqual(Array.from(shown.items), ["A", "B", "C"], "in order of their names");
@@ -561,9 +562,9 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
     const getFileByPath = app.vault.getFileByPath;
     app.vault.getFileByPath = (p) => (p === tpl.path ? tpl : getFileByPath(p));
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
-    const DueDate = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/setDueDate.js", here), "utf8") + "\n;DueDate", vm.createContext({}));
-    const Cls = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({
-        app, customJS: { DueDate: new DueDate() }, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+    const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
+        app, plainday: { DueDate: new DueDate() }, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -635,9 +636,8 @@ test("one place for the logs folder's name: the Log template and every other scr
     assert.match(template, /folder = tasks \? tasks\.logsFolderIn\(pickedFile\.parent\.path\)/, "the Log template files a log where AddTaskNote says");
     assert.match(template, /if \(tasks\) await tasks\.makeFolder\(folder\);/, "and makes the folder through it, icon and all");
     // No other class file spells a logs folder in its code (comments aside)
-    const dir = new URL("../../../plugin/src/classes/", here);
-    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith(".js") && n !== "addTaskNote.js")) {
-        const code = fs.readFileSync(new URL(name, dir), "utf8").split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/ .*$/, "")).join("\n");
+    for (const name of classFiles().map((f) => f.split("/")[1]).filter((n) => n !== "addTaskNote.js")) {
+        const code = classSource(name).split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/ .*$/, "")).join("\n");
         assert.doesNotMatch(code, /["'`/]›?logs\b/i, `${name} spells the logs folder itself`);
     }
 });
@@ -652,10 +652,10 @@ test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote an
             vault: { getFileByPath: () => ({ path: AddTaskNote.TASK_TEMPLATE }), getAvailablePath: (p, ext) => `${p}.${ext}` },
             fileManager: { trashFile: async (f) => trashed.push(f.path) },
         },
-        customJS: { obsidian: { normalizePath: (p) => p } },
+        normalizePath: (p) => p,
         Notice: class { constructor(m) { notices.push(m); } },
     });
-    const Fresh = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", ctx);
+    const Fresh = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx);
     const fresh = new Fresh();
     assert.equal(await fresh.createTaskNote("Order toner"), note, "kept, unfiled");
     assert.deepEqual(trashed, [], "never trashed");
@@ -667,7 +667,7 @@ test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote an
 });
 
 test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so the ⭕ is still found (OBS-185)", () => {
-    const helper = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({})))();
     const plain = (v) => JSON.parse(JSON.stringify(v));
     assert.deepEqual(plain(helper.trailingProjectLinks("- [>] Book it [[Kestrel|⭕]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2")), [{ raw: "[[Kestrel|⭕]]", linkpath: "Kestrel" }]);
     assert.equal(helper.trailingNote("- [>] Book it [[Book it|⋯]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");
@@ -716,10 +716,10 @@ test("createTaskNote cleans the name for any caller, before Templater sees it; a
             plugins: { plugins: { "templater-obsidian": { templater: { create_new_note_from_template: async (t, folder, name) => { asked.push({ folder, name }); return { path: `${folder}/${name}.md`, basename: name }; } } } } },
             vault: { getFileByPath: () => ({ path: AddTaskNote.TASK_TEMPLATE }), getAvailablePath: (p, ext) => { asked.push({ path: `${p}.${ext}` }); return `${p}.${ext}`; } },
         },
-        customJS: { obsidian: { normalizePath: (p) => p } },
+        normalizePath: (p) => p,
         Notice: class { constructor(m) { notices.push(m); } },
     });
-    const fresh = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", ctx))();
+    const fresh = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx))();
     const note = await fresh.createTaskNote("Fix #12: order form 2026-09-25");
     assert.equal(note.basename, "Fix 12 - order form 2026-09-25", "the date stays for the template, which makes it `due`");
     assert.deepEqual(asked, [{ path: `${AddTaskNote.STAGING_FOLDER}/Fix 12 - order form 2026-09-25.md` }, { folder: AddTaskNote.STAGING_FOLDER, name: "Fix 12 - order form 2026-09-25" }]);
@@ -775,7 +775,7 @@ for (const lag of [false, true]) {
 
     test(`a # and a date: the # and the colon stay on the line, the date comes off it, and the template gets the date for \`due\` (OBS-111)${also}`, async () => {
         const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-18")]: "- [ ] Fix #12: order form 2026-09-25 [[New|⭕]]\n" }, open: day("2026-09-18"), at: 0, lag });
-        const helper = v.customJS.AddTaskNote, make = helper.createTaskNote, titles = [];
+        const helper = v.plainday.AddTaskNote, make = helper.createTaskNote, titles = [];
         helper.createTaskNote = async (title, parent) => { titles.push(title); return make(title, parent); };
         await v.addTaskNote();
         assert.deepEqual(titles, ["Fix 12 - order form 2026-09-25"]);

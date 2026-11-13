@@ -1,16 +1,17 @@
-// Tests for plugin/src/classes/schedule.js. Run from the vault root:
+// Tests for plugin/src/commands/schedule.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { src, PLANNER, NN, MONTHS, SHORT, momentOn } from "./standInVault.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
 // Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn)
-const statics = vm.createContext({ customJS: {} });
+const statics = vm.createContext({ plainday: {} });
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
-statics.customJS.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
-statics.customJS.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
+statics.plainday.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
+statics.plainday.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
 // Values made in the vm, as plain ones, so deepEqual doesn't trip on the vm's own Array
 const plainOf = (x) => JSON.parse(JSON.stringify(x));
 const file = (path) => ({ basename: path.split("/").pop().replace(/\.md$/, ""), parent: { path: path.slice(0, path.lastIndexOf("/")) } });
@@ -73,20 +74,20 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
             process: async (f, fn) => { vault.set(f.path, fn(vault.get(f.path))); return vault.get(f.path); },
         },
     };
-    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en" } };
-    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
+    const plainday = {};
+    const context = vm.createContext({ MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
     const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
-    Object.assign(customJS, {
+    Object.assign(plainday, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
         TaskIds: make("taskIds", "TaskIds"),
     });
-    customJS.TaskIds.freshId = () => "k3x9m2";
+    plainday.TaskIds.freshId = () => "k3x9m2";
     let prompt = null;
-    customJS.DatePrompt.open = (title, onPick, opts) => { prompt = { onPick, opts }; return {}; };
-    await customJS.Schedule.invoke();
-    if (prompt && pick) await prompt.onPick(pick(customJS.DatePrompt), { close() {} });
-    return { editor: lines.join("\n"), notes: Object.fromEntries(vault), notices, opts: prompt?.opts, schedule: customJS.Schedule, dp: customJS.DatePrompt };
+    plainday.DatePrompt.open = (title, onPick, opts) => { prompt = { onPick, opts }; return {}; };
+    await plainday.Schedule.invoke();
+    if (prompt && pick) await prompt.onPick(pick(plainday.DatePrompt), { close() {} });
+    return { editor: lines.join("\n"), notes: Object.fromEntries(vault), notices, opts: prompt?.opts, schedule: plainday.Schedule, dp: plainday.DatePrompt };
 };
 
 test("periodic notes: a weekly, monthly or yearly note is named by its pattern, in its folder (OBS-9, OBS-96)", async () => {
@@ -333,9 +334,9 @@ const withVault = (paths) => {
             getFirstLinkpathDest: (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase()) ?? null,
         },
     };
-    const context = vm.createContext({ app, customJS: { obsidian: { getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) } } });
-    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", context);
-    context.customJS.AddTaskNote = new AddTaskNote();
+    const context = vm.createContext({ app, plainday: {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) });
+    const AddTaskNote = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", context);
+    context.plainday.AddTaskNote = new AddTaskNote();
     return { schedule: new (vm.runInContext(code + "\n;Schedule", context))(), file: (p) => files.find((f) => f.path === p) };
 };
 const DEMO = [

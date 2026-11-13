@@ -31,6 +31,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import vm from "node:vm";
 import { ROOT, PLANNER, loadTimeReport, readVault, makeIndex, dailyNotes } from "./renderReports.mjs";
+import { classPath, scriptOf } from "../../../../plugin/classShape.mjs";
 
 const TASK = /^\s*[-*+]\s+\[.\]/;
 
@@ -38,9 +39,10 @@ const TASK = /^\s*[-*+]\s+\[.\]/;
 // timeReport.js from before OBS-196, whose resolve took one, else off the note's `lines`
 const lookup = (tr, lines, ctx, i, p, index) => (tr.resolve.length === 3 ? tr.resolve(ctx, p, index, true) : tr.resolve((n) => lines[n], i, p, index).live);
 
-// The classes, loaded with vm; only their text methods are used
+// The classes, loaded with vm; only their text methods are used. A class file from before OBS-271
+// is already a script.
 function load(file, name) {
-    return new (vm.runInContext(fs.readFileSync(file, "utf8") + `\n;${name}`, vm.createContext({})))();
+    return new (vm.runInContext(scriptOf(fs.readFileSync(file, "utf8"), file) + `\n;${name}`, vm.createContext({})))();
 }
 
 // Every line's context as the time report builds it: the line, then each line it's nested under
@@ -229,7 +231,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
         process.exit(2);
     }
     const newTr = loadTimeReport();
-    const tasks = load(path.join(ROOT, "plugin/src/classes/addTaskNote.js"), "AddTaskNote");
+    const tasks = load(classPath("addTaskNote.js"), "AddTaskNote");
     const result = convert(readVault(root), oldTr, newTr, tasks);
     console.log(report(result));
     if (write) {

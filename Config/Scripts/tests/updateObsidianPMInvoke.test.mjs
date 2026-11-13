@@ -9,12 +9,13 @@ import path from "node:path";
 import vm from "node:vm";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 // The class files run in Obsidian, where `require` exists; an ES module has none
 const nodeRequire = createRequire(import.meta.url);
 
 const here = new URL(".", import.meta.url);
-const code = fs.readFileSync(new URL("../../../plugin/src/classes/updateObsidianPM.js", here), "utf8");
+const code = classScript("updateObsidianPM.js");
 
 const write = (root, rel, text) => {
     const full = path.join(root, rel);
@@ -28,7 +29,7 @@ const exists = (root, rel) => fs.existsSync(path.join(root, rel));
 // file and two tests (one the demo's own)
 function makeSource(dir) {
     write(dir, "manifest.json", '{"id":"plainday","name":"Plainday"}\n');
-    write(dir, "plugin/src/classes/timeReport.js", "class TimeReport {}\n");
+    write(dir, "plugin/src/commands/timeReport.js", "export default class TimeReport {}\n");
     write(dir, "Config/Scripts/Templater/recordEvent.js", "new report\n");
     write(dir, "Config/Templates/Task.md", "task template\n");
     write(dir, ".obsidian/plugins/templater-obsidian/data.json", '{"templates_folder":"Config/Templates"}\n');
@@ -36,7 +37,7 @@ function makeSource(dir) {
     write(dir, "Welcome.md", "demo note\n");
     write(dir, "Reference/Planner/days/2026-09-16.md", "demo daily note\n");
     write(dir, "Config/Scripts/tests/demoVault.test.mjs", "demo test\n");
-    write(dir, "Config/Scripts/tests/timeReport.test.mjs", "reads plugin/src/classes\n");
+    write(dir, "Config/Scripts/tests/timeReport.test.mjs", "reads plugin/src/commands\n");
     write(dir, "Config/Scripts/tests/demo/renderReports.mjs", "writes notes\n");
     const git = (...args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" });
     git("init", "-q", "-b", "main");
@@ -74,21 +75,20 @@ function stubs(vaultDir, answers = {}) {
         require: nodeRequire,
         process,
         console,
-        window: { moment: () => ({ format: () => "2026-09-17 12:00" }) },
-        customJS: { obsidian: {
-            Notice: class { constructor(m) { notices.push(String(m)); } },
-            // Enough of Obsidian's YAML for a settings note: `key: value` lines, and a line that
-            // isn't one doesn't read
-            getFrontMatterInfo: (text) => {
-                const m = String(text).match(/^---\n([\s\S]*?)\n---/);
-                return { exists: !!m, frontmatter: m ? m[1] : "" };
-            },
-            parseYaml: (yaml) => Object.fromEntries(yaml.split("\n").filter(Boolean).map((line) => {
-                const m = line.match(/^([\w-]+):\s*(.*)$/);
-                if (!m) throw new Error(`can't read ${line}`);
-                return [m[1], m[2] === "" ? null : m[2].replace(/^"(.*)"$/, "$1")];
-            })),
-        } },
+        moment: () => ({ format: () => "2026-09-17 12:00" }),
+        // What the class imports from Obsidian, by name
+        Notice: class { constructor(m) { notices.push(String(m)); } },
+        // Enough of Obsidian's YAML for a settings note: `key: value` lines, and a line that
+        // isn't one doesn't read
+        getFrontMatterInfo: (text) => {
+            const m = String(text).match(/^---\n([\s\S]*?)\n---/);
+            return { exists: !!m, frontmatter: m ? m[1] : "" };
+        },
+        parseYaml: (yaml) => Object.fromEntries(yaml.split("\n").filter(Boolean).map((line) => {
+            const m = line.match(/^([\w-]+):\s*(.*)$/);
+            if (!m) throw new Error(`can't read ${line}`);
+            return [m[1], m[2] === "" ? null : m[2].replace(/^"(.*)"$/, "$1")];
+        })),
     };
     context.globalThis = context;
     return { context, notices, trashed, moved, toggled, answers };
@@ -124,7 +124,7 @@ test("invoke: a first install copies the system, and never a note, a class file 
     assert.equal(read(f.vault, "Config/Templates/Task.md"), "task template\n");
     assert.equal(read(f.vault, "README.md"), "readme\n");
     assert.equal(exists(f.vault, ".obsidian/plugins/templater-obsidian/data.json"), true);
-    for (const note of ["Welcome.md", "Reference/Planner/days/2026-09-16.md", "manifest.json", "plugin/src/classes/timeReport.js",
+    for (const note of ["Welcome.md", "Reference/Planner/days/2026-09-16.md", "manifest.json", "plugin/src/commands/timeReport.js",
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs", "Config/Scripts/tests/timeReport.test.mjs"]) {
         assert.equal(exists(f.vault, note), false, note);
     }

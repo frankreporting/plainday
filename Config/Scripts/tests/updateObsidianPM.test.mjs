@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/updateObsidianPM.js. Run from the vault root:
+// Tests for plugin/src/commands/updateObsidianPM.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the planning, which doesn't
 // touch `app`, the file system or git, is tested.
@@ -7,10 +7,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { execFileSync } from "node:child_process";
+import { classFiles, classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
 const UpdateObsidianPM = vm.runInContext(
-    fs.readFileSync(new URL("../../../plugin/src/classes/updateObsidianPM.js", here), "utf8") + "\n;UpdateObsidianPM",
+    classScript("updateObsidianPM.js") + "\n;UpdateObsidianPM",
     vm.createContext({}),
 );
 const up = new UpdateObsidianPM();
@@ -36,7 +37,7 @@ test("installs: the system, never notes, the class files or the tests", () => {
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs",
         "Config/Scripts/dev-vault.sh", "Config/Scripts/tests/devVault.test.mjs",
         "Config/Scripts/tests/timeReport.test.mjs", "Config/Scripts/tests/standInVault.mjs", "Config/Scripts/tests/fixtures/x.json",
-        "plugin/src/classes/timeReport.js", "plugin/src/main.js", "manifest.json", "main.js"]) {
+        "plugin/src/commands/timeReport.js", "plugin/src/main.js", "manifest.json", "main.js"]) {
         assert.equal(up.installs(path), false, path);
     }
 });
@@ -85,11 +86,12 @@ test("plan: CustomJS's settings and CalendarSyncRange, installed before OBS-257 
     assert.deepEqual(plain([plan.add, plan.update, plan.local, plan.keep]), [[], [], [], []]);
 });
 
-// ------------------------------------------------------------------ the class files in plugin/src/classes (OBS-270)
+// ------------------------------------------------------------------ the class files in plugin/src/ (OBS-270, OBS-271)
 
 const REPO = new URL("../../../", here);
 const tracked = execFileSync("git", ["-C", REPO.pathname, "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
-const CLASS_FILES = fs.readdirSync(new URL("plugin/src/classes/", REPO)).filter((f) => f.endsWith(".js")).sort();
+// By file name, as they were in Config/Scripts/CustomJS/ before OBS-270
+const CLASS_FILES = classFiles().map((f) => f.split("/")[1]).sort();
 
 test("a clone is a folder whose manifest.json is Plainday's", () => {
     assert.equal(up.isManifest(fs.readFileSync(new URL("manifest.json", REPO), "utf8")), true, "this repository's");
@@ -148,7 +150,7 @@ const BASE = "Config/Bases/Invoices.base";
 const PLACED = "Business/Invoices/Invoices.base";
 
 test("folderOf: reads Invoice Settings' `folder` exactly as Billing does", () => {
-    const Billing = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/billing.js", here), "utf8") + "\n;Billing", vm.createContext({}));
+    const Billing = vm.runInContext(classScript("billing.js") + "\n;Billing", vm.createContext({}));
     const billing = new Billing();
     for (const raw of ["Business/Invoices", " /a//b/ ", "Business /Invoices", "a\nb", "Config/x", "archive", "x/Config", "", "  ", "/", null, undefined, "../x", "a/../b", ".obsidian", "a/.trash",
         "a/ /b", "C:\\x", "a\\b", "[[x]]", "x#1", "a|b", 2026, ["a"], { a: 1 }, true, "Business/Invoices 2026"]) {

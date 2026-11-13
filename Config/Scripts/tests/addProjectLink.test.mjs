@@ -1,19 +1,20 @@
-// Tests for plugin/src/classes/addProjectLink.js. Run from the vault root:
+// Tests for plugin/src/commands/addProjectLink.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `customJS`;
+// The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `plainday`;
 // only the methods that don't touch `app` are tested. The menu,
 // the move and the write into the editor are checked in a dev vault.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { COMMANDS } from "../../../plugin/src/commands.js";
+import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+const { COMMANDS } = readIndex("commands").exports;
 
 const here = new URL(".", import.meta.url);
-const context = vm.createContext({ customJS: {} });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
+const context = vm.createContext({ plainday: {} });
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
-context.customJS.AddTaskNote = new AddTaskNote();
+context.plainday.AddTaskNote = new AddTaskNote();
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
 const cmd = new AddProjectLink();
 const P = "[[Hawk Ledger|⭕]]";
@@ -77,7 +78,7 @@ test("label: the line's text for the menu, without checkbox, event time or symbo
 
 test("AddProjectLink is registered as a command, and goes through the shared change code", () => {
     assert.ok(COMMANDS.some((c) => c.script === "AddProjectLink"));
-    const source = fs.readFileSync(new URL("../../../plugin/src/classes/addProjectLink.js", here), "utf8");
+    const source = classScript("addProjectLink.js");
     assert.match(source, /helper\.pickHome\(this\.label\(lineText\), /, "the same project-or-area menu");
     assert.match(source, /change\.run\(found, home, /, "the question, the refusal and the write are TaskChange's");
     assert.doesNotMatch(source, /renameFile|replaceRange/, "and it writes nothing itself");

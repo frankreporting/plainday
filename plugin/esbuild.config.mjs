@@ -1,19 +1,14 @@
-// Builds Plainday: the class files in plugin/src/classes/, as they are on disk, bundled with the
-// host into one main.js at the repository root. Every .js file in that folder is a class file, so
-// Plainday's own modules (main.js, host.js, commands.js) sit beside it, in plugin/src/.
+// Builds Plainday: the plugin's code in plugin/src/, bundled into one main.js at the repository
+// root. The entry is plugin/src/main.js, which imports the three folders' indexes (commands/,
+// startup/, shared/), each importing its class files.
 //
-// Each class file is one class, a single expression: `(${file})` evaluates to it. The build wraps
-// each one, on one line so the class keeps its own line numbers, give or take the first:
-//
-//     import { customJS, app } from "<plugin/src/host.js>"; export default (<the file>
-//     );
-//
-// so the class reads `customJS` and `app` from the host instead of from globals. The virtual
-// module `plainday:classes` exports every class, in file-name order.
+// Each class file is a module of one shape (plugin/classShape.mjs): its imports, then
+// `export default class <Name>`, and nothing else. The build checks that shape in every class file
+// it bundles, and stops on a file without it, naming the line.
 //
 // The class files are written for Plainday alone (OBS-257). A line that still reaches for the
-// CustomJS plugin, by its id or one of its command ids, or for its global, would do nothing here,
-// so it stops the build, which names the line (LEFT below).
+// CustomJS plugin, by its id or one of its command ids, or for its global or its `customJS` name,
+// would do nothing here, so it stops the build, which names the line (LEFT below).
 //
 //   npm run build                         main.js at the repository root
 //   npm run dev                           the same, rebuilt on every change
@@ -24,27 +19,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
+import { FOLDERS, shapeProblems } from "./classShape.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, "..");
-export const CLASSES = path.join(here, "src/classes");
+export const SRC = path.join(here, "src");
 export const OUTFILE = path.join(ROOT, "main.js");
-const HOST = path.join(here, "src/host.js");
-const ENTRY = path.join(here, "src/main.js");
 // What Plainday ships beside main.js; styles.css only once there is one
 const RELEASE = ["manifest.json", "styles.css"];
 
-// What no line in a class file may say: the CustomJS plugin by its id, one of its command ids, or
-// its global. Plainday's own are `customJS.plugin` and the host's `customJS`.
+// What no line in a class file may say: the CustomJS plugin by its id, one of its command ids, its
+// global, or `customJS` at all, which Plainday calls `plainday` (OBS-271)
 const LEFT = [
     /["'`]customjs["'`]/,
     /\bcustomjs:/,
     /\.\s*customjs\b/,
-    /\b(?:globalThis|window|self)\s*(?:\?\.|\.)\s*customJS\b/,
-    /\b(?:globalThis|window|self)\s*\[\s*["'`]customJS["'`]\s*\]/,
+    /\bcustomJS\b/,
 ];
-
-const classFiles = (dir) => fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort((a, b) => a.localeCompare(b));
 // A line without its comment: good enough to keep comments that mention CustomJS out of the check
 const code = (line) => {
     const t = line.trimStart();
@@ -56,35 +47,35 @@ export function check(file, source) {
     const problems = [];
     source.split("\n").forEach((line, i) => {
         if (LEFT.some((p) => p.test(code(line)))) {
-            problems.push(`${file}:${i + 1} reaches for CustomJS: ${line.trim()}. Plainday doesn't run CustomJS: the plugin is \`customJS.plugin\`,`
-                + " and the classes are on `customJS` (plugin/src/host.js).");
+            problems.push(`${file}:${i + 1} reaches for CustomJS: ${line.trim()}. Plainday doesn't run CustomJS: the plugin is \`plainday.plugin\`,`
+                + " and the classes are on `plainday` (plugin/src/host.js).");
         }
     });
     return problems;
 }
 
-// The plugin that turns each class file into a module, and lists them all in `plainday:classes`
+// A class file is a .js file in one of the three folders, other than its index
+function isClassFile(src, file) {
+    const rel = path.relative(src, file);
+    const parts = rel.split(path.sep);
+    return parts.length === 2 && FOLDERS.includes(parts[0]) && parts[1].endsWith(".js") && parts[1] !== "index.js";
+}
+
+// The CustomJS check and the shape check on every class file, which the build otherwise reads as it is
 function classesPlugin(dir) {
+    // esbuild gives each file's real path, so a folder reached through a link (macOS's temporary
+    // folder is one) is compared by its real path too
+    const src = fs.realpathSync(dir);
     return {
         name: "plainday-classes",
         setup(build) {
-            build.onResolve({ filter: /^plainday:classes$/ }, () => ({ path: "classes", namespace: "plainday" }));
-            // By file name, not the absolute path: esbuild writes the path into main.js as a comment, and
-            // the community directory rebuilds the release in its own folder to compare (OBS-230)
-            build.onResolve({ filter: /^plainday:class\// }, (args) => ({ path: args.path.slice("plainday:class/".length), namespace: "plainday-class" }));
-            build.onLoad({ filter: /.*/, namespace: "plainday" }, () => {
-                const files = classFiles(dir);
-                const lines = files.map((f, i) => `import c${i} from ${JSON.stringify(`plainday:class/${f}`)};`);
-                lines.push(`export default [${files.map((_, i) => `c${i}`).join(", ")}];`);
-                return { contents: lines.join("\n"), loader: "js", resolveDir: here, watchDirs: [dir] };
-            });
-            build.onLoad({ filter: /.*/, namespace: "plainday-class" }, async (args) => {
-                const file = args.path;
-                const abs = path.join(dir, file);
-                const text = await fs.promises.readFile(abs, "utf8");
-                const problems = check(file, text);
-                if (problems.length) return { errors: problems.map((p) => ({ text: p })), watchFiles: [abs] };
-                return { contents: `import { customJS, app } from ${JSON.stringify(HOST)}; export default (${text}\n);\n`, loader: "js", resolveDir: dir, watchFiles: [abs] };
+            build.onLoad({ filter: /\.js$/ }, async (args) => {
+                if (!isClassFile(src, args.path)) return undefined;
+                const file = path.relative(src, args.path).split(path.sep).join("/");
+                const text = await fs.promises.readFile(args.path, "utf8");
+                const problems = [...check(file, text), ...shapeProblems(file, text)];
+                if (problems.length) return { errors: problems.map((p) => ({ text: p })), watchFiles: [args.path] };
+                return { contents: text, loader: "js" };
             });
         },
     };
@@ -106,26 +97,30 @@ function copyOut(outfile) {
     };
 }
 
-export function options({ classes = CLASSES, outfile = OUTFILE, watch = false, logLevel = "info" } = {}) {
+// `src`: the folder to build from, plugin/src/ unless a test builds a copy
+export function options({ src = SRC, outfile = OUTFILE, watch = false, logLevel = "info" } = {}) {
     return {
-        entryPoints: [ENTRY],
+        entryPoints: [path.join(src, "main.js")],
+        // esbuild names each file in main.js in a comment, relative to this folder: the repository's
+        // root, wherever the build starts, so a build anywhere matches the release (OBS-230)
+        absWorkingDir: ROOT,
         bundle: true,
         format: "cjs",
         platform: "browser",
         target: "es2022",
         outfile,
-        // Obsidian's plugin loader provides these, as for every plugin. The host imports Obsidian's
-        // module and CodeMirror's; the class files `require` a few of Node's modules, on the
-        // desktop only, inside their functions.
+        // Obsidian's plugin loader provides these, as for every plugin. The class files import
+        // Obsidian's module and CodeMirror's, and `require` a few of Node's modules, on the desktop
+        // only, inside their functions.
         external: [
             "obsidian", "electron", "@codemirror/view", "@codemirror/state", "@codemirror/language",
             ...builtinModules, ...builtinModules.map((m) => `node:${m}`),
         ],
-        // The host keeps every class by name (customJS.Schedule), so names must survive
+        // A class's own name shows in its errors, and the bundle test checks every class keeps it
         keepNames: true,
         sourcemap: watch ? "inline" : false,
         logLevel,
-        plugins: [classesPlugin(classes), copyOut(outfile)],
+        plugins: [classesPlugin(src), copyOut(outfile)],
     };
 }
 

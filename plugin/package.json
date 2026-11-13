@@ -1,6 +1,6 @@
 {
   "private": true,
-  "description": "Plainday's own source: ES modules, which plugin/esbuild.config.mjs bundles with the class files in src/classes/ into main.js. CodeMirror's packages are peers: Obsidian provides them, and the build leaves them out. The repository's package.json is at the root.",
+  "description": "Plainday's own source: ES modules, the class files among them in src/commands/, src/startup/ and src/shared/, which plugin/esbuild.config.mjs bundles into main.js. CodeMirror's packages are peers: Obsidian provides them, and the build leaves them out. The repository's package.json is at the root.",
   "type": "module",
   "scripts": {
     "preinstall": "node preinstall.mjs"

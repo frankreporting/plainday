@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/setDueDate.js. Run from the vault root:
+// Tests for plugin/src/commands/setDueDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // `placement` and `cursorAfter` first; then the command on a stand-in vault, with and without the cache a
 // command behind: the deadline on every line of the task, and its task note's `due` (OBS-229). Every name,
@@ -8,9 +8,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const DueDate = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/setDueDate.js", here), "utf8") + "\n;DueDate", vm.createContext({}));
+const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
 const due = new DueDate();
 const D = "[[2026-09-30|🚩 9/30]]";
 const apply = (line) => { const { from, to, text } = due.placement(line, D); return line.slice(0, from) + text + line.slice(to); };
@@ -253,7 +254,7 @@ scenario("DueDate on a nested task writes the task at the top of its nest, on ev
 
 scenario("DueDate: a line that changes between the search and the write keeps its old 🚩, is named, and running again finishes", async ({ lag }) => {
     const v = standIn({ notes: NOTES, lag });
-    const change = v.customJS.TaskChange, find = change.find.bind(change);
+    const change = v.plainday.TaskChange, find = change.find.bind(change);
     // Sync merges an edit from the phone into 9/14 just after the search read it
     change.find = async (...args) => {
         const found = await find(...args);
@@ -387,7 +388,7 @@ scenario("DueDate stops at the task: a subtask's own note is never named, wherev
 
 scenario("DueDate names a line that changed meanwhile in a project note by the note", async ({ lag }) => {
     const v = standIn({ notes: NOTES, lag });
-    const change = v.customJS.TaskChange, find = change.find.bind(change);
+    const change = v.plainday.TaskChange, find = change.find.bind(change);
     change.find = async (...args) => {
         const found = await find(...args);
         await v.app.vault.process(v.file(OLD), (t) => t.replace("- [ ] Write copy", "- [ ] Write the copy"));
@@ -438,7 +439,7 @@ scenario("DueDate: lines whose ⋯ links a plain note outside the system, such a
 
 scenario("DueDate: a task note whose properties Obsidian can't read keeps them, and the notice says why", async ({ lag }) => {
     const v = standIn({ notes: NOTES, lag });
-    const ob = v.customJS.obsidian, parse = ob.parseYaml;
+    const ob = v.globals, parse = ob.parseYaml;
     ob.parseYaml = (y) => { if (/parent:/.test(y)) throw new Error("duplicated mapping key"); return parse(y); };
     await run(v, day("2026-09-15"), "Copy: revisions", "2026-09-25");
     assert.equal(v.notes()[NOTE], NOTES[NOTE]);
@@ -464,7 +465,7 @@ scenario("DueDate leaves a due written in a way the one-line edit doesn't take, 
 
 scenario("DueDate: a one-line edit Obsidian would read as other properties isn't written", async ({ lag }) => {
     const v = noFrontMatter(standIn({ notes: NOTES, lag }));
-    const ob = v.customJS.obsidian, parse = ob.parseYaml;
+    const ob = v.globals, parse = ob.parseYaml;
     // Obsidian reading the edited block differently, a shape the line match didn't foresee
     ob.parseYaml = (y) => { const fm = parse(y); if (/due: 2026-09-25/.test(y)) delete fm.parent; return fm; };
     await run(v, day("2026-09-15"), "Copy: revisions", "2026-09-25");
@@ -475,7 +476,7 @@ scenario("DueDate: a one-line edit Obsidian would read as other properties isn't
 
 scenario("DueDate: a note whose due changed shape between the read and the write is left, and says so, not that it's due", async ({ lag }) => {
     const v = noFrontMatter(standIn({ notes: NOTES, lag }));
-    const schedule = v.customJS.Schedule, rewrite = schedule.rewrite.bind(schedule);
+    const schedule = v.plainday.Schedule, rewrite = schedule.rewrite.bind(schedule);
     // Sync turns the note's due into a list in that moment
     schedule.rewrite = async (f, fn) => {
         if (f.path === NOTE) await v.app.vault.process(f, (t) => t.replace("due: 2026-09-18", "due:\n  - 2026-09-18"));

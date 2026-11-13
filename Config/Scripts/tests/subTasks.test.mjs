@@ -57,8 +57,8 @@ test("DueDate on an event, or a line under one, does nothing and says an event h
 // AddProjectLink on line `at` of `path`, the menu handing on `pick`
 const projectLink = async (path, at, pick) => {
     const v = standIn({ notes: NOTES, open: path, at });
-    v.customJS.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(pick);
-    await v.customJS.AddProjectLink.invoke();
+    v.plainday.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(pick);
+    await v.plainday.AddProjectLink.invoke();
     return { v, lines: v.notes()[path].split("\n") };
 };
 
@@ -74,10 +74,10 @@ test("AddProjectLink on a sub-task links the top of its nest; under an event, th
 test("AddTaskNote on a sub-task links the top's note, named from its text, cursor and selection aside; under an event, the event's log (OBS-193, rule 5)", async () => {
     const NOTE = "Projects/Household/Test the timer.md";
     const v = standIn({ notes: { ...NOTES, [NOTE]: "---\ntags: [task]\n---\n" }, open: day("2026-09-16"), at: 1 });
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.deepEqual(v.notes()[day("2026-09-16")].split("\n").slice(0, 2), ["- [ ] Test the timer [[Household|🗃️]] [[Test the timer|⋯]]", "\t- [ ] A sub-step"]);
     const e = standIn({ notes: NOTES, open: day("2026-09-17"), at: 2 });
-    await e.customJS.AddTaskNote.invoke();
+    await e.plainday.AddTaskNote.invoke();
     assert.deepEqual(e.notes()[day("2026-09-17")].split("\n").slice(0, 3), ["- [<] 9:00am\tKestrel standup [[Kestrel|⭕]] [[2026-09-17 Kestrel standup|⋯]]", "\t- 9:20am", "\t- [ ] Bring the sitemap"]);
 });
 
@@ -86,12 +86,12 @@ test("AddProjectLink on a meeting line in the form used before August 2025, or a
     const notes = { ...NOTES, [MEET]: "## Meetings\n\n11:00am [[2025-03-04 Team meeting|Team meeting]]\n\t- 11:00am - 11:45am\n\t- [ ] Action item\n" };
     for (const at of [2, 4]) {
         const v = standIn({ notes, open: MEET, at });
-        v.customJS.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(HOUSE);
-        await v.customJS.AddProjectLink.invoke();
+        v.plainday.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(HOUSE);
+        await v.plainday.AddProjectLink.invoke();
         assert.equal(v.notes()[MEET].split("\n")[2], "11:00am [[2025-03-04 Team meeting|Team meeting]] [[Household|🗃️]]", `line ${at}`);
         assert.deepEqual(v.notices, [], `line ${at}`);
     }
-    const cmd = standIn({ notes }).customJS.AddProjectLink;
+    const cmd = standIn({ notes }).plainday.AddProjectLink;
     assert.equal(cmd.label("11:00am [[2025-03-04 Team meeting|Team meeting]]"), "Team meeting");
 });
 
@@ -99,15 +99,15 @@ test("AddTaskNote, review: on or under a meeting line in the form used before Au
     const MEET = day("2025-03-04");
     const notes = { ...NOTES, [MEET]: "10:00am\tWeekly sync\n\t- [ ] Action item\n11:00am [[2025-03-04 Team meeting|Team meeting]]\n\t- [ ] Another\n" };
     let v = standIn({ notes, open: MEET, at: 1 });
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.equal(v.notes()[MEET].split("\n")[0], "10:00am\tWeekly sync [[2025-03-04 Weekly sync|⋯]]");
     v = standIn({ notes, open: MEET, at: 3 });
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.equal(v.notes()[MEET], notes[MEET]);
     assert.equal(v.notices.at(-1), "This event already links a log");
     const CANCELED = day("2026-09-19");
     v = standIn({ notes: { ...NOTES, [CANCELED]: "- [-] 1:00pm\tCanceled call\n\t- [ ] x\n" }, open: CANCELED, at: 1 });
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.equal(v.notes()[CANCELED].split("\n")[0], "- [-] 1:00pm\tCanceled call [[2026-09-19 Canceled call|⋯]]");
 });
 
@@ -119,7 +119,7 @@ test("AddTaskNote, review: on a sub-task of a task with no text yet, the empty l
         for (const c of changes) editor.replaceRange(c.text, c.from, c.to ?? c.from);
         assert.equal(selection.from.line, 0);
     };
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.deepEqual(v.notes()[day("2026-09-20")].split("\n").slice(0, 2), ["- [ ] [[|⋯]]", "\t- [ ] sub step"]);
 });
 
@@ -128,7 +128,7 @@ test("AddTaskNote, review round 2: on a [>] event line the calendar sync wrote, 
     const notes = { ...NOTES, [D]: "- [>] [[2026-09-20|9/20]] 2:00pm\tMoved call\n\t- [ ] x\n" };
     for (const at of [0, 1]) {
         const v = standIn({ notes, open: D, at });
-        await v.customJS.AddTaskNote.invoke();
+        await v.plainday.AddTaskNote.invoke();
         assert.equal(v.notes()[D], notes[D]);
         assert.equal(v.notices.at(-1), "This event moved to another day: link its log from its line there");
     }
@@ -140,19 +140,19 @@ test("DueDate, PR 54 review: does nothing on or under any form of event; and not
     for (const at of [1, 3, 5]) {
         const w = standIn({ notes, open: D, at });
         let p = false;
-        w.customJS.DatePrompt.open = () => { p = true; return {}; };
-        await w.customJS.DueDate.invoke();
+        w.plainday.DatePrompt.open = () => { p = true; return {}; };
+        await w.plainday.DueDate.invoke();
         assert.equal(p, false, `line ${at}: no date box`);
         assert.deepEqual(w.notices, ["An event has no deadline, so none was set"], `line ${at}`);
     }
     const v = standIn({ notes: NOTES, open: day("2026-09-16"), at: 1 });
     const editor = v.app.workspace.activeLeaf.view.editor;
-    v.customJS.DatePrompt.open = (t, onPick) => {
+    v.plainday.DatePrompt.open = (t, onPick) => {
         editor.replaceRange(" (edited)", { line: 0, ch: editor.getLine(0).length });
         onPick({ m: { format: (f) => ({ "YYYY-MM-DD": "2026-09-25", "M/D": "9/25" })[f] } }, { close() {} });
         return {};
     };
-    await v.customJS.DueDate.invoke();
+    await v.plainday.DueDate.invoke();
     assert.equal(v.notes()[day("2026-09-16")].split("\n")[0], "- [ ] Test the timer (edited)");
     assert.equal(v.notices.at(-1), "The line changed while the date box was open, so no deadline was set");
 });
@@ -160,14 +160,14 @@ test("DueDate, PR 54 review: does nothing on or under any form of event; and not
 test("on a sub-task, DueDate, AddProjectLink and AddTaskNote leave the cursor where it was (Brian, 2026-10-26)", async () => {
     const D = day("2026-09-16"), end = "\t- [ ] A sub-step".length;
     let v = standIn({ notes: NOTES, open: D, at: 1 });
-    v.customJS.DatePrompt.open = (t, onPick) => { onPick({ m: { format: (f) => ({ "YYYY-MM-DD": "2026-09-25", "M/D": "9/25" })[f] } }, { close() {} }); return {}; };
-    await v.customJS.DueDate.invoke();
+    v.plainday.DatePrompt.open = (t, onPick) => { onPick({ m: { format: (f) => ({ "YYYY-MM-DD": "2026-09-25", "M/D": "9/25" })[f] } }, { close() {} }); return {}; };
+    await v.plainday.DueDate.invoke();
     assert.deepEqual(v.placed(), { line: 1, ch: end }, "DueDate");
     v = standIn({ notes: NOTES, open: D, at: 1 });
-    v.customJS.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(HOUSE);
-    await v.customJS.AddProjectLink.invoke();
+    v.plainday.AddTaskNote.pickHome = async () => v.app.vault.getFileByPath(HOUSE);
+    await v.plainday.AddProjectLink.invoke();
     assert.deepEqual(v.placed(), { line: 1, ch: end }, "AddProjectLink");
     v = standIn({ notes: { ...NOTES, "Projects/Household/Test the timer.md": "---\ntags: [task]\n---\n" }, open: D, at: 1 });
-    await v.customJS.AddTaskNote.invoke();
+    await v.plainday.AddTaskNote.invoke();
     assert.deepEqual(v.placed(), { line: 1, ch: end }, "AddTaskNote");
 });

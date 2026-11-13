@@ -9,7 +9,7 @@
     "build": "node plugin/esbuild.config.mjs",
     "dev": "node plugin/esbuild.config.mjs --watch",
     "test": "node --test plugin/test/*.test.mjs",
-    "lint": "eslint --quiet --suppressions-location .github/ci/eslint-suppressions.json . && eslint --max-warnings 0 --ignore-pattern 'plugin/src/classes/**' plugin/src manifest.json package.json LICENSE",
+    "lint": "eslint --quiet --suppressions-location .github/ci/eslint-suppressions.json . && eslint --max-warnings 0 --ignore-pattern 'plugin/src/*/*.js' --ignore-pattern '!plugin/src/*/index.js' plugin/src manifest.json package.json LICENSE",
     "lint:prune": "eslint --quiet --suppressions-location .github/ci/eslint-suppressions.json . --prune-suppressions",
     "version": "node plugin/version-bump.mjs"
   },

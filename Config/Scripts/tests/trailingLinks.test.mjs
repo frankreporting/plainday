@@ -1,13 +1,14 @@
-// Tests for plugin/src/classes/trailingLinks.js. Run from the vault root:
+// Tests for plugin/src/startup/trailingLinks.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // Only the text rules are pure; the editor extension and its CSS are checked in a dev vault.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const TrailingLinks = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/trailingLinks.js", here), "utf8") + "\n;TrailingLinks", vm.createContext({}));
+const TrailingLinks = vm.runInContext(classScript("trailingLinks.js") + "\n;TrailingLinks", vm.createContext({}));
 // Values made in the script's own context, as plain ones this file can compare
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const kinds = (line) => plain(TrailingLinks.trail(line)?.links.map((l) => l.kind) ?? null);
@@ -118,7 +119,7 @@ test("CSS: the forward date sits after the due date, faint (OBS-185)", () => {
 });
 
 test("CSS: the ⋯ and then the ↗ are drawn last, at the edge after the due and forward dates (OBS-208, Brian 2026-10-28)", () => {
-    const css = fs.readFileSync(new URL("../../../plugin/src/classes/trailingLinks.js", here), "utf8");
+    const css = classScript("trailingLinks.js");
     assert.match(css, /:is\(\.pm-trail-note, \.pm-trail-from\) \{ order: 4; \}/);
 });
 
