@@ -319,7 +319,7 @@ export default class UpdateObsidianPM {
             source = (await this.ask("Where is your clone of the obsidian-pm repository?", "~/src/obsidian-pm"))?.trim();
             if (!source) return;
         }
-        source = source.replace(/^~(?=$|\/)/, process.env.HOME ?? "");
+        source = source.replace(/^~(?=$|\/)/, require("os").homedir());
         source = path.resolve(source);
 
         const isClone = () => {

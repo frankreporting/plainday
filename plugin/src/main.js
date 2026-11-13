@@ -20,6 +20,18 @@ import { bind, plainday, unbind } from "./host.js";
 /** @type {Record<ClassName, new () => object>} */
 const CLASSES = { ...COMMAND_CLASSES, ...STARTUP_CLASSES, ...SHARED_CLASSES };
 
+/** @param {unknown} e An error's message, else the thing thrown, as a string */
+const messageOf = (e) => {
+    if (e instanceof Error) return e.message;
+    if (typeof e === "object" && e !== null && "message" in e && typeof e.message === "string") return e.message;
+    if (typeof e === "string") return e;
+    if (typeof e === "number" || typeof e === "boolean" || typeof e === "bigint") return String(e);
+    if (e === null) return "null";
+    if (e === undefined) return "undefined";
+    // Anything else thrown, as data
+    try { return JSON.stringify(e); } catch { return typeof e; }
+};
+
 /** @param {unknown} obj @param {string} method @returns {obj is Record<string, () => unknown>} */
 const has = (obj, method) => typeof obj === "object" && obj !== null && typeof (/** @type {Record<string, unknown>} */ (obj))[method] === "function";
 
@@ -77,8 +89,7 @@ export default class Plainday extends Plugin {
         try {
             await script.invoke();
         } catch (e) {
-            const message = /** @type {{ message?: unknown } | null | undefined} */ (e)?.message ?? e;
-            new Notice(`Plainday: ${name} failed\n${String(message)}\nSee the developer console for details`);
+            new Notice(`Plainday: ${name} failed\n${messageOf(e)}\nSee the developer console for details`);
             console.error(`Plainday: ${name} failed`, e);
         }
     }
