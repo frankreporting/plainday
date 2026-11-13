@@ -30,7 +30,7 @@ test("no lookbehind in a class file, a Templater script or Plainday's own code, 
     for (const dir of ["../../plugin/src/classes", "Templater", "../../plugin/src"]) {
         for (const name of fs.readdirSync(new URL(`../${dir}/`, here)).filter((n) => n.endsWith(".js"))) {
             read(`${dir}/${name}`).split("\n").forEach((line, i) => {
-                if (/\(\?<[=!]/.test(line)) found.push(`${dir}/${name}:${i + 1}`);
+                if (/\(\?<[=!]/.test(line)) found.push(`${dir.replace(/^(\.\.\/)+/, "")}/${name}:${i + 1}`);
             });
         }
     }
