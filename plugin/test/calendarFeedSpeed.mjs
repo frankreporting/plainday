@@ -1,19 +1,23 @@
-// How long the calendar reader (plugin/src/shared/calendarFeed.js) takes on Big, the invented feed
-// the size of a large real one, and on Heavy, what's slowest for ical.js (calendarFeeds.mjs), in
-// Node: the download from a server on this
-// machine, the read, and its longest step, which is what blocks the app. The best of three runs,
-// so numbers compare from one PR to the next (OBS-274). Run from the repository root, after
-// `npm ci`:
+// How long the calendar reader takes on Big, the invented feed the size of a large real one, and
+// on Heavy, what's slowest for ical.js (calendarFeeds.mjs), in Node, best of three runs, so numbers
+// compare from one PR to the next (OBS-274):
+// - the download, from a server on this machine;
+// - the read, in the worker (plugin/src/worker/calendarRead.js), timed here in this process;
+// - the worker as the build makes it, on a thread of its own: from starting it to its answer;
+// - what the read holds up Obsidian's main thread for: CalendarFeed handing the text over.
+// Run from the repository root, after `npm ci`:
 //
 //   node plugin/test/calendarFeedSpeed.mjs [--day YYYY-MM-DD] [--days 62]
 //
 // A private test measures a real feed the same way, through measure().
 import http from "node:http";
-import vm from "node:vm";
-import ICAL from "ical.js";
 import path from "node:path";
+import vm from "node:vm";
+import { Worker as Thread } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import { loadClass } from "../classShape.mjs";
+import { workerSource } from "../esbuild.config.mjs";
+import { CalendarReader } from "../src/worker/calendarRead.js";
 import { feeds } from "./calendarFeeds.mjs";
 
 // Obsidian's requestUrl, on Node's fetch
@@ -22,43 +26,75 @@ async function requestUrl({ url }) {
     return { status: r.status, text: await r.text() };
 }
 
-export function reader() {
-    const context = vm.createContext({ ICAL, requestUrl, performance, window: { setTimeout, clearTimeout } });
-    const CalendarFeed = loadClass("calendarFeed.js", context);
-    return { CalendarFeed, feed: new CalendarFeed() };
+// A worker that reads in this process, a turn later
+function inProcess(reader) {
+    return class {
+        postMessage(data) {
+            setTimeout(() => this.onmessage?.({ data: structuredClone(reader.read(data.text, data.options)) }), 0);
+        }
+        terminate() {}
+    };
 }
 
-// The best of `runs` loads of `url`: download, read (the time spent working, without the hand-backs)
-// and longest step, in milliseconds, and how many events and steps. Also the read in one block,
-// with no hand-backs, as OBS-227's spike measured it.
+// The worker as the build makes it, on a Node thread
+let built = null;
+export async function threadWorker() {
+    built ??= (await workerSource()).code;
+    return class {
+        constructor() {
+            this.thread = new Thread(`const { parentPort } = require("node:worker_threads"); globalThis.self = globalThis;
+                self.postMessage = (m) => parentPort.postMessage(m); parentPort.on("message", (m) => self.onmessage({ data: m }));\n${built}`, { eval: true });
+            this.thread.on("message", (m) => this.onmessage?.({ data: m }));
+            this.thread.on("error", (e) => this.onerror?.(e));
+        }
+        postMessage(data) { this.thread.postMessage(data); }
+        terminate() { void this.thread.terminate(); }
+    };
+}
+
+// CalendarFeed on Node: requestUrl on fetch, and a worker that reads in this process, or `Worker`
+export function feedOn(Worker = null) {
+    const context = vm.createContext({
+        requestUrl, performance, window: { setTimeout, clearTimeout }, calendarWorkerSource: "",
+        Worker: Worker ?? inProcess(new CalendarReader()), Blob: class {}, URL: { createObjectURL: () => "blob:x", revokeObjectURL: () => {} },
+    });
+    const CalendarFeed = loadClass("calendarFeed.js", context);
+    return new CalendarFeed();
+}
+
+// The best of `runs`: download, read and the worker's start to answer, and the main thread's
+// part, in milliseconds, with how many events and old events skipped
 export async function measure(url, { days = 62, runs = 3, calendar = { id: "cal", name: "Feed", account: null }, link = url } = {}) {
-    const best = { downloadMs: Infinity, readMs: Infinity, longestMs: Infinity, oneBlockMs: Infinity };
-    let events = 0, steps = 0, skipped = 0, bytes = 0;
+    const Worker = await threadWorker();
+    const best = { downloadMs: Infinity, readMs: Infinity, workerMs: Infinity, mainMs: Infinity };
+    let events = 0, skipped = 0, bytes = 0;
     for (let i = 0; i < runs; i++) {
-        const { feed } = reader();
+        const feed = feedOn();
         const window = feed.window(days);
-        const got = await feed.load(url, { calendar, window });
+        let started = performance.now();
+        const got = await feed.download(url);
+        best.downloadMs = Math.min(best.downloadMs, performance.now() - started);
         if (got.problem) throw new Error(`the feed didn't load: ${got.problem}`);
-        best.downloadMs = Math.min(best.downloadMs, got.stats.downloadMs);
-        best.readMs = Math.min(best.readMs, got.stats.readMs);
-        best.longestMs = Math.min(best.longestMs, got.stats.longestMs);
-        ({ steps, skipped } = got.stats);
-        events = got.events.length;
-        const text = await (await fetch(url)).text();
-        bytes = Buffer.byteLength(text);
-        const whole = reader();
-        whole.CalendarFeed.SLICE_MS = Infinity;
-        const started = performance.now();
-        await whole.feed.read(text, { calendar, window, link });
-        best.oneBlockMs = Math.min(best.oneBlockMs, performance.now() - started);
+        bytes = Buffer.byteLength(got.text);
+        const read = new CalendarReader().read(got.text, { calendar, window, owner: feed.owner(link) });
+        best.readMs = Math.min(best.readMs, read.stats.readMs);
+        ({ skipped } = read.stats);
+        events = read.events.length;
+        const threaded = feedOn(Worker);
+        started = performance.now();
+        const answer = threaded.read(got.text, { calendar, window, link });
+        best.mainMs = Math.min(best.mainMs, performance.now() - started);
+        const result = await answer;
+        if (result.problem) throw new Error(`the worker didn't read it: ${result.problem}`);
+        best.workerMs = Math.min(best.workerMs, result.stats.wallMs);
     }
-    return { ...best, events, steps, skipped, bytes };
+    return { ...best, events, skipped, bytes };
 }
 
 const round = (ms) => Math.round(ms * 10) / 10;
 export function report(name, m) {
     return `${name}: ${(m.bytes / 1e6).toFixed(2)} MB, ${m.skipped} old events skipped, ${m.events} events; download ${round(m.downloadMs)} ms, `
-        + `read ${round(m.readMs)} ms in ${m.steps} steps, longest step ${round(m.longestMs)} ms (in one block: ${round(m.oneBlockMs)} ms)`;
+        + `read ${round(m.readMs)} ms, worker start to answer ${round(m.workerMs)} ms, main thread ${round(m.mainMs)} ms`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

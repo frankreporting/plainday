@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { build, check, ROOT, SRC } from "../esbuild.config.mjs";
+import { build, check, ROOT, SRC, workerSource } from "../esbuild.config.mjs";
 import { classFiles as listClassFiles, parse, readIndex, shapeProblems } from "../classShape.mjs";
 
 // The indexes import the class files, which import Obsidian's module, which only Obsidian has, so
@@ -287,20 +287,21 @@ test("the build stops on a class file without the shape, and names the file and 
     assert.ok(classLine > 1, "plan.js imports before its class");
 });
 
-test("a class file may import ical.js by its default import, and nothing else by one", () => {
-    const body = "export default class X {\n}\n";
-    assert.deepEqual(shapeProblems("x.js", `import ICAL from "ical.js";\n${body}`), []);
-    assert.match(shapeProblems("x.js", `import Obsidian from "obsidian";\n${body}`)[0], /x\.js:1 .*no default import but "ical\.js"'s/);
-    assert.match(shapeProblems("x.js", `import ICAL from "ical.js/dist/ical.js";\n${body}`)[0], /no default import/);
-});
-
-test("main.js starts with ical.js's license notice, and holds ical.js", () => {
+test("main.js starts with ical.js's license notice, and holds ical.js", async () => {
     const text = fs.readFileSync(BUNDLE, "utf8");
     const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, "node_modules", "ical.js", "package.json"), "utf8"));
     const first = text.split("\n")[0];
     assert.ok(first.startsWith(`/*! Plainday bundles ical.js ${version} (https://github.com/kewisch/ical.js)`), first);
     assert.match(first, /Mozilla Public License, v\. 2\.0 \(https:\/\/mozilla\.org\/MPL\/2\.0\/\)/);
     assert.match(text, /node_modules\/ical\.js\/dist\/ical\.js/, "esbuild's comment naming the bundled file");
+    // In the calendar reader's worker, which starts with the notice too, and which main.js carries
+    const { code } = await workerSource();
+    assert.ok(code.startsWith(first), code.slice(0, 120));
+    assert.match(code, /self\.onmessage/);
+    // main.js carries it as text, as esbuild writes a string: the notice a second time, and the
+    // worker's message handler
+    assert.equal(text.split("Plainday bundles ical.js").length - 1, 2, "the notice, in main.js and in the worker's script");
+    assert.match(text, /self\.onmessage = \(event\) =>/);
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {

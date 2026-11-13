@@ -6,9 +6,12 @@
 // `export default class <Name>`, and nothing else. The build checks that shape in every class file
 // it bundles, and stops on a file without it, naming the line.
 //
-// ical.js, which reads calendar feeds (plugin/src/shared/calendarFeed.js), is bundled in, under the
-// Mozilla Public License 2.0. Its notice doesn't survive bundling by itself, so the build puts one
-// at the top of main.js, naming where its source is (notices()).
+// The calendar reader (plugin/src/worker/, OBS-274) runs in a background worker, so the build
+// bundles it on its own, with ical.js, into one script, and main.js carries that script as text:
+// the host exports it as `calendarWorkerSource`, from the module "plainday:calendar-worker", which
+// only this build provides (workerPlugin()). ical.js is under the Mozilla Public License 2.0. Its
+// notice doesn't survive bundling by itself, so the build puts one at the top of main.js and of the
+// worker's script, naming where its source is (notices()).
 //
 // The class files are written for Plainday alone (OBS-257). A line that still reaches for the
 // CustomJS plugin, by its id or one of its command ids, or for its global or its `customJS` name,
@@ -93,6 +96,39 @@ function classesPlugin(dir) {
     };
 }
 
+// The calendar reader's worker as one script: plugin/src/worker/calendarWorker.js with what it
+// imports (ical.js), and the files it was built from
+export async function workerSource(src = SRC) {
+    const result = await esbuild.build({
+        entryPoints: [path.join(src, "worker", "calendarWorker.js")],
+        absWorkingDir: ROOT,
+        nodePaths: [path.join(ROOT, "node_modules")],
+        bundle: true,
+        format: "iife",
+        platform: "browser",
+        target: "es2022",
+        banner: { js: notices() },
+        write: false,
+        metafile: true,
+        logLevel: "silent",
+    });
+    return { code: result.outputFiles[0].text, inputs: Object.keys(result.metafile.inputs).map((f) => path.resolve(ROOT, f)) };
+}
+
+// "plainday:calendar-worker": the worker's script as the module's default export, a string
+function workerPlugin(src) {
+    return {
+        name: "plainday-calendar-worker",
+        setup(build) {
+            build.onResolve({ filter: /^plainday:calendar-worker$/ }, () => ({ path: "calendar-worker", namespace: "plainday-worker" }));
+            build.onLoad({ filter: /.*/, namespace: "plainday-worker" }, async () => {
+                const { code, inputs } = await workerSource(src);
+                return { contents: `export default ${JSON.stringify(code)};`, loader: "js", watchFiles: inputs };
+            });
+        },
+    };
+}
+
 function copyOut(outfile) {
     return {
         name: "plainday-copy-out",
@@ -136,7 +172,7 @@ export function options({ src = SRC, outfile = OUTFILE, watch = false, logLevel 
         banner: { js: notices() },
         sourcemap: watch ? "inline" : false,
         logLevel,
-        plugins: [classesPlugin(src), copyOut(outfile)],
+        plugins: [classesPlugin(src), workerPlugin(src), copyOut(outfile)],
     };
 }
 
