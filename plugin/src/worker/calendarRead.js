@@ -22,14 +22,19 @@
 //   Zone", or an abbreviation like "BST", which the device would take for another place) is read
 //   from the feed's own definition, kept to this read. An event in a zone neither knows goes to
 //   `failed`.
-// - Events are grouped by UID into a series and its overrides. A moved occurrence keeps its
-//   series' key, `UID@<original date>`; so does an override whose series isn't in the feed (an
-//   invitation to one occurrence of someone else's series).
+// - Events are grouped by UID into a series and its overrides, and ical.js works the series'
+//   occurrences out, as it is. A moved occurrence keeps its series' key, `UID@<original date>`;
+//   so does an override whose series isn't in the feed (an invitation to one occurrence of
+//   someone else's series).
+// - It reads what Google Calendar, Apple's Calendar and Outlook write, and skips anything else
+//   by name rather than work it out by hand (see written()): the calendar standard allows far
+//   more than any of them writes.
 // - An all-day event ends 1 second before midnight on its last day, as EventKit reported it.
 // - An invitation the calendar's owner declined is left out, as EventKit left it out.
 // - An event it can't read (one that doesn't parse, a zone it doesn't know, two events with one
-//   UID, two overrides of one occurrence, EXRULE, a series it can't finish) is left out and named
-//   in `failed`, with its title, and the rest of the calendar is read as usual. A feed it can't
+//   UID or one key, two overrides of one occurrence, EXRULE, a "this and all following" change,
+//   a series it can't finish) is left out and named in `failed`, with its title, and the rest of
+//   the calendar is read as usual. A feed it can't
 //   read at all is "unreadable", so nothing in it looks canceled.
 import ICAL from "ical.js";
 
@@ -387,13 +392,6 @@ export class CalendarReader {
                     return pair;
                 };
                 const device = new ICAL.Timezone({ tzid: name });
-                device.offsetAt = at;
-                // The clock there at an instant
-                device.clockAt = (ms) => {
-                    const p = {};
-                    for (const { type, value } of format.formatToParts(new Date(ms))) p[type] = Number(value);
-                    return { year: p.year, month: p.month, day: p.day, hour: p.hour, minute: p.minute, second: p.second };
-                };
                 // In seconds, for a local time there. A time that happens twice (the hour the clocks
                 // go back) is the first, and one that never happens (the hour they skip) is read with
                 // the offset from before, so it lands after the gap, as RFC 5545 says.
@@ -414,8 +412,9 @@ export class CalendarReader {
     }
 
     // One series: its master and its overrides (each with a RECURRENCE-ID), handing every
-    // occurrence that starts in the window to `emit`. False when it can't be read whole; it
-    // throws when two overrides change one occurrence, or `emit` does.
+    // occurrence that starts in the window to `emit`. ical.js works the occurrences out, as it is.
+    // False when the series holds something calendar apps don't write (see written()), which is
+    // skipped rather than worked out by hand; it throws when `emit` does.
     expand(master, exceptions, range, emit) {
         if (!master) {
             // Overrides with no series in the feed: invitations to single occurrences
@@ -433,26 +432,15 @@ export class CalendarReader {
             emit(master, ev.startDate, ev.endDate, null);
             return true;
         }
-        // Occurrences are looked at from a day before the window to a day after it, and further by
-        // as much as a this-and-following change moves them. An override moved into the window
-        // from further away is caught after, from the overrides themselves.
-        let from = range.start.getTime() - CalendarReader.DAY_MS;
-        let to = range.end.getTime() + CalendarReader.DAY_MS;
-        // Each override by the instant of the occurrence it changes, whatever zone that's written
-        // in. ical.js matches overrides by their clock times, which differ when the zones do, and
-        // works a this-and-following change's move out from them too, so it's given none: they're
-        // matched and moved here.
         const byInstant = this.overrides(exceptions);
-        // The this-and-following changes, by the instant they start from, earliest first
-        const changes = [...byInstant].filter(([, e]) => e.modifiesFuture()).sort((a, b) => a[0] - b[0]);
-        for (const [at, e] of changes) {
-            // A change that makes an all-day series timed, or a timed one all-day: what its later
-            // occurrences become can't be told for sure
-            if (e.startDate.isDate !== ev.startDate.isDate) return false;
-            const moved = e.startDate.toJSDate().getTime() - at;
-            from = Math.min(from, range.start.getTime() - CalendarReader.DAY_MS - moved);
-            to = Math.max(to, range.end.getTime() + CalendarReader.DAY_MS - moved);
-        }
+        if (!this.written(ev, byInstant)) return false;
+        // Occurrences are looked at from a day before the window to a day after it; an override
+        // moved into the window from further away is caught after, from the overrides themselves
+        const from = range.start.getTime() - CalendarReader.DAY_MS;
+        const to = range.end.getTime() + CalendarReader.DAY_MS;
+        // The instants EXDATE takes out: ical.js takes out only one copy of an occurrence an RDATE
+        // repeats
+        const out = new Set(master.getAllProperties("exdate").flatMap((p) => p.getValues()).map((t) => t.toJSDate().getTime()));
         const matched = new Set();
         // ical.js gives an occurrence twice when an RDATE repeats one the rule makes; RFC 5545
         // counts it once
@@ -463,78 +451,47 @@ export class CalendarReader {
             if (++steps > CalendarReader.MAX_STEPS) return false;
             const at = next.toJSDate().getTime();
             if (at >= to) break;
-            if (at < from || seen.has(at)) continue;
+            if (at < from || seen.has(at) || out.has(at)) continue;
             seen.add(at);
             const own = byInstant.get(at);
             if (own) {
                 matched.add(own);
-                emit(own.component, own.startDate, own.endDate, next);
+                emit(own.component, own.startDate, own.endDate, own.recurrenceId);
                 continue;
             }
-            // The latest this-and-following change from this occurrence or before moves it
-            let change = null;
-            for (const [from, e] of changes) {
-                if (from > at) break;
-                change = e;
-            }
-            if (change) {
-                const { start, end } = this.moved(next, change);
-                emit(change.component, start, end, next);
-            } else {
-                const end = next.clone();
-                end.addDuration(ev.duration);
-                emit(master, next, end, next);
-            }
+            const end = next.clone();
+            end.addDuration(ev.duration);
+            emit(master, next, end, next);
         }
         for (const e of byInstant.values()) {
-            if (!matched.has(e)) emit(e.component, e.startDate, e.endDate, this.inZone(e.recurrenceId, ev.startDate.zone));
+            if (!matched.has(e)) emit(e.component, e.startDate, e.endDate, e.recurrenceId);
         }
         return true;
     }
 
-    // An occurrence moved as a this-and-following change moved its own: by the same clock time,
-    // in the zone the change's new start is written in, and as long as the change lasts
-    // The move is worked out on the instant, so a change that keeps the time keeps each
-    // occurrence's instant exactly, the second of a repeated hour included.
-    moved(next, change) {
-        const by = change.startDate.subtractDate(this.inZone(change.recurrenceId, change.startDate.zone));
-        let start;
-        if (next.isDate) {
-            start = next.clone();
-            start.addDuration(by);
-        } else {
-            const zone = change.startDate.zone;
-            const at = next.toJSDate().getTime();
-            // The clock there moves by `by`; the instant by that, less any change of the zone's
-            // offset in between
-            let ms = at + by.toSeconds() * 1000;
-            ms += this.offsetIn(zone, at) - this.offsetIn(zone, ms);
-            start = ICAL.Time.fromJSDate(new Date(ms), true);
+    // Whether a series is as Google Calendar, Apple's Calendar and Outlook write one, each a plain
+    // yes or no, so nothing past that is worked out by hand. The apps write a moved occurrence's
+    // original start, and any extra date (RDATE), in the zone of the series' own start (or all of
+    // them in UTC, or as dates for an all-day series), and split a series in two for a "this and
+    // all following" change rather than writing one (RANGE=THISANDFUTURE).
+    written(ev, byInstant) {
+        const zone = this.zoneOf(ev.startDate);
+        for (const e of byInstant.values()) {
+            if (e.modifiesFuture() || this.zoneOf(e.recurrenceId) !== zone) return false;
         }
-        const end = start.clone();
-        end.addDuration(change.duration);
-        return { start, end };
+        for (const p of ev.component.getAllProperties("rdate")) {
+            if (p.type === "period" || p.getValues().some((t) => this.zoneOf(t) !== zone)) return false;
+        }
+        return true;
     }
 
-    // A zone's offset from UTC at an instant, in milliseconds
-    offsetIn(zone, ms) {
-        if (zone === ICAL.Timezone.utcTimezone) return 0;
-        if (zone === ICAL.Timezone.localTimezone) return -new Date(ms).getTimezoneOffset() * 60000;
-        if (typeof zone.offsetAt === "function") return zone.offsetAt(ms);
-        const t = ICAL.Time.fromJSDate(new Date(ms), true).convertToZone(zone);
-        return Date.UTC(t.year, t.month - 1, t.day, t.hour, t.minute, t.second) - (ms - (((ms % 1000) + 1000) % 1000));
-    }
-
-    // A time as the clock reads it in `zone`. A zone from the device reads its clock from the
-    // instant itself; ical.js's conversion is off by an hour near a change for those.
-    inZone(time, zone) {
-        if (time.isDate || time.zone === zone || time.zone?.tzid === zone?.tzid) {
-            const same = time.clone();
-            if (!time.isDate) same.zone = zone;
-            return same;
-        }
-        if (typeof zone.clockAt === "function") return ICAL.Time.fromData({ ...zone.clockAt(time.toJSDate().getTime()), isDate: false }, zone);
-        return time.convertToZone(zone);
+    // How a time is written: as a date, in UTC, floating, or in a named zone
+    zoneOf(time) {
+        if (!time) return null;
+        if (time.isDate) return "date";
+        if (time.zone === ICAL.Timezone.utcTimezone) return "utc";
+        if (time.zone === ICAL.Timezone.localTimezone) return "floating";
+        return `zone:${time.zone?.tzid ?? ""}`;
     }
 
     // A series' overrides by the instant of the occurrence each changes. Two for one occurrence
@@ -592,8 +549,9 @@ export class CalendarReader {
         const transp = String(item.getFirstPropertyValue("transp") ?? "").toUpperCase();
         return {
             // The date the occurrence was due, on its series' own calendar (the zone its start is
-            // written in): one a day, wherever the device is. On the device's calendar, a daily
-            // meeting in a far-off zone could fall twice on one date around a change of clocks.
+            // written in, as its overrides' are): one a day, wherever the device is. On the
+            // device's calendar, a daily meeting in a far-off zone could fall twice on one date
+            // around a change of clocks.
             key: recurring ? `${uid}@${recurrenceId.toString().slice(0, 10)}` : uid,
             id: uid,
             calendarId: calendar.id ?? null,
