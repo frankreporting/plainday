@@ -171,13 +171,11 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
 test("a long-running series started near the window gives the occurrences it gives stepped from its start", async () => {
     const day = "2026-11-12";
     const rules = [
-        "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;INTERVAL=2;BYDAY=MO,TH", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR",
+        "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;INTERVAL=7", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR",
         "FREQ=WEEKLY", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;WKST=SU", "FREQ=WEEKLY;INTERVAL=3;BYDAY=SA,SU;WKST=MO",
-        "FREQ=WEEKLY;BYDAY=WE;UNTIL=20261120T235959Z", "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261101T000000Z",
+        "FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;WKST=MO", "FREQ=WEEKLY;BYDAY=WE;UNTIL=20261120T235959Z",
+        "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261101T000000Z", "FREQ=WEEKLY;UNTIL=20261201",
         "FREQ=DAILY;COUNT=4000", "FREQ=MONTHLY;BYDAY=2TU", "FREQ=YEARLY",
-        "FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=2", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;BYSETPOS=-1;WKST=MO",
-        "FREQ=DAILY;BYMONTH=1,6,11", "FREQ=DAILY;BYMONTHDAY=1,15,28", "FREQ=WEEKLY;BYMONTH=11,12;BYDAY=TU",
-        "FREQ=DAILY;BYHOUR=8,16", "FREQ=WEEKLY;UNTIL=20261201",
     ];
     const ymd = (n) => dayAfter(day, n).replaceAll("-", "");
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "X-WR-CALNAME:Rules", ...feeds(day).studio.text.split("\r\n").filter((l, i, all) => {
@@ -193,8 +191,9 @@ test("a long-running series started near the window gives the occurrences it giv
                 const at = (k, time) => kind === "allDay" ? `;VALUE=DATE:${ymd(k)}` : kind === "zoned" ? `;TZID=America/New_York:${ymd(k)}T${time}`
                     : kind === "utc" ? `:${ymd(k)}T${time}Z` : `:${ymd(k)}T${time}`;
                 const value = (prop, k, time) => { const v = at(k, time); return v.startsWith(";") ? `${prop}${v}` : `${prop}${v}`; };
+                // An RDATE turns starting near the window off, so only the UTC series have one
                 lines.push("BEGIN:VEVENT", value("DTSTART", start, "083000"), kind === "allDay" ? value("DTEND", start + 1, "") : value("DTEND", start, "090000"),
-                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), value("RDATE", 12, "070000"), "END:VEVENT");
+                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 12, "070000")] : []), "END:VEVENT");
                 if (kind !== "allDay") lines.push("BEGIN:VEVENT", value("RECURRENCE-ID", 9, "083000"),
                     value("DTSTART", 10, "120000"), value("DTEND", 10, "130000"), `UID:${uid}`, "SUMMARY:moved", "END:VEVENT");
             }
@@ -392,10 +391,22 @@ test("an event ical.js can't read is left out by its UID, and the rest of the ca
         "yearly-no-date@example.org": "RRULE:FREQ=YEARLY;BYMONTH=4,6;BYMONTHDAY=31",
         "fortnightly@example.org": "RRULE:FREQ=FORTNIGHTLY",
         "yearday@example.org": "RRULE:FREQ=DAILY;INTERVAL=7;BYYEARDAY=320,330,340",
+        // October 1st 2026 is a Thursday: every 7 days from it is never a Tuesday
+        "every-7-tuesday@example.org": "RRULE:FREQ=DAILY;INTERVAL=7;BYDAY=TU",
+        "every-14@example.org": "RRULE:FREQ=DAILY;INTERVAL=14;BYDAY=WE,TU",
+        "every-365-feb@example.org": "RRULE:FREQ=DAILY;INTERVAL=365;BYMONTH=2",
+        "weekly-52-feb@example.org": "RRULE:FREQ=WEEKLY;INTERVAL=52;BYMONTH=2",
+        "hourly@example.org": "RRULE:FREQ=HOURLY;BYDAY=MO,SA",
+        "monthly-12-feb-30@example.org": "RRULE:FREQ=MONTHLY;INTERVAL=12;BYMONTHDAY=30;WKST=MO",
+        "leap-every-4@example.org": "RRULE:FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29",
+        "setpos-10@example.org": "RRULE:FREQ=MONTHLY;BYDAY=FR;BYSETPOS=10",
+        "day-and-weekday@example.org": "RRULE:FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=-1;BYDAY=MO,TU",
     };
     const lines = [];
     for (const [uid, rule] of Object.entries(bad)) {
-        lines.push(...vevent(`UID:${uid}`, "SUMMARY:Bad rule", "DTSTART;TZID=America/New_York:20261001T090000", "DTEND;TZID=America/New_York:20261001T100000", rule));
+        // The February rules start in February 2025, which isn't a leap year
+        const on = /feb|leap/.test(uid) ? "20250201" : "20261001";
+        lines.push(...vevent(`UID:${uid}`, "SUMMARY:Bad rule", `DTSTART;TZID=America/New_York:${on}T090000`, `DTEND;TZID=America/New_York:${on}T100000`, rule));
     }
     lines.push(...vevent("UID:not-a-date@example.org", "SUMMARY:Bad date", "DTSTART;VALUE=DATE-TIME:20261114", "DTEND:20261114T100000Z"));
     lines.push(...vevent("UID:no-start@example.org", "SUMMARY:No start", "DTEND:20261114T100000Z"));
@@ -502,4 +513,103 @@ test("Heavy, what's slowest for ical.js, reads its series and skips its old over
     assert.ok(got.events.some((e) => e.title === "Month-end close" && e.start === "2026-11-30T10:00:00-05:00"));
     // The last Friday of November, at 10am Pacific: 1pm Eastern
     assert.ok(got.events.some((e) => e.title === "Last-Friday review" && e.start === "2026-11-27T13:00:00-05:00"));
+});
+
+test("the repeating rules Google, iCloud and Outlook write are all read", async () => {
+    const written = [
+        "FREQ=DAILY", "FREQ=DAILY;INTERVAL=3", "FREQ=DAILY;COUNT=10", "FREQ=DAILY;UNTIL=20270101T045959Z", "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR",
+        "FREQ=WEEKLY;BYDAY=FR", "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU",
+        "FREQ=WEEKLY;INTERVAL=1;BYDAY=FR;UNTIL=20270301T000000Z", "FREQ=WEEKLY;INTERVAL=3;BYDAY=MO;WKST=MO",
+        "FREQ=MONTHLY", "FREQ=MONTHLY;BYMONTHDAY=13", "FREQ=MONTHLY;BYMONTHDAY=31", "FREQ=MONTHLY;BYMONTHDAY=-1", "FREQ=MONTHLY;BYMONTHDAY=1,15",
+        "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=31", "FREQ=MONTHLY;BYDAY=2TU", "FREQ=MONTHLY;BYDAY=-1FR", "FREQ=MONTHLY;BYDAY=5MO",
+        "FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR", "FREQ=MONTHLY;INTERVAL=1;BYDAY=MO;BYSETPOS=2",
+        "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", "FREQ=MONTHLY;BYDAY=SU,MO,TU,WE,TH,FR,SA;BYSETPOS=-1",
+        "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1", "FREQ=YEARLY", "FREQ=YEARLY;INTERVAL=2", "FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=13",
+        "FREQ=YEARLY;BYMONTH=5;BYDAY=-1MO", "FREQ=YEARLY;INTERVAL=1;BYDAY=TH;BYSETPOS=4;BYMONTH=11", "FREQ=YEARLY;BYMONTH=1,3",
+        "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29",
+    ];
+    const lines = written.flatMap((rule, i) => vevent(`UID:written-${i}@example.org`, `SUMMARY:${rule}`,
+        "DTSTART;TZID=America/New_York:20240213T090000", "DTEND;TZID=America/New_York:20240213T100000", `RRULE:${rule}`));
+    const { feed } = reader();
+    const got = await feed.read(calendar(lines), { calendar: CALENDARS.studio, window: feed.window(500, at("2026-11-12")) });
+    assert.deepEqual(plain(got.failed), []);
+    const read = new Set(got.events.map((e) => e.title));
+    assert.deepEqual(written.filter((r) => !read.has(r) && !/COUNT=10|UNTIL=2027|UNTIL=20270301/.test(r)), [], "every running rule has an occurrence in the window");
+});
+
+// Zones whose changes stop: one that dropped daylight time (its last change is a rule's last),
+// and one whose rules end two years before the window, from an old start late in the month
+test("a zone whose rules ended keeps its last change", async () => {
+    const zones = [
+        // Like vzic's: daylight time until 2018, then standard time for good, at -03
+        ["BEGIN:VTIMEZONE", "TZID:Ended", "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0300", "TZOFFSETTO:-0200", "DTSTART:20081019T000000",
+            "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=3SU;UNTIL=20181104T030000Z", "END:DAYLIGHT",
+            "BEGIN:STANDARD", "TZOFFSETFROM:-0200", "TZOFFSETTO:-0300", "DTSTART:20090215T000000",
+            "RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=3SU;UNTIL=20190217T020000Z", "END:STANDARD", "END:VTIMEZONE"],
+        // Rules that end in 2024, started on the 31st of October
+        ["BEGIN:VTIMEZONE", "TZID:Ends2024", "BEGIN:STANDARD", "TZOFFSETFROM:-0400", "TZOFFSETTO:-0500", "DTSTART:19701031T020000",
+            "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU;UNTIL=20241027T060000Z", "END:STANDARD",
+            "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0500", "TZOFFSETTO:-0400", "DTSTART:19700405T020000",
+            "RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=1SU;UNTIL=20240407T070000Z", "END:DAYLIGHT", "END:VTIMEZONE"],
+    ];
+    const lines = ["Ended", "Ends2024"].flatMap((tz) => [3, 120, 200].flatMap((n) => vevent(`UID:${tz}-${n}@example.org`, `SUMMARY:${tz}`,
+        `DTSTART;TZID=${tz}:${dayAfter("2026-11-12", n).replaceAll("-", "")}T100000`, `DTEND;TZID=${tz}:${dayAfter("2026-11-12", n).replaceAll("-", "")}T110000`)));
+    const text = calendar(lines, zones.flat());
+    const moved = reader().feed, untouched = reader().feed;
+    untouched.zones = () => {};
+    const window = moved.window(300, at("2026-11-12"));
+    const a = await moved.read(text, { calendar: CALENDARS.studio, window });
+    const b = await untouched.read(text, { calendar: CALENDARS.studio, window });
+    assert.equal(a.events.length, 6);
+    assert.deepEqual(plain(a.events), plain(b.events));
+    // 10am at -03 is 8am in New York in November
+    assert.equal(a.events.find((e) => e.key === "Ended-3@example.org").start, `${dayAfter("2026-11-12", 3)}T08:00:00-05:00`);
+});
+
+test("a series with an RDATE before the window keeps the occurrences its EXDATEs remove", async () => {
+    const exdates = Array.from({ length: 40 }, (_, i) => `EXDATE;TZID=America/New_York:${dayAfter("2026-11-12", -7 * (i + 3)).replaceAll("-", "")}T090000`);
+    const text = calendar(vevent("UID:rdate@example.org", "SUMMARY:Weekly", "DTSTART;TZID=America/New_York:20200102T090000",
+        "DTEND;TZID=America/New_York:20200102T093000", "RRULE:FREQ=WEEKLY", "RDATE;TZID=America/New_York:20210303T090000", ...exdates,
+        "EXDATE;TZID=America/New_York:20261119T090000"));
+    const near = reader().feed, fromStart = reader().feed;
+    fromStart.startFor = (ev) => ev.startDate;
+    const window = near.window(20, at("2026-11-12"));
+    const a = await near.read(text, { calendar: CALENDARS.studio, window });
+    const b = await fromStart.read(text, { calendar: CALENDARS.studio, window });
+    assert.deepEqual(plain(a.events.map((e) => e.date)), ["2026-11-12", "2026-11-26"]);
+    assert.deepEqual(plain(a.events), plain(b.events));
+});
+
+test("an event that runs into the next one without closing makes the feed unreadable", async () => {
+    const text = calendar([
+        "BEGIN:VEVENT", "UID:a@example.org", "SUMMARY:A", "DTSTART:20261113T140000Z",
+        ...vevent("UID:b@example.org", "SUMMARY:B", "DTSTART:20261113T150000Z"),
+        ...vevent("UID:c@example.org", "SUMMARY:C", "DTSTART:20261113T160000Z"),
+    ]);
+    const { feed } = reader();
+    assert.deepEqual(plain(await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(7, at("2026-11-12")) })), { problem: "unreadable" });
+});
+
+test("an event that doesn't parse is named by its UID as ical.js reads UIDs, so its series' events are all left out", async () => {
+    for (const [line, uid] of [["UID:s\\,1@example.org", "s,1@example.org"], ["UID;X-A=1:s2@example.org", "s2@example.org"]]) {
+        const text = calendar([
+            ...vevent(line, "SUMMARY:Series", "DTSTART;TZID=America/New_York:20261113T090000", "DTEND;TZID=America/New_York:20261113T093000", "RRULE:FREQ=DAILY;COUNT=3"),
+            ...vevent(line, "RECURRENCE-ID;TZID=America/New_York:20261114T090000", "DTSTART;TZID=America/New_York:20261114T110000", "X-BROKEN;=:"),
+        ]);
+        const { feed } = reader();
+        const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(7, at("2026-11-12")) });
+        assert.deepEqual(plain(got.failed), [uid]);
+        assert.deepEqual(plain(got.events), []);
+    }
+});
+
+test("when two attendees are on as many events, no one is taken for the owner, and nothing is left out", async () => {
+    const att = (who, partstat) => `ATTENDEE;PARTSTAT=${partstat}:mailto:${who}`;
+    const text = calendar([
+        ...vevent("UID:t1@example.org", "SUMMARY:One", "DTSTART:20261113T140000Z", att("guest@example.org", "DECLINED"), att("me@example.org", "ACCEPTED")),
+        ...vevent("UID:t2@example.org", "SUMMARY:Two", "DTSTART:20261114T140000Z", att("guest@example.org", "ACCEPTED"), att("me@example.org", "ACCEPTED")),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(7, at("2026-11-12")) });
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["One", "Two"]);
 });

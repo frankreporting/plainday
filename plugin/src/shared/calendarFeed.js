@@ -60,9 +60,8 @@ export default class CalendarFeed {
     static RECURRENCE_ID = /\nRECURRENCE-ID(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
     static HAS_RECURRENCE_ID = /\nRECURRENCE-ID[;:]/i;
     static RULES = /\n(?:RRULE|RDATE|EXRULE)[;:]/i;
-    static UID = /\nUID[;:]([^\r\n]*)/i;
+    static UID = /\nUID[;:][^\r\n]*/i;
     static GOOGLE = /^https:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
-    static FREQS = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
     async load(link, { calendar, window }) {
@@ -145,7 +144,9 @@ export default class CalendarFeed {
             if (!this.isCalendar(text)) return { problem: "unreadable" };
             const body = text.trimStart();
             const cutoff = Number(this.date(new Date(window.start.getFullYear(), window.start.getMonth(), window.start.getDate() - 1)).replaceAll("-", ""));
-            const { head, blocks, skipped } = await this.split(body, cutoff, clock);
+            const split = await this.split(body, cutoff, clock);
+            if (!split) return { problem: "unreadable" };
+            const { head, blocks, skipped } = split;
             const parsed = ICAL.parse(head);
             const roots = (typeof parsed[0] === "string" ? [parsed] : parsed).map((j) => new ICAL.Component(j));
             // Every event was split out of the text: one left in the rest is one the split didn't
@@ -174,7 +175,7 @@ export default class CalendarFeed {
                 if (ve?.name !== "vevent") {
                     // An event that doesn't parse: left out by its UID, or, with none to name it,
                     // the whole feed is unreadable
-                    const uid = this.unfold(block).match(CalendarFeed.UID)?.[1]?.trim();
+                    const uid = this.uidOf(block);
                     if (!uid) return { problem: "unreadable" };
                     failed.add(uid);
                     continue;
@@ -227,7 +228,8 @@ export default class CalendarFeed {
     // The feed's text split into its events, each an iCalendar text of its own, and the rest (the
     // calendar's own lines and its time zones). An event is a line that is BEGIN:VEVENT through
     // the next that is END:VEVENT, in any case: a line inside a property starts with a space, so
-    // it can't be either. An old one-off event or override (see old()) is dropped here.
+    // it can't be either. An old one-off event or override (see old()) is dropped here. Null when
+    // an event runs into the next one without closing.
     async split(text, cutoff, clock) {
         const begin = /^BEGIN:VEVENT[ \t]*\r?$/gim;
         const end = /^END:VEVENT[ \t]*\r?$/gim;
@@ -244,6 +246,10 @@ export default class CalendarFeed {
             // An event that never closes is left in the rest, whose read then fails: the feed is
             // cut off, and reading what came before would make its other events look canceled
             if (!e) break;
+            // So is one that runs into the next event: the two would be read as one
+            begin.lastIndex = b.index + 1;
+            const again = begin.exec(text);
+            if (again && again.index < e.index) return null;
             const newline = text.indexOf("\n", e.index);
             const after = newline < 0 ? text.length : newline + 1;
             head.push(text.slice(pos, b.index));
@@ -273,29 +279,36 @@ export default class CalendarFeed {
         return !!m && Number(m[1]) < cutoff;
     }
 
-    // Lines folded back into one, for the few reads done on the text itself
-    unfold(text) {
-        return text.replace(/\r?\n[ \t]/g, "");
+    // The UID of an event that doesn't parse, read as ical.js reads the UIDs of those that do
+    // (parameters left out, escapes undone), or null
+    uidOf(block) {
+        const line = block.replace(/\r?\n[ \t]/g, "").match(CalendarFeed.UID)?.[0];
+        if (!line) return null;
+        try {
+            return String(ICAL.Property.fromString(line.trim()).getFirstValue() ?? "").trim() || null;
+        } catch {
+            return null;
+        }
     }
 
-    // Readies the feed's own time zones. ical.js works a zone's changes out from its first
-    // definition's start, and Outlook's start in 1601: that's centuries of yearly changes in one
-    // step the first time a time is read. So a yearly rule starting more than two years before the
-    // window starts then instead (the same changes from then on), a rule that ended by then goes,
-    // and a zone with a rule ical.js could loop on is dropped: its times read as the device's.
+    // Readies the feed's own time zones. ical.js works a zone's changes out from each rule's
+    // start, and Outlook's start in 1601: that's centuries of yearly changes in one step the first
+    // time a time is read. So a yearly rule that never ends, and starts more than two years before
+    // the window, starts then instead: the same changes from then on. A rule that ends is left as
+    // it is, since its last change may be the zone's last. A zone with a rule ical.js could loop on
+    // is dropped, and its times read as the device's.
     zones(root, window) {
         const year = window.start.getFullYear() - 2;
         for (const vtz of root.getAllSubcomponents("vtimezone")) {
             let bad = false;
-            for (const obs of [...vtz.getAllSubcomponents()]) {
+            for (const obs of vtz.getAllSubcomponents()) {
                 if (obs.name !== "standard" && obs.name !== "daylight") continue;
                 const rules = obs.getAllProperties("rrule");
                 if (!rules.length) continue;
                 const rule = rules[0].getFirstValue();
-                if (rules.length > 1 || rule.freq !== "YEARLY" || rule.interval !== 1 || this.unsafe(rule)) { bad = true; break; }
-                if (rule.until && rule.until.year < year) { vtz.removeSubcomponent(obs); continue; }
                 const start = obs.getFirstPropertyValue("dtstart");
-                if (rule.count || !start || start.year >= year) continue;
+                if (rules.length > 1 || !start || rule.freq !== "YEARLY" || this.unsafe(rule, start)) { bad = true; break; }
+                if (rule.until || rule.count || (rule.interval || 1) !== 1 || start.year >= year) continue;
                 const later = start.clone();
                 later.year = year;
                 if (later.month === 2 && later.day === 29) later.day = 28;
@@ -305,27 +318,71 @@ export default class CalendarFeed {
         }
     }
 
-    // Why ical.js can't be trusted with a rule, or null. It loops forever, or until memory runs
-    // out, on some rules RFC 5545 allows (a daily rule limited to the last day of the month, or to
-    // a date no month has, and some rules that repeat more often than daily), so those are
-    // refused, with the combinations the RFC rules out. Calendars repeat events daily at most.
-    unsafe(rule) {
-        if (!CalendarFeed.FREQS.includes(rule.freq)) return "frequency";
+    // Why a repeating rule isn't read, or null. ical.js loops forever, or until memory runs out,
+    // on some rules RFC 5545 allows (a daily rule limited to a month's last day, a daily rule every
+    // 7 days on a weekday it never lands on, a date no month has), inside one step, where nothing
+    // can stop it. So only the shapes calendar apps write are read (Google's, iCloud's and
+    // Outlook's), each of which it steps through in bounded time: daily or weekly, on weekdays;
+    // monthly on days of the month, or on weekdays with a position; yearly in given months, on a day
+    // or a weekday with a position. `start`
+    // is the series' first start, whose month and day stand in for a missing BYMONTH or BYMONTHDAY.
+    unsafe(rule, start) {
         const p = rule.parts ?? {};
-        const finer = rule.freq === "DAILY";
+        if (Object.keys(p).some((k) => !["BYDAY", "BYMONTHDAY", "BYMONTH", "BYSETPOS", "WKST"].includes(k))) return "part";
+        const interval = rule.interval || 1;
+        const byday = (p.BYDAY ?? []).map((d) => /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/.exec(String(d)));
+        if (byday.some((m) => !m)) return "BYDAY";
+        const ordinals = byday.map((m) => (m[1] ? Number(m[1]) : 0));
         const days = (p.BYMONTHDAY ?? []).map(Number);
+        const months = (p.BYMONTH ?? []).map(Number);
+        const setpos = (p.BYSETPOS ?? []).map(Number);
+        const position = (n) => Number.isInteger(n) && n !== 0 && Math.abs(n) <= 5;
         if (days.some((d) => !Number.isInteger(d) || d === 0 || Math.abs(d) > 31)) return "BYMONTHDAY";
-        if ((finer || rule.freq === "WEEKLY") && days.some((d) => d < 0)) return "BYMONTHDAY";
-        if (rule.freq === "WEEKLY" && days.length) return "BYMONTHDAY";
-        if (p.BYYEARDAY && rule.freq !== "YEARLY") return "BYYEARDAY";
-        if (p.BYWEEKNO && rule.freq !== "YEARLY") return "BYWEEKNO";
-        if (p.BYSETPOS && (finer || !Object.keys(p).some((k) => k !== "BYSETPOS" && k !== "WKST"))) return "BYSETPOS";
-        if ((finer || rule.freq === "WEEKLY") && (p.BYDAY ?? []).some((d) => /\d/.test(String(d)))) return "BYDAY";
-        const months = (p.BYMONTH ?? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).map(Number);
         if (months.some((m) => !Number.isInteger(m) || m < 1 || m > 12)) return "BYMONTH";
+        if (!ordinals.every((o) => o === 0 || position(o)) || !setpos.every(position)) return "position";
+        if (setpos.length && !byday.length) return "BYSETPOS";
+        // A fifth weekday turns up within a few years only when every month or year is looked at
+        const fifth = ordinals.some((o) => Math.abs(o) === 5) || setpos.some((n) => Math.abs(n) === 5);
+        // The months a rule's dates can fall in, and whether a date there exists: February 29th
+        // only in leap years, which a rule that skips years may never reach
         const longest = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        if (days.length && !months.some((m) => days.some((d) => Math.abs(d) <= longest[m - 1]))) return "no date";
-        return null;
+        const dated = (inMonths, everyYear) => {
+            const want = days.length ? days : [start.day];
+            const pairs = inMonths.flatMap((m) => want.filter((d) => Math.abs(d) <= longest[m - 1]).map((d) => [m, d]));
+            if (!pairs.length) return false;
+            return everyYear || !pairs.every(([m, d]) => m === 2 && Math.abs(d) === 29);
+        };
+        switch (rule.freq) {
+            case "DAILY":
+                if (days.length || months.length || setpos.length || ordinals.some(Boolean)) return "DAILY";
+                if (byday.length && interval !== 1) return "DAILY";
+                return null;
+            case "WEEKLY":
+                if (days.length || months.length || setpos.length || ordinals.some(Boolean)) return "WEEKLY";
+                return null;
+            case "MONTHLY": {
+                if (months.length || (days.length && byday.length) || (fifth && interval !== 1)) return "MONTHLY";
+                if (byday.length) return null;
+                const visited = [...new Set(Array.from({ length: 12 }, (_, n) => ((start.month - 1 + n * interval) % 12) + 1))];
+                return dated(visited, interval === 12 || visited.length > 1) ? null : "no date";
+            }
+            case "YEARLY": {
+                if ((byday.length && !months.length) || (fifth && interval !== 1)) return "YEARLY";
+                // Days of the month and weekdays together only as old time zone definitions write
+                // them (the Sunday among the 8th to the 14th): seven days in a row hold every weekday
+                if (days.length && byday.length && (interval !== 1 || !this.week(days))) return "YEARLY";
+                if (byday.length && !days.length) return null;
+                return dated(months.length ? months : [start.month], interval === 1) ? null : "no date";
+            }
+            default:
+                return "frequency";
+        }
+    }
+
+    // Whether days of the month hold seven in a row
+    week(days) {
+        const set = new Set(days);
+        return days.some((d) => [1, 2, 3, 4, 5, 6].every((k) => set.has(d + k)));
     }
 
     // One series: its master and its overrides (each with a RECURRENCE-ID), handing every
@@ -345,7 +402,7 @@ export default class CalendarFeed {
             emit(master, ev.startDate, ev.endDate, null);
             return true;
         }
-        for (const p of master.getAllProperties("rrule")) if (this.unsafe(p.getFirstValue())) return false;
+        for (const p of master.getAllProperties("rrule")) if (this.unsafe(p.getFirstValue(), ev.startDate)) return false;
         // Occurrences are looked at from a day before the window to a day after it, and further by
         // as much as a this-and-following change moves them. An override moved into the window
         // from further away is caught after, from the overrides themselves.
@@ -394,11 +451,13 @@ export default class CalendarFeed {
     // of its periods later (the same weekday, the same week in its rhythm), so stepping starts at
     // the last such start at least one period before `from`. An occurrence there that the rule
     // wouldn't have made falls before `from`, where nothing is read. Anything else starts at the
-    // series' start.
+    // series' start, as does one with an RDATE.
     startFor(ev, from) {
         const start = ev.startDate;
         const rules = ev.component.getAllProperties("rrule");
-        if (rules.length !== 1) return start;
+        // ical.js starts from an RDATE before the given start, and then steps its EXDATEs out of
+        // line, so a series with any RDATE starts at its start
+        if (rules.length !== 1 || ev.component.hasProperty("rdate")) return start;
         const rule = rules[0].getFirstValue();
         const days = rule.freq === "DAILY" ? 1 : rule.freq === "WEEKLY" ? 7 : 0;
         if (!days || rule.count) return start;
@@ -448,7 +507,7 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, lowercased: from a Google link's path, or else the attendee on
-    // the most events read (the first seen, on a tie). Null when there's none.
+    // the most events read. Null when there's none, or two are on as many.
     owner(link, vevents) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (m) {
@@ -468,9 +527,12 @@ export default class CalendarFeed {
                 counts.set(who, (counts.get(who) ?? 0) + 1);
             }
         }
-        let best = null, most = 0;
-        for (const [who, n] of counts) if (n > most) { best = who; most = n; }
-        return best;
+        // On a tie it can't tell, and takes no one: no event is left out
+        let best = null, most = 0, tie = false;
+        for (const [who, n] of counts) {
+            if (n > most) { best = who; most = n; tie = false; } else if (n === most) tie = true;
+        }
+        return tie ? null : best;
     }
 
     // An attendee's address: its EMAIL parameter (iCloud's), or its value without `mailto:`
