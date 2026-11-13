@@ -5,9 +5,9 @@
 //   its body must close the same issue, not another one and not just "Part of". A PR for a cluster
 //   of issues lists them after one keyword (`Closes OBS-65, OBS-66` or `… OBS-65 and OBS-66`),
 //   the way Linear reads it, and every issue in the list counts.
-// - Docs gate: when system files change (CustomJS, Templater, the templates, the calendar
-//   scripts, Plainday's source and manifest), the PR either changes one of DOCS (the manual or the
-//   README) or has a `## Docs` section saying why neither needs anything.
+// - Docs gate: when system files change (Plainday's source, the class files in it and its
+//   manifest, the Templater and calendar scripts, the templates), the PR either changes one of DOCS
+//   (the manual or the README) or has a `## Docs` section saying why neither needs anything.
 //
 // Inputs (environment): PR_TITLE, PR_BODY, PR_BRANCH, and CHANGED_FILES (one path per line) or
 // BASE_SHA + HEAD_SHA to compute it. Exit 1 with one line per problem.
@@ -15,11 +15,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const SYSTEM_DIRS = [
-    "Config/Scripts/CustomJS/",
     "Config/Scripts/Templater/",
     "Config/Scripts/Calendar/",
     "Config/Templates/",
-    // Plainday (OBS-226)
+    // Plainday (OBS-226), with the class files in plugin/src/classes/ (OBS-270)
     "plugin/",
     "manifest.json",
 ];

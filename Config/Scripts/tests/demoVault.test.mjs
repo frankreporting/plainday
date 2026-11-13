@@ -220,7 +220,7 @@ test("demo vault: every convention the README describes shows up at least once",
 });
 
 test("demo vault: every line that links a note also links its project or area, before the note link (OBS-90)", () => {
-    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
     const { changes, skipped, moved } = convert(vault, tr, tr, tasks);
     assert.deepEqual(changes.map((c) => `${c.path}:${c.line}: ${c.after}`), [], "the conversion (tests/demo/addProjectLinks.mjs) finds nothing left to do");
     assert.deepEqual([skipped, moved].map((l) => l.length), [0, 0]);
@@ -230,7 +230,7 @@ test("demo vault: every line that links a note also links its project or area, b
 });
 
 test("the conversion's check: an entry counted on one side only, or with other minutes or 🆓, is caught (OBS-90 review)", () => {
-    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
+    const tasks = new (vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", vm.createContext({})))();
     // The old report stood in for by the new one with some of its entries changed
     const before = tr.build(dailyNotes(vault), plan.index);
     const withEntries = (change) => Object.assign(Object.create(tr), { build: () => ({ ...before, entries: change(before.entries.map((e) => ({ ...e }))) }) });
@@ -319,7 +319,7 @@ test("demo vault: every meeting log has its line in its daily note, and its time
     const require = createRequire(import.meta.url);
     const eventTimes = require("../Templater/eventTimes.js");
     const recordEvent = require("../Templater/recordEvent.js");
-    const code = fs.readFileSync(new URL("../CustomJS/calendarSync.js", import.meta.url), "utf8");
+    const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
     const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, customJS: {}, console })))();
     const logs = demoNotes.filter((p) => tagsOf(p).includes("log"));
     assert.ok(logs.length >= 3);
@@ -378,7 +378,7 @@ test("demo vault: the paid Kestrel invoice adds up, and is what Invoice would bi
 });
 
 test("demo vault: Pinecrest Library Brochure shows a bill-to; Kestrel, with none, bills its client (OBS-109)", () => {
-    const Invoice = vm.runInContext(fs.readFileSync(new URL("../CustomJS/invoice.js", import.meta.url), "utf8") + "\n;Invoice", vm.createContext({}));
+    const Invoice = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", import.meta.url), "utf8") + "\n;Invoice", vm.createContext({}));
     const inv = new Invoice();
     const brochure = inv.readBillTo("Projects/Freelance/Pinecrest Library Brochure/Pinecrest Library Brochure.md", tr, plan.index);
     assert.equal(brochure.path, "Reference/Entities/Friends of Pinecrest Library.md");
@@ -447,7 +447,7 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
 });
 
 test("demo vault: every task's lines agree, and the sample shows a sent task and a forwarded one with IDs (OBS-185)", () => {
-    const TaskIds = vm.runInContext(fs.readFileSync(new URL("../CustomJS/taskIds.js", import.meta.url), "utf8") + "\n;TaskIds", vm.createContext({}));
+    const TaskIds = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/taskIds.js", import.meta.url), "utf8") + "\n;TaskIds", vm.createContext({}));
     const kind = (p) => (p.startsWith(`${DAYS}/`) ? "day" : /\/(weeks|months|years)\//.test(p) ? "period" : "other");
     const notes = demoNotes.map((p) => ({ path: p, kind: kind(p), text: vault.notes.get(p).text }));
     const violations = TaskIds.check(notes, {

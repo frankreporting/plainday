@@ -34,7 +34,7 @@ The sample notes use this layout. Area and project names are yours to choose; on
 Archive/                           finished projects, moved here whole; excluded from search, kept in reports
 Config/                            the system
   Bases/                           Bases views (and the Invoices base, in a vault with no invoice folder)
-  Scripts/                         CustomJS, Templater user scripts, Calendar, tests
+  Scripts/                         Templater user scripts, Calendar, tests
   Templates/                       Templater templates
 Inbox/                             new notes that haven't been filed
 Projects/
@@ -62,10 +62,11 @@ Reference/
   Planner/
     days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
 Welcome.md                         start here
-plugin/                            Plainday, the plugin built from Config/Scripts/CustomJS (build, host, command list, tests)
+plugin/                            Plainday: its build, tests and source (src/), the class files in src/classes/
 manifest.json, package.json        Plainday's manifest, and its build (npm run build)
 versions.json                      each release's oldest Obsidian (npm version)
 eslint.config.mjs                  Obsidian's lint (npm run lint); its baseline is .github/ci/eslint-suppressions.json
+jsconfig.json                      the code the community directory's scan reviews
 ```
 
 Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
@@ -179,7 +180,7 @@ From the vault root, with Node 20 or later:
 node --test "Config/Scripts/tests/*.test.mjs"
 ```
 
-For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and no line that reaches for the CustomJS plugin, which ran the scripts before Plainday. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
+For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, and no line that reaches for the CustomJS plugin, which ran the scripts before Plainday. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs, with Obsidian's types for the code `jsconfig.json` names for the scan: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
 
 The scripts are loaded in Node, each class file and Templater script on its own, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
 
@@ -196,10 +197,10 @@ Don't make your own vault a copy of this repository: it carries the sample notes
 Instead, install Plainday in your vault, clone this repository somewhere outside it, and install the rest of the system (the templates, bases and manual) with the **Update Obsidian PM** command:
 
 1. Install Templater, Natural Language Dates (Revived) and BRAT, then Plainday through BRAT, as in *Try it* (steps 2 and 3).
-2. Run **Plainday: Update Obsidian PM** from the command palette. It asks where your clone is the first time.
+2. Run **Plainday: Update Obsidian PM** from the command palette. It asks where your clone is the first time: the folder with Plainday's `manifest.json`.
 3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
 
-What it installs: everything the repository has under `Config/` (the manual included), plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the two settings files the scripts depend on (`daily-notes.json` and Templater's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them), your other Obsidian settings, the demo's own test files, and the script that tests a branch in the clone.
+What it installs: everything the repository has under `Config/` (the manual included) but the tests, plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the two settings files the scripts depend on (`daily-notes.json` and Templater's `data.json`). The Invoices base goes beside your invoices, in the `folder` your Invoice Settings name, once you've set one (see the manual's *Where invoices live*). The demo's own `Invoice Settings.md` and invoices are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them, your own tests included), your other Obsidian settings, and the script that tests a branch in the clone. Plainday's class files aren't installed either: the plugin runs its own build of them. A vault that took an update before they moved to `plugin/src/classes/` gets its old copies in `Config/Scripts/CustomJS/`, and the tests it was given in `Config/Scripts/tests/`, offered for removal.
 
 A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `Config/Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
 

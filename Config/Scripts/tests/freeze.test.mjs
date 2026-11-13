@@ -8,7 +8,7 @@ import vm from "node:vm";
 import { obsidianPadded, segments, tablesIn as spans } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
 const TimeReport = load("timeReport.js", "TimeReport");
 const tr = new TimeReport();
 const billing = new (load("billing.js", "Billing"))();
@@ -404,7 +404,7 @@ test("UpdateObsidianPM installs Table Settings when the vault has none, and then
     const up = new UpdateObsidianPM();
     const PATH = "Config/Table Settings.md";
     assert.ok(up.installs(PATH));
-    const source = new Map([[PATH, "repo"], ["Config/Scripts/CustomJS/timeReport.js", "s1"]]);
+    const source = new Map([[PATH, "repo"], ["Config/Scripts/Templater/recordEvent.js", "s1"]]);
     const listed = (plan) => Object.entries(plain(plan)).filter(([, paths]) => paths.some?.((p) => p === PATH || p?.to === PATH)).map(([k]) => k);
     assert.deepEqual(listed(up.plan(source, new Map())), ["add"]);
     assert.deepEqual(listed(up.plan(source, new Map([[PATH, "yours"]]), new Map([[PATH, "repo"]]))), [], "changed by you: not updated, not listed");
@@ -412,7 +412,7 @@ test("UpdateObsidianPM installs Table Settings when the vault has none, and then
     assert.deepEqual(listed(up.plan(source, new Map([[PATH, "old"]]), new Map([[PATH, "old"]]))), [], "an older copy you never changed stays too");
     assert.deepEqual(listed(up.plan(new Map([[PATH, "repo"]]), new Map([[PATH, "repo"]]))), []);
     // Should the repository ever drop it, the vault's own stays: not removed, not listed
-    const dropped = new Map([["Config/Scripts/CustomJS/timeReport.js", "s1"]]);
+    const dropped = new Map([["Config/Scripts/Templater/recordEvent.js", "s1"]]);
     for (const vault of ["repo", "yours"]) assert.deepEqual(listed(up.plan(dropped, new Map([[PATH, vault]]), new Map([[PATH, "repo"]]))), [], vault);
 });
 
@@ -458,7 +458,7 @@ function withOpenNote(file, editor) {
         app: { workspace: { getLeavesOfType: () => [{ view: { file, editor } }] } },
         Notice: class { constructor(message) { notices.push(message); } },
     });
-    const make = (file, name) => new (vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, context))();
+    const make = (file, name) => new (vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context))();
     return { tr: make("timeReport.js", "TimeReport"), inv: make("invoice.js", "Invoice"), notices };
 }
 

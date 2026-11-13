@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const recordEvent = require("../Templater/recordEvent.js");
 const eventTimes = require("../Templater/eventTimes.js");
 
-const code = fs.readFileSync(new URL("../CustomJS/calendarSync.js", import.meta.url), "utf8");
+const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
 const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, customJS: {}, console })))();
 
 const text = (...lines) => lines.join("\n");

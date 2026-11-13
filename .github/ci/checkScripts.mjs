@@ -1,6 +1,6 @@
 // CI: every script loads, and Plainday's command list names only classes that exist.
 //
-// - Each class file (Config/Scripts/CustomJS/*.js) is evaluated in a bare vm context and must
+// - Each class file (plugin/src/classes/*.js) is evaluated in a bare vm context and must
 //   leave behind the class it declares. This catches a syntax error or a top-level reference
 //   that would break a command at startup, even when no test covers that script.
 // - Templater/*.js must parse (`node --check`).
@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const SCRIPTS = "Config/Scripts";
-const CUSTOMJS = `${SCRIPTS}/CustomJS`;
+const CLASSES = "plugin/src/classes";
 const TEMPLATER = `${SCRIPTS}/Templater`;
 const PLAINDAY_COMMANDS = "plugin/src/commands.js";
 
@@ -28,7 +28,7 @@ export function classNameOf(source) {
 
 // Loads one class file's source in a fresh context; returns null when it defines its class, else
 // the problem.
-export function loadCustomJS(source, file) {
+export function loadClass(source, file) {
     const name = classNameOf(source);
     if (!name) return `${file}: no top-level class declaration`;
     try {
@@ -42,7 +42,7 @@ export function loadCustomJS(source, file) {
 
 // The classes the class files declare, by name
 export function classesIn(root = ".") {
-    const dir = path.join(root, CUSTOMJS);
+    const dir = path.join(root, CLASSES);
     return new Set(fs.readdirSync(dir).filter((f) => f.endsWith(".js"))
         .map((f) => classNameOf(fs.readFileSync(path.join(dir, f), "utf8"))).filter(Boolean));
 }
@@ -50,10 +50,10 @@ export function classesIn(root = ".") {
 export function checkAll(root = ".") {
     const problems = [];
 
-    const customJSDir = path.join(root, CUSTOMJS);
-    for (const f of fs.readdirSync(customJSDir).filter((f) => f.endsWith(".js")).sort()) {
-        const source = fs.readFileSync(path.join(customJSDir, f), "utf8");
-        const problem = loadCustomJS(source, `${CUSTOMJS}/${f}`);
+    const classesDir = path.join(root, CLASSES);
+    for (const f of fs.readdirSync(classesDir).filter((f) => f.endsWith(".js")).sort()) {
+        const source = fs.readFileSync(path.join(classesDir, f), "utf8");
+        const problem = loadClass(source, `${CLASSES}/${f}`);
         if (problem) problems.push(problem);
     }
 
@@ -87,10 +87,10 @@ export async function checkPlainday(root = ".") {
     const classes = classesIn(root);
     const problems = [];
     for (const c of COMMANDS) {
-        if (!classes.has(c.script)) problems.push(`${PLAINDAY_COMMANDS}: the command ${JSON.stringify(c.id)} runs ${c.script}, which no ${CUSTOMJS} file defines`);
+        if (!classes.has(c.script)) problems.push(`${PLAINDAY_COMMANDS}: the command ${JSON.stringify(c.id)} runs ${c.script}, which no ${CLASSES} file defines`);
     }
     for (const name of STARTUP) {
-        if (!classes.has(name)) problems.push(`${PLAINDAY_COMMANDS}: STARTUP names ${name}, which no ${CUSTOMJS} file defines`);
+        if (!classes.has(name)) problems.push(`${PLAINDAY_COMMANDS}: STARTUP names ${name}, which no ${CLASSES} file defines`);
     }
     for (const key of ["id", "name"]) {
         const seen = new Set();

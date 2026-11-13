@@ -1,4 +1,4 @@
-// Tests for CustomJS/updateObsidianPM.js. Run from the vault root:
+// Tests for plugin/src/classes/updateObsidianPM.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the planning, which doesn't
 // touch `app`, the file system or git, is tested.
@@ -6,10 +6,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { execFileSync } from "node:child_process";
 
 const here = new URL(".", import.meta.url);
 const UpdateObsidianPM = vm.runInContext(
-    fs.readFileSync(new URL("../CustomJS/updateObsidianPM.js", here), "utf8") + "\n;UpdateObsidianPM",
+    fs.readFileSync(new URL("../../../plugin/src/classes/updateObsidianPM.js", here), "utf8") + "\n;UpdateObsidianPM",
     vm.createContext({}),
 );
 const up = new UpdateObsidianPM();
@@ -17,13 +18,13 @@ const map = (o) => new Map(Object.entries(o));
 // Objects made inside the vm context have that context's prototypes; compare as plain data
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-const SCRIPT = "Config/Scripts/CustomJS/timeReport.js";
+const SCRIPT = "Config/Scripts/Templater/recordEvent.js";
 const TEMPLATE = "Config/Templates/Task.md";
 const SETTINGS = ".obsidian/plugins/templater-obsidian/data.json";
 // Installed until OBS-257, when the class files stopped running under CustomJS
 const CUSTOMJS_SETTINGS = ".obsidian/plugins/customjs/data.json";
 
-test("installs: the system, never notes, never the demo's own test files", () => {
+test("installs: the system, never notes, the class files or the tests", () => {
     for (const path of [SCRIPT, TEMPLATE, SETTINGS, "README.md", "CLAUDE.md", "Reference/Invoices/Invoices.base", "Projects/Projects.base",
         ".obsidian/daily-notes.json"]) {
         assert.equal(up.installs(path), true, path);
@@ -33,7 +34,9 @@ test("installs: the system, never notes, never the demo's own test files", () =>
         "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "Inbox/Desk lamp for the studio.md",
         ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json", CUSTOMJS_SETTINGS,
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs",
-        "Config/Scripts/dev-vault.sh", "Config/Scripts/tests/devVault.test.mjs"]) {
+        "Config/Scripts/dev-vault.sh", "Config/Scripts/tests/devVault.test.mjs",
+        "Config/Scripts/tests/timeReport.test.mjs", "Config/Scripts/tests/standInVault.mjs", "Config/Scripts/tests/fixtures/x.json",
+        "plugin/src/classes/timeReport.js", "plugin/src/main.js", "manifest.json", "main.js"]) {
         assert.equal(up.installs(path), false, path);
     }
 });
@@ -82,6 +85,51 @@ test("plan: CustomJS's settings and CalendarSyncRange, installed before OBS-257 
     assert.deepEqual(plain([plan.add, plan.update, plan.local, plan.keep]), [[], [], [], []]);
 });
 
+// ------------------------------------------------------------------ the class files in plugin/src/classes (OBS-270)
+
+const REPO = new URL("../../../", here);
+const tracked = execFileSync("git", ["-C", REPO.pathname, "ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
+const CLASS_FILES = fs.readdirSync(new URL("plugin/src/classes/", REPO)).filter((f) => f.endsWith(".js")).sort();
+
+test("a clone is a folder whose manifest.json is Plainday's", () => {
+    assert.equal(up.isManifest(fs.readFileSync(new URL("manifest.json", REPO), "utf8")), true, "this repository's");
+    for (const text of ['{"id":"another-plugin"}', '{"name":"Plainday"}', "null", "", "{not json"]) {
+        assert.equal(up.isManifest(text), false, text);
+    }
+});
+
+test("installs: of this repository's files, the templates, the manual and the Templater scripts, and no class file or test", () => {
+    const installed = tracked.filter((p) => up.installs(p));
+    assert.deepEqual(installed.filter((p) => !p.startsWith("Config/") && !p.includes("/")).sort(), ["CLAUDE.md", "README.md"]);
+    assert.deepEqual(installed.filter((p) => /^(plugin|\.github)\/|^Config\/Scripts\/(tests\/|dev-vault\.sh$)/.test(p)), []);
+    assert.ok(installed.includes("Config/Manual.md"));
+    for (const p of tracked.filter((q) => /^Config\/(Templates|Scripts\/Templater)\//.test(q))) assert.ok(installed.includes(p), p);
+    assert.ok(installed.some((p) => p.startsWith("Config/Scripts/Templater/")), "the Templater scripts are there to install");
+    assert.equal(CLASS_FILES.length > 20, true, "the class files are where the build reads them");
+});
+
+test("plan: a vault installed before OBS-270 gets its class files and tests offered as removals, and keeps an edited test", () => {
+    // What the vault's install record lists: every class file at its old path, and every test the
+    // repository had that the old rules installed (all but the demo's own and dev-vault.sh's)
+    const oldTests = tracked.filter((p) => p.startsWith("Config/Scripts/tests/")
+        && !p.startsWith("Config/Scripts/tests/demo/") && !["Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/devVault.test.mjs"].includes(p));
+    const oldClasses = CLASS_FILES.map((f) => `Config/Scripts/CustomJS/${f}`);
+    const source = new Map(tracked.filter((p) => up.installs(p)).map((p) => [p, "same"]));
+    const installed = new Map([...source, ...[...oldClasses, ...oldTests].map((p) => [p, "old"])]);
+    const plan = up.plan(source, installed, installed);
+    assert.deepEqual(plain(plan.remove), [...oldClasses, ...oldTests].sort());
+    assert.deepEqual(plain([plan.add, plan.update, plan.local, plan.keep]), [[], [], [], []]);
+    // A test edited in the vault stays, and a private test was never installed, so it's in no list
+    const edited = oldTests[0];
+    const vault = new Map([...installed, [edited, "edited"], ["Config/Scripts/tests/mine.private.test.mjs", "mine"]]);
+    const kept = up.plan(source, vault, installed);
+    assert.deepEqual(plain(kept.keep), [edited]);
+    assert.equal(plain(kept.remove).includes(edited), false);
+    for (const list of Object.values(plain(kept))) {
+        if (Array.isArray(list)) assert.equal(list.some((p) => String(p?.to ?? p).includes("private")), false);
+    }
+});
+
 test("plan: notes are never in any list, whatever the repository holds", () => {
     const plan = up.plan(map({
         "Welcome.md": "a", "Projects/Freelance/Freelance.md": "b", "Reference/Planner/days/2026-09-16.md": "c",
@@ -100,7 +148,7 @@ const BASE = "Config/Bases/Invoices.base";
 const PLACED = "Business/Invoices/Invoices.base";
 
 test("folderOf: reads Invoice Settings' `folder` exactly as Billing does", () => {
-    const Billing = vm.runInContext(fs.readFileSync(new URL("../CustomJS/billing.js", here), "utf8") + "\n;Billing", vm.createContext({}));
+    const Billing = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/billing.js", here), "utf8") + "\n;Billing", vm.createContext({}));
     const billing = new Billing();
     for (const raw of ["Business/Invoices", " /a//b/ ", "Business /Invoices", "a\nb", "Config/x", "archive", "x/Config", "", "  ", "/", null, undefined, "../x", "a/../b", ".obsidian", "a/.trash",
         "a/ /b", "C:\\x", "a\\b", "[[x]]", "x#1", "a|b", 2026, ["a"], { a: 1 }, true, "Business/Invoices 2026"]) {

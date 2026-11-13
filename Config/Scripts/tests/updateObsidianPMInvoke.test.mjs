@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 const nodeRequire = createRequire(import.meta.url);
 
 const here = new URL(".", import.meta.url);
-const code = fs.readFileSync(new URL("../CustomJS/updateObsidianPM.js", here), "utf8");
+const code = fs.readFileSync(new URL("../../../plugin/src/classes/updateObsidianPM.js", here), "utf8");
 
 const write = (root, rel, text) => {
     const full = path.join(root, rel);
@@ -24,15 +24,19 @@ const write = (root, rel, text) => {
 const read = (root, rel) => fs.readFileSync(path.join(root, rel), "utf8");
 const exists = (root, rel) => fs.existsSync(path.join(root, rel));
 
-// A clone: a git repository holding a few system files, a note and a demo-only test file
+// A clone: a git repository with Plainday's manifest, holding a few system files, a note, a class
+// file and two tests (one the demo's own)
 function makeSource(dir) {
-    write(dir, "Config/Scripts/CustomJS/timeReport.js", "new report\n");
+    write(dir, "manifest.json", '{"id":"plainday","name":"Plainday"}\n');
+    write(dir, "plugin/src/classes/timeReport.js", "class TimeReport {}\n");
+    write(dir, "Config/Scripts/Templater/recordEvent.js", "new report\n");
     write(dir, "Config/Templates/Task.md", "task template\n");
     write(dir, ".obsidian/plugins/templater-obsidian/data.json", '{"templates_folder":"Config/Templates"}\n');
     write(dir, "README.md", "readme\n");
     write(dir, "Welcome.md", "demo note\n");
     write(dir, "Reference/Planner/days/2026-09-16.md", "demo daily note\n");
     write(dir, "Config/Scripts/tests/demoVault.test.mjs", "demo test\n");
+    write(dir, "Config/Scripts/tests/timeReport.test.mjs", "reads plugin/src/classes\n");
     write(dir, "Config/Scripts/tests/demo/renderReports.mjs", "writes notes\n");
     const git = (...args) => execFileSync("git", ["-C", dir, ...args], { stdio: "pipe" });
     git("init", "-q", "-b", "main");
@@ -111,24 +115,24 @@ function fixture(answers = {}) {
     return { base, source, vault, up: load(s.context, s.answers), ...s };
 }
 
-test("invoke: a first install copies the system, and never a note or a demo test", async (t) => {
+test("invoke: a first install copies the system, and never a note, a class file or a test", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     await f.up.invoke();
 
-    assert.equal(read(f.vault, "Config/Scripts/CustomJS/timeReport.js"), "new report\n");
+    assert.equal(read(f.vault, "Config/Scripts/Templater/recordEvent.js"), "new report\n");
     assert.equal(read(f.vault, "Config/Templates/Task.md"), "task template\n");
     assert.equal(read(f.vault, "README.md"), "readme\n");
     assert.equal(exists(f.vault, ".obsidian/plugins/templater-obsidian/data.json"), true);
-    for (const note of ["Welcome.md", "Reference/Planner/days/2026-09-16.md",
-        "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs"]) {
+    for (const note of ["Welcome.md", "Reference/Planner/days/2026-09-16.md", "manifest.json", "plugin/src/classes/timeReport.js",
+        "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs", "Config/Scripts/tests/timeReport.test.mjs"]) {
         assert.equal(exists(f.vault, note), false, note);
     }
     // it remembers where it came from and what it put there
     assert.equal(read(f.vault, "Config/Scripts/update-source").trim(), f.source);
     const manifest = JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json"));
     assert.deepEqual(Object.keys(manifest.files).sort(), [
-        ".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/CustomJS/timeReport.js",
+        ".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/Templater/recordEvent.js",
         "Config/Templates/Task.md", "README.md",
     ]);
     assert.match(manifest.commit, /^[0-9a-f]{7,}$/);
@@ -153,13 +157,13 @@ test("invoke: a second run updates an old file and leaves one edited here alone"
     await f.up.invoke();
 
     // the repository moves on; the vault has its own edit in the template
-    write(f.source, "Config/Scripts/CustomJS/timeReport.js", "newer report\n");
+    write(f.source, "Config/Scripts/Templater/recordEvent.js", "newer report\n");
     execFileSync("git", ["-C", f.source, "commit", "-qam", "update"], { stdio: "pipe" });
     write(f.vault, "Config/Templates/Task.md", "my own template\n");
 
     f.answers.confirm = { overwriteLocal: false, remove: true };
     await f.up.invoke();
-    assert.equal(read(f.vault, "Config/Scripts/CustomJS/timeReport.js"), "newer report\n", "old version updated");
+    assert.equal(read(f.vault, "Config/Scripts/Templater/recordEvent.js"), "newer report\n", "old version updated");
     assert.equal(read(f.vault, "Config/Templates/Task.md"), "my own template\n", "local edit kept");
     assert.match(f.answers.sawSummary, /Changed in this vault, would be overwritten: 1/);
     assert.match(f.answers.sawSummary, /Updated: 1/);
@@ -187,7 +191,7 @@ test("invoke: cancelling writes nothing, and a second thought about removals is 
     const f = fixture({ confirm: null });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     await f.up.invoke();
-    assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), false);
+    assert.equal(exists(f.vault, "Config/Scripts/Templater/recordEvent.js"), false);
     assert.equal(exists(f.vault, "Config/Scripts/update-manifest.json"), false);
 
     // install, then drop a file in the repository but say no to removing it
@@ -206,9 +210,19 @@ test("invoke: it refuses a folder that isn't a clone, and the vault itself", asy
     f.answers.source = path.join(f.base, "nowhere");
     await f.up.invoke();
     assert.match(f.notices.at(-1), /No obsidian-pm clone/);
+    // The class files' old folder isn't the sign of a clone any more (OBS-270), and another plugin's
+    // manifest isn't one either
+    const other = path.join(f.base, "other");
+    write(other, "Config/Scripts/CustomJS/timeReport.js", "x\n");
+    f.answers.source = other;
+    await f.up.invoke();
+    assert.match(f.notices.at(-1), /No obsidian-pm clone/);
+    write(other, "manifest.json", '{"id":"another-plugin"}\n');
+    await f.up.invoke();
+    assert.match(f.notices.at(-1), /No obsidian-pm clone/);
 
     f.answers.source = f.vault;
-    write(f.vault, "Config/Scripts/CustomJS/x.js", "x\n");
+    write(f.vault, "manifest.json", '{"id":"plainday"}\n');
     await f.up.invoke();
     assert.match(f.notices.at(-1), /that's this vault|not a clone/i);
     assert.equal(exists(f.vault, "Config/Scripts/update-manifest.json"), false);
@@ -223,7 +237,7 @@ test("invoke: a clone with an uncommitted edit is refused before anything is wri
     assert.match(f.notices.at(-1), /1 uncommitted change \(Reference\/Planner\/days\/2026-09-16\.md\)/);
     assert.match(f.notices.at(-1), /dev-vault\.sh done/);
     assert.equal(f.answers.sawSummary, undefined, "no dialog");
-    assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), false, "nothing installed");
+    assert.equal(exists(f.vault, "Config/Scripts/Templater/recordEvent.js"), false, "nothing installed");
     assert.equal(exists(f.vault, "Config/Scripts/update-manifest.json"), false);
 });
 
@@ -274,7 +288,7 @@ test("invoke: nothing to do says so", async (t) => {
 // guard checked is checked again when Update is clicked; `answers.confirm` as a function stands in
 // for whatever happened while the dialog was open.
 const nothingWritten = (f, why) => {
-    assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), false, `${why}: nothing installed`);
+    assert.equal(exists(f.vault, "Config/Scripts/Templater/recordEvent.js"), false, `${why}: nothing installed`);
     assert.equal(exists(f.vault, "Config/Scripts/update-manifest.json"), false, `${why}: no manifest`);
     assert.match(f.notices.at(-1), /clone changed while the dialog was open/i, why);
     assert.match(f.notices.at(-1), /run this again/i, why);
@@ -309,7 +323,7 @@ test("invoke: a clone that moved to another commit while the dialog was open ins
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     f.answers.confirm = () => {
         // pulled in another terminal: still main, still clean, different files
-        write(f.source, "Config/Scripts/CustomJS/timeReport.js", "newer report\n");
+        write(f.source, "Config/Scripts/Templater/recordEvent.js", "newer report\n");
         execFileSync("git", ["-C", f.source, "commit", "-qam", "pulled"], { stdio: "pipe" });
         return { overwriteLocal: true, remove: true };
     };
@@ -344,11 +358,11 @@ test("invoke: a copy that fails partway still records what landed, and names wha
     await f.up.invoke();
     // copy order: .obsidian/…/data.json, Config/Scripts/…/timeReport.js, Config/Templates/Task.md, README.md
     assert.equal(exists(f.vault, ".obsidian/plugins/templater-obsidian/data.json"), true);
-    assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), true);
+    assert.equal(exists(f.vault, "Config/Scripts/Templater/recordEvent.js"), true);
     assert.equal(fs.statSync(path.join(f.vault, blocked)).isDirectory(), true, "the failed file");
     assert.equal(exists(f.vault, "README.md"), false, "stopped at the failure");
     const manifest = JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json"));
-    assert.deepEqual(Object.keys(manifest.files).sort(), [".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/CustomJS/timeReport.js"],
+    assert.deepEqual(Object.keys(manifest.files).sort(), [".obsidian/plugins/templater-obsidian/data.json", "Config/Scripts/Templater/recordEvent.js"],
         "the manifest matches what's on disk");
     assert.equal(manifest.failed, blocked);
     assert.match(f.notices.at(-1), /2 of 4 files copied/);
@@ -384,7 +398,7 @@ test("invoke: a file edited under skip-worktree while the dialog was open is not
     await f.up.invoke();
     // it's the first file in copy order, so nothing lands at all
     assert.equal(exists(f.vault, settings), false, "the edited file");
-    assert.equal(exists(f.vault, "Config/Scripts/CustomJS/timeReport.js"), false, "nothing after it either");
+    assert.equal(exists(f.vault, "Config/Scripts/Templater/recordEvent.js"), false, "nothing after it either");
     assert.match(f.notices.at(-1), /0 of 4 files copied/);
     assert.match(f.notices.at(-1), /data\.json/);
     assert.match(f.notices.at(-1), /changed while the dialog was open/i);
@@ -399,7 +413,7 @@ test("invoke: a removal that fails still records the copies that landed", async 
     await f.up.invoke();
 
     // the repository updates one file and drops two; the vault's trash refuses the second removal
-    write(f.source, "Config/Scripts/CustomJS/timeReport.js", "newer report\n");
+    write(f.source, "Config/Scripts/Templater/recordEvent.js", "newer report\n");
     execFileSync("git", ["-C", f.source, "rm", "-q", "Config/Templates/Task.md", "README.md"], { stdio: "pipe" });
     execFileSync("git", ["-C", f.source, "commit", "-qam", "update and drop"], { stdio: "pipe" });
     const trashFile = f.context.app.fileManager.trashFile;
@@ -408,7 +422,7 @@ test("invoke: a removal that fails still records the copies that landed", async 
         return trashFile(file);
     };
     await f.up.invoke();
-    assert.equal(read(f.vault, "Config/Scripts/CustomJS/timeReport.js"), "newer report\n");
+    assert.equal(read(f.vault, "Config/Scripts/Templater/recordEvent.js"), "newer report\n");
     assert.equal(exists(f.vault, "Config/Templates/Task.md"), false, "the first removal went through");
     assert.equal(exists(f.vault, "README.md"), true, "the second didn't");
     assert.match(f.notices.at(-1), /1 of 1 files? copied/);
@@ -562,7 +576,7 @@ test("invoke: settings that don't read, or a `folder` that isn't one, leave the 
         [settingsNote("README.md/Invoices"), /goes through README\.md, which is a file/],
     ]) {
         write(f.vault, "Config/Invoice Settings.md", settings);
-        write(f.source, "Config/Scripts/CustomJS/timeReport.js", `report ${Math.random()}\n`);
+        write(f.source, "Config/Scripts/Templater/recordEvent.js", `report ${Math.random()}\n`);
         execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
         f.notices.length = 0;
         await f.up.invoke();

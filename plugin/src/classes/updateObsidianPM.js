@@ -6,8 +6,9 @@ class UpdateObsidianPM {
     // It copies only what the repository holds under `Config/`, plus README.md, CLAUDE.md, the
     // Projects base and the three settings files the scripts depend on. It never touches a note,
     // never touches anything under `Config/` that the repository doesn't have (your own fonts,
-    // templates or notes stay), and never copies the demo's own test files, which rewrite notes
-    // when they run.
+    // templates, notes or tests stay), and never copies the repository's tests: they read the class
+    // files in plugin/src/, which a vault doesn't get (Plainday runs its own build of them), and the
+    // demo's own rewrite notes when they run.
     //
     // One file goes somewhere of the vault's choosing (OBS-112): the Invoices base sits beside the
     // invoices, in the `folder` Invoice Settings names, so it can be opened as a file even when
@@ -36,6 +37,7 @@ class UpdateObsidianPM {
     //
     // Where the clone is: `Config/Scripts/update-source`, a one-line file holding its path. It
     // isn't in the repository, since it's yours. The command asks for the path on the first run.
+    // A folder is a clone when its manifest.json is Plainday's, which stays put when files move.
     // What it installed last time: `Config/Scripts/update-manifest.json` (also yours), which is
     // how it can tell your edits from an old version.
     //
@@ -48,6 +50,8 @@ class UpdateObsidianPM {
     static INVOICES_BASE_HOME = "Config/Bases/Invoices.base";
     static INVOICE_SETTINGS = "Config/Invoice Settings.md";
     static MANIFEST_FILE = "Config/Scripts/update-manifest.json";
+    // The plugin's id in a clone's manifest.json
+    static PLUGIN_ID = "plainday";
     // The only branch that installs
     static BRANCH = "main";
     // What the repository installs into a vault
@@ -62,15 +66,14 @@ class UpdateObsidianPM {
         ".obsidian/daily-notes.json",
         ".obsidian/plugins/templater-obsidian/data.json",
     ];
-    // Parts of the repository that belong to the demo vault only. demoVault.test.mjs asserts the
-    // demo's own notes, and its render script writes report blocks into notes, so neither belongs
-    // in a vault of real notes. dev-vault.sh drives the clone as a test vault, and its test builds
-    // throwaway clones: both are for working on the system, not for using it.
+    // Parts of the repository for working on the system, not for using it. The tests read the
+    // class files from plugin/src/, outside `Config/`, so they couldn't run in a vault (OBS-270);
+    // demoVault.test.mjs asserts the demo's own notes, and the demo's render script writes report
+    // blocks into notes. dev-vault.sh drives the clone as a test vault. A vault's own tests in
+    // that folder (its private ones) were never installed, so they're never touched.
     static EXCLUDE = [
-        "Config/Scripts/tests/demoVault.test.mjs",
-        "Config/Scripts/tests/demo/",
+        "Config/Scripts/tests/",
         "Config/Scripts/dev-vault.sh",
-        "Config/Scripts/tests/devVault.test.mjs",
         // The demo's invented details: a vault's own settings note is never the repository's
         "Config/Invoice Settings.md",
     ];
@@ -82,6 +85,12 @@ class UpdateObsidianPM {
     ];
 
     // ---------------------------------------------------------------- planning (no app, no fs)
+
+    // Whether `text`, a folder's manifest.json, is a clone's: Plainday's manifest. A folder
+    // without one, or with another plugin's, isn't.
+    isManifest(text) {
+        try { return JSON.parse(text)?.id === UpdateObsidianPM.PLUGIN_ID; } catch { return false; }
+    }
 
     installs(path) {
         return UpdateObsidianPM.INCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -311,7 +320,10 @@ class UpdateObsidianPM {
         source = source.replace(/^~(?=$|\/)/, process.env.HOME ?? "");
         source = path.resolve(source);
 
-        if (!fs.existsSync(path.join(source, "Config/Scripts/CustomJS"))) {
+        const isClone = () => {
+            try { return this.isManifest(fs.readFileSync(path.join(source, "manifest.json"), "utf8")); } catch { return false; }
+        };
+        if (!isClone()) {
             new Notice(`No obsidian-pm clone at ${source}`, 0); return;
         }
         if (path.resolve(vaultPath) === source) { new Notice("That's this vault, not a clone of the repository", 0); return; }
@@ -365,8 +377,7 @@ class UpdateObsidianPM {
         if (!choice) return;
 
         // The dialog may have been open for a while: the clone has to be where the plan left it
-        const isClone = fs.existsSync(path.join(source, "Config/Scripts/CustomJS"));
-        const moved = this.moved(before, isClone ? this.state(source) : null);
+        const moved = this.moved(before, isClone() ? this.state(source) : null);
         if (moved) { new Notice(`Update Obsidian PM: ${moved}`, 0); return; }
 
         if (!(await this.read(UpdateObsidianPM.SOURCE_FILE))) await this.write(UpdateObsidianPM.SOURCE_FILE, source + "\n");

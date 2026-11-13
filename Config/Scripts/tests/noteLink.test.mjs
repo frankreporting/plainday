@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 
 const here = new URL(".", import.meta.url);
 const context = vm.createContext({ customJS: {}, app: {}, window: {}, console });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, context);
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 context.customJS.AddTaskNote = new AddTaskNote();
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");

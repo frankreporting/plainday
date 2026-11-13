@@ -1,4 +1,4 @@
-// Tests for CustomJS/addProjectLink.js. Run from the vault root:
+// Tests for plugin/src/classes/addProjectLink.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `customJS`;
 // only the methods that don't touch `app` are tested. The menu,
@@ -11,7 +11,7 @@ import { COMMANDS } from "../../../plugin/src/commands.js";
 
 const here = new URL(".", import.meta.url);
 const context = vm.createContext({ customJS: {} });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, context);
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 context.customJS.AddTaskNote = new AddTaskNote();
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
@@ -77,7 +77,7 @@ test("label: the line's text for the menu, without checkbox, event time or symbo
 
 test("AddProjectLink is registered as a command, and goes through the shared change code", () => {
     assert.ok(COMMANDS.some((c) => c.script === "AddProjectLink"));
-    const source = fs.readFileSync(new URL("../CustomJS/addProjectLink.js", here), "utf8");
+    const source = fs.readFileSync(new URL("../../../plugin/src/classes/addProjectLink.js", here), "utf8");
     assert.match(source, /helper\.pickHome\(this\.label\(lineText\), /, "the same project-or-area menu");
     assert.match(source, /change\.run\(found, home, /, "the question, the refusal and the write are TaskChange's");
     assert.doesNotMatch(source, /renameFile|replaceRange/, "and it writes nothing itself");

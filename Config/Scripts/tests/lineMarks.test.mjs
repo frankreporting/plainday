@@ -258,7 +258,7 @@ test("sentLine: a source tagged with a subtag names itself; a ⭕ in the title s
 // ---------------------------------------------------------------- waiting for the conversion (review round 3)
 
 test("until the one-time conversion runs, the calendar sync changes nothing, and says why", async () => {
-    const code = fs.readFileSync(new URL("../CustomJS/calendarSync.js", import.meta.url), "utf8");
+    const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
     const Sync = vm.runInContext(`${code}\n;CalendarSync`, vm.createContext({ customJS: { TimeReport: { oldMarksLeft: async () => 2 } }, console }));
     const sync = new Sync();
     let fetched = false;

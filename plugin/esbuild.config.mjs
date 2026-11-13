@@ -1,5 +1,6 @@
-// Builds Plainday: the class files in Config/Scripts/CustomJS/, as they are on disk, bundled with
-// the host into one main.js at the repository root.
+// Builds Plainday: the class files in plugin/src/classes/, as they are on disk, bundled with the
+// host into one main.js at the repository root. Every .js file in that folder is a class file, so
+// Plainday's own modules (main.js, host.js, commands.js) sit beside it, in plugin/src/.
 //
 // Each class file is one class, a single expression: `(${file})` evaluates to it. The build wraps
 // each one, on one line so the class keeps its own line numbers, give or take the first:
@@ -26,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(here, "..");
-export const CLASSES = path.join(ROOT, "Config/Scripts/CustomJS");
+export const CLASSES = path.join(here, "src/classes");
 export const OUTFILE = path.join(ROOT, "main.js");
 const HOST = path.join(here, "src/host.js");
 const ENTRY = path.join(here, "src/main.js");

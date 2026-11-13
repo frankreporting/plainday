@@ -1,4 +1,4 @@
-// Tests for CustomJS/taskIds.js. Run from the vault root:
+// Tests for plugin/src/classes/taskIds.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
 // `customJS` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
-const TaskIds = vm.runInContext(fs.readFileSync(new URL("../CustomJS/taskIds.js", here), "utf8") + "\n;TaskIds", vm.createContext({ customJS: {} }));
+const TaskIds = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/taskIds.js", here), "utf8") + "\n;TaskIds", vm.createContext({ customJS: {} }));
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const F = "[[2026-10-08#^k3x9m2|10/8]]";
 
@@ -287,7 +287,7 @@ test("check 5: a block ID of your own twice in one note, never sent, isn't a tas
 });
 
 test("TRAIL_ITEM and trailItem are AddTaskNote's, kept as copies by hand (OBS-185, OBS-199)", () => {
-    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({}));
+    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({}));
     // One writes the U+FE0F as itself, the other as ️
     assert.equal(TaskIds.TRAIL_ITEM.source.replace(/️/g, "\\uFE0F"), AddTaskNote.TRAIL_ITEM.source);
     assert.equal(TaskIds.TRAIL_ITEM.flags, AddTaskNote.TRAIL_ITEM.flags);

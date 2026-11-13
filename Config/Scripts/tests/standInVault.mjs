@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-export const src = (name) => fs.readFileSync(new URL(`../CustomJS/${name}.js`, import.meta.url), "utf8");
+export const src = (name) => fs.readFileSync(new URL(`../../../plugin/src/classes/${name}.js`, import.meta.url), "utf8");
 
 export const PLANNER = "Reference/Planner";
 export const NN = {

@@ -1,4 +1,4 @@
-// Tests for CustomJS/timeReportOnStartup.js. Run from the vault root:
+// Tests for plugin/src/classes/timeReportOnStartup.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm against a stub of the little it asks of `app` and `customJS`: the
 // layout is ready, the metadata cache is clean (unless a test holds it), Plainday is loaded.
@@ -8,7 +8,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-const code = fs.readFileSync(new URL("../CustomJS/timeReportOnStartup.js", here), "utf8");
+const code = fs.readFileSync(new URL("../../../plugin/src/classes/timeReportOnStartup.js", here), "utf8");
 
 // `customJS` with Plainday loaded and no class in it
 const bare = () => ({ obsidian: { Platform: { isDesktop: true } }, plugin: {} });
