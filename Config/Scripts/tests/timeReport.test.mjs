@@ -1,4 +1,4 @@
-// Tests for CustomJS/timeReport.js. Run from the vault root:
+// Tests for plugin/src/classes/timeReport.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Checks against a real vault's data can go in
@@ -12,14 +12,14 @@ import { compactWriter } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
 const TimeReport = vm.runInContext(
-    fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport",
+    fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport",
     vm.createContext({}),
 );
 // Most tests here are about what a table says, so this TimeReport's tables are read back compactly
 // (`| a | b |`) after the real writer pads them; tables.test.mjs checks the padding (OBS-184)
 const tr = compactWriter(new TimeReport());
 const Billing = vm.runInContext(
-    fs.readFileSync(new URL("../CustomJS/billing.js", here), "utf8") + "\n;Billing",
+    fs.readFileSync(new URL("../../../plugin/src/classes/billing.js", here), "utf8") + "\n;Billing",
     vm.createContext({}),
 );
 const billing = new Billing();
@@ -2166,7 +2166,7 @@ test("OBS-41: refresh keeps the Schedule it started with, even when `customJS` l
         window: { moment: (text) => ({ format: () => text }) },
         console: { ...console, warn: () => {} },
     };
-    const Loaded = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const Loaded = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
     const report = new Loaded();
     // With no project note in sight, refresh stops before it writes anything; it has started, though
     await report.refresh({ quiet: true });
@@ -2987,7 +2987,7 @@ const sheetHarness = ({ files = {}, desktop = true, remembered = [], createFails
             loadLocalStorage: () => remembered, saveLocalStorage: () => {},
         },
     };
-    const Loaded = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const Loaded = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
     const report = new Loaded();
     report.writeBlock = async (f) => { writes.push(f.path); return { wrote: true }; };
     return { report, created, writes };

@@ -8,7 +8,7 @@ import vm from "node:vm";
 import { obsidianPadded, shapeOf, segments, tablesIn } from "./tables.mjs";
 
 const here = new URL(".", import.meta.url);
-const TimeReport = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext({}));
+const TimeReport = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext({}));
 const tr = new TimeReport();
 const table = (head, align, rows) => [...tr.table(head, align, rows)];
 
@@ -123,9 +123,10 @@ test("table: a row with more cells than the table has columns is a mistake, not 
 });
 
 test("every table the system writes comes from TimeReport.table: no script builds a row by hand", () => {
-    // Every script under Config/Scripts (CustomJS, Templater, Calendar). A row built by hand joins cells with
-    // " | ", or starts a string with "| " or "|${"; the writer's own lines are the only ones allowed
-    const root = new URL("../", here);
+    // Every script under Config/Scripts (Templater, Calendar) and in plugin/src (Plainday's own and the
+    // class files). A row built by hand joins cells with " | ", or starts a string with "| " or "|${";
+    // the writer's own lines are the only ones allowed
+    const repo = new URL("../../../", here);
     const scripts = [];
     const walk = (dir) => {
         for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -133,17 +134,19 @@ test("every table the system writes comes from TimeReport.table: no script build
             else if (d.name.endsWith(".js")) scripts.push(new URL(d.name, dir));
         }
     };
-    walk(root);
-    assert.ok(scripts.some((u) => u.pathname.endsWith("CustomJS/timeReport.js")), "the scan reaches the scripts");
+    walk(new URL("Config/Scripts/", repo));
+    walk(new URL("plugin/src/", repo));
+    assert.ok(scripts.some((u) => u.pathname.endsWith("plugin/src/classes/timeReport.js")), "the scan reaches the class files");
+    assert.ok(scripts.some((u) => u.pathname.endsWith("Config/Scripts/Templater/recordEvent.js")), "and the Templater scripts");
     const found = [];
     for (const url of scripts) {
         const lines = fs.readFileSync(url, "utf8").split("\n");
         const from = lines.findIndex((l) => /^\s+table\(head, align, rows(?:, \{[^}]*\} = \{\})?\) \{$/.test(l));
         const to = from === -1 ? -1 : lines.findIndex((l, i) => i > from && /^    \}$/.test(l));
         lines.forEach((line, i) => {
-            if (url.pathname.endsWith("CustomJS/timeReport.js") && i >= from && i <= to) return;
+            if (url.pathname.endsWith("plugin/src/classes/timeReport.js") && i >= from && i <= to) return;
             const code = line.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/\s.*$/, "");
-            if (/join\(\s*["'`] \| ["'`]\s*\)|["'`]\|(?: |\$\{)/.test(code)) found.push(`${url.pathname.split("/Config/")[1]}:${i + 1}: ${line.trim()}`);
+            if (/join\(\s*["'`] \| ["'`]\s*\)|["'`]\|(?: |\$\{)/.test(code)) found.push(`${url.pathname.slice(repo.pathname.length)}:${i + 1}: ${line.trim()}`);
         });
     }
     assert.deepEqual(found, [], "build a table with TimeReport.table instead (CLAUDE.md, Tables in notes)");

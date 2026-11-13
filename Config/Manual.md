@@ -29,7 +29,7 @@ Config/                          the system: templates, scripts, bases, this man
   Bases/                         Bases views (and the Invoices base, in a vault with no invoice folder)
   Error Log.md                   every Problem in one place (see The error log)
   Invoice Settings.md            your details for invoices, and where they go (see Invoices)
-  Scripts/                       CustomJS, Templater, Calendar, tests
+  Scripts/                       Templater, Calendar, tests
   Templates/
 Inbox/                           new notes that haven't been filed
 Projects/
@@ -840,7 +840,7 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 ## Plugins
 
-**Required:** Plainday, the plugin this repository builds from the scripts in `Config/Scripts/CustomJS/`, installed through BRAT from the repository's releases until the community directory lists it (see the README); Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
+**Required:** Plainday, the plugin this repository builds from the class files in `plugin/src/classes/`, installed through BRAT from the repository's releases until the community directory lists it (see the README); Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
 
 **Recommended:**
 
@@ -852,5 +852,5 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 Changes go through pull requests from a git worktree, and are tested one at a time in a clone of the repository opened as its own vault, with `Config/Scripts/dev-vault.sh`. The tests run with `node --test "Config/Scripts/tests/*.test.mjs"` from the vault root. `CLAUDE.md` has the workflow and the privacy rule; the README has the tests and CI.
 
-- **Plainday is built from the scripts:** `npm run build`, in a worktree, bundles every file in `Config/Scripts/CustomJS/` with the plugin's own code in `plugin/` into `main.js`, and `npm test` tests the bundle. A saved script changes nothing in a vault running Plainday until it's built and the plugin reloaded; `dev-vault.sh test` does both for the dev vault. npm never runs in a folder Obsidian opens as a vault.
+- **Plainday is built from the scripts:** `npm run build`, in a worktree, bundles every class file in `plugin/src/classes/` with the plugin's own code in `plugin/src/` into `main.js`, and `npm test` tests the bundle. A saved script changes nothing in a vault running Plainday until it's built and the plugin reloaded; `dev-vault.sh test` does both for the dev vault. npm never runs in a folder Obsidian opens as a vault.
 - **Testing the calendar sync:** the repository holds nothing about calendars. Give a test vault its own calendar, tick only that one in its Calendar Sync note, and seed test events there.

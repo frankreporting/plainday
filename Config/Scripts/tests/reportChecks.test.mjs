@@ -361,7 +361,7 @@ test("check 2: one fix, AddProjectLink, and by hand only where no command works:
 // ------------------------------------------------------------------ the error log
 
 test("the error log names each new check, and a task whose deadlines differ once", () => {
-    const ErrorLog = vm.runInContext(fs.readFileSync(new URL("../CustomJS/errorLog.js", import.meta.url), "utf8") + "\n;ErrorLog", vm.createContext({}));
+    const ErrorLog = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/errorLog.js", import.meta.url), "utf8") + "\n;ErrorLog", vm.createContext({}));
     const log = new ErrorLog();
     const link = (p) => `[[${p.replace(/\.md$/, "")}]]`;
     const kinds = (notes) => plain(log.fromModel({ ...run(notes).model, billing: null }, link).map((g) => [g.kind, g.name, g.count]));

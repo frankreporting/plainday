@@ -15,6 +15,8 @@
 //
 // The one exception is a PR that changes the version of a lint package (LINT_PACKAGES), since a
 // new version can find new things: it re-records the baseline, and says in the PR what changed.
+// Obsidian's types count as one (OBS-270): the type-aware rules read them, and a newer version
+// tells `no-unsupported-api` about newer APIs.
 //
 // Inputs (environment): BASE_SHA, main's commit to compare with. Without it, or when main has no
 // baseline yet, there's nothing to compare. Exit 1 with one line per rule that grew, or when the
@@ -26,7 +28,7 @@ import { spawnSync } from "node:child_process";
 export const BASELINE = ".github/ci/eslint-suppressions.json";
 // Where ESLint reads one on its own, and where the baseline was before OBS-268
 export const ROOT_BASELINE = "eslint-suppressions.json";
-export const LINT_PACKAGES = ["eslint-plugin-obsidianmd", "eslint", "typescript-eslint", "typescript"];
+export const LINT_PACKAGES = ["eslint-plugin-obsidianmd", "eslint", "typescript-eslint", "typescript", "obsidian"];
 
 // { rule: count } summed over every file
 export function ruleTotals(suppressions) {

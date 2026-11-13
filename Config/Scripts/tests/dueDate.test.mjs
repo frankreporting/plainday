@@ -1,4 +1,4 @@
-// Tests for CustomJS/setDueDate.js. Run from the vault root:
+// Tests for plugin/src/classes/setDueDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // `placement` and `cursorAfter` first; then the command on a stand-in vault, with and without the cache a
 // command behind: the deadline on every line of the task, and its task note's `due` (OBS-229). Every name,
@@ -10,7 +10,7 @@ import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
-const DueDate = vm.runInContext(fs.readFileSync(new URL("../CustomJS/setDueDate.js", here), "utf8") + "\n;DueDate", vm.createContext({}));
+const DueDate = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/setDueDate.js", here), "utf8") + "\n;DueDate", vm.createContext({}));
 const due = new DueDate();
 const D = "[[2026-09-30|🚩 9/30]]";
 const apply = (line) => { const { from, to, text } = due.placement(line, D); return line.slice(0, from) + text + line.slice(to); };

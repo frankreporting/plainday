@@ -52,7 +52,7 @@ const contexts = new WeakMap();
 // logs folder is called (OBS-233: a note in one is a log)
 export function loadTimeReport(root = ROOT) {
     const ctx = vm.createContext({});
-    const load = (file, name) => vm.runInContext(fs.readFileSync(path.join(root, `Config/Scripts/CustomJS/${file}.js`), "utf8") + `\n;${name}`, ctx);
+    const load = (file, name) => vm.runInContext(fs.readFileSync(path.join(root, `plugin/src/classes/${file}.js`), "utf8") + `\n;${name}`, ctx);
     ctx.customJS = { AddTaskNote: new (load("addTaskNote", "AddTaskNote"))() };
     const TimeReport = load("timeReport", "TimeReport");
     const tr = new TimeReport();
@@ -62,7 +62,7 @@ export function loadTimeReport(root = ROOT) {
 
 // Billing, which reads the invoice notes for the project timesheets (OBS-5)
 export function loadBilling(root = ROOT) {
-    const code = fs.readFileSync(path.join(root, "Config/Scripts/CustomJS/billing.js"), "utf8");
+    const code = fs.readFileSync(path.join(root, "plugin/src/classes/billing.js"), "utf8");
     const Billing = vm.runInContext(code + "\n;Billing", vm.createContext({}));
     return new Billing();
 }

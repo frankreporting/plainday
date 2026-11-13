@@ -8,9 +8,9 @@ import vm from "node:vm";
 const here = new URL(".", import.meta.url);
 // `customJS` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
 const context = vm.createContext({ customJS: {} });
-const TimeReport = vm.runInContext(fs.readFileSync(new URL("../CustomJS/timeReport.js", here), "utf8") + "\n;TimeReport", context);
+const TimeReport = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", context);
 const tr = new TimeReport();
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}.js`, here), "utf8") + `\n;${name}`, vm.createContext({ customJS: {} }));
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}.js`, here), "utf8") + `\n;${name}`, vm.createContext({ customJS: {} }));
 const billing = new (load("billing", "Billing"))();
 const TaskIds = load("taskIds", "TaskIds");
 const log = new (load("errorLog", "ErrorLog"))();

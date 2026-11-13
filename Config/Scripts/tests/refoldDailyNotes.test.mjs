@@ -1,4 +1,4 @@
-// Tests for CustomJS/refoldDailyNotes.js. Run from the vault root:
+// Tests for plugin/src/classes/refoldDailyNotes.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, against a stub of what refold() asks
 // of `app`: the note's text, one open view of it, the saved fold record and local storage. Folds
@@ -9,7 +9,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-const read = (name) => fs.readFileSync(new URL(`../CustomJS/${name}`, here), "utf8");
+const read = (name) => fs.readFileSync(new URL(`../../../plugin/src/classes/${name}`, here), "utf8");
 const Schedule = vm.runInContext(read("schedule.js") + "\n;Schedule", vm.createContext({}));
 // Objects made inside the vm context have that context's prototypes; compare as plain data
 const plain = (x) => JSON.parse(JSON.stringify(x));

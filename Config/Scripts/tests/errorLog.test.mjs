@@ -1,4 +1,4 @@
-// Tests for CustomJS/errorLog.js (OBS-218). Run from the vault root:
+// Tests for plugin/src/classes/errorLog.js (OBS-218). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, next to TimeReport and Billing, whose
 // model it reads. Every project, note and entry here is invented.
@@ -8,7 +8,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-const source = (file) => fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8");
+const source = (file) => fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8");
 const load = (file, name, context = {}) => vm.runInContext(source(file) + `\n;${name}`, vm.createContext(context));
 const tr = new (load("timeReport.js", "TimeReport"))();
 const billing = new (load("billing.js", "Billing"))();

@@ -229,7 +229,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
         process.exit(2);
     }
     const newTr = loadTimeReport();
-    const tasks = load(path.join(ROOT, "Config/Scripts/CustomJS/addTaskNote.js"), "AddTaskNote");
+    const tasks = load(path.join(ROOT, "plugin/src/classes/addTaskNote.js"), "AddTaskNote");
     const result = convert(readVault(root), oldTr, newTr, tasks);
     console.log(report(result));
     if (write) {

@@ -1,4 +1,4 @@
-// Tests for CustomJS/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
+// Tests for plugin/src/classes/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The classes are loaded with vm beside AddTaskNote, AddProjectLink and TimeReport, whose helpers
 // they use through `customJS`, the way Plainday gives it to them. The planning and the line edits
@@ -19,7 +19,7 @@ const context = vm.createContext({
     console: { ...console, info: (...a) => logged.push(a) },
     Notice: class { constructor(message) { notices.push(message); } },
 });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../CustomJS/${file}`, here), "utf8") + `\n;${name}`, context);
+const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
 const TimeReport = load("timeReport.js", "TimeReport");

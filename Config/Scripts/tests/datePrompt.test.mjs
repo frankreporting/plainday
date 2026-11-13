@@ -1,4 +1,4 @@
-// Tests for CustomJS/datePrompt.js and jumpToDate.js. Run from the vault root:
+// Tests for plugin/src/classes/datePrompt.js and jumpToDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The date plugin's answers come from datePrompt.revived.json, recorded from Natural Language Dates
 // (Revived) itself with a fixed clock, so these check the prompt against what the plugin really says.
@@ -18,11 +18,11 @@ const momentOn = (today) => (date = today) => ({ date, isValid: () => true, form
 
 const load = (ctx = {}, today = SUN) => {
     const context = vm.createContext({ window: { moment: momentOn(today) }, Notice: class { constructor(m) { (ctx.notices ??= []).push(m); } }, console: { error() {} }, ...ctx });
-    const DatePrompt = vm.runInContext(read("../CustomJS/datePrompt.js") + "\n;DatePrompt", context);
+    const DatePrompt = vm.runInContext(read("../../../plugin/src/classes/datePrompt.js") + "\n;DatePrompt", context);
     return { DatePrompt, dp: new DatePrompt(), context };
 };
 const { dp } = load();
-const TimeReport = vm.runInContext(read("../CustomJS/timeReport.js") + "\n;TimeReport", vm.createContext({}));
+const TimeReport = vm.runInContext(read("../../../plugin/src/classes/timeReport.js") + "\n;TimeReport", vm.createContext({}));
 const tr = new TimeReport();
 
 // Revived as the fixture recorded it on `day`; a phrase it doesn't have fails the test
@@ -289,8 +289,8 @@ const loadJump = ({ nn, language = "en", current = "en" } = {}) => {
         TimeReport: { periodFolders: () => ({ week: `${PLANNER}/weeks`, month: `${PLANNER}/months`, year: `${PLANNER}/years` }) },
     };
     const ctx = vm.createContext({ window: { moment }, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, customJS });
-    customJS.DatePrompt = new (vm.runInContext(read("../CustomJS/datePrompt.js") + "\n;DatePrompt", ctx))();
-    const JumpToDate = vm.runInContext(read("../CustomJS/jumpToDate.js") + "\n;JumpToDate", ctx);
+    customJS.DatePrompt = new (vm.runInContext(read("../../../plugin/src/classes/datePrompt.js") + "\n;DatePrompt", ctx))();
+    const JumpToDate = vm.runInContext(read("../../../plugin/src/classes/jumpToDate.js") + "\n;JumpToDate", ctx);
     return { j: new JumpToDate(), dp: customJS.DatePrompt };
 };
 const NN_PATTERNS = { calendarCustomWeekPattern: "[weeks]/gggg[w]ww", calendarCustomMonthPattern: "[months]/YYYY-MM", calendarCustomYearPattern: "[years]/YYYY" };
@@ -325,7 +325,7 @@ test("a note just made from its template stays listed as in progress, so Templat
         app: { plugins: { plugins: { "templater-obsidian": { templater: { files_with_pending_templates: pending } } } } },
         setTimeout: (fn, ms) => timers.push([fn, ms]),
     });
-    const Plan = vm.runInContext(read("../CustomJS/plan.js") + "\n;Plan", ctx);
+    const Plan = vm.runInContext(read("../../../plugin/src/classes/plan.js") + "\n;Plan", ctx);
     new Plan().holdOffTemplater(`${PLANNER}/weeks/2026w41.md`);
     assert.deepEqual([...pending], [`${PLANNER}/weeks/2026w41.md`]);
     assert.ok(timers[0][1] > 300, "longer than the trigger's 300ms wait");
@@ -333,7 +333,7 @@ test("a note just made from its template stays listed as in progress, so Templat
     assert.deepEqual([...pending], []);
     // Without Templater, nothing to do
     const bare = vm.createContext({ app: { plugins: { plugins: {} } }, setTimeout });
-    new (vm.runInContext(read("../CustomJS/plan.js") + "\n;Plan", bare))().holdOffTemplater("x.md");
+    new (vm.runInContext(read("../../../plugin/src/classes/plan.js") + "\n;Plan", bare))().holdOffTemplater("x.md");
 });
 
 test("the warm-up reads a few words once per session, and a failure in it is harmless", () => {
@@ -348,7 +348,7 @@ test("the warm-up reads a few words once per session, and a failure in it is har
 });
 
 test("JumpToDate: a week or a month in words, this year unless a year comes before or after", () => {
-    const J = vm.runInContext(read("../CustomJS/jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
+    const J = vm.runInContext(read("../../../plugin/src/classes/jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
     const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const w = (t) => { const r = J.periodWords(t, { months: MONTHS, short: SHORT, year: 2026 }); return r && `${r.unit} ${r.year} ${r.n}`; };
@@ -377,7 +377,7 @@ test("JumpToDate: a week or a month in words, this year unless a year comes befo
 });
 
 test("a week or a month in words says whether a year was given, and Schedule moves one that's over to next year (OBS-96)", () => {
-    const J = vm.runInContext(read("../CustomJS/jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
+    const J = vm.runInContext(read("../../../plugin/src/classes/jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
     const opts = { months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], year: 2026 };
     for (const t of ["w38", "sep", "september"]) assert.equal(J.periodWords(t, opts).withYear, false, t);
     for (const t of ["w38 2026", "2027 w1", "Sep 2026", "2027 sep", "9/2026"]) assert.equal(J.periodWords(t, opts).withYear, true, t);

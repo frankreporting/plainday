@@ -1,4 +1,4 @@
-// Tests for CustomJS/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
+// Tests for plugin/src/classes/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
 // the vault root: node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, with a fake `app`. The last test reads
 // Templater's own code when it's installed in this folder (the dev vault), since the guard leans on
@@ -11,7 +11,7 @@ import { STARTUP } from "../../../plugin/src/commands.js";
 import { createRequire } from "node:module";
 
 const here = new URL(".", import.meta.url);
-const SOURCE = fs.readFileSync(new URL("../CustomJS/newNoteGuard.js", here), "utf8");
+const SOURCE = fs.readFileSync(new URL("../../../plugin/src/classes/newNoteGuard.js", here), "utf8");
 const NewNoteGuard = vm.runInContext(SOURCE + "\n;NewNoteGuard", vm.createContext({}));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const arrivedNote = createRequire(import.meta.url)("../Templater/arrivedNote.js");

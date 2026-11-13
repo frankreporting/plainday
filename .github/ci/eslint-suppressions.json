@@ -1,25 +1,25 @@
 {
-  "Config/Scripts/CustomJS/calendarSync.js": {
+  "plugin/src/classes/calendarSync.js": {
     "preserve-caught-error": {
       "count": 1
     }
   },
-  "Config/Scripts/CustomJS/datePrompt.js": {
+  "plugin/src/classes/datePrompt.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 3
     }
   },
-  "Config/Scripts/CustomJS/invoice.js": {
+  "plugin/src/classes/invoice.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 2
     }
   },
-  "Config/Scripts/CustomJS/plan.js": {
+  "plugin/src/classes/plan.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 1
     }
   },
-  "Config/Scripts/CustomJS/updateObsidianPM.js": {
+  "plugin/src/classes/updateObsidianPM.js": {
     "no-control-regex": {
       "count": 1
     },

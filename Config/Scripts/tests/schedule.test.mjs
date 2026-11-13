@@ -1,4 +1,4 @@
-// Tests for CustomJS/schedule.js. Run from the vault root:
+// Tests for plugin/src/classes/schedule.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -334,7 +334,7 @@ const withVault = (paths) => {
         },
     };
     const context = vm.createContext({ app, customJS: { obsidian: { getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) } } });
-    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../CustomJS/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", context);
+    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", import.meta.url), "utf8") + "\n;AddTaskNote", context);
     context.customJS.AddTaskNote = new AddTaskNote();
     return { schedule: new (vm.runInContext(code + "\n;Schedule", context))(), file: (p) => files.find((f) => f.path === p) };
 };

@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 
-const dir = new URL("../CustomJS/", import.meta.url);
+const dir = new URL("../../../plugin/src/classes/", import.meta.url);
 const scripts = fs.readdirSync(dir).filter((f) => f.endsWith(".js"));
 const read = (f) => fs.readFileSync(new URL(f, dir), "utf8");
 

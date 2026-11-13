@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadCustomJS, checkAll as checkScripts, checkPlainday } from "./checkScripts.mjs";
+import { loadClass, checkAll as checkScripts, checkPlainday } from "./checkScripts.mjs";
 import { scanLine, scanDiff, scanText, describe } from "./privacy.mjs";
 import { docsSection, checkLinearLink, checkDocs } from "./checkPR.mjs";
 import { oldFolderLines, checkAll as checkFolders } from "./checkFolders.mjs";
@@ -20,16 +20,16 @@ import { spawnSync } from "node:child_process";
 // ------------------------------------------------------------------ scripts load
 
 test("a class that evaluates cleanly passes; a syntax error and a missing class fail", () => {
-    assert.equal(loadCustomJS("class Thing {\n  async invoke() {}\n}\n", "thing.js"), null);
-    assert.match(loadCustomJS("class Thing {\n  async invoke( {}\n}\n", "thing.js"), /thing\.js: SyntaxError/);
-    assert.match(loadCustomJS("const x = 1;\n", "x.js"), /no top-level class/);
+    assert.equal(loadClass("class Thing {\n  async invoke() {}\n}\n", "thing.js"), null);
+    assert.match(loadClass("class Thing {\n  async invoke( {}\n}\n", "thing.js"), /thing\.js: SyntaxError/);
+    assert.match(loadClass("const x = 1;\n", "x.js"), /no top-level class/);
     // A top-level reference to something only Obsidian provides breaks at startup too
-    assert.match(loadCustomJS("const m = moment();\nclass Thing {}\n", "thing.js"), /ReferenceError/);
+    assert.match(loadClass("const m = moment();\nclass Thing {}\n", "thing.js"), /ReferenceError/);
 });
 
 test("checkAll reports a broken class file and a Templater script that doesn't parse", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
-    const cjs = path.join(root, "Config/Scripts/CustomJS");
+    const cjs = path.join(root, "plugin/src/classes");
     const tpl = path.join(root, "Config/Scripts/Templater");
     fs.mkdirSync(cjs, { recursive: true });
     fs.mkdirSync(tpl, { recursive: true });
@@ -52,7 +52,7 @@ test("home-folder paths block, ~ and repo paths don't", () => {
     assert.deepEqual(rulesOf("see /home/" + "somebody/vault"), ["block:home folder path"]);
     assert.deepEqual(rulesOf("log at ~/Library/Logs/calendar-sync.log"), []);
     assert.deepEqual(rulesOf("a site at https://example.com/home/page"), []);
-    assert.deepEqual(rulesOf("Config/Scripts/CustomJS/plan.js"), []);
+    assert.deepEqual(rulesOf("plugin/src/classes/plan.js"), []);
 });
 
 test("emails block except the bot and GitHub noreply addresses", () => {
@@ -137,7 +137,7 @@ test("Linear link: a cluster lists its issues after one keyword", () => {
 });
 
 test("docs gate: only system changes need it; the manual, the README or a Docs section saying why", () => {
-    const script = ["Config/Scripts/CustomJS/plan.js"];
+    const script = ["plugin/src/classes/plan.js"];
     assert.deepEqual(checkDocs({ body: "", changed: ["Welcome.md", "Config/Bases/Projects.base"] }), []);
     assert.match(checkDocs({ body: "Closes OBS-1", changed: script })[0], /## Docs/);
     assert.deepEqual(checkDocs({ body: "", changed: [...script, "Config/Manual.md"] }), []);
@@ -153,7 +153,7 @@ test("OBS-81: a numbered folder the vault dropped is caught, in any case; plain 
     for (const line of [`path: "${old("00", "Meta")}/Manual.md"`, `${old("30", "Reference")}/${old("36", "Planner")}/days`, `in ${old("90", "archive")}`, old("02", "Scripts"), old("37", "Journal")]) {
         assert.equal(oldFolderLines(line).length, 1, line);
     }
-    for (const line of ["Config/Scripts/CustomJS", "Reference/Planner/days", "Archive", "20 Projects/Freelance", "40 Trailhead pack", "2026-09-14"]) {
+    for (const line of ["plugin/src/classes", "Reference/Planner/days", "Archive", "20 Projects/Freelance", "40 Trailhead pack", "2026-09-14"]) {
         assert.deepEqual(oldFolderLines(line), [], line);
     }
     assert.deepEqual(oldFolderLines(`a\nb ${old("10", "Inbox")}\nc`).map((l) => l.line), [2]);
@@ -179,7 +179,7 @@ test("Plainday's command list must name classes that exist, with no id or name t
         fs.writeFileSync(path.join(root, "plugin/src/commands.js"), body);
         fs.writeFileSync(path.join(root, "plugin/package.json"), '{"type":"module"}\n');
     };
-    const cjs = path.join(root, "Config/Scripts/CustomJS");
+    const cjs = path.join(root, "plugin/src/classes");
     fs.mkdirSync(cjs, { recursive: true });
     for (const name of ["Schedule", "Plan", "SyncArea", "CheckOff"]) fs.writeFileSync(path.join(cjs, `${name}.js`), `class ${name} {}\n`);
     try {
@@ -193,8 +193,8 @@ export const STARTUP = ["SyncArea", "CheckOff", "Gone"];
 `);
         const problems = await checkPlainday(root);
         const has = (re) => assert.ok(problems.some((p) => re.test(p)), `${re}\n${problems.join("\n")}`);
-        has(/the command "plan" runs Invoice, which no Config\/Scripts\/CustomJS file defines/);
-        has(/STARTUP names Gone, which no Config\/Scripts\/CustomJS file defines/);
+        has(/the command "plan" runs Invoice, which no plugin\/src\/classes file defines/);
+        has(/STARTUP names Gone, which no plugin\/src\/classes file defines/);
         has(/two commands have the id "plan"/);
         has(/two commands have the name "Schedule"/);
         assert.equal(problems.length, 4, problems.join("\n"));
