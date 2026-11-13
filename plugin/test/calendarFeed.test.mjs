@@ -826,3 +826,70 @@ test("only the calendar's ID, name and account reach the worker, and a message t
         assert.ok(Date.now() - started < 1000, "at once, not at the time limit");
     }
 });
+
+test("an RDATE that repeats an occurrence the rule makes counts once", async () => {
+    for (const rdate of ["RDATE;TZID=America/New_York:20261116T100000", "RDATE;TZID=America/New_York:20261109T100000", "RDATE:20261116T150000Z"]) {
+        const text = calendar(vevent("UID:weekly@example.org", "SUMMARY:Weekly", "DTSTART;TZID=America/New_York:20261109T100000",
+            "DTEND;TZID=America/New_York:20261109T110000", "RRULE:FREQ=WEEKLY;COUNT=3", rdate));
+        const { feed } = reader();
+        const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(20, at("2026-11-08")) });
+        assert.deepEqual(uids(got.failed), [], rdate);
+        assert.deepEqual(plain(got.events.map((e) => e.key)), [9, 16, 23].map((d) => `weekly@example.org@2026-11-${d < 10 ? `0${d}` : d}`), rdate);
+    }
+});
+
+test("a daily meeting in a far-off zone keeps one key a day through the device's change of clocks", async () => {
+    const india = ["BEGIN:VTIMEZONE", "TZID:Asia/Kolkata", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0530", "TZOFFSETTO:+0530", "TZNAME:IST", "END:STANDARD", "END:VTIMEZONE"];
+    const text = calendar(vevent("UID:india@example.org", "SUMMARY:Morning sync", "DTSTART;TZID=Asia/Kolkata:20261001T100000",
+        "DTEND;TZID=Asia/Kolkata:20261001T103000", "RRULE:FREQ=DAILY"), [...NY_ZONE, ...india]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(62, at("2026-10-13")) });
+    assert.deepEqual(uids(got.failed), []);
+    const keys = got.events.map((e) => e.key);
+    assert.equal(new Set(keys).size, keys.length, "one key a day");
+    // 10am in India is 12:30am in New York until the clocks go back early on November 1st, and
+    // 11:30pm the day before after it: November 1st in New York has two, each keyed by its own day
+    const start = (day) => got.events.find((e) => e.key === `india@example.org@2026-11-0${day}`).start;
+    assert.equal(start(1), "2026-11-01T00:30:00-04:00");
+    assert.equal(start(2), "2026-11-01T23:30:00-05:00");
+    assert.equal(got.events.filter((e) => e.date === "2026-11-01").length, 2);
+});
+
+test("a this-and-following change that makes an all-day series timed, or a timed one all-day, leaves it out by name", async () => {
+    const text = calendar([
+        ...vevent("UID:allday@example.org", "SUMMARY:All-day weekly", "DTSTART;VALUE=DATE:20261005", "DTEND;VALUE=DATE:20261006", "RRULE:FREQ=WEEKLY"),
+        ...vevent("UID:allday@example.org", "SUMMARY:Now timed", "RECURRENCE-ID;RANGE=THISANDFUTURE;VALUE=DATE:20261019", "DTSTART;TZID=America/New_York:20261019T090000"),
+        ...vevent("UID:timed@example.org", "SUMMARY:Timed weekly", "DTSTART;TZID=America/New_York:20261006T090000", "RRULE:FREQ=WEEKLY"),
+        ...vevent("UID:timed@example.org", "SUMMARY:Now all day", "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=America/New_York:20261020T090000", "DTSTART;VALUE=DATE:20261020"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(20, at("2026-10-22")) });
+    assert.deepEqual(plain(got.failed).sort((x, y) => (x.uid < y.uid ? -1 : 1)), [{ uid: "allday@example.org", title: "All-day weekly" }, { uid: "timed@example.org", title: "Timed weekly" }]);
+});
+
+test("a this-and-following change that keeps the time keeps each meeting's instant, the second 1am of the night the clocks go back included", async () => {
+    const text = calendar([
+        ...vevent("UID:utc@example.org", "SUMMARY:Early call", "DTSTART:20261025T063000Z", "DTEND:20261025T070000Z", "RRULE:FREQ=DAILY"),
+        // Renamed from October 28th on, written in New York's time: 2:30am there is 6:30 UTC
+        ...vevent("UID:utc@example.org", "SUMMARY:Early call, renamed", "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=America/New_York:20261028T023000",
+            "DTSTART;TZID=America/New_York:20261028T023000", "DTEND;TZID=America/New_York:20261028T030000"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(5, at("2026-10-29")) });
+    for (const e of got.events) {
+        assert.equal(new Date(e.start).getUTCHours() * 60 + new Date(e.start).getUTCMinutes(), 6 * 60 + 30, `${e.key} starts at 6:30 UTC`);
+        assert.equal(Date.parse(e.end) - Date.parse(e.start), 30 * 60000, `${e.key} lasts half an hour`);
+    }
+    // November 1st, 6:30 UTC, is the second 1:30am in New York
+    assert.equal(got.events.find((e) => e.key === "utc@example.org@2026-11-01").start, "2026-11-01T01:30:00-05:00");
+});
+
+test("the events file lists each calendar's ID as the events carry it", async () => {
+    const { feed } = reader();
+    const window = feed.window(7, at("2026-11-12"));
+    const calendar = { id: 7, name: "Studio", account: "Google" };
+    const got = await feed.read(feeds("2026-11-12").studio.text, { calendar, window, link: LINKS.studio });
+    const file = feed.feed([{ calendar, events: got.events }], window, at("2026-11-12"));
+    assert.deepEqual(plain(file.calendars), [{ id: "7", title: "Studio", account: "Google" }]);
+    assert.ok(file.events.every((e) => e.calendarId === "7"));
+});

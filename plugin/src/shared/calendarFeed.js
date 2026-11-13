@@ -127,13 +127,12 @@ export default class CalendarFeed {
             worker.onmessage = (event) => finish(event.data);
             worker.onerror = () => finish({ problem: "unreadable" });
             worker.onmessageerror = () => finish({ problem: "unreadable" });
-            // Only what the reader needs, as strings: a calendar's settings may hold more (its link)
-            const plain = (value) => (value === undefined || value === null ? null : String(value));
+            // Only what the reader needs, as text: a calendar's settings may hold more (its link)
             try {
                 worker.postMessage({
                     text,
                     options: {
-                        calendar: { id: plain(calendar.id), name: plain(calendar.name), account: plain(calendar.account) },
+                        calendar: this.calendarOf(calendar),
                         window: { start: range.start.getTime(), end: range.end.getTime() },
                         owner: this.owner(link),
                     },
@@ -142,6 +141,13 @@ export default class CalendarFeed {
                 finish({ problem: "unreadable" });
             }
         });
+    }
+
+    // A calendar's ID, name and account, as text, as the events carry them: the sync matches events
+    // to calendars by ID
+    calendarOf(calendar = {}) {
+        const text = (value) => (value === undefined || value === null ? null : String(value));
+        return { id: text(calendar.id), name: text(calendar.name), account: text(calendar.account) };
     }
 
     // The window the Mac's fetcher used: today, through `days` days after it. `start` and `end`
@@ -162,7 +168,10 @@ export default class CalendarFeed {
             source: "ical",
             windowStart: window.windowStart,
             windowEnd: window.windowEnd,
-            calendars: reads.map(({ calendar }) => ({ id: calendar.id, title: calendar.name, account: calendar.account })),
+            calendars: reads.map(({ calendar }) => {
+                const { id, name, account } = this.calendarOf(calendar);
+                return { id, title: name, account };
+            }),
             events: reads.flatMap((r) => r.events)
                 .sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0)),
         };
