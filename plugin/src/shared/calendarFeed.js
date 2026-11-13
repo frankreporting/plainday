@@ -12,23 +12,31 @@ export default class CalendarFeed {
     //   const got = await feed.load(link, { calendar: { id, name, account }, window });
     //   got.problem   "dead" (the link stopped working), "unreachable", or "unreadable"
     //   got.events    the events, as calendar-events.json held them; got.name, the feed's own name
+    //   got.failed    the UIDs of events it couldn't read: their lines are to be left as they are,
+    //                 not taken for canceled
     //   feed.feed([{ calendar, events }], window)   the whole events file, for apply()
     //
     // How it reads a feed, from what OBS-227's spike found on real feeds:
-    // - One-off events that ended more than a day before the window are dropped from the text
-    //   before anything is parsed. Google's feed holds every event since the calendar began, and
-    //   this is most of it. The day of margin covers an end written in UTC or another zone.
-    // - Every time zone the feed defines is registered first. Outlook names zones the Windows way
-    //   ("Eastern Standard Time"), which ical.js knows only from the feed's own definitions.
+    // - One-off events and overrides that ended more than a day before the window are dropped from
+    //   the text before anything is parsed. Google's feed holds every event since the calendar
+    //   began, and this is most of it. The day of margin covers an end written in UTC or another
+    //   zone.
+    // - Times are read in the time zones the feed itself defines. Outlook names zones the Windows
+    //   way ("Eastern Standard Time"), which ical.js knows only from the feed's definitions. Each
+    //   read keeps its zones to itself, so reads at the same time can't mix up two feeds' zones of
+    //   the same name.
     // - Events are grouped by UID into a series and its overrides. A moved occurrence keeps its
     //   series' key, `UID@<original date>`; so does an override whose series isn't in the feed (an
     //   invitation to one occurrence of someone else's series).
     // - An all-day event ends 1 second before midnight on its last day, as EventKit reported it.
     // - An invitation the calendar's owner declined is left out, as EventKit left it out. For a
     //   Google link the owner is the calendar ID in the link's path; for any other, the attendee
-    //   on the most events (OBS-277 checks that against real iCloud and Outlook feeds).
+    //   on the most events read (OBS-277 checks that against real iCloud and Outlook feeds).
     // - It works in small steps: it hands control back to the app every few milliseconds, so a
     //   large feed doesn't freeze the editor, and records its longest step for the speed check.
+    // - An event it can't read (a rule ical.js would loop on, a date that doesn't parse) is left
+    //   out and named in `failed`, and the rest of the calendar is read as usual. A feed it can't
+    //   read at all is "unreadable", so nothing in it looks canceled.
     //
     // A link works like a password (OBS-231, 11/04): nothing here puts it in a result, an error,
     // the console or a notice. A failed download comes back as a problem and a status code only.
@@ -43,19 +51,18 @@ export default class CalendarFeed {
     static MAX_STEPS = 100000;
     static DAY_MS = 24 * 3600 * 1000;
     static STATUS = { CONFIRMED: "confirmed", TENTATIVE: "tentative", CANCELLED: "canceled", CANCELED: "canceled" };
-    // The end date of an event in the text, or its start when it has no end: the date's digits,
-    // whatever zone they're written in. The value is what follows the last colon on the line, so a
-    // quoted zone name with a colon in it (`TZID="(UTC+01:00) Amsterdam"`) doesn't confuse it.
-    static DTEND = /\nDTEND(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?\r?\n/;
-    static DTSTART = /\nDTSTART(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?\r?\n/;
-    static REPEATS = /\n(?:RRULE|RDATE|RECURRENCE-ID)[;:]/;
+    // A property's date in an event's text: the date's digits, whatever zone they're written in.
+    // The value is what follows the last colon on the line, so a quoted zone name with a colon in
+    // it (`TZID="(UTC+01:00) Amsterdam"`) doesn't confuse it. A line folded inside the property
+    // doesn't match, and the event is then kept.
+    static DTEND = /\nDTEND(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
+    static DTSTART = /\nDTSTART(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
+    static RECURRENCE_ID = /\nRECURRENCE-ID(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
+    static HAS_RECURRENCE_ID = /\nRECURRENCE-ID[;:]/i;
+    static RULES = /\n(?:RRULE|RDATE|EXRULE)[;:]/i;
+    static UID = /\nUID[;:]([^\r\n]*)/i;
     static GOOGLE = /^https:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
-
-    constructor() {
-        // The text of each time zone registered with ical.js, by its TZID: a zone is registered
-        // again only when a feed defines it differently
-        this.zones = new Map();
-    }
+    static FREQS = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"];
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
     async load(link, { calendar, window }) {
@@ -103,7 +110,7 @@ export default class CalendarFeed {
 
     // Whether text starts as a calendar does (after any byte-order mark, which trimStart takes)
     isCalendar(text) {
-        return typeof text === "string" && /^BEGIN:VCALENDAR\r?\n/i.test(text.trimStart().slice(0, 32));
+        return typeof text === "string" && /^BEGIN:VCALENDAR[ \t]*\r?\n/i.test(text.trimStart().slice(0, 40));
     }
 
     // The window the Mac's fetcher used: today, through `days` days after it. `start` and `end`
@@ -129,30 +136,52 @@ export default class CalendarFeed {
         };
     }
 
-    // Reads a feed's text: { name, events, stats }, or { problem: "unreadable" }. `calendar` is
-    // the calendar's { id, name, account } in Plainday's settings, `window` from window(), and
-    // `link` the link it came from, which only says whose invitations were declined.
+    // Reads a feed's text: { name, events, failed, stats }, or { problem: "unreadable" }.
+    // `calendar` is the calendar's { id, name, account } in Plainday's settings, `window` from
+    // window(), and `link` the link it came from, which only says whose invitations were declined.
     async read(text, { calendar = {}, window, link = null }) {
         const clock = this.clock();
         try {
             if (!this.isCalendar(text)) return { problem: "unreadable" };
+            const body = text.trimStart();
             const cutoff = Number(this.date(new Date(window.start.getFullYear(), window.start.getMonth(), window.start.getDate() - 1)).replaceAll("-", ""));
-            const { head, blocks, skipped } = await this.split(text, cutoff, clock);
+            const { head, blocks, skipped } = await this.split(body, cutoff, clock);
             const parsed = ICAL.parse(head);
             const roots = (typeof parsed[0] === "string" ? [parsed] : parsed).map((j) => new ICAL.Component(j));
+            // Every event was split out of the text: one left in the rest is one the split didn't
+            // recognise, and reading without it would make it look canceled
+            if (roots.some((r) => r.getAllSubcomponents("vevent").length)) return { problem: "unreadable" };
+            const root = roots[0];
+            for (const other of roots.slice(1)) {
+                for (const vtz of other.getAllSubcomponents("vtimezone")) root.addSubcomponent(vtz);
+            }
             const name = roots.map((r) => String(r.getFirstPropertyValue("x-wr-calname") ?? "").trim()).find(Boolean) ?? null;
-            for (const root of roots) this.register(root);
+            this.zones(root, window);
             if (clock.due()) await clock.pause();
 
-            const stats = { blocks: blocks.length + skipped, skipped, series: 0, declined: 0, noUid: 0, capped: 0, unknownZones: 0 };
+            const stats = { blocks: blocks.length + skipped, skipped, series: 0, declined: 0, failed: 0, unknownZones: 0 };
+            const failed = new Set();
             const series = new Map();
             const all = [];
             for (const block of blocks) {
-                const ve = new ICAL.Component(ICAL.parse(block));
-                if (ve.name !== "vevent") continue;
+                let ve = null;
+                try {
+                    // The calendar as its parent, so its times find the feed's own zones
+                    ve = new ICAL.Component(ICAL.parse(block), root);
+                } catch {
+                    ve = null;
+                }
+                if (ve?.name !== "vevent") {
+                    // An event that doesn't parse: left out by its UID, or, with none to name it,
+                    // the whole feed is unreadable
+                    const uid = this.unfold(block).match(CalendarFeed.UID)?.[1]?.trim();
+                    if (!uid) return { problem: "unreadable" };
+                    failed.add(uid);
+                    continue;
+                }
                 const uid = String(ve.getFirstPropertyValue("uid") ?? "").trim();
                 // An event with no UID can't be told from one sync to the next, so it isn't synced
-                if (!uid) { stats.noUid++; continue; }
+                if (!uid) continue;
                 let s = series.get(uid);
                 if (!s) series.set(uid, (s = { master: null, exceptions: [] }));
                 if (ve.hasProperty("recurrence-id")) s.exceptions.push(ve);
@@ -164,17 +193,30 @@ export default class CalendarFeed {
 
             const owner = this.owner(link, all);
             const events = [];
-            const emit = (item, startTime, endTime, recurrenceId) => {
-                const event = this.event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats });
-                if (event) events.push(event);
-            };
-            for (const [, { master, exceptions }] of series) {
-                await this.expand(master, exceptions, window, emit, clock, stats);
+            for (const [uid, { master, exceptions }] of series) {
+                const found = [];
+                const emit = (item, startTime, endTime, recurrenceId) => {
+                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats, root });
+                    if (event) found.push(event);
+                };
+                let whole;
+                try {
+                    whole = await this.expand(master, exceptions, window, emit, clock);
+                } catch {
+                    whole = false;
+                }
+                // A series read only partly is left out whole, so none of its lines look canceled
+                if (whole) events.push(...found);
+                else failed.add(uid);
                 if (clock.due()) await clock.pause();
             }
-            stats.events = events.length;
+            // An event that failed anywhere (an override that didn't parse, say) is left out whole:
+            // its series' other occurrences would otherwise come out as if it hadn't been moved
+            const read = events.filter((e) => !failed.has(e.id));
+            stats.failed = failed.size;
+            stats.events = read.length;
             clock.stop();
-            return { name, events: this.sorted(events), stats: { ...stats, ...clock.stats() } };
+            return { name, events: this.sorted(read), failed: [...failed], stats: { ...stats, ...clock.stats() } };
         } catch {
             // A parse error's message quotes the feed, not the link, but there's nothing in it the
             // user can act on either: the feed isn't one Plainday can read
@@ -183,26 +225,31 @@ export default class CalendarFeed {
     }
 
     // The feed's text split into its events, each an iCalendar text of its own, and the rest (the
-    // calendar's own lines and its time zones). An event is a line that is exactly BEGIN:VEVENT
-    // through the next that is exactly END:VEVENT: a line inside a property starts with a space,
-    // so it can't be either. A one-off event that ended before `cutoff` (a date as YYYYMMDD) is
-    // dropped here.
+    // calendar's own lines and its time zones). An event is a line that is BEGIN:VEVENT through
+    // the next that is END:VEVENT, in any case: a line inside a property starts with a space, so
+    // it can't be either. An old one-off event or override (see old()) is dropped here.
     async split(text, cutoff, clock) {
+        const begin = /^BEGIN:VEVENT[ \t]*\r?$/gim;
+        const end = /^END:VEVENT[ \t]*\r?$/gim;
         const head = [];
         const blocks = [];
         let skipped = 0;
         let pos = 0;
         for (;;) {
-            const begin = this.lineAt(text, "BEGIN:VEVENT", pos);
-            if (begin < 0) break;
-            const close = this.lineAt(text, "END:VEVENT", begin);
-            // An event that never closes is left in the rest, whose parse then fails: the feed is
+            begin.lastIndex = pos;
+            const b = begin.exec(text);
+            if (!b) break;
+            end.lastIndex = b.index;
+            const e = end.exec(text);
+            // An event that never closes is left in the rest, whose read then fails: the feed is
             // cut off, and reading what came before would make its other events look canceled
-            if (close < 0) break;
-            const newline = text.indexOf("\n", close);
+            if (!e) break;
+            const newline = text.indexOf("\n", e.index);
             const after = newline < 0 ? text.length : newline + 1;
-            head.push(text.slice(pos, begin));
-            const block = text.slice(begin, after);
+            head.push(text.slice(pos, b.index));
+            // Its first and last lines written as ical.js reads them: it would take a trailing
+            // space for part of the component's name
+            const block = `BEGIN:VEVENT\r\n${text.slice(text.indexOf("\n", b.index) + 1, e.index)}END:VEVENT\r\n`;
             if (this.old(block, cutoff)) skipped++;
             else blocks.push(block);
             pos = after;
@@ -212,69 +259,119 @@ export default class CalendarFeed {
         return { head: head.join(""), blocks, skipped };
     }
 
-    // Where the next line that is exactly `line` starts, at or after `from`, or -1
-    lineAt(text, line, from) {
-        let i = from;
-        for (;;) {
-            i = text.indexOf(line, i);
-            if (i < 0) return -1;
-            const end = i + line.length;
-            const starts = i === 0 || text[i - 1] === "\n";
-            const ends = end === text.length || text[end] === "\n" || (text[end] === "\r" && (end + 1 === text.length || text[end + 1] === "\n"));
-            if (starts && ends) return i;
-            i = end;
-        }
-    }
-
-    // A one-off event (no RRULE, RDATE or RECURRENCE-ID) whose end, or start when it has no end,
-    // is dated before `cutoff`. An event whose dates can't be read is kept.
+    // An event that can't put anything in the window: no RRULE or RDATE; its end, or its start
+    // when it has no end, dated before `cutoff` (YYYYMMDD); and, for an override, its original
+    // date too, and no RANGE (a this-and-following change moves later occurrences). An event whose
+    // dates can't be read is kept.
     old(block, cutoff) {
-        if (CalendarFeed.REPEATS.test(block)) return false;
+        if (CalendarFeed.RULES.test(block)) return false;
+        if (CalendarFeed.HAS_RECURRENCE_ID.test(block)) {
+            const rid = CalendarFeed.RECURRENCE_ID.exec(block);
+            if (!rid || Number(rid[1]) >= cutoff || /RANGE=/i.test(block)) return false;
+        }
         const m = CalendarFeed.DTEND.exec(block) ?? CalendarFeed.DTSTART.exec(block);
         return !!m && Number(m[1]) < cutoff;
     }
 
-    // Registers every time zone a calendar defines, before any of its times are read: ical.js
-    // works a time's zone out when it first reads the time, from the zones registered then
-    register(root) {
+    // Lines folded back into one, for the few reads done on the text itself
+    unfold(text) {
+        return text.replace(/\r?\n[ \t]/g, "");
+    }
+
+    // Readies the feed's own time zones. ical.js works a zone's changes out from its first
+    // definition's start, and Outlook's start in 1601: that's centuries of yearly changes in one
+    // step the first time a time is read. So a yearly rule starting more than two years before the
+    // window starts then instead (the same changes from then on), a rule that ended by then goes,
+    // and a zone with a rule ical.js could loop on is dropped: its times read as the device's.
+    zones(root, window) {
+        const year = window.start.getFullYear() - 2;
         for (const vtz of root.getAllSubcomponents("vtimezone")) {
-            const tzid = String(vtz.getFirstPropertyValue("tzid") ?? "");
-            if (!tzid) continue;
-            const source = JSON.stringify(vtz.toJSON());
-            if (this.zones.get(tzid) === source && ICAL.TimezoneService.has(tzid)) continue;
-            ICAL.TimezoneService.register(new ICAL.Timezone(vtz), tzid);
-            this.zones.set(tzid, source);
+            let bad = false;
+            for (const obs of [...vtz.getAllSubcomponents()]) {
+                if (obs.name !== "standard" && obs.name !== "daylight") continue;
+                const rules = obs.getAllProperties("rrule");
+                if (!rules.length) continue;
+                const rule = rules[0].getFirstValue();
+                if (rules.length > 1 || rule.freq !== "YEARLY" || rule.interval !== 1 || this.unsafe(rule)) { bad = true; break; }
+                if (rule.until && rule.until.year < year) { vtz.removeSubcomponent(obs); continue; }
+                const start = obs.getFirstPropertyValue("dtstart");
+                if (rule.count || !start || start.year >= year) continue;
+                const later = start.clone();
+                later.year = year;
+                if (later.month === 2 && later.day === 29) later.day = 28;
+                obs.updatePropertyWithValue("dtstart", later);
+            }
+            if (bad) root.removeSubcomponent(vtz);
         }
     }
 
+    // Why ical.js can't be trusted with a rule, or null. It loops forever, or until memory runs
+    // out, on some rules RFC 5545 allows (a daily rule limited to the last day of the month, or to
+    // a date no month has, and some rules that repeat more often than daily), so those are
+    // refused, with the combinations the RFC rules out. Calendars repeat events daily at most.
+    unsafe(rule) {
+        if (!CalendarFeed.FREQS.includes(rule.freq)) return "frequency";
+        const p = rule.parts ?? {};
+        const finer = rule.freq === "DAILY";
+        const days = (p.BYMONTHDAY ?? []).map(Number);
+        if (days.some((d) => !Number.isInteger(d) || d === 0 || Math.abs(d) > 31)) return "BYMONTHDAY";
+        if ((finer || rule.freq === "WEEKLY") && days.some((d) => d < 0)) return "BYMONTHDAY";
+        if (rule.freq === "WEEKLY" && days.length) return "BYMONTHDAY";
+        if (p.BYYEARDAY && rule.freq !== "YEARLY") return "BYYEARDAY";
+        if (p.BYWEEKNO && rule.freq !== "YEARLY") return "BYWEEKNO";
+        if (p.BYSETPOS && (finer || !Object.keys(p).some((k) => k !== "BYSETPOS" && k !== "WKST"))) return "BYSETPOS";
+        if ((finer || rule.freq === "WEEKLY") && (p.BYDAY ?? []).some((d) => /\d/.test(String(d)))) return "BYDAY";
+        const months = (p.BYMONTH ?? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).map(Number);
+        if (months.some((m) => !Number.isInteger(m) || m < 1 || m > 12)) return "BYMONTH";
+        const longest = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        if (days.length && !months.some((m) => days.some((d) => Math.abs(d) <= longest[m - 1]))) return "no date";
+        return null;
+    }
+
     // One series: its master and its overrides (each with a RECURRENCE-ID), handing every
-    // occurrence that starts in the window to `emit`
-    async expand(master, exceptions, window, emit, clock, stats) {
+    // occurrence that starts in the window to `emit`. False when it can't be read whole.
+    async expand(master, exceptions, window, emit, clock) {
         if (!master) {
             // Overrides with no series in the feed: invitations to single occurrences
             for (const ex of exceptions) {
                 const e = new ICAL.Event(ex);
                 emit(ex, e.startDate, e.endDate, e.recurrenceId);
+                if (clock.due()) await clock.pause();
             }
-            return;
+            return true;
         }
         const ev = new ICAL.Event(master);
         if (!ev.isRecurring()) {
             emit(master, ev.startDate, ev.endDate, null);
-            return;
+            return true;
         }
-        for (const ex of exceptions) ev.relateException(ex);
-        // Occurrences are looked at from a day before the window to a day after it, which catches
-        // one moved by a this-and-following change across the window's edge. An override moved
-        // into the window from further away is caught after, from the overrides themselves.
-        const from = window.start.getTime() - CalendarFeed.DAY_MS;
-        const to = window.end.getTime() + CalendarFeed.DAY_MS;
+        for (const p of master.getAllProperties("rrule")) if (this.unsafe(p.getFirstValue())) return false;
+        // Occurrences are looked at from a day before the window to a day after it, and further by
+        // as much as a this-and-following change moves them. An override moved into the window
+        // from further away is caught after, from the overrides themselves.
+        let from = window.start.getTime() - CalendarFeed.DAY_MS;
+        let to = window.end.getTime() + CalendarFeed.DAY_MS;
+        const zone = ev.startDate.zone;
+        for (const ex of exceptions) {
+            const e = new ICAL.Event(ex);
+            ev.relateException(e);
+            // An override whose original start is written in another zone than the series' is
+            // found under the series' zone too, as ical.js finds the series' own occurrences
+            const there = e.recurrenceId.convertToZone(zone).toString();
+            if (!(there in ev.exceptions)) ev.exceptions[there] = e;
+            if (e.modifiesFuture()) {
+                const moved = e.startDate.toJSDate().getTime() - e.recurrenceId.toJSDate().getTime();
+                from = Math.min(from, window.start.getTime() - CalendarFeed.DAY_MS - moved);
+                to = Math.max(to, window.end.getTime() + CalendarFeed.DAY_MS - moved);
+            }
+            if (clock.due()) await clock.pause();
+        }
         const matched = new Set();
         const it = ev.iterator(this.startFor(ev, from));
         let steps = 0;
         for (let next = it.next(); next; next = it.next()) {
-            if (++steps > CalendarFeed.MAX_STEPS) { stats.capped++; break; }
-            if ((steps & 63) === 0 && clock.due()) await clock.pause();
+            if (++steps > CalendarFeed.MAX_STEPS) return false;
+            if (clock.due()) await clock.pause();
             const at = next.toJSDate().getTime();
             if (at >= to) break;
             if (at < from) continue;
@@ -284,9 +381,11 @@ export default class CalendarFeed {
             const d = ev.getOccurrenceDetails(next);
             emit(d.item.component, d.startDate, d.endDate, d.recurrenceId);
         }
-        for (const ex of Object.values(ev.exceptions)) {
+        for (const ex of new Set(Object.values(ev.exceptions))) {
             if (!matched.has(ex)) emit(ex.component, ex.startDate, ex.endDate, ex.recurrenceId);
+            if (clock.due()) await clock.pause();
         }
+        return true;
     }
 
     // Where to start stepping through a series' occurrences. ical.js steps through every one from
@@ -314,12 +413,13 @@ export default class CalendarFeed {
 
     // One occurrence as the events file holds it, or null when it doesn't start in the window or
     // the owner declined it. `recurrenceId` is its original start, for an occurrence of a series.
-    event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats }) {
+    event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats, root }) {
         const start = startTime.toJSDate();
         if (start < window.start || start >= window.end) return null;
         if (this.declined(item, owner)) { stats.declined++; return null; }
+        // A zone the feed doesn't define reads as the device's own (OBS-274's follow-up)
         const tzid = item.getFirstProperty("dtstart")?.getParameter("tzid");
-        if (tzid && !ICAL.TimezoneService.has(tzid)) stats.unknownZones++;
+        if (tzid && !root.getTimeZoneByID(tzid) && !ICAL.TimezoneService.has(tzid)) stats.unknownZones++;
         const allDay = startTime.isDate;
         const end = (endTime ?? startTime).toJSDate();
         // EventKit ends an all-day event 1 second before midnight on its last day; the feed's
@@ -348,7 +448,7 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, lowercased: from a Google link's path, or else the attendee on
-    // the most events (the first seen, on a tie). Null when there's none.
+    // the most events read (the first seen, on a tie). Null when there's none.
     owner(link, vevents) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (m) {
@@ -433,10 +533,23 @@ export default class CalendarFeed {
         };
     }
 
-    // Lets the app run whatever is waiting (a keystroke, a repaint) before the read goes on
+    // Lets the app run whatever is waiting (a keystroke, a repaint) before the read goes on.
+    // scheduler.yield() where the app has it (Obsidian's desktop app); else a message posted to
+    // itself, which a hidden window doesn't hold back the way it holds back timers; else a timer.
     handBack() {
         const scheduler = /** @type {any} */ (window).scheduler;
         if (typeof scheduler?.yield === "function") return scheduler.yield();
+        const Channel = window.MessageChannel;
+        if (typeof Channel === "function") {
+            return new Promise((resolve) => {
+                const { port1, port2 } = new Channel();
+                port1.onmessage = () => {
+                    port1.close();
+                    resolve(undefined);
+                };
+                port2.postMessage(null);
+            });
+        }
         return new Promise((resolve) => window.setTimeout(resolve, 0));
     }
 }

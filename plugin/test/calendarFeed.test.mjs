@@ -11,9 +11,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import vm from "node:vm";
+import { Worker } from "node:worker_threads";
 import ICAL from "ical.js";
 import { loadClass, classSource, scriptOf } from "../classShape.mjs";
-import { BIG, feeds, LINKS } from "./calendarFeeds.mjs";
+import { BIG, feeds, HEAVY, LINKS } from "./calendarFeeds.mjs";
 
 const moment = createRequire(import.meta.url)("moment");
 // What the reader gives back was made in its own context, whose objects compare as different
@@ -21,8 +22,8 @@ const moment = createRequire(import.meta.url)("moment");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 // The reader, in a context of its own, with a stand-in for Obsidian's requestUrl that each test sets
-function reader(requestUrl = () => { throw new Error("no download in this test"); }) {
-    const context = vm.createContext({ ICAL, requestUrl, performance, window: { setTimeout, clearTimeout } });
+function reader(requestUrl = () => { throw new Error("no download in this test"); }, extra = {}) {
+    const context = vm.createContext({ ICAL, requestUrl, performance, window: { setTimeout, clearTimeout, ...extra } });
     const CalendarFeed = loadClass("calendarFeed.js", context);
     return { CalendarFeed, feed: new CalendarFeed(), context };
 }
@@ -134,11 +135,13 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
         assert.equal(guessed.events.some((e) => e.title === "Vendor demo"), true);
     });
 
+    // Google-shaped feeds, whose owner comes from the link: for any other, the attendee counted as
+    // the owner is the one on the most events read, so dropping old events can change who that is
     test(`${day}: old one-offs are dropped before reading, and the same events come out either way (1.6)`, async () => {
         const { reads, window } = await readAll(day);
         assert.equal(reads.studio.stats.skipped, 1);
         assert.equal(reads.studio.events.some((e) => e.title === "Old kickoff"), false);
-        for (const name of ["studio", "big"]) {
+        for (const name of ["studio", "big", "heavy"]) {
             const text = feeds(day)[name].text;
             const skipping = await reader().feed.read(text, { calendar: CALENDARS[name], window, link: LINKS[name] });
             const all = reader().feed;
@@ -154,12 +157,13 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
         const window = feed.window(62, at(day));
         const got = await feed.read(feeds(day).big.text, { calendar: CALENDARS.big, window, link: LINKS.big });
         assert.equal(got.name, "Big");
-        assert.equal(got.stats.skipped, BIG.oldOneOffs);
+        // Every old one-off, and the overrides moved before the window
+        assert.ok(got.stats.skipped > BIG.oldOneOffs && got.stats.skipped < BIG.oldOneOffs + BIG.overrides, `${got.stats.skipped} skipped`);
+        assert.deepEqual(plain(got.failed), []);
         assert.equal(got.events.filter((e) => e.key.startsWith("big-new-")).length, BIG.upcoming);
         assert.ok(got.events.length > 300, `${got.events.length} events`);
         assert.ok(got.events.every((e) => e.date >= window.windowStart && e.date <= window.windowEnd));
         assert.equal(new Set(got.events.map((e) => e.key)).size, got.events.length, "every key once");
-        assert.equal(got.stats.capped, 0);
         assert.equal(got.stats.unknownZones, 0);
     });
 }
@@ -171,6 +175,9 @@ test("a long-running series started near the window gives the occurrences it giv
         "FREQ=WEEKLY", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,FR;WKST=SU", "FREQ=WEEKLY;INTERVAL=3;BYDAY=SA,SU;WKST=MO",
         "FREQ=WEEKLY;BYDAY=WE;UNTIL=20261120T235959Z", "FREQ=WEEKLY;BYDAY=MO,WE,FR;UNTIL=20261101T000000Z",
         "FREQ=DAILY;COUNT=4000", "FREQ=MONTHLY;BYDAY=2TU", "FREQ=YEARLY",
+        "FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=2", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TH;BYSETPOS=-1;WKST=MO",
+        "FREQ=DAILY;BYMONTH=1,6,11", "FREQ=DAILY;BYMONTHDAY=1,15,28", "FREQ=WEEKLY;BYMONTH=11,12;BYDAY=TU",
+        "FREQ=DAILY;BYHOUR=8,16", "FREQ=WEEKLY;UNTIL=20261201",
     ];
     const ymd = (n) => dayAfter(day, n).replaceAll("-", "");
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "X-WR-CALNAME:Rules", ...feeds(day).studio.text.split("\r\n").filter((l, i, all) => {
@@ -180,27 +187,30 @@ test("a long-running series started near the window gives the occurrences it giv
     let n = 0;
     for (const rule of rules) {
         for (const start of [-3001, -1000, -400, -31, -8, -1, 0, 3]) {
-            for (const allDay of [false, true]) {
+            // New York's time, all-day, UTC and floating (no zone: the device's)
+            for (const kind of ["zoned", "allDay", "utc", "floating"]) {
                 const uid = `rule-${n++}@example.com`;
-                const dtstart = allDay ? `DTSTART;VALUE=DATE:${ymd(start)}` : `DTSTART;TZID=America/New_York:${ymd(start)}T083000`;
-                const dtend = allDay ? `DTEND;VALUE=DATE:${ymd(start + 1)}` : `DTEND;TZID=America/New_York:${ymd(start)}T090000`;
-                lines.push("BEGIN:VEVENT", dtstart, dtend, `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`,
-                    allDay ? `EXDATE;VALUE=DATE:${ymd(5)}` : `EXDATE;TZID=America/New_York:${ymd(5)}T083000`, "END:VEVENT");
-                if (!allDay) lines.push("BEGIN:VEVENT", `RECURRENCE-ID;TZID=America/New_York:${ymd(9)}T083000`,
-                    `DTSTART;TZID=America/New_York:${ymd(10)}T120000`, `DTEND;TZID=America/New_York:${ymd(10)}T130000`, `UID:${uid}`, "SUMMARY:moved", "END:VEVENT");
+                const at = (k, time) => kind === "allDay" ? `;VALUE=DATE:${ymd(k)}` : kind === "zoned" ? `;TZID=America/New_York:${ymd(k)}T${time}`
+                    : kind === "utc" ? `:${ymd(k)}T${time}Z` : `:${ymd(k)}T${time}`;
+                const value = (prop, k, time) => { const v = at(k, time); return v.startsWith(";") ? `${prop}${v}` : `${prop}${v}`; };
+                lines.push("BEGIN:VEVENT", value("DTSTART", start, "083000"), kind === "allDay" ? value("DTEND", start + 1, "") : value("DTEND", start, "090000"),
+                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), value("RDATE", 12, "070000"), "END:VEVENT");
+                if (kind !== "allDay") lines.push("BEGIN:VEVENT", value("RECURRENCE-ID", 9, "083000"),
+                    value("DTSTART", 10, "120000"), value("DTEND", 10, "130000"), `UID:${uid}`, "SUMMARY:moved", "END:VEVENT");
             }
         }
     }
     lines.push("END:VCALENDAR");
     const text = lines.join("\r\n") + "\r\n";
-    for (const [name, feedText, days] of [["rules", text, 62], ["big", feeds(day).big.text, 62]]) {
+    for (const [name, feedText, days] of [["rules", text, 62], ["big", feeds(day).big.text, 62], ["heavy", feeds(day).heavy.text, 62]]) {
         const near = reader().feed;
         const window = near.window(days, at(day));
         const fromStart = reader().feed;
         fromStart.startFor = (ev) => ev.startDate;
         const a = await near.read(feedText, { calendar: CALENDARS.studio, window });
         const b = await fromStart.read(feedText, { calendar: CALENDARS.studio, window });
-        assert.ok(a.events.length > 100, `${name}: ${a.events.length} events`);
+        assert.ok(a.events.length > 50, `${name}: ${a.events.length} events`);
+        assert.deepEqual(plain(a.failed), [], name);
         assert.deepEqual(plain(a.events), plain(b.events), name);
     }
 });
@@ -324,4 +334,172 @@ test("the class file imports ical.js by its default import, which the loader rea
     const script = scriptOf(classSource("calendarFeed.js"), "calendarFeed.js");
     assert.match(script, /^var ICAL = globalThis\.ICAL;$/m);
     assert.match(script, /^var requestUrl = globalThis\.requestUrl;$/m);
+});
+
+// A calendar whose events are given as lines, with New York's zone and any other zone lines
+const NY_ZONE = feeds("2026-11-12").studio.text.split("\r\n").filter((l, i, all) => i >= all.indexOf("BEGIN:VTIMEZONE") && i <= all.indexOf("END:VTIMEZONE"));
+const calendar = (lines, zones = NY_ZONE) => ["BEGIN:VCALENDAR", "VERSION:2.0", ...zones, ...lines, "END:VCALENDAR"].join("\r\n") + "\r\n";
+const vevent = (...lines) => ["BEGIN:VEVENT", ...lines, "END:VEVENT"];
+
+test("two reads at once keep their own zones, even with the same name", async () => {
+    const zone = (offset) => ["BEGIN:VTIMEZONE", "TZID:Customized Time Zone", "BEGIN:STANDARD", "DTSTART:16010101T000000",
+        `TZOFFSETFROM:${offset}`, `TZOFFSETTO:${offset}`, "END:STANDARD", "END:VTIMEZONE"];
+    const text = (offset) => calendar(vevent("UID:noon@example.org", "SUMMARY:Noon", "DTSTART;TZID=Customized Time Zone:20261113T120000",
+        "DTEND;TZID=Customized Time Zone:20261113T130000"), zone(offset));
+    const one = reader(), other = reader();
+    one.CalendarFeed.SLICE_MS = 0;
+    other.CalendarFeed.SLICE_MS = 0;
+    const window = one.feed.window(7, at("2026-11-12"));
+    const [east, west] = await Promise.all([
+        one.feed.read(text("-0500"), { calendar: CALENDARS.library, window }),
+        other.feed.read(text("-0800"), { calendar: CALENDARS.library, window }),
+    ]);
+    assert.deepEqual(plain([east.events[0].start, west.events[0].start]), ["2026-11-13T12:00:00-05:00", "2026-11-13T15:00:00-05:00"]);
+    assert.equal(ICAL.TimezoneService.has("Customized Time Zone"), false, "nothing registered for the whole app");
+});
+
+test("events in lowercase, with a trailing space or after a byte-order mark read as usual; one the split misses makes the feed unreadable", async () => {
+    const day = "2026-11-12";
+    const { reads, window } = await readAll(day);
+    const text = feeds(day).studio.text;
+    const variants = {
+        lowercase: text.replaceAll("BEGIN:VEVENT", "begin:vevent").replaceAll("END:VEVENT", "end:vevent"),
+        mixed: text.replaceAll("BEGIN:VEVENT", "Begin:VEvent"),
+        trailing: text.replaceAll("BEGIN:VEVENT\r\n", "BEGIN:VEVENT \r\n").replaceAll("END:VEVENT\r\n", "END:VEVENT\t\r\n"),
+        bom: String.fromCharCode(0xfeff) + text,
+        lf: "\n\n" + text.replaceAll("\r\n", "\n"),
+    };
+    for (const [name, variant] of Object.entries(variants)) {
+        const got = await reader().feed.read(variant, { calendar: CALENDARS.studio, window, link: LINKS.studio });
+        assert.ok(!got.problem, `${name}: ${got.problem}`);
+        assert.deepEqual(plain(got.events), plain(reads.studio.events), name);
+    }
+    const { feed } = reader();
+    feed.split = async (t) => ({ head: t, blocks: [], skipped: 0 });
+    assert.deepEqual(plain(await feed.read(text, { calendar: CALENDARS.studio, window, link: LINKS.studio })), { problem: "unreadable" });
+});
+
+// Rules ical.js loops on, rules it throws on and events that don't parse: each is left out by its
+// UID, and the rest of the calendar reads as usual. Run in a worker with a time and memory limit,
+// so a rule that gets through fails this test instead of hanging it.
+test("an event ical.js can't read is left out by its UID, and the rest of the calendar reads", async () => {
+    const day = "2026-11-12";
+    const bad = {
+        "daily-last-day@example.org": "RRULE:FREQ=DAILY;BYMONTHDAY=-1",
+        "daily-monday-last@example.org": "RRULE:FREQ=DAILY;BYDAY=MO;BYMONTHDAY=-1",
+        "daily-setpos@example.org": "RRULE:FREQ=DAILY;INTERVAL=3;BYMONTHDAY=-1;BYSETPOS=1",
+        "no-such-date@example.org": "RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30",
+        "yearly-no-date@example.org": "RRULE:FREQ=YEARLY;BYMONTH=4,6;BYMONTHDAY=31",
+        "fortnightly@example.org": "RRULE:FREQ=FORTNIGHTLY",
+        "yearday@example.org": "RRULE:FREQ=DAILY;INTERVAL=7;BYYEARDAY=320,330,340",
+    };
+    const lines = [];
+    for (const [uid, rule] of Object.entries(bad)) {
+        lines.push(...vevent(`UID:${uid}`, "SUMMARY:Bad rule", "DTSTART;TZID=America/New_York:20261001T090000", "DTEND;TZID=America/New_York:20261001T100000", rule));
+    }
+    lines.push(...vevent("UID:not-a-date@example.org", "SUMMARY:Bad date", "DTSTART;VALUE=DATE-TIME:20261114", "DTEND:20261114T100000Z"));
+    lines.push(...vevent("UID:no-start@example.org", "SUMMARY:No start", "DTEND:20261114T100000Z"));
+    // An override that doesn't parse leaves its whole series out, not its other occurrences as if unmoved
+    lines.push(...vevent("UID:daily-good@example.org", "SUMMARY:Good series", "DTSTART;TZID=America/New_York:20261113T090000",
+        "DTEND;TZID=America/New_York:20261113T093000", "RRULE:FREQ=DAILY;COUNT=5"));
+    lines.push(...vevent("UID:daily-good@example.org", "RECURRENCE-ID;TZID=America/New_York:20261115T090000", "DTSTART;TZID=America/New_York:20261115T110000",
+        "DTEND;TZID=America/New_York:20261115T113000", "SUMMARY:Moved", "X-BROKEN;=:"));
+    lines.push(...vevent("UID:fine@example.org", "SUMMARY:Fine", "DTSTART;TZID=America/New_York:20261113T140000", "DTEND;TZID=America/New_York:20261113T150000"));
+    // A zone whose rule ical.js would loop on is dropped, and its times read as the device's
+    const loopZone = ["BEGIN:VTIMEZONE", "TZID:Looping", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0100", "TZOFFSETTO:+0100",
+        "RRULE:FREQ=DAILY;BYMONTHDAY=-1", "END:STANDARD", "END:VTIMEZONE"];
+    lines.push(...vevent("UID:looping-zone@example.org", "SUMMARY:Looping zone", "DTSTART;TZID=Looping:20261114T090000", "DTEND;TZID=Looping:20261114T100000"));
+    const text = calendar(lines, [...NY_ZONE, ...loopZone]);
+    const code = `
+        const { parentPort, workerData } = require("node:worker_threads");
+        (async () => {
+            process.env.TZ = "America/New_York";
+            const vm = require("node:vm");
+            const ICAL = (await import(workerData.ical)).default;
+            const { loadClass } = await import(workerData.shape);
+            const context = vm.createContext({ ICAL, requestUrl: null, performance, window: { setTimeout, clearTimeout } });
+            const CalendarFeed = loadClass("calendarFeed.js", context);
+            const feed = new CalendarFeed();
+            const [y, m, d] = workerData.day.split("-").map(Number);
+            const got = await feed.read(workerData.text, { calendar: { id: "c", name: "C", account: null }, window: feed.window(14, new Date(y, m - 1, d, 9)) });
+            parentPort.postMessage(JSON.stringify(got));
+        })().catch((e) => parentPort.postMessage(JSON.stringify({ error: String(e) })));`;
+    const worker = new Worker(code, {
+        eval: true,
+        workerData: { text, day, ical: import.meta.resolve("ical.js"), shape: new URL("../classShape.mjs", import.meta.url).href },
+        resourceLimits: { maxOldGenerationSizeMb: 256 },
+    });
+    const got = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { worker.terminate(); reject(new Error("the read didn't finish: a rule got through")); }, 20000);
+        worker.on("message", (m) => { clearTimeout(timer); worker.terminate(); resolve(JSON.parse(m)); });
+        worker.on("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+    assert.equal(got.error, undefined, got.error);
+    assert.ok(!got.problem, got.problem);
+    assert.deepEqual([...got.failed].sort(), [...Object.keys(bad), "not-a-date@example.org", "no-start@example.org", "daily-good@example.org"].sort());
+    assert.deepEqual(got.events.map((e) => [e.title, e.start]), [["Fine", "2026-11-13T14:00:00-05:00"], ["Looping zone", "2026-11-14T09:00:00-05:00"]]);
+    assert.equal(got.stats.unknownZones, 1);
+});
+
+test("an override whose original start is written in another zone replaces its occurrence, once", async () => {
+    const { feed } = reader();
+    const window = feed.window(7, at("2026-11-12"));
+    const London = feeds("2026-11-12").studio.text.split("\r\n").filter((l, i, all) => i > all.indexOf("END:VTIMEZONE") && i <= all.lastIndexOf("END:VTIMEZONE"));
+    const text = calendar([
+        ...vevent("UID:ny@example.org", "SUMMARY:Standup", "DTSTART;TZID=America/New_York:20261113T093000", "DTEND;TZID=America/New_York:20261113T094500", "RRULE:FREQ=DAILY;COUNT=5"),
+        // 2:30pm in London is 9:30am in New York in November
+        ...vevent("UID:ny@example.org", "SUMMARY:Standup, moved", "RECURRENCE-ID;TZID=Europe/London:20261115T143000",
+            "DTSTART;TZID=America/New_York:20261115T150000", "DTEND;TZID=America/New_York:20261115T151500"),
+        ...vevent("UID:utc@example.org", "SUMMARY:Sync", "DTSTART:20261113T143000Z", "DTEND:20261113T150000Z", "RRULE:FREQ=DAILY;COUNT=5"),
+        ...vevent("UID:utc@example.org", "SUMMARY:Sync, moved", "RECURRENCE-ID;TZID=America/New_York:20261114T093000",
+            "DTSTART;TZID=America/New_York:20261114T160000", "DTEND;TZID=America/New_York:20261114T163000"),
+    ], [...NY_ZONE, ...London]);
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window });
+    const on = (title, date) => got.events.filter((e) => e.title.startsWith(title) && e.date === date).map((e) => [e.key, e.title, e.start.slice(11, 16)]);
+    assert.deepEqual(plain(on("Standup", "2026-11-15")), [["ny@example.org@2026-11-15", "Standup, moved", "15:00"]]);
+    assert.deepEqual(plain(on("Sync", "2026-11-14")), [["utc@example.org@2026-11-14", "Sync, moved", "16:00"]]);
+    assert.equal(got.events.length, 10);
+});
+
+test("a this-and-following change that moves occurrences days later still fills the window's first days", async () => {
+    const { feed } = reader();
+    const window = feed.window(6, at("2026-11-12"));
+    const text = calendar([
+        ...vevent("UID:range@example.org", "SUMMARY:Daily", "DTSTART;TZID=America/New_York:20261101T090000", "DTEND;TZID=America/New_York:20261101T093000", "RRULE:FREQ=DAILY"),
+        // From the 7th on, every occurrence three days later
+        ...vevent("UID:range@example.org", "SUMMARY:Daily", "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=America/New_York:20261107T090000",
+            "DTSTART;TZID=America/New_York:20261110T090000", "DTEND;TZID=America/New_York:20261110T093000"),
+    ]);
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window });
+    assert.deepEqual(plain(got.events.map((e) => [e.date, e.key])), [12, 13, 14, 15, 16, 17, 18].map((n) => [`2026-11-${n}`, `range@example.org@2026-11-${String(n - 3).padStart(2, "0")}`]));
+});
+
+test("it hands control back through scheduler.yield, else a posted message, else a timer", async () => {
+    const day = "2026-11-12";
+    const text = feeds(day).studio.text;
+    let yields = 0;
+    const scheduler = { yield: () => { yields++; return Promise.resolve(); } };
+    for (const [name, extra] of [["scheduler", { scheduler }], ["message", { MessageChannel }], ["timer", {}]]) {
+        const { CalendarFeed, feed } = reader(undefined, extra);
+        CalendarFeed.SLICE_MS = 0;
+        const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(14, at(day)), link: LINKS.studio });
+        assert.equal(got.events.length, 12, name);
+        assert.ok(got.stats.steps > 10, `${name}: ${got.stats.steps} steps`);
+    }
+    assert.ok(yields > 10);
+});
+
+test("Heavy, what's slowest for ical.js, reads its series and skips its old overrides", async () => {
+    const { feed } = reader();
+    const day = "2026-11-12";
+    const window = feed.window(62, at(day));
+    const got = await feed.read(feeds(day).heavy.text, { calendar: CALENDARS.library, window, link: LINKS.heavy });
+    assert.deepEqual(plain(got.failed), []);
+    assert.equal(got.stats.skipped, HEAVY.overrides);
+    const titles = new Set(got.events.map((e) => e.title));
+    assert.deepEqual([...titles].sort(), ["Desk hours", "Last-Friday review", "Month-end close", "Morning check"]);
+    // The last weekday of November 2026 is Monday the 30th, at 10am Eastern
+    assert.ok(got.events.some((e) => e.title === "Month-end close" && e.start === "2026-11-30T10:00:00-05:00"));
+    // The last Friday of November, at 10am Pacific: 1pm Eastern
+    assert.ok(got.events.some((e) => e.title === "Last-Friday review" && e.start === "2026-11-27T13:00:00-05:00"));
 });

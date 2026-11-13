@@ -1,5 +1,6 @@
 // How long the calendar reader (plugin/src/shared/calendarFeed.js) takes on Big, the invented feed
-// the size of a large real one (calendarFeeds.mjs), in Node: the download from a server on this
+// the size of a large real one, and on Heavy, what's slowest for ical.js (calendarFeeds.mjs), in
+// Node: the download from a server on this
 // machine, the read, and its longest step, which is what blocks the app. The best of three runs,
 // so numbers compare from one PR to the next (OBS-274). Run from the repository root, after
 // `npm ci`:
@@ -56,7 +57,7 @@ export async function measure(url, { days = 62, runs = 3, calendar = { id: "cal"
 
 const round = (ms) => Math.round(ms * 10) / 10;
 export function report(name, m) {
-    return `${name}: ${(m.bytes / 1e6).toFixed(2)} MB, ${m.skipped} old one-offs skipped, ${m.events} events; download ${round(m.downloadMs)} ms, `
+    return `${name}: ${(m.bytes / 1e6).toFixed(2)} MB, ${m.skipped} old events skipped, ${m.events} events; download ${round(m.downloadMs)} ms, `
         + `read ${round(m.readMs)} ms in ${m.steps} steps, longest step ${round(m.longestMs)} ms (in one block: ${round(m.oneBlockMs)} ms)`;
 }
 
@@ -66,12 +67,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const t = new Date();
     const day = option("--day", `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`);
     const days = Number(option("--days", "62"));
-    const { big } = feeds(day);
-    const server = http.createServer((req, res) => { res.writeHead(200, { "Content-Type": "text/calendar" }); res.end(big.text); });
+    const all = feeds(day);
+    const server = http.createServer((req, res) => {
+        const name = (req.url ?? "").replace(/^\/|\.ics$/g, "");
+        res.writeHead(200, { "Content-Type": "text/calendar" });
+        res.end(all[name]?.text ?? "");
+    });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const url = `http://127.0.0.1:${server.address().port}/big.ics`;
+    const url = (name) => `http://127.0.0.1:${server.address().port}/${name}.ics`;
     try {
-        console.log(report("Big", await measure(url, { days, link: big.link })));
+        console.log(report("Big", await measure(url("big"), { days, link: all.big.link })));
+        console.log(report("Heavy", await measure(url("heavy"), { days, link: all.heavy.link })));
     } finally {
         server.close();
     }

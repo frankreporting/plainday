@@ -3,17 +3,17 @@
 // Every name, address, link and event here is invented. Each feed is shaped like one provider's
 // export: Studio like a Google calendar's secret address, Home like an iCloud public calendar,
 // Library like an Outlook published calendar. Big has the size and shape of a large real Google
-// feed (1.4 MB and 1,692 events, mostly old one-offs: a little over the largest real one), for the
-// speed checks.
+// feed (1.4 MB and 1,692 events, mostly old one-offs: a little over the largest real one), and
+// Heavy holds what's slowest for ical.js, for the speed checks.
 //
 // Everything is dated from a test day: "day 1" is the day after it. The tests pin the day; a test
 // round uses the real one.
 //
 //   import { feeds } from "./calendarFeeds.mjs";
-//   const { studio, home, library, big } = feeds("2026-11-12");   // each { name, link, owner, text }
+//   const { studio, home, library, big, heavy } = feeds("2026-11-12");   // each { name, link, owner, text }
 //
 //   node plugin/test/calendarFeeds.mjs write <folder> [--day YYYY-MM-DD]
-//       writes studio.ics, home.ics, library.ics and big.ics into <folder>
+//       writes studio.ics, home.ics, library.ics, big.ics and heavy.ics into <folder>
 //   node plugin/test/calendarFeeds.mjs serve [--port 8765] [--day YYYY-MM-DD]
 //       serves them at http://127.0.0.1:<port>/<name>.ics until stopped; /gone.ics answers 404,
 //       and /silent.ics never answers
@@ -88,6 +88,7 @@ export const LINKS = {
     home: "webcal://p00-caldav.icloud.com/published/2/INVENTEDinventedINVENTEDinventedINVENTEDinventedINVENTEDinventedINVENTEDinventedINVENTEDinventedINVENTEDinvented00",
     library: "https://outlook.office365.com/owa/calendar/0000invented0000@example.org/0000invented00000000invented0000/calendar.ics",
     big: "https://calendar.google.com/calendar/ical/big-owner%40example.com/private-0000invented0000invented0000beef/basic.ics",
+    heavy: "https://outlook.office365.com/owa/calendar/0000invented0001@example.org/0000invented00000000invented0001/calendar.ics",
 };
 
 // Studio, a Google calendar's secret address: a series with a skipped day and a moved one, an
@@ -249,12 +250,42 @@ function big(day) {
     return ics(lines);
 }
 
+// Heavy: what's slowest for ical.js, shaped like an Outlook export. Two zones defined from 1601;
+// series since 2015 on the last weekday and the last Friday of each month (BYSETPOS, as Outlook
+// writes them); a weekly series since 2016; and a daily series since 2020 with 1,500 moved
+// occurrences before the window. For the speed checks: each of these once made one step too long.
+export const HEAVY = { overrides: 1500 };
+function heavy(day) {
+    const d = (n) => dayOf(day, n);
+    const ET = "TZID=Eastern Standard Time", PT = "TZID=Pacific Standard Time";
+    const PACIFIC = EASTERN_OUTLOOK.map((l) => l.replace("Eastern Standard Time", "Pacific Standard Time")
+        .replace("TZOFFSETFROM:-0400", "TZOFFSETFROM:-0700").replace("TZOFFSETTO:-0500", "TZOFFSETTO:-0800")
+        .replace("TZOFFSETFROM:-0500", "TZOFFSETFROM:-0800").replace("TZOFFSETTO:-0400", "TZOFFSETTO:-0700"));
+    const series = (uid, start, rule, summary, zone = ET) => event([`UID:${uid}`, `SUMMARY:${summary}`, `DTSTART;${zone}:${start}T100000`,
+        `DTEND;${zone}:${start}T103000`, `RRULE:${rule}`, `DTSTAMP:${STAMP}`, "TRANSP:OPAQUE", "STATUS:CONFIRMED", "X-MICROSOFT-CDO-BUSYSTATUS:BUSY"]);
+    const lines = ["BEGIN:VCALENDAR", "METHOD:PUBLISH", "PRODID:Microsoft Exchange Server 2010", "VERSION:2.0", "X-WR-CALNAME:Heavy",
+        ...EASTERN_OUTLOOK, ...PACIFIC,
+        ...series("heavy-last-weekday@example.org", "20150130", "FREQ=MONTHLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", "Month-end close"),
+        ...series("heavy-last-friday@example.org", "20150130", "FREQ=MONTHLY;INTERVAL=1;BYDAY=FR;BYSETPOS=-1", "Last-Friday review", PT),
+        ...series("heavy-weekly@example.org", "20160104", "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR;WKST=SU", "Desk hours"),
+        ...series("heavy-daily@example.org", "20200106", "FREQ=DAILY;INTERVAL=1", "Morning check")];
+    // Moved occurrences of the daily series, each an hour later, on the days before the window
+    for (let k = 0; k < HEAVY.overrides; k++) {
+        const n = -2 - k;
+        lines.push(...event(["UID:heavy-daily@example.org", "SUMMARY:Morning check", `RECURRENCE-ID;${ET}:${d(n)}T100000`,
+            `DTSTART;${ET}:${d(n)}T110000`, `DTEND;${ET}:${d(n)}T113000`, `DTSTAMP:${STAMP}`, "TRANSP:OPAQUE", "STATUS:CONFIRMED"]));
+    }
+    lines.push("END:VCALENDAR");
+    return ics(lines);
+}
+
 export function feeds(day) {
     return {
         studio: { name: "Studio", link: LINKS.studio, owner: OWNERS.studio, text: studio(day) },
         home: { name: "Home", link: LINKS.home, owner: OWNERS.home, text: home(day) },
         library: { name: "Library", link: LINKS.library, owner: OWNERS.library, text: library(day) },
         big: { name: "Big", link: LINKS.big, owner: "big-owner@example.com", text: big(day) },
+        heavy: { name: "Heavy", link: LINKS.heavy, owner: null, text: heavy(day) },
     };
 }
 
