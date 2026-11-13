@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { build, check, ROOT, SRC, workerSource } from "../esbuild.config.mjs";
+import { build, check, ROOT, SRC, workerPlugin, workerSource } from "../esbuild.config.mjs";
 import { classFiles as listClassFiles, parse, readIndex, shapeProblems } from "../classShape.mjs";
 
 // The indexes import the class files, which import Obsidian's module, which only Obsidian has, so
@@ -302,6 +302,18 @@ test("main.js starts with ical.js's license notice, and holds ical.js", async ()
     // worker's message handler
     assert.equal(text.split("Plainday bundles ical.js").length - 1, 2, "the notice, in main.js and in the worker's script");
     assert.match(text, /self\.onmessage = \(event\) =>/);
+});
+
+test("a worker that doesn't build stops the build, and names its files for npm run dev to watch", async () => {
+    const copy = copySrc();
+    const file = path.join(copy, "worker", "calendarRead.js");
+    fs.writeFileSync(file, `${fs.readFileSync(file, "utf8")}\nexport const broken = ;\n`);
+    await assert.rejects(build({ src: copy, outfile: path.join(copy, "main.js.out"), logLevel: "silent" }));
+    let load;
+    workerPlugin(copy).setup({ onResolve() {}, onLoad(_, fn) { load = fn; } });
+    const result = await load({ path: "calendar-worker", namespace: "plainday-worker" });
+    assert.ok(result.errors.length, "the worker's error");
+    assert.ok(result.watchFiles.includes(file), "watched, so fixing it builds again");
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {

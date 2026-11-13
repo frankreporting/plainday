@@ -113,8 +113,10 @@ export default class CalendarFeed {
             return { problem: "unreadable" };
         }
         return new Promise((resolve) => {
-            let timer = null;
+            let timer = null, done = false;
             const finish = (result) => {
+                if (done) return;
+                done = true;
                 window.clearTimeout(timer);
                 worker.terminate();
                 URL.revokeObjectURL(url);
@@ -124,10 +126,21 @@ export default class CalendarFeed {
             timer = window.setTimeout(() => finish({ problem: "slow" }), CalendarFeed.READ_LIMIT_MS);
             worker.onmessage = (event) => finish(event.data);
             worker.onerror = () => finish({ problem: "unreadable" });
-            worker.postMessage({
-                text,
-                options: { calendar, window: { start: range.start.getTime(), end: range.end.getTime() }, owner: this.owner(link) },
-            });
+            worker.onmessageerror = () => finish({ problem: "unreadable" });
+            // Only what the reader needs, as strings: a calendar's settings may hold more (its link)
+            const plain = (value) => (value === undefined || value === null ? null : String(value));
+            try {
+                worker.postMessage({
+                    text,
+                    options: {
+                        calendar: { id: plain(calendar.id), name: plain(calendar.name), account: plain(calendar.account) },
+                        window: { start: range.start.getTime(), end: range.end.getTime() },
+                        owner: this.owner(link),
+                    },
+                });
+            } catch {
+                finish({ problem: "unreadable" });
+            }
         });
     }
 

@@ -222,9 +222,11 @@ test("a long-running series started near the window gives the occurrences it giv
                 const at = (k, time) => kind === "allDay" ? `;VALUE=DATE:${ymd(k)}` : kind === "zoned" ? `;TZID=America/New_York:${ymd(k)}T${time}`
                     : kind === "utc" ? `:${ymd(k)}T${time}Z` : `:${ymd(k)}T${time}`;
                 const value = (prop, k, time) => { const v = at(k, time); return v.startsWith(";") ? `${prop}${v}` : `${prop}${v}`; };
-                // An RDATE turns starting near the window off, so only the UTC series have one
+                // An RDATE turns starting near the window off, so only the UTC series have one, past
+                // the window's end: on a day a daily rule also lands on, the series would repeat
+                // twice that day, and be left out
                 lines.push("BEGIN:VEVENT", value("DTSTART", start, "083000"), kind === "allDay" ? value("DTEND", start + 1, "") : value("DTEND", start, "090000"),
-                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 12, "070000")] : []), "END:VEVENT");
+                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 70, "070000")] : []), "END:VEVENT");
                 if (kind !== "allDay") lines.push("BEGIN:VEVENT", value("RECURRENCE-ID", 9, "083000"),
                     value("DTSTART", 10, "120000"), value("DTEND", 10, "130000"), `UID:${uid}`, "SUMMARY:moved", "END:VEVENT");
             }
@@ -738,4 +740,89 @@ test("when two attendees are on as many events, no one is taken for the owner, a
     const { feed } = reader();
     const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(7, at("2026-11-12")) });
     assert.deepEqual(plain(got.events.map((e) => e.title)), ["One", "Two"]);
+});
+
+test("a this-and-following change written in UTC or in London's time moves later meetings by its clock time", async () => {
+    const london = feeds("2026-11-12").studio.text.split("\r\n").filter((l, i, all) => i > all.indexOf("END:VTIMEZONE") && i <= all.lastIndexOf("END:VTIMEZONE"));
+    // 2:30pm in UTC, and in London in November, is 9:30am in New York
+    for (const rid of ["RECURRENCE-ID;RANGE=THISANDFUTURE:20261113T143000Z", "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=Europe/London:20261113T143000"]) {
+        const text = calendar([
+            ...vevent("UID:later@example.org", "SUMMARY:Standup", "DTSTART;TZID=America/New_York:20261110T093000", "DTEND;TZID=America/New_York:20261110T094500", "RRULE:FREQ=DAILY"),
+            ...vevent("UID:later@example.org", "SUMMARY:Standup, later", rid, "DTSTART;TZID=America/New_York:20261113T113000", "DTEND;TZID=America/New_York:20261113T114500"),
+        ], [...NY_ZONE, ...london]);
+        const { feed } = reader();
+        const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(5, at("2026-11-12")) });
+        assert.deepEqual(plain(got.events.map((e) => [e.date, e.start.slice(11, 16), e.end.slice(11, 16), e.title])), [
+            ["2026-11-12", "09:30", "09:45", "Standup"],
+            ...[13, 14, 15, 16, 17].map((d) => [`2026-11-${d}`, "11:30", "11:45", "Standup, later"]),
+        ], rid);
+    }
+});
+
+test("an override that changes no occurrence of its series, and a one-off with an override, are left out by name", async () => {
+    const london = feeds("2026-11-12").studio.text.split("\r\n").filter((l, i, all) => i > all.indexOf("END:VTIMEZONE") && i <= all.lastIndexOf("END:VTIMEZONE"));
+    const text = calendar([
+        // 9:30 in London is 4:30 in New York: no occurrence of the series starts then
+        ...vevent("UID:stray@example.org", "SUMMARY:Daily", "DTSTART;TZID=America/New_York:20261110T093000", "RRULE:FREQ=DAILY;COUNT=10"),
+        ...vevent("UID:stray@example.org", "SUMMARY:Stray", "RECURRENCE-ID;TZID=Europe/London:20261115T093000", "DTSTART;TZID=America/New_York:20261115T120000"),
+        ...vevent("UID:one-off@example.org", "SUMMARY:Lunch", "DTSTART;TZID=America/New_York:20261114T093000"),
+        ...vevent("UID:one-off@example.org", "SUMMARY:Lunch, moved", "RECURRENCE-ID;TZID=America/New_York:20261114T093000", "DTSTART;TZID=America/New_York:20261114T150000"),
+        ...vevent("UID:fine@example.org", "SUMMARY:Fine", "DTSTART;TZID=America/New_York:20261113T140000"),
+    ], [...NY_ZONE, ...london]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(7, at("2026-11-12")) });
+    assert.deepEqual(plain(got.failed).sort((x, y) => (x.uid < y.uid ? -1 : 1)), [{ uid: "one-off@example.org", title: "Lunch" }, { uid: "stray@example.org", title: "Daily" }]);
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Fine"]);
+});
+
+test("a meeting at the hour the clocks go back, in a zone only the feed defines, moved by an override written in UTC: left out, not doubled", async () => {
+    const custom = NY_ZONE.map((l) => l.replace("America/New_York", "Customized Time Zone"));
+    const text = calendar([
+        ...vevent("UID:night@example.org", "SUMMARY:Night", "DTSTART;TZID=Customized Time Zone:20261028T013000", "DTEND;TZID=Customized Time Zone:20261028T020000", "RRULE:FREQ=DAILY"),
+        // The first 1:30am on November 1st, in UTC
+        ...vevent("UID:night@example.org", "SUMMARY:Night, moved", "RECURRENCE-ID:20261101T053000Z", "DTSTART;TZID=Customized Time Zone:20261101T030000"),
+    ], custom);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(7, at("2026-10-29")) });
+    // ical.js reads 1:30am that night as the second one in a zone it defines, so the override,
+    // which changes the first, matches no occurrence, and the series would have Nov 1 twice
+    assert.deepEqual(plain(got.failed), [{ uid: "night@example.org", title: "Night" }]);
+    assert.deepEqual(plain(got.events), []);
+});
+
+test("a series with more occurrences in the window than can be handed back is left out by name, and the rest reads", async () => {
+    const text = calendar([
+        ...vevent("UID:minutely@example.org", "SUMMARY:Every minute", "DTSTART;TZID=America/New_York:20261112T000000", "RRULE:FREQ=MINUTELY"),
+        ...vevent("UID:fine@example.org", "SUMMARY:Fine", "DTSTART;TZID=America/New_York:20261113T140000"),
+    ]);
+    const { feed } = reader();
+    const started = performance.now();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(62, at("2026-11-12")) });
+    assert.ok(performance.now() - started < 2000, `${Math.round(performance.now() - started)} ms`);
+    assert.deepEqual(plain(got.failed), [{ uid: "minutely@example.org", title: "Every minute" }]);
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Fine"]);
+});
+
+test("only the calendar's ID, name and account reach the worker, and a message that can't be sent or read is unreadable", async () => {
+    const sent = [];
+    const reading = new CalendarReader();
+    const Recording = class extends inProcess(reading) { postMessage(data) { sent.push(data); super.postMessage(data); } };
+    const { feed } = reader(undefined, Recording);
+    const window = feed.window(7, at("2026-11-12"));
+    // A calendar setting holding more than the reader needs: its link, and something that can't be copied
+    const settings = { id: 7, name: "Studio", account: "Google", link: LINKS.studio, check: () => true };
+    const got = await feed.read(feeds("2026-11-12").studio.text, { calendar: settings, window, link: LINKS.studio });
+    assert.ok(!got.problem, got.problem);
+    assert.deepEqual(plain(sent[0].options.calendar), { id: "7", name: "Studio", account: "Google" });
+    assert.ok(!JSON.stringify(sent).includes("private-"), "no link");
+    assert.equal(got.events[0].calendarId, "7");
+    for (const Broken of [
+        class { postMessage() { throw new Error("DataCloneError"); } terminate() {} },
+        class { postMessage() { setTimeout(() => this.onmessageerror?.({}), 0); } terminate() {} },
+    ]) {
+        const { feed: broken } = reader(undefined, Broken);
+        const started = Date.now();
+        assert.deepEqual(plain(await broken.read(feeds("2026-11-12").studio.text, { calendar: settings, window })), { problem: "unreadable" });
+        assert.ok(Date.now() - started < 1000, "at once, not at the time limit");
+    }
 });

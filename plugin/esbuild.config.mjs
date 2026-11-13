@@ -116,14 +116,22 @@ export async function workerSource(src = SRC) {
 }
 
 // "plainday:calendar-worker": the worker's script as the module's default export, a string
-function workerPlugin(src) {
+export function workerPlugin(src) {
     return {
         name: "plainday-calendar-worker",
         setup(build) {
             build.onResolve({ filter: /^plainday:calendar-worker$/ }, () => ({ path: "calendar-worker", namespace: "plainday-worker" }));
             build.onLoad({ filter: /.*/, namespace: "plainday-worker" }, async () => {
-                const { code, inputs } = await workerSource(src);
-                return { contents: `export default ${JSON.stringify(code)};`, loader: "js", watchFiles: inputs };
+                try {
+                    const { code, inputs } = await workerSource(src);
+                    return { contents: `export default ${JSON.stringify(code)};`, loader: "js", watchFiles: inputs };
+                } catch (e) {
+                    // A worker that doesn't build stops the build, and `npm run dev` builds again once
+                    // one of its files changes
+                    const dir = path.join(src, "worker");
+                    const watchFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".js")).map((f) => path.join(dir, f));
+                    return { errors: e.errors?.length ? e.errors : [{ text: String(e.message) }], watchFiles };
+                }
             });
         },
     };
