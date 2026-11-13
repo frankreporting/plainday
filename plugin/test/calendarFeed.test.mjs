@@ -157,8 +157,8 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
         const window = feed.window(62, at(day));
         const got = await feed.read(feeds(day).big.text, { calendar: CALENDARS.big, window, link: LINKS.big });
         assert.equal(got.name, "Big");
-        // Every old one-off, and the overrides moved before the window
-        assert.ok(got.stats.skipped > BIG.oldOneOffs && got.stats.skipped < BIG.oldOneOffs + BIG.overrides, `${got.stats.skipped} skipped`);
+        // Every old one-off; moved occurrences of series are read, whenever they were
+        assert.equal(got.stats.skipped, BIG.oldOneOffs);
         assert.deepEqual(plain(got.failed), []);
         assert.equal(got.events.filter((e) => e.key.startsWith("big-new-")).length, BIG.upcoming);
         assert.ok(got.events.length > 300, `${got.events.length} events`);
@@ -401,6 +401,10 @@ test("an event ical.js can't read is left out by its UID, and the rest of the ca
         "leap-every-4@example.org": "RRULE:FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29",
         "setpos-10@example.org": "RRULE:FREQ=MONTHLY;BYDAY=FR;BYSETPOS=10",
         "day-and-weekday@example.org": "RRULE:FREQ=YEARLY;BYMONTH=11;BYMONTHDAY=-1;BYDAY=MO,TU",
+        "setpos-numbered@example.org": "RRULE:FREQ=MONTHLY;BYDAY=1MO;BYSETPOS=5",
+        "setpos-numbered-feb@example.org": "RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=1MO;BYSETPOS=2",
+        "a-million-weeks@example.org": "RRULE:FREQ=WEEKLY;INTERVAL=1000000",
+        "exrule@example.org": "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR\r\nEXRULE:FREQ=WEEKLY;BYDAY=FR",
     };
     const lines = [];
     for (const [uid, rule] of Object.entries(bad)) {
@@ -416,7 +420,7 @@ test("an event ical.js can't read is left out by its UID, and the rest of the ca
     lines.push(...vevent("UID:daily-good@example.org", "RECURRENCE-ID;TZID=America/New_York:20261115T090000", "DTSTART;TZID=America/New_York:20261115T110000",
         "DTEND;TZID=America/New_York:20261115T113000", "SUMMARY:Moved", "X-BROKEN;=:"));
     lines.push(...vevent("UID:fine@example.org", "SUMMARY:Fine", "DTSTART;TZID=America/New_York:20261113T140000", "DTEND;TZID=America/New_York:20261113T150000"));
-    // A zone whose rule ical.js would loop on is dropped, and its times read as the device's
+    // A zone whose rule ical.js would loop on is dropped, and its events are left out by UID
     const loopZone = ["BEGIN:VTIMEZONE", "TZID:Looping", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:+0100", "TZOFFSETTO:+0100",
         "RRULE:FREQ=DAILY;BYMONTHDAY=-1", "END:STANDARD", "END:VTIMEZONE"];
     lines.push(...vevent("UID:looping-zone@example.org", "SUMMARY:Looping zone", "DTSTART;TZID=Looping:20261114T090000", "DTEND;TZID=Looping:20261114T100000"));
@@ -447,8 +451,8 @@ test("an event ical.js can't read is left out by its UID, and the rest of the ca
     });
     assert.equal(got.error, undefined, got.error);
     assert.ok(!got.problem, got.problem);
-    assert.deepEqual([...got.failed].sort(), [...Object.keys(bad), "not-a-date@example.org", "no-start@example.org", "daily-good@example.org"].sort());
-    assert.deepEqual(got.events.map((e) => [e.title, e.start]), [["Fine", "2026-11-13T14:00:00-05:00"], ["Looping zone", "2026-11-14T09:00:00-05:00"]]);
+    assert.deepEqual([...got.failed].sort(), [...Object.keys(bad), "not-a-date@example.org", "no-start@example.org", "daily-good@example.org", "looping-zone@example.org"].sort());
+    assert.deepEqual(got.events.map((e) => [e.title, e.start]), [["Fine", "2026-11-13T14:00:00-05:00"]]);
     assert.equal(got.stats.unknownZones, 1);
 });
 
@@ -488,25 +492,31 @@ test("a this-and-following change that moves occurrences days later still fills 
 test("it hands control back through scheduler.yield, else a posted message, else a timer", async () => {
     const day = "2026-11-12";
     const text = feeds(day).studio.text;
-    let yields = 0;
-    const scheduler = { yield: () => { yields++; return Promise.resolve(); } };
-    for (const [name, extra] of [["scheduler", { scheduler }], ["message", { MessageChannel }], ["timer", {}]]) {
+    const used = { scheduler: 0, message: 0, timer: 0 };
+    const scheduler = { yield: () => { used.scheduler++; return Promise.resolve(); } };
+    const Channel = class extends MessageChannel { constructor() { super(); used.message++; } };
+    const timer = (fn, ms) => { used.timer++; return setTimeout(fn, ms); };
+    for (const [name, extra] of [["scheduler", { scheduler }], ["message", { MessageChannel: Channel }], ["timer", { setTimeout: timer }]]) {
         const { CalendarFeed, feed } = reader(undefined, extra);
         CalendarFeed.SLICE_MS = 0;
+        const before = { ...used };
         const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(14, at(day)), link: LINKS.studio });
         assert.equal(got.events.length, 12, name);
         assert.ok(got.stats.steps > 10, `${name}: ${got.stats.steps} steps`);
+        assert.equal(used[name] - before[name], got.stats.steps - 1, `${name}: one hand-back between each two steps`);
+        for (const other of Object.keys(used).filter((k) => k !== name)) assert.equal(used[other], before[other], `${name}: not ${other}`);
     }
-    assert.ok(yields > 10);
 });
 
-test("Heavy, what's slowest for ical.js, reads its series and skips its old overrides", async () => {
+test("Heavy, what's slowest for ical.js, reads its series and its moved occurrences", async () => {
     const { feed } = reader();
     const day = "2026-11-12";
     const window = feed.window(62, at(day));
     const got = await feed.read(feeds(day).heavy.text, { calendar: CALENDARS.library, window, link: LINKS.heavy });
     assert.deepEqual(plain(got.failed), []);
-    assert.equal(got.stats.skipped, HEAVY.overrides);
+    // Moved occurrences aren't skipped, however old: another can move them into the window
+    assert.equal(got.stats.skipped, 0);
+    assert.equal(got.stats.blocks, 4 + HEAVY.overrides);
     const titles = new Set(got.events.map((e) => e.title));
     assert.deepEqual([...titles].sort(), ["Desk hours", "Last-Friday review", "Month-end close", "Morning check"]);
     // The last weekday of November 2026 is Monday the 30th, at 10am Eastern
@@ -537,16 +547,16 @@ test("the repeating rules Google, iCloud and Outlook write are all read", async 
     assert.deepEqual(written.filter((r) => !read.has(r) && !/COUNT=10|UNTIL=2027|UNTIL=20270301/.test(r)), [], "every running rule has an occurrence in the window");
 });
 
-// Zones whose changes stop: one that dropped daylight time (its last change is a rule's last),
-// and one whose rules end two years before the window, from an old start late in the month
-test("a zone whose rules ended keeps its last change", async () => {
+// Zones whose changes stop, as definitions with their history write them: one that dropped
+// daylight time (its last change is a rule's last), and one whose rules end in 2024
+test("a zone the device doesn't know is read from the feed's definition, ended rules and all", async () => {
     const zones = [
-        // Like vzic's: daylight time until 2018, then standard time for good, at -03
+        // Daylight time until 2018, then standard time for good, at -03
         ["BEGIN:VTIMEZONE", "TZID:Ended", "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0300", "TZOFFSETTO:-0200", "DTSTART:20081019T000000",
             "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=3SU;UNTIL=20181104T030000Z", "END:DAYLIGHT",
             "BEGIN:STANDARD", "TZOFFSETFROM:-0200", "TZOFFSETTO:-0300", "DTSTART:20090215T000000",
             "RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=3SU;UNTIL=20190217T020000Z", "END:STANDARD", "END:VTIMEZONE"],
-        // Rules that end in 2024, started on the 31st of October
+        // Rules that end in 2024 at -05 standard, started on the 31st of October
         ["BEGIN:VTIMEZONE", "TZID:Ends2024", "BEGIN:STANDARD", "TZOFFSETFROM:-0400", "TZOFFSETTO:-0500", "DTSTART:19701031T020000",
             "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU;UNTIL=20241027T060000Z", "END:STANDARD",
             "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0500", "TZOFFSETTO:-0400", "DTSTART:19700405T020000",
@@ -554,16 +564,138 @@ test("a zone whose rules ended keeps its last change", async () => {
     ];
     const lines = ["Ended", "Ends2024"].flatMap((tz) => [3, 120, 200].flatMap((n) => vevent(`UID:${tz}-${n}@example.org`, `SUMMARY:${tz}`,
         `DTSTART;TZID=${tz}:${dayAfter("2026-11-12", n).replaceAll("-", "")}T100000`, `DTEND;TZID=${tz}:${dayAfter("2026-11-12", n).replaceAll("-", "")}T110000`)));
-    const text = calendar(lines, zones.flat());
-    const moved = reader().feed, untouched = reader().feed;
-    untouched.zones = () => {};
-    const window = moved.window(300, at("2026-11-12"));
-    const a = await moved.read(text, { calendar: CALENDARS.studio, window });
-    const b = await untouched.read(text, { calendar: CALENDARS.studio, window });
-    assert.equal(a.events.length, 6);
-    assert.deepEqual(plain(a.events), plain(b.events));
-    // 10am at -03 is 8am in New York in November
-    assert.equal(a.events.find((e) => e.key === "Ended-3@example.org").start, `${dayAfter("2026-11-12", 3)}T08:00:00-05:00`);
+    const { feed } = reader();
+    const window = feed.window(300, at("2026-11-12"));
+    const got = await feed.read(calendar(lines, zones.flat()), { calendar: CALENDARS.studio, window });
+    assert.equal(got.events.length, 6);
+    const utcHour = (e) => new Date(e.start).getUTCHours();
+    // 10am at -03 is 1pm UTC; at -05 (the last change of the rules that ended in 2024) 3pm UTC
+    assert.deepEqual(plain(got.events.map((e) => [e.title, utcHour(e)])).sort(), [["Ended", 13], ["Ended", 13], ["Ended", 13], ["Ends2024", 15], ["Ends2024", 15], ["Ends2024", 15]]);
+});
+
+test("a zone named the IANA or the Windows way is read from the device, even with no definition, or a wrong one", async () => {
+    const event = (uid, tzid) => vevent(`UID:${uid}@example.org`, `SUMMARY:${uid}`, `DTSTART;TZID=${tzid}:20261116T090000`, `DTEND;TZID=${tzid}:20261116T100000`);
+    // A definition of New York that's wrong: it says -0700 all year
+    const wrong = ["BEGIN:VTIMEZONE", "TZID:America/New_York", "BEGIN:STANDARD", "DTSTART:19700101T000000", "TZOFFSETFROM:-0700", "TZOFFSETTO:-0700", "END:STANDARD", "END:VTIMEZONE"];
+    const text = calendar([...event("berlin", "Europe/Berlin"), ...event("tokyo", "Tokyo Standard Time"), ...event("eastern", "Eastern Standard Time"),
+        ...event("ny", "America/New_York"), ...event("nowhere", "Nowhere Standard Time")], wrong);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
+    const by = Object.fromEntries(got.events.map((e) => [e.title, e.start]));
+    // 9am in Berlin is 3am in New York in November; in Tokyo, 7pm the day before
+    assert.deepEqual(plain(by), {
+        berlin: "2026-11-16T03:00:00-05:00", tokyo: "2026-11-15T19:00:00-05:00",
+        eastern: "2026-11-16T09:00:00-05:00", ny: "2026-11-16T09:00:00-05:00",
+    });
+    // A zone no one knows: its event is left out, not read in the device's zone
+    assert.deepEqual(plain(got.failed), ["nowhere@example.org"]);
+    assert.equal(got.stats.unknownZones, 1);
+});
+
+test("the device's zones read the invented feeds as their own definitions do, around the changes to and from daylight time", async () => {
+    for (const day of ["2026-03-05", "2026-10-29", "2026-11-12"]) {
+        for (const name of ["studio", "home", "library", "heavy"]) {
+            const device = reader().feed, defined = reader().feed;
+            defined.deviceZone = () => null;
+            const window = device.window(20, at(day));
+            const a = await device.read(feeds(day)[name].text, { calendar: CALENDARS.studio, window, link: LINKS[name] });
+            const b = await defined.read(feeds(day)[name].text, { calendar: CALENDARS.studio, window, link: LINKS[name] });
+            assert.ok(a.events.length > 0, `${day} ${name}`);
+            // Late launch ends at 1am on the night the clocks go back, an hour that happens twice:
+            // RFC 5545 says it's the first, as the device reads it; ical.js's own reading of the
+            // definition takes the second. Every other time is the same.
+            const twice = (e) => e.id === "late-launch@example.com" && e.end.startsWith("2026-11-01T01:00:00");
+            const first = plain(a.events).map((e) => (twice(e) ? (assert.equal(e.end.slice(-6), "-04:00"), { ...e, end: "first 1am" }) : e));
+            const second = plain(b.events).map((e) => (twice(e) ? (assert.equal(e.end.slice(-6), "-05:00"), { ...e, end: "first 1am" }) : e));
+            assert.deepEqual(first, second, `${day} ${name}`);
+        }
+    }
+});
+
+test("a time the clocks skip lands after the gap, and one they repeat is the first", async () => {
+    const text = calendar([
+        // The clocks go from 2am to 3am on March 8th 2026 in New York, and from 2am back to 1am on November 1st
+        ...vevent("UID:gap@example.org", "SUMMARY:Gap", "DTSTART;TZID=America/New_York:20260308T023000", "DTEND;TZID=America/New_York:20260308T033000"),
+        ...vevent("UID:twice@example.org", "SUMMARY:Twice", "DTSTART;TZID=America/New_York:20261101T013000", "DTEND;TZID=America/New_York:20261101T023000"),
+    ]);
+    const { feed } = reader();
+    for (const [day, title, utc] of [["2026-03-08", "Gap", "2026-03-08T07:30:00.000Z"], ["2026-11-01", "Twice", "2026-11-01T05:30:00.000Z"]]) {
+        const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(1, at(day, 0)) });
+        const e = got.events.find((x) => x.title === title);
+        assert.equal(new Date(e.start).toISOString(), utc, title);
+    }
+});
+
+test("a date years past the window isn't worked out, even in a zone defined from 1601", async () => {
+    const zone = feeds("2026-11-12").heavy.text.split("\r\n").filter((l, i, all) => i >= all.indexOf("BEGIN:VTIMEZONE") && i <= all.indexOf("END:VTIMEZONE"))
+        .map((l) => l.replace("Eastern Standard Time", "Customized Time Zone"));
+    const text = calendar([
+        ...vevent("UID:far@example.org", "SUMMARY:Far", "DTSTART;TZID=Customized Time Zone:99991113T090000", "DTEND;TZID=Customized Time Zone:99991113T100000"),
+        ...vevent("UID:rare@example.org", "SUMMARY:Rare", "DTSTART;TZID=Customized Time Zone:20261113T090000", "DTEND;TZID=Customized Time Zone:20261113T100000", "RRULE:FREQ=YEARLY;INTERVAL=999"),
+        ...vevent("UID:ends-far@example.org", "SUMMARY:Ends far", "DTSTART;TZID=Customized Time Zone:20261114T090000", "DTEND;TZID=Customized Time Zone:30261114T100000"),
+    ], zone);
+    const { feed } = reader();
+    const started = performance.now();
+    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
+    assert.ok(performance.now() - started < 1000, `${Math.round(performance.now() - started)} ms`);
+    assert.deepEqual(plain(got.events.map((e) => [e.title, e.endsSameDay])), [["Rare", true], ["Ends far", false]]);
+    assert.deepEqual(plain(got.failed), []);
+});
+
+test("an old occurrence moved back by itself isn't skipped: another's this-and-following change would move it into the window", async () => {
+    const text = calendar([
+        ...vevent("UID:standup@example.org", "SUMMARY:Standup", "DTSTART;TZID=America/New_York:20261006T093000", "DTEND;TZID=America/New_York:20261006T094500", "RRULE:FREQ=WEEKLY"),
+        // From October 20th on, two days later: Thursdays
+        ...vevent("UID:standup@example.org", "SUMMARY:Standup", "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID=America/New_York:20261020T093000",
+            "DTSTART;TZID=America/New_York:20261022T093000", "DTEND;TZID=America/New_York:20261022T094500"),
+        // The 10th kept on its Tuesday
+        ...vevent("UID:standup@example.org", "SUMMARY:Standup", "RECURRENCE-ID;TZID=America/New_York:20261110T093000",
+            "DTSTART;TZID=America/New_York:20261110T093000", "DTEND;TZID=America/New_York:20261110T094500"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(10, at("2026-11-12")) });
+    assert.deepEqual(plain(got.events.map((e) => [e.date, e.key])), [["2026-11-19", "standup@example.org@2026-11-17"]]);
+});
+
+test("a rule every few months on a fifth weekday is read, and so is February 29th from a leap year", async () => {
+    const text = calendar([
+        ...vevent("UID:fifth@example.org", "SUMMARY:Fifth Friday", "DTSTART;TZID=America/New_York:20260130T100000", "DTEND;TZID=America/New_York:20260130T110000",
+            "RRULE:FREQ=MONTHLY;INTERVAL=2;BYDAY=5FR"),
+        ...vevent("UID:leap4@example.org", "SUMMARY:Leap 4", "DTSTART;VALUE=DATE:20240229", "DTEND;VALUE=DATE:20240301", "RRULE:FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29"),
+        ...vevent("UID:leap2@example.org", "SUMMARY:Leap 2", "DTSTART;VALUE=DATE:20240229", "DTEND;VALUE=DATE:20240301", "RRULE:FREQ=YEARLY;INTERVAL=2"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(500, at("2026-11-12")) });
+    assert.deepEqual(plain(got.failed), []);
+    assert.deepEqual(plain(got.events.map((e) => [e.title, e.date])), [["Fifth Friday", "2027-01-29"], ["Fifth Friday", "2027-07-30"], ["Leap 2", "2028-02-29"], ["Leap 4", "2028-02-29"]]);
+});
+
+test("two events with one UID, and an event that doesn't parse whose alarm comes first, are named by the right UID", async () => {
+    const text = calendar([
+        ...vevent("UID:twin@example.org", "SUMMARY:First", "DTSTART:20261113T140000Z"),
+        ...vevent("UID:twin@example.org", "SUMMARY:Second", "DTSTART:20261114T140000Z"),
+        ...vevent("UID:series@example.org", "SUMMARY:Series", "DTSTART;TZID=America/New_York:20261113T093000", "DTEND;TZID=America/New_York:20261113T100000", "RRULE:FREQ=DAILY;COUNT=4"),
+        ...vevent("BEGIN:VALARM", "UID:alarm-1@example.org", "ACTION:DISPLAY", "TRIGGER:-PT10M", "END:VALARM", "UID:series@example.org",
+            "RECURRENCE-ID;TZID=America/New_York:20261115T093000", "DTSTART;TZID=America/New_York:20261115T150000", "X-BROKEN;=:"),
+        ...vevent("UID:fine@example.org", "SUMMARY:Fine", "DTSTART:20261113T160000Z"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.studio, window: feed.window(7, at("2026-11-12")) });
+    assert.deepEqual(plain([...got.failed].sort()), ["series@example.org", "twin@example.org"]);
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Fine"]);
+});
+
+test("the owner is counted on events that didn't parse too", async () => {
+    const att = (who, partstat) => `ATTENDEE;PARTSTAT=${partstat}:mailto:${who}`;
+    const text = calendar([
+        ...vevent("UID:a@example.org", "SUMMARY:Declined", "DTSTART:20261113T140000Z", att("desk@example.org", "DECLINED"), att("x@example.org", "ACCEPTED")),
+        ...vevent("UID:b@example.org", "SUMMARY:Broken", "DTSTART:20261114T140000Z", att("desk@example.org", "ACCEPTED"), "X-BROKEN;=:"),
+        ...vevent("UID:c@example.org", "SUMMARY:Other", "DTSTART:20261115T140000Z", att("y@example.org", "ACCEPTED")),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
+    assert.deepEqual(plain(got.failed), ["b@example.org"]);
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Other"]);
 });
 
 test("a series with an RDATE before the window keeps the occurrences its EXDATEs remove", async () => {

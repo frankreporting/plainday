@@ -17,14 +17,14 @@ export default class CalendarFeed {
     //   feed.feed([{ calendar, events }], window)   the whole events file, for apply()
     //
     // How it reads a feed, from what OBS-227's spike found on real feeds:
-    // - One-off events and overrides that ended more than a day before the window are dropped from
-    //   the text before anything is parsed. Google's feed holds every event since the calendar
-    //   began, and this is most of it. The day of margin covers an end written in UTC or another
-    //   zone.
-    // - Times are read in the time zones the feed itself defines. Outlook names zones the Windows
-    //   way ("Eastern Standard Time"), which ical.js knows only from the feed's definitions. Each
-    //   read keeps its zones to itself, so reads at the same time can't mix up two feeds' zones of
-    //   the same name.
+    // - One-off events that ended more than a day before the window are dropped from the text
+    //   before anything is parsed. Google's feed holds every event since the calendar began, and
+    //   this is most of it. The day of margin covers an end written in UTC or another zone.
+    // - Times are read in this device's own time zone data, by the zone's name: an IANA name
+    //   (Google's and iCloud's, "America/New_York") as it is, a Windows name (Outlook's, "Eastern
+    //   Standard Time") through Unicode's table of them (WINDOWS). Only a name the device doesn't
+    //   know ("Customized Time Zone") is read from the feed's own definition, which each read
+    //   keeps to itself. An event in a zone neither knows goes to `failed`.
     // - Events are grouped by UID into a series and its overrides. A moved occurrence keeps its
     //   series' key, `UID@<original date>`; so does an override whose series isn't in the feed (an
     //   invitation to one occurrence of someone else's series).
@@ -34,9 +34,10 @@ export default class CalendarFeed {
     //   on the most events read (OBS-277 checks that against real iCloud and Outlook feeds).
     // - It works in small steps: it hands control back to the app every few milliseconds, so a
     //   large feed doesn't freeze the editor, and records its longest step for the speed check.
-    // - An event it can't read (a rule ical.js would loop on, a date that doesn't parse) is left
-    //   out and named in `failed`, and the rest of the calendar is read as usual. A feed it can't
-    //   read at all is "unreadable", so nothing in it looks canceled.
+    // - An event it can't read (a rule ical.js would loop on, a date that doesn't parse, a zone
+    //   it doesn't know, two events with one UID) is left out and named in `failed`, and the rest of
+    //   the calendar is read as usual. A feed it can't read at all is "unreadable", so nothing in
+    //   it looks canceled.
     //
     // A link works like a password (OBS-231, 11/04): nothing here puts it in a result, an error,
     // the console or a notice. A failed download comes back as a problem and a status code only.
@@ -57,11 +58,108 @@ export default class CalendarFeed {
     // doesn't match, and the event is then kept.
     static DTEND = /\nDTEND(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
     static DTSTART = /\nDTSTART(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
-    static RECURRENCE_ID = /\nRECURRENCE-ID(?:;[^\r\n]*)?:(\d{8})(?:T\d{6}Z?)?[ \t]*\r?\n/i;
-    static HAS_RECURRENCE_ID = /\nRECURRENCE-ID[;:]/i;
-    static RULES = /\n(?:RRULE|RDATE|EXRULE)[;:]/i;
-    static UID = /\nUID[;:][^\r\n]*/i;
+    static REPEATS = /\n(?:RRULE|RDATE|EXRULE|RECURRENCE-ID)[;:]/i;
     static GOOGLE = /^https:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
+    // Windows zone names, as Outlook writes them, and the IANA name of each: Unicode CLDR 46's
+    // windowsZones.xml, its "001" (whole zone) rows
+    static WINDOWS = {
+        "Dateline Standard Time": "Etc/GMT+12", "UTC-11": "Etc/GMT+11",
+        "Aleutian Standard Time": "America/Adak", "Hawaiian Standard Time": "Pacific/Honolulu",
+        "Marquesas Standard Time": "Pacific/Marquesas",
+        "Alaskan Standard Time": "America/Anchorage", "UTC-09": "Etc/GMT+9",
+        "Pacific Standard Time (Mexico)": "America/Tijuana", "UTC-08": "Etc/GMT+8",
+        "Pacific Standard Time": "America/Los_Angeles",
+        "US Mountain Standard Time": "America/Phoenix",
+        "Mountain Standard Time (Mexico)": "America/Mazatlan",
+        "Mountain Standard Time": "America/Denver", "Yukon Standard Time": "America/Whitehorse",
+        "Central America Standard Time": "America/Guatemala",
+        "Central Standard Time": "America/Chicago", "Easter Island Standard Time": "Pacific/Easter",
+        "Central Standard Time (Mexico)": "America/Mexico_City",
+        "Canada Central Standard Time": "America/Regina",
+        "SA Pacific Standard Time": "America/Bogota",
+        "Eastern Standard Time (Mexico)": "America/Cancun",
+        "Eastern Standard Time": "America/New_York",
+        "Haiti Standard Time": "America/Port-au-Prince", "Cuba Standard Time": "America/Havana",
+        "US Eastern Standard Time": "America/Indianapolis",
+        "Turks And Caicos Standard Time": "America/Grand_Turk",
+        "Paraguay Standard Time": "America/Asuncion", "Atlantic Standard Time": "America/Halifax",
+        "Venezuela Standard Time": "America/Caracas",
+        "Central Brazilian Standard Time": "America/Cuiaba",
+        "SA Western Standard Time": "America/La_Paz",
+        "Pacific SA Standard Time": "America/Santiago",
+        "Newfoundland Standard Time": "America/St_Johns",
+        "Tocantins Standard Time": "America/Araguaina",
+        "E. South America Standard Time": "America/Sao_Paulo",
+        "SA Eastern Standard Time": "America/Cayenne",
+        "Argentina Standard Time": "America/Buenos_Aires",
+        "Greenland Standard Time": "America/Godthab",
+        "Montevideo Standard Time": "America/Montevideo",
+        "Magallanes Standard Time": "America/Punta_Arenas",
+        "Saint Pierre Standard Time": "America/Miquelon", "Bahia Standard Time": "America/Bahia",
+        "UTC-02": "Etc/GMT+2", "Azores Standard Time": "Atlantic/Azores",
+        "Cape Verde Standard Time": "Atlantic/Cape_Verde", "UTC": "Etc/UTC",
+        "GMT Standard Time": "Europe/London", "Greenwich Standard Time": "Atlantic/Reykjavik",
+        "Sao Tome Standard Time": "Africa/Sao_Tome", "Morocco Standard Time": "Africa/Casablanca",
+        "W. Europe Standard Time": "Europe/Berlin",
+        "Central Europe Standard Time": "Europe/Budapest", "Romance Standard Time": "Europe/Paris",
+        "Central European Standard Time": "Europe/Warsaw",
+        "W. Central Africa Standard Time": "Africa/Lagos", "Jordan Standard Time": "Asia/Amman",
+        "GTB Standard Time": "Europe/Bucharest", "Middle East Standard Time": "Asia/Beirut",
+        "Egypt Standard Time": "Africa/Cairo", "E. Europe Standard Time": "Europe/Chisinau",
+        "Syria Standard Time": "Asia/Damascus", "West Bank Standard Time": "Asia/Hebron",
+        "South Africa Standard Time": "Africa/Johannesburg", "FLE Standard Time": "Europe/Kiev",
+        "Israel Standard Time": "Asia/Jerusalem", "South Sudan Standard Time": "Africa/Juba",
+        "Kaliningrad Standard Time": "Europe/Kaliningrad", "Sudan Standard Time": "Africa/Khartoum",
+        "Libya Standard Time": "Africa/Tripoli", "Namibia Standard Time": "Africa/Windhoek",
+        "Arabic Standard Time": "Asia/Baghdad", "Turkey Standard Time": "Europe/Istanbul",
+        "Arab Standard Time": "Asia/Riyadh", "Belarus Standard Time": "Europe/Minsk",
+        "Russian Standard Time": "Europe/Moscow", "E. Africa Standard Time": "Africa/Nairobi",
+        "Iran Standard Time": "Asia/Tehran", "Arabian Standard Time": "Asia/Dubai",
+        "Astrakhan Standard Time": "Europe/Astrakhan", "Azerbaijan Standard Time": "Asia/Baku",
+        "Russia Time Zone 3": "Europe/Samara", "Mauritius Standard Time": "Indian/Mauritius",
+        "Saratov Standard Time": "Europe/Saratov", "Georgian Standard Time": "Asia/Tbilisi",
+        "Volgograd Standard Time": "Europe/Volgograd", "Caucasus Standard Time": "Asia/Yerevan",
+        "Afghanistan Standard Time": "Asia/Kabul", "West Asia Standard Time": "Asia/Tashkent",
+        "Ekaterinburg Standard Time": "Asia/Yekaterinburg",
+        "Pakistan Standard Time": "Asia/Karachi", "Qyzylorda Standard Time": "Asia/Qyzylorda",
+        "India Standard Time": "Asia/Calcutta", "Sri Lanka Standard Time": "Asia/Colombo",
+        "Nepal Standard Time": "Asia/Katmandu", "Central Asia Standard Time": "Asia/Bishkek",
+        "Bangladesh Standard Time": "Asia/Dhaka", "Omsk Standard Time": "Asia/Omsk",
+        "Myanmar Standard Time": "Asia/Rangoon", "SE Asia Standard Time": "Asia/Bangkok",
+        "Altai Standard Time": "Asia/Barnaul", "W. Mongolia Standard Time": "Asia/Hovd",
+        "North Asia Standard Time": "Asia/Krasnoyarsk",
+        "N. Central Asia Standard Time": "Asia/Novosibirsk", "Tomsk Standard Time": "Asia/Tomsk",
+        "China Standard Time": "Asia/Shanghai", "North Asia East Standard Time": "Asia/Irkutsk",
+        "Singapore Standard Time": "Asia/Singapore",
+        "W. Australia Standard Time": "Australia/Perth", "Taipei Standard Time": "Asia/Taipei",
+        "Ulaanbaatar Standard Time": "Asia/Ulaanbaatar",
+        "Aus Central W. Standard Time": "Australia/Eucla",
+        "Transbaikal Standard Time": "Asia/Chita", "Tokyo Standard Time": "Asia/Tokyo",
+        "North Korea Standard Time": "Asia/Pyongyang", "Korea Standard Time": "Asia/Seoul",
+        "Yakutsk Standard Time": "Asia/Yakutsk",
+        "Cen. Australia Standard Time": "Australia/Adelaide",
+        "AUS Central Standard Time": "Australia/Darwin",
+        "E. Australia Standard Time": "Australia/Brisbane",
+        "AUS Eastern Standard Time": "Australia/Sydney",
+        "West Pacific Standard Time": "Pacific/Port_Moresby",
+        "Tasmania Standard Time": "Australia/Hobart",
+        "Vladivostok Standard Time": "Asia/Vladivostok",
+        "Lord Howe Standard Time": "Australia/Lord_Howe",
+        "Bougainville Standard Time": "Pacific/Bougainville",
+        "Russia Time Zone 10": "Asia/Srednekolymsk", "Magadan Standard Time": "Asia/Magadan",
+        "Norfolk Standard Time": "Pacific/Norfolk", "Sakhalin Standard Time": "Asia/Sakhalin",
+        "Central Pacific Standard Time": "Pacific/Guadalcanal",
+        "Russia Time Zone 11": "Asia/Kamchatka", "New Zealand Standard Time": "Pacific/Auckland",
+        "UTC+12": "Etc/GMT-12", "Fiji Standard Time": "Pacific/Fiji",
+        "Chatham Islands Standard Time": "Pacific/Chatham", "UTC+13": "Etc/GMT-13",
+        "Tonga Standard Time": "Pacific/Tongatapu", "Samoa Standard Time": "Pacific/Apia",
+        "Line Islands Standard Time": "Pacific/Kiritimati",
+    };
+
+    constructor() {
+        // Zones by the name a feed gives them: the device's zone for that name, or null
+        this.deviceZones = new Map();
+    }
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
     async load(link, { calendar, window }) {
@@ -157,17 +255,25 @@ export default class CalendarFeed {
                 for (const vtz of other.getAllSubcomponents("vtimezone")) root.addSubcomponent(vtz);
             }
             const name = roots.map((r) => String(r.getFirstPropertyValue("x-wr-calname") ?? "").trim()).find(Boolean) ?? null;
-            this.zones(root, window);
-            if (clock.due()) await clock.pause();
+            const known = this.zones(root);
+            // The device's zone data loads the first time any is asked for, once after Obsidian
+            // starts (about 10 ms on a Mac): in a step of its own
+            if (!this.deviceZones.size) {
+                await clock.pause();
+                this.deviceZone("UTC");
+            }
+            await clock.pause();
 
             const stats = { blocks: blocks.length + skipped, skipped, series: 0, declined: 0, failed: 0, unknownZones: 0 };
             const failed = new Set();
             const series = new Map();
             const all = [];
+            // The attendees of events that didn't parse, which still count toward the owner
+            const unread = [];
             for (const block of blocks) {
                 let ve = null;
                 try {
-                    // The calendar as its parent, so its times find the feed's own zones
+                    // The calendar as its parent, so its times find their zones through it
                     ve = new ICAL.Component(ICAL.parse(block), root);
                 } catch {
                     ve = null;
@@ -175,29 +281,37 @@ export default class CalendarFeed {
                 if (ve?.name !== "vevent") {
                     // An event that doesn't parse: left out by its UID, or, with none to name it,
                     // the whole feed is unreadable
-                    const uid = this.uidOf(block);
+                    const { uid, attendees } = this.unparsed(block);
                     if (!uid) return { problem: "unreadable" };
                     failed.add(uid);
+                    unread.push(attendees);
                     continue;
                 }
                 const uid = String(ve.getFirstPropertyValue("uid") ?? "").trim();
                 // An event with no UID can't be told from one sync to the next, so it isn't synced
                 if (!uid) continue;
+                all.push(ve);
                 let s = series.get(uid);
                 if (!s) series.set(uid, (s = { master: null, exceptions: [] }));
                 if (ve.hasProperty("recurrence-id")) s.exceptions.push(ve);
+                // Two events with one UID can't both be synced, nor told which is which
+                else if (s.master) failed.add(uid);
                 else s.master = ve;
-                all.push(ve);
+                // EXRULE, the old way to leave dates out of a series, which ical.js doesn't read,
+                // and a time in a zone neither the device nor the feed knows
+                if (ve.hasProperty("exrule")) failed.add(uid);
+                if (this.unknownZone(ve, known)) { failed.add(uid); stats.unknownZones++; }
                 if (clock.due()) await clock.pause();
             }
             stats.series = series.size;
 
-            const owner = this.owner(link, all);
+            const owner = await this.owner(link, all, unread, clock);
             const events = [];
             for (const [uid, { master, exceptions }] of series) {
+                if (failed.has(uid)) continue;
                 const found = [];
                 const emit = (item, startTime, endTime, recurrenceId) => {
-                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats, root });
+                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats });
                     if (event) found.push(event);
                 };
                 let whole;
@@ -265,57 +379,113 @@ export default class CalendarFeed {
         return { head: head.join(""), blocks, skipped };
     }
 
-    // An event that can't put anything in the window: no RRULE or RDATE; its end, or its start
-    // when it has no end, dated before `cutoff` (YYYYMMDD); and, for an override, its original
-    // date too, and no RANGE (a this-and-following change moves later occurrences). An event whose
-    // dates can't be read is kept.
+    // A one-off event that ended before `cutoff` (YYYYMMDD): no RRULE, RDATE, EXRULE or
+    // RECURRENCE-ID, and its end, or its start when it has no end, dated before it. Only those:
+    // an occurrence of a series can be moved by another (a this-and-following change), so
+    // whether one matters depends on more than its own text. An event whose dates can't be read
+    // is kept.
     old(block, cutoff) {
-        if (CalendarFeed.RULES.test(block)) return false;
-        if (CalendarFeed.HAS_RECURRENCE_ID.test(block)) {
-            const rid = CalendarFeed.RECURRENCE_ID.exec(block);
-            if (!rid || Number(rid[1]) >= cutoff || /RANGE=/i.test(block)) return false;
-        }
+        if (CalendarFeed.REPEATS.test(block)) return false;
         const m = CalendarFeed.DTEND.exec(block) ?? CalendarFeed.DTSTART.exec(block);
         return !!m && Number(m[1]) < cutoff;
     }
 
-    // The UID of an event that doesn't parse, read as ical.js reads the UIDs of those that do
-    // (parameters left out, escapes undone), or null
-    uidOf(block) {
-        const line = block.replace(/\r?\n[ \t]/g, "").match(CalendarFeed.UID)?.[0];
-        if (!line) return null;
-        try {
-            return String(ICAL.Property.fromString(line.trim()).getFirstValue() ?? "").trim() || null;
-        } catch {
-            return null;
+    // The UID and attendees of an event that doesn't parse, read as ical.js reads those of events
+    // that do (parameters left out, escapes undone), from the event's own lines: not those of an
+    // alarm or anything else inside it, which can have a UID of its own
+    unparsed(block) {
+        let depth = 0, uid = null;
+        const attendees = [];
+        for (const line of block.replace(/\r?\n[ \t]/g, "").split(/\r?\n/)) {
+            if (/^BEGIN:/i.test(line)) { depth++; continue; }
+            if (/^END:/i.test(line)) { depth--; continue; }
+            if (depth !== 1) continue;
+            try {
+                if (!uid && /^UID[;:]/i.test(line)) uid = String(ICAL.Property.fromString(line.trim()).getFirstValue() ?? "").trim() || null;
+                if (/^ATTENDEE[;:]/i.test(line)) attendees.push(this.attendee(ICAL.Property.fromString(line.trim())));
+            } catch {
+                // a line that doesn't parse names nothing
+            }
         }
+        return { uid, attendees };
     }
 
-    // Readies the feed's own time zones. ical.js works a zone's changes out from each rule's
-    // start, and Outlook's start in 1601: that's centuries of yearly changes in one step the first
-    // time a time is read. So a yearly rule that never ends, and starts more than two years before
-    // the window, starts then instead: the same changes from then on. A rule that ends is left as
-    // it is, since its last change may be the zone's last. A zone with a rule ical.js could loop on
-    // is dropped, and its times read as the device's.
-    zones(root, window) {
-        const year = window.start.getFullYear() - 2;
+    // Readies the zones for the read: a time in a zone the device knows by its name is read from
+    // the device's own zone data, and only one it doesn't from the feed's definition. A feed's
+    // definition with a rule ical.js could loop on is dropped. Returns whether a zone name is
+    // known, one way or the other.
+    zones(root) {
         for (const vtz of root.getAllSubcomponents("vtimezone")) {
-            let bad = false;
-            for (const obs of vtz.getAllSubcomponents()) {
-                if (obs.name !== "standard" && obs.name !== "daylight") continue;
+            const bad = vtz.getAllSubcomponents().some((obs) => {
                 const rules = obs.getAllProperties("rrule");
-                if (!rules.length) continue;
-                const rule = rules[0].getFirstValue();
+                if (!rules.length) return false;
                 const start = obs.getFirstPropertyValue("dtstart");
-                if (rules.length > 1 || !start || rule.freq !== "YEARLY" || this.unsafe(rule, start)) { bad = true; break; }
-                if (rule.until || rule.count || (rule.interval || 1) !== 1 || start.year >= year) continue;
-                const later = start.clone();
-                later.year = year;
-                if (later.month === 2 && later.day === 29) later.day = 28;
-                obs.updatePropertyWithValue("dtstart", later);
-            }
+                const rule = rules[0].getFirstValue();
+                return rules.length > 1 || !start || rule.freq !== "YEARLY" || !!this.unsafe(rule, start);
+            });
             if (bad) root.removeSubcomponent(vtz);
         }
+        const defined = new Set(root.getAllSubcomponents("vtimezone").map((vtz) => String(vtz.getFirstPropertyValue("tzid") ?? "")));
+        const own = root.getTimeZoneByID.bind(root);
+        root.getTimeZoneByID = (tzid) => this.deviceZone(tzid) ?? own(tzid);
+        return (tzid) => !!this.deviceZone(tzid) || defined.has(tzid) || ICAL.TimezoneService.has(tzid);
+    }
+
+    // Whether an event names a zone that isn't known, on any of its times
+    unknownZone(ve, known) {
+        return ve.getAllProperties().some((p) => {
+            const tzid = p.getParameter("tzid");
+            return !!tzid && !known(tzid);
+        });
+    }
+
+    // The device's zone for a name a feed gives, or null: an IANA name the device knows, or a
+    // Windows name in WINDOWS. It answers ical.js's one question of a zone, its offset at a local
+    // time there, from the device's own zone data.
+    deviceZone(tzid) {
+        if (this.deviceZones.has(tzid)) return this.deviceZones.get(tzid);
+        const name = String(tzid ?? "").trim();
+        const iana = Object.prototype.hasOwnProperty.call(CalendarFeed.WINDOWS, name) ? CalendarFeed.WINDOWS[name] : name;
+        let zone;
+        try {
+            const format = new Intl.DateTimeFormat("en-US", {
+                timeZone: iana, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric",
+                hour: "numeric", minute: "numeric", second: "numeric",
+            });
+            // The offset at an instant: the local time there, less the instant
+            const at = (ms) => {
+                const parts = {};
+                for (const { type, value } of format.formatToParts(new Date(ms))) parts[type] = Number(value);
+                return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - (ms - (((ms % 1000) + 1000) % 1000));
+            };
+            // Each local day's offsets a day either side of it: the same on a day with no change
+            // near it, which is nearly every day, so its times need nothing more
+            const days = new Map();
+            const around = (day) => {
+                let pair = days.get(day);
+                if (!pair) {
+                    if (days.size > 5000) days.clear();
+                    pair = [at((day - 1) * CalendarFeed.DAY_MS), at((day + 2) * CalendarFeed.DAY_MS)];
+                    days.set(day, pair);
+                }
+                return pair;
+            };
+            zone = new ICAL.Timezone({ tzid: name });
+            // In seconds, for a local time there. A time that happens twice (the hour the clocks go
+            // back) is the first, and one that never happens (the hour they skip) is read with the
+            // offset from before, so it lands after the gap, as RFC 5545 says.
+            zone.utcOffset = (tt) => {
+                const wall = Date.UTC(tt.year, tt.month - 1, tt.day, tt.hour, tt.minute, tt.second);
+                const [before, after] = around(Math.floor(wall / CalendarFeed.DAY_MS));
+                if (before === after) return before / 1000;
+                const fits = [before, after].filter((o) => at(wall - o) === o);
+                return (fits.length ? Math.max(...fits) : before) / 1000;
+            };
+        } catch {
+            zone = null;
+        }
+        this.deviceZones.set(tzid, zone);
+        return zone;
     }
 
     // Why a repeating rule isn't read, or null. ical.js loops forever, or until memory runs out,
@@ -330,6 +500,8 @@ export default class CalendarFeed {
         const p = rule.parts ?? {};
         if (Object.keys(p).some((k) => !["BYDAY", "BYMONTHDAY", "BYMONTH", "BYSETPOS", "WKST"].includes(k))) return "part";
         const interval = rule.interval || 1;
+        // Nothing an app writes repeats less often than every 999 days, weeks, months or years
+        if (interval > 999) return "interval";
         const byday = (p.BYDAY ?? []).map((d) => /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/.exec(String(d)));
         if (byday.some((m) => !m)) return "BYDAY";
         const ordinals = byday.map((m) => (m[1] ? Number(m[1]) : 0));
@@ -340,17 +512,21 @@ export default class CalendarFeed {
         if (days.some((d) => !Number.isInteger(d) || d === 0 || Math.abs(d) > 31)) return "BYMONTHDAY";
         if (months.some((m) => !Number.isInteger(m) || m < 1 || m > 12)) return "BYMONTH";
         if (!ordinals.every((o) => o === 0 || position(o)) || !setpos.every(position)) return "position";
-        if (setpos.length && !byday.length) return "BYSETPOS";
-        // A fifth weekday turns up within a few years only when every month or year is looked at
+        // A position among numbered weekdays ("the second of the first Mondays"), which no app
+        // writes, can leave ical.js searching for years
+        if (setpos.length && (!byday.length || ordinals.some(Boolean))) return "BYSETPOS";
+        // A fifth weekday in a month a yearly rule skips years to may never come round
         const fifth = ordinals.some((o) => Math.abs(o) === 5) || setpos.some((n) => Math.abs(n) === 5);
         // The months a rule's dates can fall in, and whether a date there exists: February 29th
-        // only in leap years, which a rule that skips years may never reach
+        // only in leap years, which a rule that skips years may never reach. `years` is the
+        // number of years between the times it comes to February.
         const longest = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        const dated = (inMonths, everyYear) => {
+        const dated = (inMonths, years) => {
             const want = days.length ? days : [start.day];
             const pairs = inMonths.flatMap((m) => want.filter((d) => Math.abs(d) <= longest[m - 1]).map((d) => [m, d]));
             if (!pairs.length) return false;
-            return everyYear || !pairs.every(([m, d]) => m === 2 && Math.abs(d) === 29);
+            if (!pairs.every(([m, d]) => m === 2 && Math.abs(d) === 29)) return true;
+            return [0, 1, 2, 3].some((n) => (start.year + n * years) % 4 === 0);
         };
         switch (rule.freq) {
             case "DAILY":
@@ -361,10 +537,12 @@ export default class CalendarFeed {
                 if (days.length || months.length || setpos.length || ordinals.some(Boolean)) return "WEEKLY";
                 return null;
             case "MONTHLY": {
-                if (months.length || (days.length && byday.length) || (fifth && interval !== 1)) return "MONTHLY";
+                // A fifth weekday every few months is fine: ical.js gives up on a month rule after
+                // 28 years of months without a date
+                if (months.length || (days.length && byday.length)) return "MONTHLY";
                 if (byday.length) return null;
                 const visited = [...new Set(Array.from({ length: 12 }, (_, n) => ((start.month - 1 + n * interval) % 12) + 1))];
-                return dated(visited, interval === 12 || visited.length > 1) ? null : "no date";
+                return dated(visited, visited.length > 1 ? 1 : interval / 12) ? null : "no date";
             }
             case "YEARLY": {
                 if ((byday.length && !months.length) || (fifth && interval !== 1)) return "YEARLY";
@@ -372,7 +550,7 @@ export default class CalendarFeed {
                 // them (the Sunday among the 8th to the 14th): seven days in a row hold every weekday
                 if (days.length && byday.length && (interval !== 1 || !this.week(days))) return "YEARLY";
                 if (byday.length && !days.length) return null;
-                return dated(months.length ? months : [start.month], interval === 1) ? null : "no date";
+                return dated(months.length ? months : [start.month], interval) ? null : "no date";
             }
             default:
                 return "frequency";
@@ -408,10 +586,14 @@ export default class CalendarFeed {
         // from further away is caught after, from the overrides themselves.
         let from = window.start.getTime() - CalendarFeed.DAY_MS;
         let to = window.end.getTime() + CalendarFeed.DAY_MS;
+        // Nothing past the year after the window's end is worked out: a date far ahead (a year
+        // typed as 3026) would have a zone's changes worked out up to it, in one step
+        const last = window.end.getFullYear() + 1;
         const zone = ev.startDate.zone;
         for (const ex of exceptions) {
             const e = new ICAL.Event(ex);
             ev.relateException(e);
+            if (e.recurrenceId.year > last || e.startDate.year > last) continue;
             // An override whose original start is written in another zone than the series' is
             // found under the series' zone too, as ical.js finds the series' own occurrences
             const there = e.recurrenceId.convertToZone(zone).toString();
@@ -424,11 +606,12 @@ export default class CalendarFeed {
             if (clock.due()) await clock.pause();
         }
         const matched = new Set();
-        const it = ev.iterator(this.startFor(ev, from));
+        const it = ev.iterator(this.startFor(ev, from, last));
         let steps = 0;
         for (let next = it.next(); next; next = it.next()) {
             if (++steps > CalendarFeed.MAX_STEPS) return false;
             if (clock.due()) await clock.pause();
+            if (next.year > last) break;
             const at = next.toJSDate().getTime();
             if (at >= to) break;
             if (at < from) continue;
@@ -452,8 +635,9 @@ export default class CalendarFeed {
     // the last such start at least one period before `from`. An occurrence there that the rule
     // wouldn't have made falls before `from`, where nothing is read. Anything else starts at the
     // series' start, as does one with an RDATE.
-    startFor(ev, from) {
+    startFor(ev, from, last = Infinity) {
         const start = ev.startDate;
+        if (start.year > last) return start;
         const rules = ev.component.getAllProperties("rrule");
         // ical.js starts from an RDATE before the given start, and then steps its EXDATEs out of
         // line, so a series with any RDATE starts at its start
@@ -472,15 +656,16 @@ export default class CalendarFeed {
 
     // One occurrence as the events file holds it, or null when it doesn't start in the window or
     // the owner declined it. `recurrenceId` is its original start, for an occurrence of a series.
-    event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats, root }) {
+    event(item, startTime, endTime, recurrenceId, { calendar, window, owner, stats }) {
+        // A date far past the window is out of it, without working out its zone's offset there
+        const farthest = window.end.getFullYear() + 1;
+        if (startTime.year > farthest) return null;
         const start = startTime.toJSDate();
         if (start < window.start || start >= window.end) return null;
         if (this.declined(item, owner)) { stats.declined++; return null; }
-        // A zone the feed doesn't define reads as the device's own (OBS-274's follow-up)
-        const tzid = item.getFirstProperty("dtstart")?.getParameter("tzid");
-        if (tzid && !root.getTimeZoneByID(tzid) && !ICAL.TimezoneService.has(tzid)) stats.unknownZones++;
         const allDay = startTime.isDate;
-        const end = (endTime ?? startTime).toJSDate();
+        // An end years ahead is read as a day past the window: the line gets no end time
+        const end = endTime && endTime.year > farthest ? new Date(window.end.getTime() + CalendarFeed.DAY_MS) : (endTime ?? startTime).toJSDate();
         // EventKit ends an all-day event 1 second before midnight on its last day; the feed's
         // DTEND is the midnight after it
         const last = allDay ? new Date(end.getTime() - 1000) : end;
@@ -489,7 +674,7 @@ export default class CalendarFeed {
         const recurring = !!recurrenceId;
         const transp = String(item.getFirstPropertyValue("transp") ?? "").toUpperCase();
         return {
-            key: recurring ? `${uid}@${this.date(recurrenceId.toJSDate())}` : uid,
+            key: recurring ? `${uid}@${recurrenceId.year > farthest ? recurrenceId.toString().slice(0, 10) : this.date(recurrenceId.toJSDate())}` : uid,
             id: uid,
             calendarId: calendar.id ?? null,
             calendar: calendar.name ?? null,
@@ -507,8 +692,9 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, lowercased: from a Google link's path, or else the attendee on
-    // the most events read. Null when there's none, or two are on as many.
-    owner(link, vevents) {
+    // the most events read, those that didn't parse included (`unread`, each a list of
+    // addresses). Null when there's none, or two are on as many.
+    async owner(link, vevents, unread = [], clock = null) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (m) {
             try {
@@ -518,15 +704,14 @@ export default class CalendarFeed {
             }
         }
         const counts = new Map();
+        const count = (addresses) => {
+            for (const who of new Set(addresses)) if (who) counts.set(who, (counts.get(who) ?? 0) + 1);
+        };
         for (const ve of vevents) {
-            const seen = new Set();
-            for (const a of ve.getAllProperties("attendee")) {
-                const who = this.attendee(a);
-                if (!who || seen.has(who)) continue;
-                seen.add(who);
-                counts.set(who, (counts.get(who) ?? 0) + 1);
-            }
+            count(ve.getAllProperties("attendee").map((a) => this.attendee(a)));
+            if (clock?.due()) await clock.pause();
         }
+        for (const addresses of unread) count(addresses);
         // On a tie it can't tell, and takes no one: no event is left out
         let best = null, most = 0, tie = false;
         for (const [who, n] of counts) {
