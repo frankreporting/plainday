@@ -4,6 +4,9 @@
 // - `plainday`: one instance of every class by name (`plainday.Schedule`), which the class files
 //   call each other through, plus:
 //   - `plainday.app`: the app;
+//   - `plainday.obsidian`: Obsidian's module, for scripts sent into Obsidian by eval, which have no
+//     other way to reach it (CalNav's Open Log Note calls `plainday.obsidian.normalizePath`). The
+//     class files import it instead;
 //   - `plainday.plugin`: Plainday itself while it's loaded, and null once it unloads. The editor
 //     features add their extensions through it, and a listener checks it before it acts.
 //   It's the same object Plainday puts on `window.plainday` for the templates and for tools
@@ -17,6 +20,7 @@
 // Each time Obsidian loads the plugin it runs main.js afresh, so a listener left over from an
 // earlier load sees its own copy of this module, whose `plainday.plugin` is null once that load
 // unbinds, and stops.
+import * as obsidian from "obsidian";
 
 /**
  * @typedef {typeof import("./commands/index.js").CLASSES} CommandClasses
@@ -26,6 +30,7 @@
  * @typedef {keyof Classes} ClassName
  * @typedef {{ [K in ClassName]: InstanceType<Classes[K]> } & {
  *   app: import("obsidian").App,
+ *   obsidian: typeof obsidian,
  *   plugin: import("obsidian").Plugin | null,
  * }} Registry
  */
@@ -40,6 +45,7 @@ export function bind(p) {
     app = p.app;
     for (const k of Object.keys(plainday)) delete plainday[/** @type {keyof Registry} */ (k)];
     plainday.app = p.app;
+    plainday.obsidian = obsidian;
     plainday.plugin = p;
 }
 

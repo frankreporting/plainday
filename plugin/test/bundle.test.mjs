@@ -28,7 +28,7 @@ await build({ outfile: BUNDLE, logLevel: "silent" });
 const classFiles = listClassFiles();
 const read = (f, src = SRC) => fs.readFileSync(path.join(src, f), "utf8");
 const CLASS_NAMES = classFiles.map((f) => parse(f, read(f)).name ?? null);
-const OWN = new Set(["app", "plugin"]);
+const OWN = new Set(["app", "obsidian", "plugin"]);
 // Fold machinery, called directly and by eval, never from the palette
 const NOT_COMMANDS = ["SnapshotDailyNotes", "RefoldDailyNotes"];
 // Stand-ins for the CodeMirror modules Obsidian provides
@@ -85,8 +85,9 @@ test("every class file is bundled, and made once by name", () => {
         for (const name of CLASS_NAMES) assert.equal(window.plainday[name].constructor.name, name, `${name} keeps its name`);
         assert.equal(window.plainday.plugin, plugin, "Plainday itself");
         assert.equal(window.plainday.app, plugin.app, "and the app");
-        assert.deepEqual(Object.keys(window.plainday).filter((k) => /^create.+Instance$|^(state|obsidian|codemirror)$/.test(k)), [],
-            "nothing of CustomJS's: no create…Instance, no state, no Obsidian or CodeMirror module");
+        assert.equal(typeof window.plainday.obsidian?.Notice, "function", "and Obsidian's module, for scripts sent in by eval");
+        assert.deepEqual(Object.keys(window.plainday).filter((k) => /^create.+Instance$|^(state|codemirror)$/.test(k)), [],
+            "nothing else of CustomJS's: no create…Instance, no state, no CodeMirror");
         assert.equal(globalThis.customJS, undefined, "no customJS global");
     } finally {
         plugin.onunload();
