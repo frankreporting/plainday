@@ -61,10 +61,6 @@ else if (/🗃️/.test(tp.file.title)) {
 	let area = await tp.file.include("[[Area]]");
 	tR += area;
 }
-else if (/¶/.test(tp.file.title)) {
-	let entry = await tp.file.include("[[Writing]]");
-	tR += entry;
-}
 else {
 	let note = await tp.file.include("[[Empty Note]]");
 	tR += note;

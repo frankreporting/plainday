@@ -33,17 +33,17 @@ views:
                 - file.links.contains(this.file)
                 - date == this.file.name
     order:
-      - Time
+      - time
       - formula.Event
     sort:
-      - property: Time
+      - property: time
         direction: ASC
       - property: date
         direction: DESC
       - property: file.name
         direction: ASC
     columnSize:
-      note.Time: 82
+      note.time: 82
       formula.Event: 279
   - type: list
     name: Daily Log 2
@@ -55,17 +55,17 @@ views:
                 - file.links.contains(this.file)
                 - date == this.file.name
     order:
-      - Time
+      - time
       - formula.Event
     sort:
-      - property: Time
+      - property: time
         direction: ASC
       - property: date
         direction: DESC
       - property: file.name
         direction: ASC
     columnSize:
-      note.Time: 82
+      note.time: 82
       formula.Event: 279
     markers: none
     indentProperties: false

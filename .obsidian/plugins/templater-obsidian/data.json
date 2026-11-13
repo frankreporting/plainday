@@ -26,28 +26,10 @@
   ],
   "syntax_highlighting": true,
   "syntax_highlighting_mobile": false,
-  "enabled_templates_hotkeys": [
-    {
-      "template": "Config/Templates/Formula.md",
-      "insert_enabled": true,
-      "create_enabled": false
-    },
-    {
-      "template": "Config/Templates/Metadata Callout.md",
-      "insert_enabled": true,
-      "create_enabled": false
-    },
-    {
-      "template": "Config/Templates/Writing Mode.md",
-      "insert_enabled": true,
-      "create_enabled": false
-    }
-  ],
+  "enabled_templates_hotkeys": [],
   "startup_templates": [],
   "intellisense_render": "1",
   "ignore_folders_on_creation": [],
   "enable_ribbon_icon": true,
-  "template_folder": "00_Meta/01_Templates",
-  "empty_file_template": "00_Meta/01_Templates/Empty Note",
   "locale": "en"
 }
