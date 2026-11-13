@@ -199,3 +199,5 @@ Run it again whenever you want the latest. Some versions change how your notes a
 ## License
 
 [MIT](LICENSE). The sample notes are invented and covered by the same license.
+
+Plainday's `main.js` also holds [ical.js](https://github.com/kewisch/ical.js) 2.2.1, which reads calendar feeds, under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/). Its notice is at the top of `main.js`, and its source is in its repository.

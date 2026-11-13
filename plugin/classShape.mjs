@@ -11,10 +11,11 @@
 //     }
 //
 // - Before the class: comments, blank lines and imports, one per line, each
-//   `import { a, b } from "<module>";` or `import * as x from "<module>";`, from Obsidian, the host
-//   or one of CodeMirror's three modules (MODULES). No default import, no renaming, and no import
-//   of another class file: the classes reach each other through the host's `plainday` at run time,
-//   so there's no import cycle.
+//   `import { a, b } from "<module>";` or `import * as x from "<module>";`, from Obsidian, the host,
+//   one of CodeMirror's three modules or ical.js (MODULES). No renaming, no default import but
+//   ical.js's (`import ICAL from "ical.js";`, its only export, DEFAULT_IMPORTS; OBS-274), and no
+//   import of another class file: the classes reach each other through the host's `plainday` at
+//   run time, so there's no import cycle.
 // - Then `export default class <Name>` at the left edge: the file's only export, and nothing else
 //   at the top level.
 //
@@ -24,7 +25,8 @@
 // Outside the bundle, Node can't run the imports (Obsidian's package carries only types), so the
 // tests, CI's check, the demo's render and the private tests read a class file through scriptOf():
 // the script it is without its imports, which reads each imported name from the context's globals,
-// where a test puts its stand-ins (`moment`, `Notice`, `app`, `plainday`). It needs no npm.
+// where a test puts its stand-ins (`moment`, `Notice`, `app`, `plainday`). It needs no npm, except
+// for a class that imports ical.js, whose test gives it the real one from node_modules.
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -35,11 +37,16 @@ export const SRC = path.join(here, "src");
 // The class files' folders, by what starts them: you run a command, a startup script starts with
 // Plainday and acts on its own, and only other classes call a shared one
 export const FOLDERS = ["commands", "startup", "shared"];
-export const MODULES = ["obsidian", "../host.js", "@codemirror/view", "@codemirror/state", "@codemirror/language"];
+// ical.js reads calendar feeds (CalendarFeed, OBS-274). Unlike the others, it isn't Obsidian's: the
+// build bundles it into main.js, with its license notice.
+export const MODULES = ["obsidian", "../host.js", "@codemirror/view", "@codemirror/state", "@codemirror/language", "ical.js"];
+// The modules whose only export is their default, so a class file imports them by a default import
+export const DEFAULT_IMPORTS = ["ical.js"];
 
 const NAME = /^[A-Za-z_$][\w$]*$/;
 const NAMED = /^import \{([^}]*)\} from "([^"]+)";\s*$/;
 const NAMESPACE = /^import \* as ([A-Za-z_$][\w$]*) from "([^"]+)";\s*$/;
+const DEFAULT = /^import ([A-Za-z_$][\w$]*) from "([^"]+)";\s*$/;
 const CLASS = /^export default class ([A-Za-z_$][\w$]*)(?=[\s{])/;
 
 // One line before the class: what it imports, null for a comment or a blank line, or the problem
@@ -51,6 +58,8 @@ function importOf(line) {
         if (!MODULES.includes(m[2])) return { problem: `imports from "${m[2]}": a class file imports only from ${MODULES.map((x) => `"${x}"`).join(", ")}` };
         return { names: [m[1]] };
     }
+    m = DEFAULT.exec(line);
+    if (m && DEFAULT_IMPORTS.includes(m[2])) return { names: [m[1]] };
     m = NAMED.exec(line);
     if (m) {
         if (!MODULES.includes(m[2])) return { problem: `imports from "${m[2]}": a class file imports only from ${MODULES.map((x) => `"${x}"`).join(", ")}` };
@@ -60,7 +69,7 @@ function importOf(line) {
         if (!names.length) return { problem: "imports nothing" };
         return { names };
     }
-    if (/^import\b/.test(t)) return { problem: "an import the loader can't read: one per line, `import { a, b } from \"<module>\";` or `import * as x from \"<module>\";`, no default import" };
+    if (/^import\b/.test(t)) return { problem: `an import the loader can't read: one per line, \`import { a, b } from "<module>";\` or \`import * as x from "<module>";\`, no default import but ${DEFAULT_IMPORTS.map((x) => `"${x}"`).join(", ")}'s` };
     return { problem: "comes before the class: only comments, blank lines and imports may" };
 }
 

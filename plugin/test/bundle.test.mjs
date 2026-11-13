@@ -287,8 +287,24 @@ test("the build stops on a class file without the shape, and names the file and 
     assert.ok(classLine > 1, "plan.js imports before its class");
 });
 
+test("a class file may import ical.js by its default import, and nothing else by one", () => {
+    const body = "export default class X {\n}\n";
+    assert.deepEqual(shapeProblems("x.js", `import ICAL from "ical.js";\n${body}`), []);
+    assert.match(shapeProblems("x.js", `import Obsidian from "obsidian";\n${body}`)[0], /x\.js:1 .*no default import but "ical\.js"'s/);
+    assert.match(shapeProblems("x.js", `import ICAL from "ical.js/dist/ical.js";\n${body}`)[0], /no default import/);
+});
+
+test("main.js starts with ical.js's license notice, and holds ical.js", () => {
+    const text = fs.readFileSync(BUNDLE, "utf8");
+    const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, "node_modules", "ical.js", "package.json"), "utf8"));
+    const first = text.split("\n")[0];
+    assert.ok(first.startsWith(`/*! Plainday bundles ical.js ${version} (https://github.com/kewisch/ical.js)`), first);
+    assert.match(first, /Mozilla Public License, v\. 2\.0 \(https:\/\/mozilla\.org\/MPL\/2\.0\/\)/);
+    assert.match(text, /node_modules\/ical\.js\/dist\/ical\.js/, "esbuild's comment naming the bundled file");
+});
+
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 29);
+    assert.equal(classFiles.length, 30);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

@@ -1,9 +1,12 @@
 {
   "private": true,
-  "description": "Plainday's own source: ES modules, the class files among them in src/commands/, src/startup/ and src/shared/, which plugin/esbuild.config.mjs bundles into main.js. CodeMirror's packages are peers: Obsidian provides them, and the build leaves them out. The repository's package.json is at the root.",
+  "description": "Plainday's own source: ES modules, the class files among them in src/commands/, src/startup/ and src/shared/, which plugin/esbuild.config.mjs bundles into main.js. CodeMirror's packages are peers: Obsidian provides them, and the build leaves them out. ical.js is a dependency: the build bundles it into main.js. Both are listed here for the lint, which reads the package.json nearest each file; npm installs from the repository's package.json, at the root, which pins the same versions.",
   "type": "module",
   "scripts": {
     "preinstall": "node preinstall.mjs"
+  },
+  "dependencies": {
+    "ical.js": "2.2.1"
   },
   "peerDependencies": {
     "@codemirror/state": "6.7.6",

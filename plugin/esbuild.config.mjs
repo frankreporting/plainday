@@ -6,6 +6,10 @@
 // `export default class <Name>`, and nothing else. The build checks that shape in every class file
 // it bundles, and stops on a file without it, naming the line.
 //
+// ical.js, which reads calendar feeds (plugin/src/shared/calendarFeed.js), is bundled in, under the
+// Mozilla Public License 2.0. Its notice doesn't survive bundling by itself, so the build puts one
+// at the top of main.js, naming where its source is (notices()).
+//
 // The class files are written for Plainday alone (OBS-257). A line that still reaches for the
 // CustomJS plugin, by its id or one of its command ids, or for its global or its `customJS` name,
 // would do nothing here, so it stops the build, which names the line (LEFT below).
@@ -27,6 +31,14 @@ export const SRC = path.join(here, "src");
 export const OUTFILE = path.join(ROOT, "main.js");
 // What Plainday ships beside main.js; styles.css only once there is one
 const RELEASE = ["manifest.json", "styles.css"];
+// The notices for what the build bundles from node_modules, at the top of main.js: the package as
+// installed, its license, and where its source is, as the MPL asks of a copy in another form
+export function notices(root = ROOT) {
+    const ical = JSON.parse(fs.readFileSync(path.join(root, "node_modules", "ical.js", "package.json"), "utf8"));
+    return `/*! Plainday bundles ical.js ${ical.version} (https://github.com/kewisch/ical.js), whose source is`
+        + " there, under the Mozilla Public License, v. 2.0 (https://mozilla.org/MPL/2.0/)."
+        + " Portions Copyright (C) Philipp Kewisch. */";
+}
 
 // What no line in a class file may say: the CustomJS plugin by its id, one of its command ids, its
 // global, or `customJS` at all, which Plainday calls `plainday` (OBS-271)
@@ -104,6 +116,9 @@ export function options({ src = SRC, outfile = OUTFILE, watch = false, logLevel 
         // esbuild names each file in main.js in a comment, relative to this folder: the repository's
         // root, wherever the build starts, so a build anywhere matches the release (OBS-230)
         absWorkingDir: ROOT,
+        // ical.js comes from the repository's node_modules, also for a copy of plugin/src/ built
+        // elsewhere (the bundle tests build one in a temporary folder)
+        nodePaths: [path.join(ROOT, "node_modules")],
         bundle: true,
         format: "cjs",
         platform: "browser",
@@ -118,6 +133,7 @@ export function options({ src = SRC, outfile = OUTFILE, watch = false, logLevel 
         ],
         // A class's own name shows in its errors, and the bundle test checks every class keeps it
         keepNames: true,
+        banner: { js: notices() },
         sourcemap: watch ? "inline" : false,
         logLevel,
         plugins: [classesPlugin(src), copyOut(outfile)],
