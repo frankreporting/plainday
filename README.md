@@ -20,7 +20,7 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 7. **Optional hotkeys** (Settings → Hotkeys, search "Plainday"): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 8. Open `Welcome.md`.
 
-Optional: the `writing` class and `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in `Config/Table Settings.md` (see the manual's *Freezing tables*).
+Optional: `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in `Config/Table Settings.md` (see the manual's *Freezing tables*).
 
 The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
 
@@ -87,16 +87,6 @@ New notes run `Get Template.md`, which picks a template from the title you type:
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
 | `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `People` / `Entities` |
 | anything else | Empty Note | `id` and `tags` frontmatter |
-
-Other templates, inserted with Templater:
-
-| Template | Purpose |
-| --- | --- |
-| Writing Mode | Toggles a `writing` CSS class on the note (hotkey) |
-| Metadata Callout | Inserts a `[!metadata]` callout |
-| Formula | Inserts a table formula comment |
-| Custom PDF | Frontmatter for PDF export (Enhancing Export) |
-| Autonote - Empty Note | Empty note for notes created by other tools; moved to the Inbox |
 
 Templater user scripts (`Config/Scripts/Templater/`): `showNewNote` (redraws properties and places the cursor after a template moves a note), `eventTimes` (start and end time from a calendar event line), `recordEvent` (a new log's line in its daily note), `arrivedNote` (tells a note that arrived with its properties from a new, empty one).
 

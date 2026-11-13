@@ -1,1 +1,0 @@
-<!-- TBLFM: @row$column=sum(range);%.2f -->
