@@ -7,9 +7,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const SyncArea = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/syncArea.js", here), "utf8") + "\n;SyncArea", vm.createContext({}));
+const SyncArea = vm.runInContext(classScript("syncArea.js") + "\n;SyncArea", vm.createContext({}));
 const sync = new SyncArea();
 
 test("isInvoice: frontmatter tagged invoice, as the Invoice command writes it, in any spelling", () => {

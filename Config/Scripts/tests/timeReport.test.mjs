@@ -9,17 +9,18 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
 import { compactWriter } from "./tables.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
 const TimeReport = vm.runInContext(
-    fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport",
+    classScript("timeReport.js") + "\n;TimeReport",
     vm.createContext({}),
 );
 // Most tests here are about what a table says, so this TimeReport's tables are read back compactly
 // (`| a | b |`) after the real writer pads them; tables.test.mjs checks the padding (OBS-184)
 const tr = compactWriter(new TimeReport());
 const Billing = vm.runInContext(
-    fs.readFileSync(new URL("../../../plugin/src/classes/billing.js", here), "utf8") + "\n;Billing",
+    classScript("billing.js") + "\n;Billing",
     vm.createContext({}),
 );
 const billing = new Billing();
@@ -1841,7 +1842,7 @@ test("overview review: quotes cut on whole characters; a differently-cased headi
 // ------------------------------------------------------------------ periodic notes (weekly, monthly, yearly)
 
 test("weekKey matches Notebook Navigator's gggg[w]ww names (checked against Obsidian's moment, 2020–2030)", () => {
-    // Values from window.moment(date).format("gggg[w]ww") in Obsidian ("en" locale: weeks start Sunday,
+    // Values from moment(date).format("gggg[w]ww") in Obsidian ("en" locale: weeks start Sunday,
     // week 1 holds January 1st); the same function matched moment on all 4,018 days 2020-01-01..2030-12-31
     for (const [date, key] of [["2026-01-01", "2026w01"], ["2026-09-13", "2026w38"], ["2026-09-19", "2026w38"],
         ["2026-12-27", "2027w01"], ["2027-01-02", "2027w01"], ["2025-12-28", "2026w01"], ["2021-01-01", "2021w01"], ["2022-12-31", "2022w53"]]) {
@@ -2149,29 +2150,30 @@ test("OBS-34: no conflict without a ⋯ note, or when the ⋯ is on a sub-task; 
     ]);
 });
 
-test("OBS-41: refresh keeps the Schedule it started with, even when `customJS` loses it part-way through", async () => {
+test("OBS-41: refresh keeps the Schedule it started with, even when `plainday` loses it part-way through", async () => {
     const schedule = {
         dailyOpts: () => ({ folder: "Planner/days", format: "YYYY-MM-DD" }),
         isDailyNote: (f) => f.path.startsWith("Planner/days/"),
     };
     const day = { path: "Planner/days/2026-09-01.md", basename: "2026-09-01" };
     const context = {
-        customJS: { obsidian: {}, Schedule: schedule },
+        plainday: { Schedule: schedule },
         app: {
             vault: { getMarkdownFiles: () => [day], getFileByPath: () => null, cachedRead: async () => "- 9:00am - 9:30am" },
             metadataCache: {},
             workspace: { getLeavesOfType: () => [] },
             plugins: { plugins: {} },
         },
-        window: { moment: (text) => ({ format: () => text }) },
+        moment: (text) => ({ format: () => text }),
+        window: {},
         console: { ...console, warn: () => {} },
     };
-    const Loaded = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const Loaded = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext(context));
     const report = new Loaded();
     // With no project note in sight, refresh stops before it writes anything; it has started, though
     await report.refresh({ quiet: true });
-    // `customJS` loses its Schedule part-way through
-    context.customJS = { obsidian: {} };
+    // `plainday` loses its Schedule part-way through
+    context.plainday = {};
     assert.deepEqual(plain(report.periodFolders()), { week: "Planner/weeks", month: "Planner/months", year: "Planner/years" });
     assert.deepEqual(plain(await report.readDailyNotes()), [{ date: "2026-09-01", path: day.path, text: "- 9:00am - 9:30am" }]);
 });
@@ -2975,8 +2977,9 @@ const sheetHarness = ({ files = {}, desktop = true, remembered = [], createFails
     const created = [], writes = [];
     const file = (path) => ({ path, basename: path.split("/").pop().replace(/\.md$/, "") });
     const context = {
-        customJS: { obsidian: { Platform: { isDesktop: desktop } } },
-        window: { moment: () => ({ format: () => "2026092812000000" }) },
+        plainday: {},
+        Platform: { isDesktop: desktop },
+        moment: () => ({ format: () => "2026092812000000" }),
         console: { ...console, warn: () => {}, error: () => {} },
         app: {
             vault: {
@@ -2987,7 +2990,7 @@ const sheetHarness = ({ files = {}, desktop = true, remembered = [], createFails
             loadLocalStorage: () => remembered, saveLocalStorage: () => {},
         },
     };
-    const Loaded = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext(context));
+    const Loaded = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext(context));
     const report = new Loaded();
     report.writeBlock = async (f) => { writes.push(f.path); return { wrote: true }; };
     return { report, created, writes };
@@ -3064,7 +3067,7 @@ test("lineLinks: a forward date after the ⭕ doesn't end the run (OBS-185)", ()
 test("lineProject: the top of its nest's ⭕, or the note it's in (OBS-185, OBS-196)", () => {
     const KES = "Projects/Freelance/Kestrel/Kestrel.md";
     const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [>] Book it ^k3x9m2\n", [`${PLANNER}/days/2026-09-17.md`]: "" } });
-    const t = v.customJS.TimeReport, index = t.appIndex();
+    const t = v.plainday.TimeReport, index = t.appIndex();
     const day = ["- [ ] Kestrel errands [[Kestrel|⭕]]", "\t- [/] Call the printer", "- [ ] Mow the lawn"];
     assert.equal(t.lineProject({ path: `${PLANNER}/days/2026-09-17.md`, kind: "day" }, 1, day, index), KES, "from the line it's nested under");
     assert.equal(t.lineProject({ path: `${PLANNER}/days/2026-09-17.md`, kind: "day" }, 2, day, index), null);
@@ -3078,7 +3081,7 @@ test("addTaskProblems: a task's lines that disagree are Problems on their day an
         [`${PLANNER}/days/2026-09-16.md`]: "- [x] Something else\n",
         [`${PLANNER}/days/2026-09-17.md`]: "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n",
     };
-    const tr = standIn({ notes }).customJS.TimeReport;
+    const tr = standIn({ notes }).plainday.TimeReport;
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, tr.appIndex(), Object.entries(notes).map(([path, text]) => ({ path, kind: path === KES ? "other" : "day", text })));
     // Sorted by date and line, as build sorts the rest
@@ -3088,7 +3091,7 @@ test("addTaskProblems: a task's lines that disagree are Problems on their day an
 });
 
 test("OBS-185: a task Problem marks a timesheet and an invoice only when the lines disagree about the project", () => {
-    const tr = standIn({ notes: {} }).customJS.TimeReport;
+    const tr = standIn({ notes: {} }).plainday.TimeReport;
     const task = (rule) => ({ kind: "task", rule });
     assert.equal(tr.changesBilling(task("project")), true);
     for (const rule of ["open", "finished", "forward", "twice", "trailing"]) assert.equal(tr.changesBilling(task(rule)), false, rule);
@@ -3117,7 +3120,7 @@ const DISAGREE = (extra = {}) => {
         [HOME]: `---\ntags: [project]\n${extra.homeStatus ? `status: ${extra.homeStatus}\n` : ""}---\nHome.\n`,
         [DAY]: "- [ ] Book it [[Household|⭕]] ^k3x9m2\n",
     };
-    const tr = standIn({ notes }).customJS.TimeReport;
+    const tr = standIn({ notes }).plainday.TimeReport;
     const list = Object.entries(notes).map(([path, text]) => ({ path, kind: path === DAY ? "day" : "other", text }));
     return { KES, HOME, DAY, tr, list };
 };
@@ -3159,7 +3162,7 @@ test("OBS-213: a task moved off an archived project reads it as the report does,
         [D16]: "- [>] Book it [[Kestrel|⭕]] [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n",
         [D17]: "- [ ] Book it [[Household|⭕]] ^k3x9m2\n",
     };
-    const tr = standIn({ notes }).customJS.TimeReport;
+    const tr = standIn({ notes }).plainday.TimeReport;
     const list = Object.entries(notes).map(([path, text]) => ({ path, kind: path.includes("/days/") ? "day" : "other", text }));
     const index = tr.appIndex();
     assert.equal(tr.lineProject(list[2], 0, notes[D16].split("\n"), index, false), OLD, "the check reads the archived ⭕");
@@ -3181,8 +3184,8 @@ test("OBS-185: a task Problem on no day and no project is listed too, dated by i
         [CH]: "- [>] Water the plants [[2026w38#^def456|Wk of 9/13]] ^def456\n",
     };
     const v = standIn({ notes });
-    const tr = v.customJS.TimeReport;
-    const list = Object.keys(notes).map((path) => ({ path, kind: v.customJS.TaskIds.kindOf(v.app.vault.getFileByPath(path)), text: notes[path] }));
+    const tr = v.plainday.TimeReport;
+    const list = Object.keys(notes).map((path) => ({ path, kind: v.plainday.TaskIds.kindOf(v.app.vault.getFileByPath(path)), text: notes[path] }));
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
     tr.addTaskProblems(model, tr.appIndex(), list);
     assert.deepEqual(plain(model.projectProblems), []);
@@ -3203,7 +3206,7 @@ test("OBS-185: the open-twice Problem for a sent line a click turned into [ ] sa
     await v.schedule("2026-09-17");
     // One click on the project note's [>] box
     v.app.workspace.activeLeaf.view.editor.replaceRange(" ", { line: 5, ch: 3 }, { line: 5, ch: 4 });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const said = (c) => Object.fromEntries(c.lines.map((l) => [l.path, tr.taskProblemText(c, l)]));
     const [open] = v.check();
     assert.equal(open.rule, "open");

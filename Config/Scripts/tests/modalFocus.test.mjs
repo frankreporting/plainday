@@ -9,10 +9,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classFiles, classScript } from "../../../plugin/classShape.mjs";
 
-const dir = new URL("../../../plugin/src/classes/", import.meta.url);
-const scripts = fs.readdirSync(dir).filter((f) => f.endsWith(".js"));
-const read = (f) => fs.readFileSync(new URL(f, dir), "utf8");
+// Each class file by its name, as a script: its imports read from the context's globals
+const scripts = classFiles().map((f) => f.split("/")[1]);
+const read = (f) => classScript(f);
 
 test("no script focuses anything straight after a modal's open()", () => {
     for (const f of scripts) {
@@ -64,7 +65,7 @@ const harness = () => {
         app: {},
         Notice: class {},
         requestAnimationFrame: (fn) => frames.push(fn),
-        customJS: { obsidian: { Modal, DropdownComponent } },
+        Modal, DropdownComponent,
     });
     return { log, frames, ctx };
 };

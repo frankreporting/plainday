@@ -1,4 +1,7 @@
-class UpdateObsidianPM {
+import { Component, getFrontMatterInfo, MarkdownRenderer, Modal, moment, Notice, parseYaml, Setting } from "obsidian";
+import { app } from "../host.js";
+
+export default class UpdateObsidianPM {
     // Command "Update Obsidian PM": installs this repository's system files into the vault it runs
     // in, from a local clone. The vault is never a git repository, so a vault full of real notes can
     // never be committed, overwritten by the repository's sample notes, or emptied by a git command.
@@ -307,7 +310,6 @@ class UpdateObsidianPM {
     // ---------------------------------------------------------------- the command
 
     async invoke() {
-        const { Notice } = customJS.obsidian;
         if (!this.desktop()) { new Notice("Update Obsidian PM runs on the desktop only"); return; }
         const fs = require("fs"), path = require("path");
         const vaultPath = this.vaultPath();
@@ -434,7 +436,6 @@ class UpdateObsidianPM {
     // note whose properties don't read, or a `folder` that isn't a folder, says so and holds the
     // base where it is for this update: guessing would move it out of sight.
     async invoiceFolder(vaultPath) {
-        const { Notice } = customJS.obsidian;
         const hold = (why) => {
             new Notice(`Update Obsidian PM: ${why}, so the Invoices base is left where it is this time`, 0);
             return { folder: "", hold: true };
@@ -443,7 +444,6 @@ class UpdateObsidianPM {
         if (!text) return { folder: "", hold: false };
         let raw;
         try {
-            const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
             const info = getFrontMatterInfo(text);
             raw = info.exists ? (parseYaml(info.frontmatter) ?? {}).folder : undefined;
         } catch (e) {
@@ -532,7 +532,7 @@ class UpdateObsidianPM {
     // Writes the manifest: what's installed now, from where, and `failed` when a copy stopped there
     async record(files, { source, commit, failed } = {}) {
         await this.write(UpdateObsidianPM.MANIFEST_FILE, JSON.stringify({
-            source, commit: commit ?? null, updated: window.moment().format("YYYY-MM-DD HH:mm"),
+            source, commit: commit ?? null, updated: moment().format("YYYY-MM-DD HH:mm"),
             ...(failed ? { failed } : {}),
             files: Object.fromEntries([...files].sort(([a], [b]) => a.localeCompare(b))),
         }, null, 2) + "\n");
@@ -557,7 +557,6 @@ class UpdateObsidianPM {
     }
 
     ask(question, placeholder) {
-        const { Modal, Setting } = customJS.obsidian;
         return new Promise((resolve) => {
             const modal = new Modal(app);
             let value = "";
@@ -573,7 +572,6 @@ class UpdateObsidianPM {
 
     // Shows the plan and asks. Returns null for cancel, else what to do about local changes and removals.
     confirm(summary, plan) {
-        const { Modal, Setting, MarkdownRenderer, Component } = customJS.obsidian;
         return new Promise((resolve) => {
             const modal = new Modal(app);
             let answer = null, overwriteLocal = false, remove = true;

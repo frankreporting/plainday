@@ -1,4 +1,7 @@
-class SyncArea {
+import { getFrontMatterInfo, Notice, parseYaml } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class SyncArea {
     // Startup script: when notes move to another folder (one at a time or as a whole folder),
     // points their `parent` property at the nearest project or area above them, i.e. the first
     // folder note (Folder/Folder.md) tagged #project or #area. A folder note looks from the
@@ -32,8 +35,8 @@ class SyncArea {
     }
 
     onRename(file, oldPath) {
-        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
-        if (!customJS.plugin) return;
+        // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
+        if (!plainday.plugin) return;
 
         const oldFolder = oldPath.includes("/") ? oldPath.slice(0, oldPath.lastIndexOf("/")) : "/";
         if (file.children) {
@@ -116,12 +119,11 @@ class SyncArea {
             return { key, old, value: keep ? current : Array.isArray(current) ? [link] : link };
         };
         // processFrontMatter rewrites the whole YAML block even when nothing changes, so check first
-        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
         const text = await app.vault.read(file);
         const info = getFrontMatterInfo(text);
         const front = info.exists ? parseYaml(info.frontmatter) ?? {} : {};
         // An invoice that lost its tag but still has its Billed entries still bills, so it's left alone too
-        if (this.isInvoice(front) || customJS.Billing?.hasBilled?.(text) || !plan(front)) return false;
+        if (this.isInvoice(front) || plainday.Billing?.hasBilled?.(text) || !plan(front)) return false;
 
         let wrote = false;
         const recached = this.waitForCache(file);

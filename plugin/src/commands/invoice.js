@@ -1,4 +1,7 @@
-class Invoice {
+import { ButtonComponent, FuzzySuggestModal, getFrontMatterInfo, Modal, moment, Notice, parseYaml, Platform, TextComponent } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class Invoice {
     // Command "Invoice" (OBS-5): makes an invoice note from the time logged in daily notes, and moves
     // one along once it's made. Run on a project note (or pick a project), it asks "Bill through" a
     // date, shows what it would bill and what needs fixing first, and writes a draft into the folder
@@ -435,8 +438,8 @@ class Invoice {
     // ---------------------------------------------------------------- the command
 
     async invoke() {
-        const tr = customJS.TimeReport, billing = customJS.Billing;
-        if (!tr || !billing || !customJS.DatePrompt) { new Notice("Invoice: Plainday is still loading; try again in a moment"); return; }
+        const tr = plainday.TimeReport, billing = plainday.Billing;
+        if (!tr || !billing || !plainday.DatePrompt) { new Notice("Invoice: Plainday is still loading; try again in a moment"); return; }
         try {
             const file = app.workspace.getActiveFile();
             if (file && this.isInvoice(file)) { await this.actions(file, tr, billing); return; }
@@ -468,7 +471,7 @@ class Invoice {
     // A note tagged `invoice` in its frontmatter
     isInvoice(file) {
         const fm = app.metadataCache.getFileCache(file)?.frontmatter;
-        return !!fm && customJS.TimeReport.tagsOf({ frontmatter: fm }).includes("invoice");
+        return !!fm && plainday.TimeReport.tagsOf({ frontmatter: fm }).includes("invoice");
     }
 
     // The projects with time to bill: those with an ended, billable, hourly entry on no invoice, and the
@@ -500,7 +503,6 @@ class Invoice {
         if (!candidates.size) { new Notice("Nothing unbilled on any project"); return null; }
         const aliasOf = (p) => [].concat(index.props(p)?.aliases ?? [])[0] || tr.basename(p);
         const items = [...candidates].sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
-        const { FuzzySuggestModal } = customJS.obsidian;
         return new Promise((resolve) => {
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
@@ -571,9 +573,9 @@ class Invoice {
         const linkText = (p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, path, true) : tr.basename(p); };
         const props = index.props(project) ?? {};
         const text = this.noteText({
-            id: window.moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
+            id: moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
             parent: `[[${linkText(project)}|${alias}]]`, ...this.partyLinks(billed, linkText),
-            invoiceDate: window.moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
+            invoiceDate: moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
             from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
@@ -642,7 +644,6 @@ class Invoice {
 
     // The index of the item picked from `items`, or null when dismissed
     pickOne(items, placeholder) {
-        const { FuzzySuggestModal } = customJS.obsidian;
         return new Promise((resolve) => {
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
@@ -697,9 +698,9 @@ class Invoice {
     async settings(tr) {
         let file = app.vault.getFileByPath(Invoice.SETTINGS);
         if (!file) {
-            file = await app.vault.create(Invoice.SETTINGS, this.settingsText(window.moment().format("YYYYMMDDHHmmssSS")));
+            file = await app.vault.create(Invoice.SETTINGS, this.settingsText(moment().format("YYYYMMDDHHmmssSS")));
         } else {
-            const s = this.readSettings(await this.propsOf(file, tr), customJS.Billing);
+            const s = this.readSettings(await this.propsOf(file, tr), plainday.Billing);
             if (s.ok) return s;
         }
         await app.workspace.getLeaf(false).openFile(file);
@@ -709,7 +710,6 @@ class Invoice {
 
     // A note's properties, read from its text (the metadata cache can lag an edit)
     async propsOf(file, tr) {
-        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
         const info = getFrontMatterInfo(await tr.textOf(file));
         try { return info.exists ? parseYaml(info.frontmatter) ?? {} : {}; } catch (e) { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
     }
@@ -726,9 +726,9 @@ class Invoice {
 
     // Refreshes the time report so the timesheets show the change: on the desktop, as at startup
     async refreshReport() {
-        if (!customJS.obsidian.Platform.isDesktop) { new Notice("The timesheets update the next time the desktop app runs the time report: at startup, or the TimeReport command"); return; }
+        if (!Platform.isDesktop) { new Notice("The timesheets update the next time the desktop app runs the time report: at startup, or the TimeReport command"); return; }
         if (window.timeReportRunning) { new Notice("The timesheets update once the time report that's running now has finished, or at the next run"); return; }
-        await customJS.TimeReport.refresh({ quiet: true });
+        await plainday.TimeReport.refresh({ quiet: true });
     }
 
     // A date from the date prompt (the box starts at "today"), or null when dismissed. A month and day
@@ -737,7 +737,7 @@ class Invoice {
     askDate(title) {
         return new Promise((resolve) => {
             let picked = null;
-            const modal = customJS.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); }, { nearest: true });
+            const modal = plainday.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); }, { nearest: true });
             if (!modal) { resolve(null); return; }
             const closed = modal.onClose?.bind(modal);
             modal.onClose = () => { closed?.(); setTimeout(() => resolve(picked), 0); };
@@ -748,7 +748,6 @@ class Invoice {
 
     // A line of text from a small prompt, or null when dismissed. `check(value)` returns an error to show.
     askText(title, description, value, check) {
-        const { Modal, TextComponent, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
             let answer = null;
             const modal = new (class extends Modal {
@@ -821,7 +820,6 @@ class Invoice {
     // so the rest of the note stays as you wrote it. Should that fail, the new note still holds its
     // number, which the next run counts, so no number is given twice.
     async raiseLastNumber(n, name, tr) {
-        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
         try {
             const file = app.vault.getFileByPath(Invoice.SETTINGS);
             if (!file) throw new Error("the note is gone");
@@ -857,7 +855,6 @@ class Invoice {
 
     // Shows what an invoice would bill, and asks. Resolves true to create it.
     confirm(project, through, sel, model, tr, billing) {
-        const { Modal, ButtonComponent } = customJS.obsidian;
         const hours = sel.entries.reduce((s, e) => s + tr.rounded(e.minutes), 0);
         const rows = billing.rows(billing.snapshot(sel.entries, model, tr));
         const cents = rows.reduce((s, r) => s + r.amount, 0);
@@ -920,7 +917,6 @@ class Invoice {
 
     // Asks a yes-or-no question with named buttons. Resolves to the picked button's key, or null.
     choose(title, text, buttons) {
-        const { Modal, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
             let picked = null;
             const made = [];
@@ -968,7 +964,6 @@ class Invoice {
     }
 
     pickAction(invoice, choices) {
-        const { FuzzySuggestModal } = customJS.obsidian;
         return new Promise((resolve) => {
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
@@ -1095,7 +1090,7 @@ class Invoice {
         const rows = billing.rows(entries);
         const minutes = rows.reduce((s, r) => s + r.minutes, 0), cents = rows.reduce((s, r) => s + r.amount, 0);
         const d = {
-            name: invoice.name, invoiceDate: invoice.invoiceDate ?? window.moment().format("YYYY-MM-DD"), minutes, cents,
+            name: invoice.name, invoiceDate: invoice.invoiceDate ?? moment().format("YYYY-MM-DD"), minutes, cents,
             from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
@@ -1167,7 +1162,7 @@ class Invoice {
         const result = billing.changes(invoice, model, tr, index, model.billing.ledger);
         const items = this.changeItems(result, tr);
         const billingChanges = result.changes.filter((c) => c.kind !== "wording").length;
-        const stamp = tr.shortDate(window.moment().format("YYYY-MM-DD"));
+        const stamp = tr.shortDate(moment().format("YYYY-MM-DD"));
         const title = billingChanges || result.late.length ? `Changed since invoiced · checked ${stamp}` : `No changes since invoiced · checked ${stamp}`;
         const before = await tr.textOf(file);
         if (!(await this.writeKeepingFold(file, before, this.placeCheck(before, this.checkLines(title, items)), tr, billing))) return;

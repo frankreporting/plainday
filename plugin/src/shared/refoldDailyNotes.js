@@ -1,4 +1,7 @@
-class RefoldDailyNotes {
+import { moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class RefoldDailyNotes {
     // Obsidian saves each note's folds per device as {folds, lines} and ignores them once the
     // note's line count stops matching, which is what happens when something outside Obsidian
     // changes it: the Raycast calendar sync, or Obsidian Sync bringing edits from another device.
@@ -87,7 +90,7 @@ class RefoldDailyNotes {
         for (const view of views) if (await this.catchesUp(view, text)) ready.push(view);
         if (views.length && !ready.length) return false;
 
-        const foldable = customJS.Schedule.foldableRanges(text);
+        const foldable = plainday.Schedule.foldableRanges(text);
         const all = new Set(foldable.map((r) => r.from));
         const saved = app.foldManager.load(file);
         const savedOk = !!saved && saved.lines === lines.length;
@@ -180,14 +183,14 @@ class RefoldDailyNotes {
             taken: Date.now(),
             lines: lines.length,
             props: folds.some(RefoldDailyNotes.isProps),
-            items: customJS.Schedule.foldableRanges(text)
+            items: plainday.Schedule.foldableRanges(text)
                 .map((r) => ({ from: r.from, text: RefoldDailyNotes.norm(lines[r.from]), folded: folded.has(r.from) })),
         };
         // Drop snapshots of notes that are gone or too old for an outside change to matter
-        const { format } = customJS.Schedule.dailyOpts();
-        const cutoff = window.moment().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
+        const { format } = plainday.Schedule.dailyOpts();
+        const cutoff = moment().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
         for (const path of Object.keys(store)) {
-            const date = window.moment(path.split("/").pop().replace(/\.md$/, ""), format, true);
+            const date = moment(path.split("/").pop().replace(/\.md$/, ""), format, true);
             if (!app.vault.getFileByPath(path) || (date.isValid() && date.isBefore(cutoff))) delete store[path];
         }
         app.saveLocalStorage(RefoldDailyNotes.STORE, store);
@@ -198,7 +201,7 @@ class RefoldDailyNotes {
     }
 
     isDaily(file) {
-        return !!file && file.extension === "md" && customJS.Schedule.isDailyNote(file);
+        return !!file && file.extension === "md" && plainday.Schedule.isDailyNote(file);
     }
 
     openDailyNotes() {

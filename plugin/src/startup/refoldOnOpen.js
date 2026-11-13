@@ -1,4 +1,6 @@
-class RefoldOnOpen {
+import { app, plainday } from "../host.js";
+
+export default class RefoldOnOpen {
     // Startup script: keeps daily notes folded as they're opened, and snapshots them as they're
     // left or Obsidian quits (see RefoldDailyNotes), on every device.
     async invoke() {
@@ -27,11 +29,11 @@ class RefoldOnOpen {
     }
 
     run(method, ...args) {
-        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
-        if (!customJS.plugin) return;
+        // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
+        if (!plainday.plugin) return;
         const log = (e) => console.error(`RefoldOnOpen: ${method} failed`, e);
         try {
-            Promise.resolve(customJS.RefoldDailyNotes?.[method](...args)).catch(log);
+            Promise.resolve(plainday.RefoldDailyNotes?.[method](...args)).catch(log);
         } catch (e) {
             log(e);
         }

@@ -1,4 +1,7 @@
-class TaskChange {
+import { moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class TaskChange {
     // A project change (rules 8 to 12, OBS-225): the edit you'd make by hand, on every copy a command can
     // find. Every command that changes a line's ⭕ or 🗃️, or moves a note into another project, goes through
     // here, so the one question and the one refusal can't be skipped:
@@ -19,25 +22,25 @@ class TaskChange {
 
     // Where a line's note puts it: "periodic", "home" (a project's or area's own note) or "other"
     placeOf(file) {
-        if (customJS.TaskIds.kindOf(file) !== "other") return "periodic";
-        return customJS.MoveToProject.isFolderNote(file) ? "home" : "other";
+        if (plainday.TaskIds.kindOf(file) !== "other") return "periodic";
+        return plainday.MoveToProject.isFolderNote(file) ? "home" : "other";
     }
 
     // Whether a change moves `note` when a line's ⋯ links it: a task note, log or plain note in the system.
     // A project or area note moves only by MoveToProject, as its folder (rule 8).
     ours(note) {
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         // A note in a folder of its own name that the cache doesn't know yet may be a project made a moment ago
         if (!app.metadataCache.getFileCache(note) && note.parent?.name === note.basename) return false;
-        return tasks.inSystem(note) && tasks.kindOf(note) === "other" && !customJS.MoveToProject.isFolderNote(note) && !customJS.MoveToProject.billingNote(note);
+        return tasks.inSystem(note) && tasks.kindOf(note) === "other" && !plainday.MoveToProject.isFolderNote(note) && !plainday.MoveToProject.billingNote(note);
     }
 
     // A note's lines as they are now, once per command: { raw, visible, hidden }, `visible` as Obsidian shows
     // them, so a code block or a comment is no line of a task
     async shown(file, memo) {
         if (!memo.has(file.path)) {
-            const raw = (await customJS.TaskIds.readNow(file)).split("\n").map((l) => l.replace(/\r$/, ""));
-            const { visible, hidden } = customJS.TimeReport.scan(raw);
+            const raw = (await plainday.TaskIds.readNow(file)).split("\n").map((l) => l.replace(/\r$/, ""));
+            const { visible, hidden } = plainday.TimeReport.scan(raw);
             memo.set(file.path, { raw, visible, hidden });
         }
         return memo.get(file.path);
@@ -45,7 +48,7 @@ class TaskChange {
 
     // The notes a line's ⋯ links, or the log its title is wrapped in, in the order they're written
     linked(text, from) {
-        const tr = customJS.TimeReport;
+        const tr = plainday.TimeReport;
         const links = tr.lineLinks(tr.classify(text).body);
         return [...links.notes, ...(links.title ? [links.title] : [])]
             .map((l) => app.metadataCache.getFirstLinkpathDest(l.target, from)).filter(Boolean);
@@ -55,8 +58,8 @@ class TaskChange {
     // [{ file, at }], through its backlinks, and every note the cache may be behind on. With `self`, a line in
     // `note` itself that links it counts too (DueDate's search, OBS-229).
     async linking(note, memo, { self = false } = {}) {
-        const tasks = customJS.TaskIds, T = tasks.constructor, tr = customJS.TimeReport, helper = customJS.AddTaskNote;
-        const files = new Map(customJS.MoveToProject.linkingNotes(note).map((f) => [f.path, f]));
+        const tasks = plainday.TaskIds, T = tasks.constructor, tr = plainday.TimeReport, helper = plainday.AddTaskNote;
+        const files = new Map(plainday.MoveToProject.linkingNotes(note).map((f) => [f.path, f]));
         for (const f of tasks.nowFiles()) files.set(f.path, f);
         if (self) files.set(note.path, note);
         const out = [];
@@ -76,7 +79,7 @@ class TaskChange {
     // aren't. Read from its own text when the cache doesn't know it yet, as for a note made a moment ago.
     async holds(note, memo) {
         if (!this.ours(note)) return false;
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         if (helper.isLogsFolderName(note.parent?.name)) return true;
         const cache = app.metadataCache.getFileCache(note);
         const tags = cache ? helper.tagsOf(cache) : TaskChange.frontTags((await this.shown(note, memo)).raw);
@@ -86,7 +89,7 @@ class TaskChange {
     // Whether `note` is a task note: tagged #task, and not a log (tagged #log, or in a `›logs` folder); read from
     // its own text when the cache doesn't know it yet. Wherever it is: the caller asks whether it's in the system.
     async isTaskNote(note, memo = new Map()) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         if (note?.extension !== "md" || helper.isLogsFolderName(note.parent?.name)) return false;
         const cache = app.metadataCache.getFileCache(note);
         const tags = cache ? helper.tagsOf(cache) : TaskChange.frontTags((await this.shown(note, memo)).raw);
@@ -109,7 +112,7 @@ class TaskChange {
 
     // A note's subtasks: its top-level checklist lines, as shown
     subtasks(visible, hidden) {
-        const T = customJS.TaskIds.constructor;
+        const T = plainday.TaskIds.constructor;
         return visible.map((text, at) => at).filter((at) => !hidden[at] && T.CHECKBOX.test(visible[at]) && T.isTop(visible, at));
     }
 
@@ -131,7 +134,7 @@ class TaskChange {
     //   those whose ⋯ links a task note no change moves (in Archive or outside the system), which share that
     //   deadline though they can't share a project, and they don't depend on which line it starts from.
     async find(start, { note = null, family = true } = {}) {
-        const tasks = customJS.TaskIds, T = tasks.constructor, mover = customJS.MoveToProject;
+        const tasks = plainday.TaskIds, T = tasks.constructor, mover = plainday.MoveToProject;
         // Every task ID's lines, one pass over the cache, made the first time a line has an ID: a line with none
         // (a task of its own) costs nothing here
         let ids = null;
@@ -207,7 +210,7 @@ class TaskChange {
     // `project`, a line that names a project while its own note waits in the Inbox: its time still counts,
     // and the report lists it until the note is filed (rule 15).
     breaking(lines, { home = null, moving = [], adds = null } = {}) {
-        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor, index = tr.appIndex();
+        const tr = plainday.TimeReport, T = plainday.TaskIds.constructor, index = tr.appIndex();
         const movingPaths = new Set(moving.map((n) => n.path));
         const out = [];
         for (const l of lines) {
@@ -229,7 +232,7 @@ class TaskChange {
 
     // The notices for `breaking`'s lines, none when there are none
     warned(breaks) {
-        const out = [], name = (path) => customJS.TimeReport.basename(path);
+        const out = [], name = (path) => plainday.TimeReport.basename(path);
         const days = (list) => [...new Set([...list].sort((a, b) => a.l.file.basename.localeCompare(b.l.file.basename)).map((b) => this.dayName(b.l.file)))].join(", ");
         const against = breaks.filter((b) => !b.inbox), waiting = breaks.filter((b) => b.inbox);
         if (against.length === 1) {
@@ -238,7 +241,7 @@ class TaskChange {
         } else if (against.length) out.push(`${against.length} lines (${days(against)}) now disagree with their notes, so their time counts nowhere until you fix them. The report lists them under Problems`);
         if (waiting.length === 1) {
             const [{ l, note, project }] = waiting;
-            out.push(`${this.dayName(l.file)}'s line links ${customJS.AddTaskNote.markOf(app.vault.getFileByPath(project))}, but its note ${note.basename} waits in the Inbox. The report lists it under Problems until you run AddProjectLink on the line or MoveToProject on the note`);
+            out.push(`${this.dayName(l.file)}'s line links ${plainday.AddTaskNote.markOf(app.vault.getFileByPath(project))}, but its note ${note.basename} waits in the Inbox. The report lists it under Problems until you run AddProjectLink on the line or MoveToProject on the note`);
         } else if (waiting.length) out.push(`${waiting.length} lines (${days(waiting)}) link a project, but their notes wait in the Inbox. The report lists them under Problems until you run AddProjectLink on the lines or MoveToProject on the notes`);
         return out;
     }
@@ -248,7 +251,7 @@ class TaskChange {
     // and one in a task note, log or other note names the project the note is filed in: a task and everything
     // under it share one project (Brian, 2026-11-02).
     agreedHome(found) {
-        const tr = customJS.TimeReport, index = tr.appIndex();
+        const tr = plainday.TimeReport, index = tr.appIndex();
         const named = new Set();
         for (const l of found.lines) {
             if (!l.task) continue;
@@ -273,11 +276,11 @@ class TaskChange {
     // entries the report reads there, an ended event's span included, each `disputed` when its line's time
     // counts nowhere. Time under a nested task is no line's.
     async entries(days, index) {
-        const tr = customJS.TimeReport, out = new Map();
+        const tr = plainday.TimeReport, out = new Map();
         if (!days.length) return out;
-        const clock = window.moment();
+        const clock = moment();
         const notes = await Promise.all([...new Map(days.map((l) => [l.file.path, l.file])).values()]
-            .map(async (f) => ({ path: f.path, date: tr.dailyDate(f.path), text: await customJS.TaskIds.readNow(f) })));
+            .map(async (f) => ({ path: f.path, date: tr.dailyDate(f.path), text: await plainday.TaskIds.readNow(f) })));
         const model = tr.build(notes, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() } });
         for (const e of [...model.entries, ...model.disputed]) {
             if (e.subTask) continue;
@@ -296,7 +299,7 @@ class TaskChange {
     // toDo: the lines in a project note that go to `home`'s To Do }. With no `home`, nothing changes project:
     // only AddTaskNote's ⋯ is written.
     async weigh(found, home, { adds = null } = {}) {
-        const tr = customJS.TimeReport, helper = customJS.AddTaskNote, mover = customJS.MoveToProject, schedule = customJS.Schedule;
+        const tr = plainday.TimeReport, helper = plainday.AddTaskNote, mover = plainday.MoveToProject, schedule = plainday.Schedule;
         const index = tr.appIndex();
         const link = home ? helper.homeLink(home, helper.linktextFor(home, app.vault.getMarkdownFiles().map((f) => f.path))) : null;
         const weighed = { link, moves: [], leaving: [], clash: null, lines: [], days: [], stops: [], checked: [], stopped: [], toDo: [], breaks: [] };
@@ -336,7 +339,7 @@ class TaskChange {
     // `raw`, a line in a periodic note, with `link` as its one ⭕ or 🗃️. A comment with nothing shown after it
     // stays last, as it was; one before the links, or a %% in the text, is just part of the line.
     withProject(raw, link) {
-        const tr = customJS.TimeReport, linker = customJS.AddProjectLink;
+        const tr = plainday.TimeReport, linker = plainday.AddProjectLink;
         const shown = (text) => tr.scan([text]).visible[0].trimEnd();
         const comment = raw.match(/\s*(?:%%[^%]*%%|<!--.*?-->)\s*$/)?.[0] ?? "";
         const head = raw.slice(0, raw.length - comment.length);
@@ -345,8 +348,8 @@ class TaskChange {
 
     // A day as the notices name it: "9/11", or a week's, month's or year's own name
     dayName(file) {
-        const schedule = customJS.Schedule;
-        return schedule.isDailyNote(file) ? window.moment(file.basename, schedule.dailyOpts().format, true).format("M/D") : schedule.labelOf(file);
+        const schedule = plainday.Schedule;
+        return schedule.isDailyNote(file) ? moment(file.basename, schedule.dailyOpts().format, true).format("M/D") : schedule.labelOf(file);
     }
 
     // The one question (rule 10): at most one per change, before anything is written. It asks when a note
@@ -357,7 +360,7 @@ class TaskChange {
     // name, filed in that project. Resolves to "move", "leave" or null (Cancel).
     async ask(weighed, home, { leave = null, name = null, matched = null, parent = false } = {}) {
         if (!weighed.leaving.length && !weighed.days.length && !leave) return "move";
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         const steps = weighed.moves, step = steps[0] ?? null;
         const mark = (f) => helper.markOf(f), to = mark(home);
         const asking = (title, label, shown, words, cancel = "Cancel") =>
@@ -398,7 +401,7 @@ class TaskChange {
     // isn't a draft or canceled, a status of your own included.
     async billed(weighed, home) {
         if (!weighed.checked.length && !weighed.stopped.length) return null;
-        const tr = customJS.TimeReport, billing = customJS.Billing;
+        const tr = plainday.TimeReport, billing = plainday.Billing;
         // Without the drafts, which refuse nothing and would otherwise hide a sent invoice's row for the same
         // entry. An invoice that can't be read isn't one: its rows are still checked.
         const ledger = billing.ledger(tr.readBilled(await tr.readInvoices(billing), tr.appIndex(), billing).filter((i) => i.status !== "draft" || i.unread));
@@ -491,7 +494,7 @@ class TaskChange {
     // it changed }.
     async rewrite(file, list, next) {
         let wrote = [];
-        await customJS.Schedule.rewrite(file, (text) => {
+        await plainday.Schedule.rewrite(file, (text) => {
             const ls = text.split("\n");
             wrote = [];
             for (const l of list) {
@@ -504,7 +507,7 @@ class TaskChange {
             return ls.join("\n");
         });
         for (const { l, at, now } of wrote) Object.assign(l, { at, raw: now, targets: this.targetsOf(now, l.file.path) });
-        if (customJS.Schedule.isDailyNote(file)) await customJS.RefoldDailyNotes?.onLeave?.(file);
+        if (plainday.Schedule.isDailyNote(file)) await plainday.RefoldDailyNotes?.onLeave?.(file);
         return { missed: list.filter((l) => !wrote.some((w) => w.l === l)), changed: wrote.filter((w) => w.changed).map((w) => w.l) };
     }
 
@@ -515,7 +518,7 @@ class TaskChange {
     // moved, failed: notes not written, written: the lines whose text it changed, rehomed: the lines in periodic
     // notes it gave `home`'s ⭕ }.
     async write(found, weighed, home, { each = null } = {}) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         const moved = [], failed = [];
         for (const step of weighed.moves) {
             try {
@@ -529,7 +532,7 @@ class TaskChange {
             }
             moved.push(step);
             try {
-                await customJS.SyncArea?.sync?.(step.note, false);
+                await plainday.SyncArea?.sync?.(step.note, false);
             } catch (e) {
                 console.error(`TaskChange: couldn't set the parent of ${step.note.path}`, e);
             }
@@ -576,13 +579,13 @@ class TaskChange {
     // Moves a task's line in a project note, with everything nested under it, to the end of `home`'s To Do.
     // True once it's out of the old note.
     async intoToDo(l, home) {
-        const tasks = customJS.TaskIds, tr = customJS.TimeReport;
+        const tasks = plainday.TaskIds, tr = plainday.TimeReport;
         const lines = (await tasks.readNow(l.file)).split("\n").map((t) => t.replace(/\r$/, ""));
         const at = this.locate(lines, l);
         if (at === -1) return false;
         const block = lines.slice(at, tr.subtreeEnd(lines, at) + 1);
-        await customJS.Schedule.rewrite(home, (t) => TaskChange.placeInToDo(t, block));
-        await customJS.Schedule.rewrite(l.file, (t) => {
+        await plainday.Schedule.rewrite(home, (t) => TaskChange.placeInToDo(t, block));
+        await plainday.Schedule.rewrite(l.file, (t) => {
             const ls = t.split("\n");
             const from = this.locate(ls, l);
             if (from === -1) return t;
@@ -596,7 +599,7 @@ class TaskChange {
     // What a change says when it's done. The lines it gave the project are named when there's more than the one
     // you ran it on, or, from AddTaskNote (`start`, its line), when one of them is another
     said(result, home, { here = null, start = null } = {}) {
-        const mover = customJS.MoveToProject;
+        const mover = plainday.MoveToProject;
         const { moved, wrote, toDo, failed } = result;
         const parts = moved.map((s) => `Moved ${s.label} to ${s.to.slice(0, s.to.lastIndexOf("/"))}`);
         if (here && home) parts.push(`${here} ${wrote || toDo.length ? "was" : "is"} already in ${home.basename}`);

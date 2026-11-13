@@ -2,19 +2,20 @@
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The helper borrows the calendar sync's line shape, matching and sort order, so the sync class
 // is loaded with vm the way its own tests do, and passed in as the Log template passes
-// customJS.CalendarSync.
+// plainday.CalendarSync.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const require = createRequire(import.meta.url);
 const recordEvent = require("../Templater/recordEvent.js");
 const eventTimes = require("../Templater/eventTimes.js");
 
-const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
-const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, customJS: {}, console })))();
+const code = classScript("calendarSync.js");
+const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, plainday: {}, console })))();
 
 const text = (...lines) => lines.join("\n");
 const FM = ["---", "aliases: 9/16/26 Wednesday", "---"];

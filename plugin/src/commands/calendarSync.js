@@ -1,4 +1,7 @@
-class CalendarSync {
+import { moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class CalendarSync {
     // Writes calendar events into daily notes and keeps them current: an event that moves, is
     // renamed or is canceled updates the line the sync wrote (a canceled one is marked [-], kept as
     // a record of what was planned, and back to [<] if the event returns). A line you've touched is yours,
@@ -83,7 +86,7 @@ class CalendarSync {
         // Until the one-time conversion has run, an event's 🗒️ log link isn't read (OBS-208): the sync
         // would take the line for one you'd changed, or drop its ⭕ and log when the event moves. It
         // waits, changing nothing, and the next run after the conversion picks everything up.
-        const old = await customJS.TimeReport?.oldMarksLeft?.();
+        const old = await plainday.TimeReport?.oldMarksLeft?.();
         if (old) return `${old} line${old === 1 ? " in the daily notes still ends" : "s in the daily notes still end"} in a 🗒️ or 🔗 link, so the calendar sync waits for the one-time conversion: see the manual's Links at the end of a line`;
         const fetchFailed = await this.fetchNow();
         const feed = await this.readJson(CalendarSync.EVENTS);
@@ -249,7 +252,7 @@ class CalendarSync {
     }
 
     newNote(body) {
-        return `---\nid: ${window.moment().format("YYYYMMDDHHmmssSS")}\ntags: \n---\n\n${body}\n`;
+        return `---\nid: ${moment().format("YYYYMMDDHHmmssSS")}\ntags: \n---\n\n${body}\n`;
     }
 
     // Replaces one "## Heading" section, keeping everything around it. A section that isn't there
@@ -453,8 +456,8 @@ class CalendarSync {
 
     async apply(feed, ledger, selected, series = new Map()) {
         const report = { added: [], adopted: [], updated: [], linked: [], restored: [], removed: [], canceled: [], forwarded: [], yours: [], held: [], skipped: [] };
-        const today = window.moment().startOf("day");
-        const upcoming = (date) => !window.moment(date, "YYYY-MM-DD", true).isBefore(today);
+        const today = moment().startOf("day");
+        const upcoming = (date) => !moment(date, "YYYY-MM-DD", true).isBefore(today);
         // Only days this fetch actually covered can say anything about their events: with a
         // one-week range, everything past next week is simply unknown, not canceled
         const covered = (date) => (!feed.windowStart || date >= feed.windowStart) && (!feed.windowEnd || date <= feed.windowEnd);
@@ -620,12 +623,12 @@ class CalendarSync {
 
         if (dry.text !== before) {
             // Keep the folds you have: snapshot first, and let RefoldDailyNotes sort out the rest
-            customJS.RefoldDailyNotes?.remember(file, before, this.currentFolds(file, before));
+            plainday.RefoldDailyNotes?.remember(file, before, this.currentFolds(file, before));
             let written;
             await app.vault.process(file, (text) => { written = this.runOps(text, operations, seed); return written.text; });
             outcomes = written.outcomes;
             after = await app.vault.read(file);   // read back what actually landed
-            await customJS.RefoldDailyNotes?.refold(file, "open");
+            await plainday.RefoldDailyNotes?.refold(file, "open");
         }
 
         const afterLines = after.split("\n");
@@ -994,7 +997,7 @@ class CalendarSync {
     // Marks the block forwarded, links it to the day the event moved to, and drops it below the
     // day's other events (the one place a daily note carries a date link at the front of a line)
     forward(lines, block, date) {
-        const alias = window.moment(date, "YYYY-MM-DD", true).format("M/D");
+        const alias = moment(date, "YYYY-MM-DD", true).format("M/D");
         const moved = lines.slice(block.from, block.to + 1);
         moved[0] = moved[0].replace(/^(\s*[-*+]\s+)\[<\]\s+/, `$1[>] [[${date}|${alias}]] `);
         const without = [...lines.slice(0, block.from), ...lines.slice(block.to + 1)];
@@ -1265,7 +1268,7 @@ class CalendarSync {
     }
 
     time(iso) {
-        return window.moment(iso).format("h:mma");
+        return moment(iso).format("h:mma");
     }
 
     claim(claimed, line) {
@@ -1314,7 +1317,7 @@ class CalendarSync {
     // (AddTaskNote.isLogsFolderName), or tagged #log (in its frontmatter or its text) wherever it waits
     isLog(file, cache) {
         const folder = (file.path ?? "").split("/").slice(-2, -1)[0];
-        if (folder && customJS?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
+        if (folder && plainday?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .concat((cache.tags ?? []).map((t) => t.tag))
@@ -1324,14 +1327,14 @@ class CalendarSync {
     // MARK: notes, files, folds
 
     dailyPath(date) {
-        const { folder } = customJS.Schedule.dailyOpts();
+        const { folder } = plainday.Schedule.dailyOpts();
         return `${folder ? folder + "/" : ""}${date}.md`;
     }
 
     async createDaily(date, path) {
-        const { folder } = customJS.Schedule.dailyOpts();
+        const { folder } = plainday.Schedule.dailyOpts();
         if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        const alias = window.moment(date, "YYYY-MM-DD", true).format("M/D/YY dddd");
+        const alias = moment(date, "YYYY-MM-DD", true).format("M/D/YY dddd");
         return app.vault.create(path, `---\naliases: ${alias}\n---\n`);
     }
 
@@ -1368,7 +1371,7 @@ class CalendarSync {
     // MARK: the report
 
     async writeReport(report, feed) {
-        const when = window.moment(feed.generatedAt).format("YYYY-MM-DD h:mma");
+        const when = moment(feed.generatedAt).format("YYYY-MM-DD h:mma");
         const lines = ["## Last run", "", `Calendar read ${when}, covering ${feed.windowStart} to ${feed.windowEnd}.`, ""];
         const section = (title, items) => {
             if (!items.length) return;
@@ -1396,7 +1399,7 @@ class CalendarSync {
     // The error log's calendar section (OBS-218): changes held back and lines it couldn't write, which
     // want you; the Last run report in the Calendar Sync note has the detail
     async logProblems(report) {
-        const log = customJS.ErrorLog;
+        const log = plainday.ErrorLog;
         if (!log) return;
         try {
             const name = CalendarSync.NOTE.split("/").pop().replace(/\.md$/, "");

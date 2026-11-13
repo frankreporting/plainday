@@ -1,4 +1,4 @@
-class Billing {
+export default class Billing {
     // What's been billed, and where each time entry stands (OBS-5). An invoice note keeps its own copy
     // of every entry it bills, in a folded "Billed entries" section at its end. This class writes and
     // reads that table, and answers from it: which entries are billed and on which invoice, what a new

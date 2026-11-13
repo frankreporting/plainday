@@ -1,29 +1,31 @@
 // Tests for plugin/src/classes/timeReportOnStartup.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The class is loaded with vm against a stub of the little it asks of `app` and `customJS`: the
+// The class is loaded with vm against a stub of the little it asks of `app` and `plainday`: the
 // layout is ready, the metadata cache is clean (unless a test holds it), Plainday is loaded.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const code = fs.readFileSync(new URL("../../../plugin/src/classes/timeReportOnStartup.js", here), "utf8");
+const code = classScript("timeReportOnStartup.js");
 
-// `customJS` with Plainday loaded and no class in it
-const bare = () => ({ obsidian: { Platform: { isDesktop: true } }, plugin: {} });
+// `plainday` with Plainday loaded and no class in it
+const bare = () => ({ plugin: {} });
 // A TimeReport whose refresh records its calls
 const timeReport = (calls) => ({ refresh: async (opts) => { calls.push(opts); } });
 
 // Loads the class. With `hold`, the metadata cache's clean callback is kept for the test to release.
-function load(customJS, { hold = null } = {}) {
+function load(plainday, { hold = null } = {}) {
     const warnings = [];
     const context = {
         app: {
             workspace: { onLayoutReady: (cb) => cb() },
             metadataCache: { onCleanCache: hold ? (cb) => { hold.release = cb; } : (cb) => cb() },
         },
-        customJS,
+        plainday,
+        Platform: { isDesktop: true },
         console: { ...console, warn: (m) => warnings.push(String(m)) },
         // The minute-long indexing timeout is never awaited here, so it mustn't keep the test process
         // alive; the short polls must, or the process exits with a run still waiting
@@ -53,10 +55,10 @@ test("OBS-41: a run that wakes up to find its classes gone waits a moment for th
     const run = new TimeReportOnStartup().invoke();
     await new Promise((r) => setImmediate(r));
     // The classes go, and come back one at a time
-    context.customJS = bare();
+    context.plainday = bare();
     hold.release();
-    after(50, () => { context.customJS.Schedule = {}; context.customJS.Billing = {}; context.customJS.TaskIds = {}; });
-    after(100, () => { context.customJS.TimeReport = timeReport(newCalls); });
+    after(50, () => { context.plainday.Schedule = {}; context.plainday.Billing = {}; context.plainday.TaskIds = {}; });
+    after(100, () => { context.plainday.TimeReport = timeReport(newCalls); });
     await run;
     assert.deepEqual(oldCalls, []);
     assert.deepEqual(plain(newCalls), [{ quiet: true }]);
@@ -69,7 +71,7 @@ test("does nothing once Plainday has unloaded while it waited for the index", as
     const { context, TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TaskIds: {}, TimeReport: timeReport(calls) }, { hold });
     const run = new TimeReportOnStartup().invoke();
     await new Promise((r) => setImmediate(r));
-    context.customJS.plugin = null;
+    context.plainday.plugin = null;
     hold.release();
     await run;
     assert.deepEqual(calls, []);
@@ -82,7 +84,7 @@ test("OBS-41: skips with a warning when a class doesn't come back in time", asyn
     await new TimeReportOnStartup().invoke();
     assert.deepEqual(calls, []);
     assert.equal(warnings.length, 1, warnings.join("\n"));
-    assert.match(warnings[0], /customJS\.Schedule isn't registered/);
+    assert.match(warnings[0], /plainday\.Schedule isn't registered/);
     assert.match(warnings[0], /skipped/);
 });
 
@@ -91,7 +93,7 @@ test("OBS-5: waits for Billing too, which the project timesheets need", async ()
     const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, TaskIds: {}, TimeReport: timeReport(calls) });
     await new TimeReportOnStartup().invoke();
     assert.deepEqual(calls, []);
-    assert.match(warnings[0], /customJS\.Billing isn't registered/);
+    assert.match(warnings[0], /plainday\.Billing isn't registered/);
 });
 
 test("OBS-185: waits for TaskIds too, which the task checks need", async () => {
@@ -99,5 +101,5 @@ test("OBS-185: waits for TaskIds too, which the task checks need", async () => {
     const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TimeReport: timeReport(calls) });
     await new TimeReportOnStartup().invoke();
     assert.deepEqual(calls, []);
-    assert.match(warnings[0], /customJS\.TaskIds isn't registered/);
+    assert.match(warnings[0], /plainday\.TaskIds isn't registered/);
 });

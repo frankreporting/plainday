@@ -1,4 +1,7 @@
-class TaskIds {
+import { moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class TaskIds {
     // Task identity (OBS-181). Every line of a task carries the same block ID at its end, `^k3x9m2`.
     // Obsidian only needs a block ID to be unique within its note, so one ID on lines in several notes
     // is valid, and [[note#^k3x9m2]] lands on that note's line. This class makes IDs, reads and writes
@@ -134,7 +137,7 @@ class TaskIds {
     // is a sub-task, and nothing on it counts, its ID included. TimeReport.nestTop decides, plain bullets
     // skipped; loaded alone (the statics in tests), a line with no indent.
     static isTop(lines, i) {
-        const tr = customJS?.TimeReport;
+        const tr = plainday?.TimeReport;
         return tr ? tr.nestTop((n) => lines[n], i) === i : !/^\s/.test(lines[i]);
     }
 
@@ -492,8 +495,8 @@ class TaskIds {
     // find nothing, and counts any line still ending in 🗒️ or 🔗, as the time report's guard does:
     // { changes, left, old }.
     async linkBackPass({ write = false } = {}) {
-        const helper = customJS.AddTaskNote;
-        const tr = customJS.TimeReport;
+        const helper = plainday.AddTaskNote;
+        const tr = plainday.TimeReport;
         const index = tr.appIndex();
         const paths = app.vault.getMarkdownFiles().map((f) => f.path);
         const texts = new Map();
@@ -506,7 +509,7 @@ class TaskIds {
         const sent = (l) => /^\s*[-*+] \[>\]/.test(l) || !!TaskIds.forwardOf(l) || !!TaskIds.oldForward(l);
         // How the report reads a daily note's entries: entry → its project, or null when disputed
         const readingOf = (file, lines) => {
-            const date = window.moment(file.basename, customJS.Schedule.dailyOpts().format, true).format("YYYY-MM-DD");
+            const date = moment(file.basename, plainday.Schedule.dailyOpts().format, true).format("YYYY-MM-DD");
             const model = tr.build([{ date, path: file.path, text: lines.join("\n") }], index, {});
             const out = new Map();
             for (const e of model.entries) out.set(`${e.line}|${e.start}|${e.end}`, { e, project: e.project ?? null });
@@ -558,7 +561,7 @@ class TaskIds {
             if (!found.length) continue;
             // Where the report counts this day's time before and after, so a line whose time would count
             // differently is listed with it
-            if (customJS.Schedule.isDailyNote(file)) {
+            if (plainday.Schedule.isDailyNote(file)) {
                 const was = lines.slice(), now = lines.slice();
                 for (const c of found) { was[c.line - 1] = c.dots; now[c.line - 1] = c.after; }
                 const a = readingOf(file, was), b = readingOf(file, now);
@@ -587,7 +590,7 @@ class TaskIds {
         for (const [path, list] of byFile) {
             const file = app.vault.getFileByPath(path);
             if (!file) continue;
-            await customJS.Schedule.rewrite(file, (text) => {
+            await plainday.Schedule.rewrite(file, (text) => {
                 const ls = text.split("\n");
                 for (const c of list) {
                     const cr = ls[c.line - 1]?.endsWith("\r") ? "\r" : "";
@@ -610,7 +613,7 @@ class TaskIds {
     // "day", "week", "month" or "year" for a periodic note (Schedule's own test), else "other": a note a
     // task is sent from
     kindOf(file) {
-        const schedule = customJS.Schedule;
+        const schedule = plainday.Schedule;
         return schedule.isDailyNote(file) ? "day" : schedule.periodOf(file) ?? "other";
     }
 }

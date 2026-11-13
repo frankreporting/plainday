@@ -7,9 +7,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { compactTable, obsidianPadded } from "./tables.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
 const tr = new (load("timeReport.js", "TimeReport"))();
 const billing = new (load("billing.js", "Billing"))();
 const inv = new (load("invoice.js", "Invoice"))();
@@ -414,8 +415,8 @@ test("askDate: a month and day without a year is the closer one, since billing l
             return modal;
         },
     };
-    const context = vm.createContext({ setTimeout, customJS: { DatePrompt } });
-    const src = fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8");
+    const context = vm.createContext({ setTimeout, plainday: { DatePrompt } });
+    const src = classScript("invoice.js");
     const asking = new (vm.runInContext(`${src}\n;Invoice`, context))();
     assert.equal(await asking.askDate("Bill through"), "2026-09-16");
     assert.deepEqual(asked, [{ title: "Bill through", nearest: true }]);
@@ -447,10 +448,10 @@ test("Invoice on a flat project asks when its fee was earned, and sets `earned` 
     };
     let pick = null;
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { if (pick !== null) this.onChooseItem(this.getItems()[pick]); this.onClose(); } };
-    const context = vm.createContext({ app, setTimeout, clearTimeout, window: { moment: () => ({ format: () => "2026-10-11" }) },
+    const context = vm.createContext({ app, setTimeout, clearTimeout, moment: () => ({ format: () => "2026-10-11" }),
         Notice: class { constructor(t) { notices.push(t); events.push("notice"); } },
-        customJS: { DatePrompt, obsidian: { Platform: { isDesktop: false }, FuzzySuggestModal } } });
-    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8")}\n;Invoice`, context))();
+        plainday: { DatePrompt }, Platform: { isDesktop: false }, FuzzySuggestModal });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     await invoice.create(POSTER, tr, billing, idx);
     assert.deepEqual(written, [POSTER]);
     assert.deepEqual(plain(fm), { rate: 1200, rate_type: "flat", Earned: "2026-09-30" }, "set where it's already spelled, not added twice");
@@ -465,12 +466,12 @@ test("Invoice on a flat project asks when its fee was earned, and sets `earned` 
     assert.equal(invoice.feeHolder(WEB, tr, idx), null, "an hourly project has no fee");
     // A day still to come is fine: a fee invoiced ahead
     const later = { ...DatePrompt, open(title, onPick) { const modal = { contentEl: { querySelector: () => null }, close() { this.onClose?.(); } }; setTimeout(() => onPick({ date: "2027-02-01" }, modal), 0); return modal; } };
-    context.customJS.DatePrompt = later;
+    context.plainday.DatePrompt = later;
     await invoice.create(POSTER, tr, billing, idx);
     assert.equal(fm.Earned, "2027-02-01");
     assert.ok(notices.includes("Poster: its $1,200 fee counts as earned on 2/1/27"));
     assert.equal(written.length, 2);
-    context.customJS.DatePrompt = DatePrompt;
+    context.plainday.DatePrompt = DatePrompt;
     // A flat project that invoices its sub-projects' time asks which; Esc does nothing
     const both = tr.makeIndex([{ path: POSTER, tags: ["project"], props: { rate: 1200, rate_type: "flat", include_subprojects: true } }, ...INDEX_NOTES]);
     pick = null;
@@ -491,7 +492,7 @@ const withApp = ({ saved = null, view = null } = {}) => {
         foldManager: { load: () => saved, save: async (file, info) => { saves.push(info); } },
     };
     const context = vm.createContext({ app, Notice: class { constructor(text) { notices.push(text); } }, setTimeout });
-    const src = fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8");
+    const src = classScript("invoice.js");
     return { invoice: new (vm.runInContext(`${src}\n;Invoice`, context))(), notices, saves };
 };
 
@@ -583,8 +584,8 @@ test("pickProject: lists the projects with unbilled time; a leftover billed_thro
     const items = [];
     // Esc as soon as it opens: the list is what it offered
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
-    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     for (const value of [undefined, "2026-09-02", "soon"]) {
         const idx = tr.makeIndex(INDEX_NOTES.map((n) => (n.path === WEB && value ? { ...n, props: { ...n.props, billed_through: value } } : n)));
         const m = tr.attachBilling(tr.build([
@@ -601,8 +602,8 @@ test("pickProject: lists the projects with unbilled time; a leftover billed_thro
 test("pickProject: an archived project with unbilled time isn't offered (OBS-213)", async () => {
     const items = [];
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
-    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     const ARCH = "Archive/Work/Harbor Stills/Harbor Stills.md";
     const idx = tr.makeIndex([...INDEX_NOTES, { path: ARCH, tags: ["project"], props: { rate: 100, rate_type: "hourly" } }]);
     const m = tr.attachBilling(tr.build([
@@ -618,8 +619,8 @@ test("pickProject: an archived project with unbilled time isn't offered (OBS-213
 test("pickProject: a live project under an archived parent is offered on its own, never through the parent (OBS-213)", async () => {
     const items = [];
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, customJS: { obsidian: { FuzzySuggestModal } } });
-    const invoice = new (vm.runInContext(`${fs.readFileSync(new URL("../../../plugin/src/classes/invoice.js", here), "utf8")}\n;Invoice`, context))();
+    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     const OLD = "Archive/Work/Old Client/Old Client.md", KID = "Projects/Work/Kid/Kid.md";
     const idx = tr.makeIndex([...INDEX_NOTES,
         { path: OLD, tags: ["project"], props: { rate: 100, rate_type: "hourly", include_subprojects: true } },

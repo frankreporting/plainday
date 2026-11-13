@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const day = (d) => `${PLANNER}/days/${d}.md`;
@@ -22,7 +23,7 @@ test("inSystem: the periodic notes and every note in Projects and the Inbox; not
         [RAFE]: "", "Archive/Old/Old.md": PROJECT, "Welcome.md": "", "Config/Templates/Task.md": "",
     };
     const v = standIn({ notes });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     const yes = Object.keys(notes).filter((p) => t.inSystem(v.app.vault.getFileByPath(p)));
     assert.deepEqual(yes, [day("2026-09-17"), `${PLANNER}/weeks/2026w38.md`, KES, "Inbox/Desk lamp.md"]);
 });
@@ -32,7 +33,7 @@ test("a line outside the system: Schedule, DueDate, AddTaskNote and AddProjectLi
     for (const name of ["Schedule", "DueDate", "AddTaskNote", "AddProjectLink"]) {
         const v = standIn({ notes: { [KES]: PROJECT, [RAFE]: text }, open: RAFE, at: 0 });
         if (name === "Schedule") assert.equal(await v.schedule("2026-09-19"), null, "no date is asked");
-        else await v.customJS[name].invoke();
+        else await v.plainday[name].invoke();
         assert.equal(v.notes()[RAFE], text, name);
         assert.equal(v.notices.at(-1), "Rafe Oakes isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed", name);
         assert.equal(Object.keys(v.notes()).length, 2, `${name}: no note made`);
@@ -46,7 +47,7 @@ test("the search for a task's lines reads only the system; the task checks read 
         [RAFE]: "- [ ] Book it ^k3x9m2\n",
         "Archive/Old/Old.md": `${PROJECT}- [>] Book it [[2026-09-17#^k3x9m2|9/17]] ^k3x9m2\n`,
     } });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     assert.deepEqual(plain(t.linesOf("k3x9m2").map((l) => l.file.path)), [day("2026-09-17")]);
     assert.deepEqual(plain((await t.gather("k3x9m2", [v.app.vault.getFileByPath(RAFE)])).map((l) => l.file.path)), [day("2026-09-17")], "even a note a caller names");
     assert.deepEqual(plain(t.allIds().get("k3x9m2").map((l) => l.file.path).sort()), ["Archive/Old/Old.md", day("2026-09-17")]);
@@ -56,7 +57,7 @@ test("the search for a task's lines reads only the system; the task checks read 
 
 test("keepLinks: a reopened line keeps its ⋯ when the moving line has none, before the ↗ it takes from the moving line", () => {
     const v = standIn({ notes: {} });
-    const keep = (line, old) => v.customJS.Schedule.constructor.keepLinks(line, old);
+    const keep = (line, old) => v.plainday.Schedule.constructor.keepLinks(line, old);
     assert.equal(keep("- [ ] Pick fonts [[Kestrel|⭕]] [[Brand guide|↗]] ^abc123", "- [>] Pick fonts [[2026-09-19#^abc123|9/19]] [[Kestrel|⭕]] [[Pick fonts|⋯]] ^abc123"),
         "- [ ] Pick fonts [[Kestrel|⭕]] [[Pick fonts|⋯]] [[Brand guide|↗]] ^abc123");
     assert.equal(keep("- [ ] Pick fonts [[Kestrel|⭕]] ^abc123", "- [x] Pick fonts [[Kestrel|⭕]] [[Brand guide|↗]] ^abc123"),
@@ -91,7 +92,7 @@ const CONVERT = () => ({
 
 test("linkBackPass: a link back becomes ↗, every other 🗒️ or 🔗 ⋯; a top-level day line reading its project only through it gets that ⭕", async () => {
     const v = standIn({ notes: CONVERT() });
-    const { changes } = await v.customJS.TaskIds.linkBackPass();
+    const { changes } = await v.plainday.TaskIds.linkBackPass();
     assert.deepEqual(plain(changes.map((c) => [c.path.split("/").pop(), c.line, c.mark, c.byText, c.after])), [
         // Text matches first, for you to check before anything is written
         ["2026-09-17.md", 7, "↗", true, "\t- [ ] Packs: loaded and empty [[Shot list|↗]]"],
@@ -108,7 +109,7 @@ test("linkBackPass: a link back becomes ↗, every other 🗒️ or 🔗 ⋯; a 
 
 test("linkBackPass with write: every note written, a note outside the system untouched, and a second run finds nothing", async () => {
     const v = standIn({ notes: CONVERT() });
-    const { changes, left } = await v.customJS.TaskIds.linkBackPass({ write: true });
+    const { changes, left } = await v.plainday.TaskIds.linkBackPass({ write: true });
     assert.equal(changes.length, 8);
     assert.deepEqual(plain(left), []);
     const notes = v.notes();
@@ -124,7 +125,7 @@ const MEET = "Projects/Freelance/Pinecrest/logs/2026-09-15 Pinecrest kickoff.md"
 const OWN = "Projects/Freelance/Kestrel/Pick fonts.md";
 const TIMED = (line) => ({ [KES]: PROJECT, [PIN]: PROJECT, [MEET]: "---\ntags: [log]\n---\n", [OWN]: "---\ntags: [task]\n---\n", [day("2026-09-17")]: `${line}\n\t- 9:00am - 10:00am\n` });
 const counted = (v) => {
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const daily = [{ date: "2026-09-17", path: day("2026-09-17"), text: v.notes()[day("2026-09-17")] }];
     const model = tr.build(daily, tr.appIndex(), {});
     // `conflicts`: entries on a line whose ⭕ and note disagree, counted toward neither project (OBS-213)
@@ -142,12 +143,12 @@ test("a line's own note is its ⋯ and nothing else: a ↗ is read by nobody (OB
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [KES], conflicts: 0 });
 });
 
-test("OBS-41: an index a run began with answers what a note is once `customJS` has lost the classes it read", () => {
+test("OBS-41: an index a run began with answers what a note is once `plainday` has lost the classes it read", () => {
     const week = `${PLANNER}/weeks/2026w38.md`;
     const v = standIn({ notes: { [KES]: PROJECT, [week]: "", [day("2026-09-17")]: "", "Reference/People/Someone.md": "---\nparent: \"[[Kestrel]]\"\n---\n" } });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const index = tr.appIndex();
-    for (const name of ["Schedule", "DatePrompt", "TimeReport", "TaskIds"]) delete v.customJS[name];
+    for (const name of ["Schedule", "DatePrompt", "TimeReport", "TaskIds"]) delete v.plainday[name];
     assert.equal(index.inSystem("Reference/People/Someone.md"), false);
     assert.equal(index.inSystem(KES), true);
     assert.deepEqual(plain([index.kind(week), index.kind(day("2026-09-17")), index.kind(KES)]), ["week", "day", "other"], "a daily note read as anything else would lose its time");
@@ -162,14 +163,14 @@ test("taskNotes finds a note by its links: a mark on a sub-task in a project not
         "Reference/People/Someone.md": "- [ ] Outside the system [[Kestrel|⭕]]\n",
         "Archive/Old/Old note.md": "- [ ] Archived [[Kestrel|⭕]]\n",
     } });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const found = plain((await tr.taskNotes([])).map((n) => n.path)).sort();
     assert.deepEqual(found, ["Archive/Old/Old note.md", KES, day("2026-09-17")].sort());
 });
 
 test("appIndex knows what waits in the Inbox, by the one name for it", () => {
     const v = standIn({ notes: { [KES]: PROJECT, "Inbox/Lamp.md": "---\ntags: [task]\n---\n" } });
-    const index = v.customJS.TimeReport.appIndex();
+    const index = v.plainday.TimeReport.appIndex();
     assert.deepEqual([index.inInbox("Inbox/Lamp.md"), index.inInbox(KES)], [true, false]);
 });
 
@@ -179,7 +180,7 @@ test("the report's task checks read Archive too: an archived task note's lines a
         "Archive/Old/Old note.md": "---\ntags: [task]\n---\n- [>] Return the samples [[2026-09-18#^ar1chv|9/18]] ^ar1chv\n",
         [day("2026-09-17")]: "- [ ] Return the samples [[Old|⭕]] ^ar1chv\n",
     } });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     const notes = await tr.taskNotes([]);
     assert.ok(notes.some((n) => n.path === "Archive/Old/Old note.md"));
     const model = { problems: [], projectProblems: [], entries: [], billing: null };
@@ -190,13 +191,13 @@ test("the report's task checks read Archive too: an archived task note's lines a
 
 test("until the one-time conversion runs, the time report and invoices write nothing, and say why", async () => {
     const v = standIn({ notes: { [KES]: PROJECT, [day("2026-09-17")]: "- [ ] Book it [[Kestrel|⭕]] [[Book it|🗒️]]\n\t- 9:00am - 10:00am\n- A [[note|🗒️]] in a line's text\n" } });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     assert.equal(tr.oldMarkLines([{ text: "- [ ] a [[K|⭕]] [[N|🗒️]] ^abc123\n9:00am\tStandup [[2026-09-14 Standup|🗒]]\nProse with [[N|🗒️]] at the end\n- b [[N|🗒️]] then text\n" }]), 2,
         "a list line and an old meeting line whose run ends in one; not prose, nor a link before more text");
     await assert.rejects(tr.currentModel());
     assert.match(v.notices.at(-1), /^1 line in the daily notes still end/);
     const after = standIn({ notes: { [KES]: PROJECT, [day("2026-09-17")]: "- [ ] Book it [[Kestrel|⭕]] [[Book it|⋯]]\n" } });
-    assert.equal(after.customJS.TimeReport.oldMarksNotice([{ text: after.notes()[day("2026-09-17")] }]), false);
+    assert.equal(after.plainday.TimeReport.oldMarksNotice([{ text: after.notes()[day("2026-09-17")] }]), false);
 });
 
 test("linkBackPass: an old meeting line is converted; a link back by an ID on a line never sent is listed first; Archive is converted too", async () => {
@@ -211,13 +212,13 @@ test("linkBackPass: an old meeting line is converted; a link back by an ID on a 
             "10:00am\tStandup [[2026-09-15 Pinecrest kickoff|🗒️]]",           // a meeting line in the old form
         ].join("\n") + "\n",
     } });
-    const { changes } = await v.customJS.TaskIds.linkBackPass();
+    const { changes } = await v.plainday.TaskIds.linkBackPass();
     assert.deepEqual(plain(changes.map((c) => [c.path.split("/").pop(), c.line, c.mark, c.review, c.home, c.after])), [
         ["2026-09-17.md", 1, "↗", true, PIN, "- [ ] Copy edits [[Pinecrest|⭕]] [[Copy#^cp3dit|↗]] ^cp3dit"],
         ["Old tasks.md", 1, "⋯", false, null, "- [>] Draft [[2026-09-17#^dr4ft1|9/17]] [[Draft|⋯]] ^dr4ft1"],
         ["2026-09-17.md", 2, "⋯", false, null, "10:00am\tStandup [[2026-09-15 Pinecrest kickoff|⋯]]"],
     ]);
-    const { old } = await v.customJS.TaskIds.linkBackPass({ write: true });
+    const { old } = await v.plainday.TaskIds.linkBackPass({ write: true });
     assert.equal(old, 0);
 });
 
@@ -230,7 +231,7 @@ test("linkBackPass: a line whose time the report would count differently afterwa
         [MEET]: "---\ntags: [log]\n---\n- [>] Pick fonts [[2026-09-17#^pf0nt5|9/17]] [[Kestrel|⭕]] ^pf0nt5\n",
         [day("2026-09-17")]: "- [x] Book it [[Kestrel|⭕]] [[2026-09-15 Pinecrest kickoff|🗒️]]\n\t- 8:00am - 8:30am\n- [x] Pick fonts [[Kestrel|⭕]] [[Pick fonts|🗒️]] [[2026-09-15 Pinecrest kickoff|🗒️]] ^pf0nt5\n\t- 9:00am - 9:30am\n",
     } });
-    const { changes } = await v.customJS.TaskIds.linkBackPass();
+    const { changes } = await v.plainday.TaskIds.linkBackPass();
     assert.deepEqual(plain(changes.map((c) => [c.line, c.mark, c.review, c.moves])), [
         [3, "↗", true, [{ minutes: 30, from: null, to: KES }]],
         [1, "⋯", false, []],
@@ -258,8 +259,8 @@ test("sentLine: a source tagged with a subtag names itself; a ⭕ in the title s
 // ---------------------------------------------------------------- waiting for the conversion (review round 3)
 
 test("until the one-time conversion runs, the calendar sync changes nothing, and says why", async () => {
-    const code = fs.readFileSync(new URL("../../../plugin/src/classes/calendarSync.js", import.meta.url), "utf8");
-    const Sync = vm.runInContext(`${code}\n;CalendarSync`, vm.createContext({ customJS: { TimeReport: { oldMarksLeft: async () => 2 } }, console }));
+    const code = classScript("calendarSync.js");
+    const Sync = vm.runInContext(`${code}\n;CalendarSync`, vm.createContext({ plainday: { TimeReport: { oldMarksLeft: async () => 2 } }, console }));
     const sync = new Sync();
     let fetched = false;
     sync.fetchNow = async () => { fetched = true; return null; };
@@ -269,19 +270,19 @@ test("until the one-time conversion runs, the calendar sync changes nothing, and
 
 test("oldMarksLeft counts every daily note, one with no times included, as the calendar sync and the Log template read them", async () => {
     const v = standIn({ notes: { [day("2026-09-17")]: "- [<] Planning [[2026-09-17 Planning|🗒️]]\n- Prose [[Note|🗒️]] then more\n", [day("2026-09-18")]: "- [<] Retro [[2026-09-18 Retro|⋯]]\n" } });
-    const tr = v.customJS.TimeReport;
+    const tr = v.plainday.TimeReport;
     assert.equal(await tr.oldMarksLeft(), 1);
-    assert.equal(tr.oldMarkLines(await tr.readDailyNotes(v.customJS.Schedule)), 0, "the report reads only days with times");
+    assert.equal(tr.oldMarkLines(await tr.readDailyNotes(v.plainday.Schedule)), 0, "the report reads only days with times");
 });
 
 test("a change reads only a line's ⋯ for its own note; its ↗ joins nothing, and a line whose links moved is still found", () => {
     const v = standIn({ notes: {} });
-    const at = (lines, raw, n = 0) => v.customJS.TaskChange.locate(lines, { raw, at: n });
+    const at = (lines, raw, n = 0) => v.plainday.TaskChange.locate(lines, { raw, at: n });
     assert.equal(at(["- [ ] A [[Src|↗]] [[P/Own|⋯]]"], "- [ ] A [[Src|↗]] [[Own|⋯]]"), 0);
     assert.equal(at(["- [ ] B", "- [ ] A [[Own|⋯]]"], "- [ ] A [[Own|⋯]]"), 1, "a line that shifted");
     assert.equal(at(["- [ ] A [[X|⭕]]", "- [ ] A [[Y|⭕]]"], "- [ ] A [[Y|⭕]]"), 1, "the line as it was read, before one that differs only in a link");
     assert.equal(at(["- [ ] B"], "- [ ] A"), -1);
-    const own = (text) => [...v.customJS.TimeReport.lineLinks(v.customJS.TimeReport.classify(text).body).notes].map((l) => l.target);
+    const own = (text) => [...v.plainday.TimeReport.lineLinks(v.plainday.TimeReport.classify(text).body).notes].map((l) => l.target);
     assert.deepEqual(own("- [ ] A [[B|⭕]] [[Src|↗]] [[Own|⋯]]"), ["Own"]);
     assert.deepEqual(own("- [ ] A [[B|⭕]] [[Src|↗]]"), []);
 });

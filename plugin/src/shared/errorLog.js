@@ -1,3 +1,6 @@
+import { moment, Notice } from "obsidian";
+import { app } from "../host.js";
+
 // The error log (OBS-218): every Problem the system found, in one note, `Config/Error Log.md`, one
 // line per kind of Problem per note (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to
 // start from. The detail stays in the reports' Problems callouts; the log is the index across the
@@ -6,7 +9,7 @@
 // fixed Problem leaves the log the next time that command runs; a section is only written when its
 // list changed. A run that finds a line the log didn't have, or a higher count, shows one toast
 // naming the new lines, with a link to the log (View Error Logs opens it too).
-class ErrorLog {
+export default class ErrorLog {
     static PATH = "Config/Error Log.md";
     // The sections, in the order the note has them
     static SECTIONS = ["Time report", "Calendar sync"];
@@ -199,13 +202,13 @@ class ErrorLog {
         const before = file ? await app.vault.read(file) : "";
         const fresh = this.fresh(before, section, groups);
         if (file && this.same(before, section, groups)) return fresh;
-        const body = this.render(section, groups, window.moment().format("M/D h:mma"));
+        const body = this.render(section, groups, moment().format("M/D h:mma"));
         if (file) {
             await app.vault.process(file, (text) => this.place(text, section, body));
         } else {
             const folder = ErrorLog.PATH.split("/").slice(0, -1).join("/");
             if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-            await app.vault.create(ErrorLog.PATH, this.place("", section, body, window.moment().format("YYYYMMDDHHmmssSS")));
+            await app.vault.create(ErrorLog.PATH, this.place("", section, body, moment().format("YYYYMMDDHHmmssSS")));
         }
         return fresh;
     }

@@ -1,4 +1,7 @@
-class TimeReport {
+import { getFrontMatterInfo, moment, Notice, parseYaml, Platform } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class TimeReport {
     // Time reports built from the time entries in daily notes. Runs at startup on the desktop
     // (TimeReportOnStartup), and as the command "Plainday: Time report". It writes only to these
     // notes, whatever note is open, under "## Time Report" (OBS-133; "## Time tracking" before, renamed
@@ -925,7 +928,7 @@ class TimeReport {
 
     // A project or area whose `status` says it's finished, as AddTaskNote reads it; AddProjectLink's menu leaves it out
     isFinishedProject(path, index) {
-        return customJS?.AddTaskNote?.isFinished?.({ frontmatter: index?.props?.(path) ?? {} }) === true;
+        return plainday?.AddTaskNote?.isFinished?.({ frontmatter: index?.props?.(path) ?? {} }) === true;
     }
 
     // Every subtask's day line that names another project than the task note or log it's a subtask of (OBS-233):
@@ -1097,7 +1100,6 @@ class TimeReport {
     // comment after it aside. Null for anything else, a list included.
     dueIn(text) {
         const raw = String(text ?? "");
-        const { getFrontMatterInfo, parseYaml } = customJS?.obsidian ?? {};
         if (getFrontMatterInfo && parseYaml) {
             try {
                 const info = getFrontMatterInfo(raw);
@@ -1118,7 +1120,7 @@ class TimeReport {
     // Whether DueDate can write `text`'s `due` (one plain `due:` line, as the Task template writes it): DueDate's own
     // test where it's loaded, else the same shapes by hand. A `due` written another way is set by hand.
     plainDue(text, date) {
-        const own = customJS?.DueDate?.constructor?.withDue;
+        const own = plainday?.DueDate?.constructor?.withDue;
         if (own) return own(String(text), date) !== null;
         const lines = String(text).split("\n").map((l) => l.replace(/\r$/, ""));
         const end = lines.findIndex((l, i) => i > 0 && /^---[ \t]*$/.test(l));
@@ -1222,7 +1224,7 @@ class TimeReport {
     // Whether a note sits in a project's or area's logs folder, which makes it a log, as AddTaskNote says
     // (AddTaskNote.isLog). Where AddTaskNote isn't loaded (the demo's render), a log is known by its tag.
     inLogsFolder(path) {
-        return customJS?.AddTaskNote?.isLogsFolderName?.(this.basename(this.dirname(path))) === true;
+        return plainday?.AddTaskNote?.isLogsFolderName?.(this.basename(this.dirname(path))) === true;
     }
 
     // A property's date as YYYY-MM-DD ("2026-09-30", "2026-09-30T09:00", a Date), a real day only, or null
@@ -2546,7 +2548,6 @@ class TimeReport {
     async tableSettings() {
         const file = app.vault.getFileByPath(TimeReport.TABLE_SETTINGS);
         if (!file) return null;
-        const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
         const info = getFrontMatterInfo(await this.textOf(file));
         let props = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
         try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { /* the cache's, then */ }
@@ -3180,18 +3181,18 @@ class TimeReport {
     async refresh({ quiet }) {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
-        // Keep the Schedule and Billing this run began with instead of looking them up on `customJS`
+        // Keep the Schedule and Billing this run began with instead of looking them up on `plainday`
         // part-way through, so the whole run uses the same ones (OBS-41)
-        this.schedule = customJS.Schedule;
-        const billing = customJS.Billing;
-        const errorLog = customJS.ErrorLog;
+        this.schedule = plainday.Schedule;
+        const billing = plainday.Billing;
+        const errorLog = plainday.ErrorLog;
         const working = quiet ? null : new Notice("Building the time report…", 0);
 
         try {
             // Billing reads the invoice notes for the timesheets (OBS-5); without it they'd show every
             // billed entry as unbilled, so nothing is written without it
             if (!billing) {
-                console.warn("TimeReport: customJS.Billing isn't registered (Plainday couldn't start it?); nothing written");
+                console.warn("TimeReport: plainday.Billing isn't registered (Plainday couldn't start it?); nothing written");
                 if (!quiet) new Notice("Time report: the Billing script isn't loaded; try again in a moment");
                 return;
             }
@@ -3206,7 +3207,7 @@ class TimeReport {
             // Nothing is written while a daily note is still in the marks before OBS-208: currentModel
             // says so (oldMarksNotice) and throws
             const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
-            const stamp = window.moment().format("YYYY-MM-DD h:mma");
+            const stamp = moment().format("YYYY-MM-DD h:mma");
             // Project and area links by name (tables escape the | themselves)
             const link = (p) => {
                 const f = app.vault.getFileByPath(p);
@@ -3223,7 +3224,7 @@ class TimeReport {
                 if (quiet) new Notice(`Time report created ${sheetsMade.length} timesheet note${sheetsMade.length === 1 ? "" : "s"}: ${sheetsMade.join(", ")}`);
             }
             // Only the desktop creates missing periodic notes, so two devices never create the same one
-            const periods = await this.writePeriodNotes(model, stamp, link, { create: customJS.obsidian.Platform.isDesktop });
+            const periods = await this.writePeriodNotes(model, stamp, link, { create: Platform.isDesktop });
             if (periods.created.length) {
                 done.push(`${periods.created.length} periodic note${periods.created.length === 1 ? "" : "s"} created`);
                 // New notes are news even at startup
@@ -3241,12 +3242,12 @@ class TimeReport {
             // for the new ones, at startup too
             if (errorLog) {
                 try {
-                    errorLog.toast("Time report", await errorLog.write("Time report", errorLog.fromModel(model, link), { create: customJS.obsidian.Platform.isDesktop }));
+                    errorLog.toast("Time report", await errorLog.write("Time report", errorLog.fromModel(model, link), { create: Platform.isDesktop }));
                 } catch (e) {
                     console.error("TimeReport: couldn't update the error log", e);
                     trouble.push(`couldn't update ${errorLog.constructor.PATH} (${e.message})`);
                 }
-            } else console.warn("TimeReport: customJS.ErrorLog isn't registered (Plainday couldn't start it?); the error log wasn't updated");
+            } else console.warn("TimeReport: plainday.ErrorLog isn't registered (Plainday couldn't start it?); the error log wasn't updated");
 
             if (trouble.length) new Notice(`Time report: ${trouble.join(" · ")}`, 0);
             else if (!quiet) new Notice(done.length ? `Time report updated: ${done.join(", ")}` : "Time report is already up to date");
@@ -3276,7 +3277,7 @@ class TimeReport {
     // (textOf: from its editor when it's open in one), as the daily notes are.
     async taskNotes(daily) {
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
-        const tasks = customJS?.TaskIds;
+        const tasks = plainday?.TaskIds;
         if (!tasks?.allIds) return [...byPath.values()];
         const T = tasks.constructor;
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
@@ -3306,8 +3307,8 @@ class TimeReport {
     dailyDate(path) {
         const name = this.basename(path);
         try {
-            const format = customJS?.Schedule?.dailyOpts?.().format;
-            const m = format ? globalThis.window?.moment?.(name, format, true) : null;
+            const format = plainday?.Schedule?.dailyOpts?.().format;
+            const m = format ? moment?.(name, format, true) : null;
             return m?.isValid() ? m.format("YYYY-MM-DD") : name;
         } catch {
             return name;
@@ -3321,7 +3322,7 @@ class TimeReport {
     // the task's project, or, when the task counts toward none, a Problem on its note that the weekly,
     // monthly and yearly notes list under a day (problemDate).
     // Pure, so the demo's reports (renderReports.mjs) run it too, passing TaskIds as `T`.
-    addTaskProblems(model, index, notes, T = customJS?.TaskIds?.constructor) {
+    addTaskProblems(model, index, notes, T = plainday?.TaskIds?.constructor) {
         if (!T?.check) return;
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const violations = T.check(notes, {
@@ -3406,8 +3407,8 @@ class TimeReport {
         if (unit === "month" && TimeReport.PERIOD_NAME.month.test(name)) return `${name}-01`;
         if (unit === "year" && TimeReport.PERIOD_NAME.year.test(name)) return `${name}-01-01`;
         try {
-            const rules = customJS?.DatePrompt?.weekRules?.();
-            const m = rules ? globalThis.window?.moment?.(name, rules.format[unit], rules.locale, true) : null;
+            const rules = plainday?.DatePrompt?.weekRules?.();
+            const m = rules ? moment?.(name, rules.format[unit], rules.locale, true) : null;
             return m?.isValid() ? m.format("YYYY-MM-DD") : null;
         } catch {
             return null;
@@ -3416,7 +3417,7 @@ class TimeReport {
 
     // Today, YYYY-MM-DD, by moment where it's loaded
     today() {
-        return globalThis.window?.moment ? window.moment().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10);
+        return moment ? moment().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10);
     }
 
     // What a Problem says about line `l` of a task check's result `v`
@@ -3467,8 +3468,8 @@ class TimeReport {
     // out, and the invoice notes attached (OBS-5). The Invoice command builds on the same one, so an
     // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
     // when it started (refresh, OBS-41) passes them in.
-    async currentModel({ index = this.appIndex(), schedule = customJS.Schedule, billing = customJS.Billing } = {}) {
-        const clock = window.moment();
+    async currentModel({ index = this.appIndex(), schedule = plainday.Schedule, billing = plainday.Billing } = {}) {
+        const clock = moment();
         const daily = await this.readDailyNotes(schedule);
         if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
         const checked = await this.taskNotes(daily);
@@ -3484,7 +3485,7 @@ class TimeReport {
     // still say what's been billed. An invoice is tagged `invoice` in its frontmatter, as the Invoice
     // command writes it; an inline #invoice (a daily note mentioning one) doesn't make a note one.
     // [{ path, props, text }]
-    async readInvoices(billing = customJS.Billing) {
+    async readInvoices(billing = plainday.Billing) {
         // A note where invoices are filed (an invoices/ folder, or Invoice Settings' `folder`) that still
         // has its Billed entries counts too, flagged, so an invoice whose tag or frontmatter got lost
         // can't let its entries be billed again
@@ -3498,7 +3499,6 @@ class TimeReport {
             // a status just changed (Mark paid, then the refresh it runs)
             const text = await this.textOf(f);
             if (!tagged && !billing.hasBilled(text)) continue;
-            const { getFrontMatterInfo, parseYaml } = customJS.obsidian;
             const info = getFrontMatterInfo(text);
             let props = cache?.frontmatter ?? {}, error = null;
             try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { error = e.message; }
@@ -3509,7 +3509,7 @@ class TimeReport {
 
     // Invoice Settings' `folder` (OBS-112), or "" when it isn't set or isn't a folder
     invoiceFolder(billing) {
-        const settings = customJS.Invoice?.constructor.SETTINGS;
+        const settings = plainday.Invoice?.constructor.SETTINGS;
         const file = settings ? app.vault.getFileByPath(settings) : null;
         return billing.folderOf(file ? app.metadataCache.getFileCache(file)?.frontmatter?.folder : null).folder;
     }
@@ -3531,7 +3531,7 @@ class TimeReport {
     periodFolders() {
         const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
         const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
-        const daily = (this.schedule ?? customJS.Schedule).dailyOpts().folder;
+        const daily = (this.schedule ?? plainday.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
         const folderOf = (pattern, fallback) => {
             const p = String(pattern ?? "");
@@ -3574,8 +3574,8 @@ class TimeReport {
 
         // Weekly notes only while Obsidian names weeks the way weekKey does (Sunday-start weeks)
         const units = ["week", "month", "year"];
-        const probe = ["2026-01-01", "2026-12-27", window.moment().format("YYYY-MM-DD")];
-        if (probe.some((d) => window.moment(d, "YYYY-MM-DD").format("gggg[w]ww") !== this.weekKey(d))) {
+        const probe = ["2026-01-01", "2026-12-27", moment().format("YYYY-MM-DD")];
+        if (probe.some((d) => moment(d, "YYYY-MM-DD").format("gggg[w]ww") !== this.weekKey(d))) {
             units.shift();
             trouble.push("weekly notes skipped: Obsidian's weeks no longer start on Sunday, so week names wouldn't match");
         }
@@ -3646,10 +3646,10 @@ class TimeReport {
             return !!c && this.tagsOf(c).includes(tag);
         };
         // What a note is, kept for this index's life, since the report asks about every line. Schedule's
-        // own test, with what it reads off `customJS` taken now, as a run keeps its Schedule (OBS-41): a
+        // own test, with what it reads off `plainday` taken now, as a run keeps its Schedule (OBS-41): a
         // note that couldn't be told would otherwise fail the run, and read as "other" its time is lost
-        const schedule = this.schedule ?? customJS.Schedule, tasks = customJS.TaskIds;
-        const rules = customJS.DatePrompt?.weekRules?.(), folders = schedule ? this.periodFolders() : undefined;
+        const schedule = this.schedule ?? plainday.Schedule, tasks = plainday.TaskIds;
+        const rules = plainday.DatePrompt?.weekRules?.(), folders = schedule ? this.periodFolders() : undefined;
         const kinds = new Map();
         const kind = (path) => {
             if (!kinds.has(path)) {
@@ -3693,7 +3693,7 @@ class TimeReport {
     // How many lines of `daily` ([{ text }]) the one-time conversion would change (TaskIds.linkBackPass):
     // a convertible line whose run ends in a 🗒️ or 🔗 link, the marks before OBS-208
     oldMarkLines(daily) {
-        const T = customJS?.TaskIds?.constructor;
+        const T = plainday?.TaskIds?.constructor;
         const old = (l) => (T?.oldMarks ? T.oldMarks(l).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
         let n = 0;
         for (const d of daily) {
@@ -3705,7 +3705,7 @@ class TimeReport {
 
     // How many lines in all the daily notes, timed or not, the one-time conversion would still change:
     // the calendar sync and the Log template wait while there are any (OBS-208)
-    async oldMarksLeft(schedule = customJS.Schedule) {
+    async oldMarksLeft(schedule = plainday.Schedule) {
         let n = 0;
         for (const f of app.vault.getMarkdownFiles()) {
             if (!schedule.isDailyNote(f)) continue;
@@ -3733,7 +3733,7 @@ class TimeReport {
             if (!schedule.isDailyNote(f)) continue;
             const text = await this.textOf(f);
             if (!/\d[:.]\d\d|\d\s*[ap]\.?m/i.test(text)) continue;
-            notes.push({ date: window.moment(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });
+            notes.push({ date: moment(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });
         }
         return notes;
     }
@@ -3815,10 +3815,10 @@ class TimeReport {
                 return null;
             }
             if (!file) {
-                if (!customJS.obsidian.Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
+                if (!Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
                 const projectFile = app.vault.getFileByPath(project);
                 const alias = [].concat(app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases ?? [])[0] || projectFile.basename;
-                file = await app.vault.create(path, this.sheetNote(window.moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
+                file = await app.vault.create(path, this.sheetNote(moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
                 remembered.add(path);
                 app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                 created.push(file.basename);

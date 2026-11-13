@@ -1,4 +1,7 @@
-class DueDate {
+import { getFrontMatterInfo, MarkdownView, Notice, parseYaml } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class DueDate {
     // Note links end a line (⋯ task note or log, ↗ the note it was sent from, ⭕ project, 🗃️ area), so End reaches the note; the
     // due date goes in front of them (OBS-36), and in front of a sent line's forward date (OBS-107): a
     // link to a periodic note's line with a date for its label, `[[2026-10-08#^k3x9m2|10/8]]`, or one
@@ -54,16 +57,15 @@ class DueDate {
     }
 
     async invoke() {
-        const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         if (!view) { new Notice("Need an active editor"); return; }
-        if (view.file && customJS.TaskIds && !customJS.TaskIds.works(view.file)) return;
+        if (view.file && plainday.TaskIds && !plainday.TaskIds.works(view.file)) return;
 
         const editor = view.editor;
         // On a sub-task, or any line under a task, the deadline is the task's: the line at the top of the nest
         // (rule 5, OBS-193). An event has none (rule 14), whatever its form.
         const cursor = editor.getCursor();
-        const top = customJS.TimeReport.topOf((n) => editor.getLine(n), cursor.line);
+        const top = plainday.TimeReport.topOf((n) => editor.getLine(n), cursor.line);
         if (top.event) {
             new Notice("An event has no deadline, so none was set");
             return;
@@ -76,12 +78,12 @@ class DueDate {
             return;
         }
         // Until Obsidian has indexed the vault at startup, the task's other lines can't be found (rule 12)
-        if (customJS.TaskChange && !customJS.TaskChange.ready()) return;
+        if (plainday.TaskChange && !plainday.TaskChange.ready()) return;
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
         const read = top.line, file = view.file;
-        customJS.DatePrompt.open("Due date", async ({ m }, modal) => {
+        plainday.DatePrompt.open("Due date", async ({ m }, modal) => {
             const lineText = editor.getLine(lineNum);
             // The date box waited on you: don't write into a line that changed meanwhile (rule 12)
             if (lineText !== read) {
@@ -108,7 +110,7 @@ class DueDate {
             }, 50);
 
             // The rest of the task follows, searched only now, so the date box never waits on it (OBS-229)
-            if (file && customJS.TaskChange) await this.spread({ file, at: lineNum }, m);
+            if (file && plainday.TaskChange) await this.spread({ file, at: lineNum }, m);
         });
     }
 
@@ -119,7 +121,7 @@ class DueDate {
     // what it couldn't write or left alone (Brian, 2026-11-07: no notice for what you'd expect); never throws into
     // the date box.
     async spread(start, m) {
-        const change = customJS.TaskChange, tr = customJS.TimeReport;
+        const change = plainday.TaskChange, tr = plainday.TimeReport;
         const dueLink = DueDate.link(m), date = m.format("YYYY-MM-DD");
         let found;
         try {
@@ -177,11 +179,10 @@ class DueDate {
     // lost; and only when Obsidian reads the result as the same properties with the new `due` (Brian, 2026-11-06:
     // no processFrontMatter, which lays the block out again and works from the saved file).
     async setDue(note, date) {
-        const ob = customJS.obsidian;
         const props = (text) => {
             try {
-                const info = ob.getFrontMatterInfo(text);
-                return info.exists ? ob.parseYaml(info.frontmatter) ?? {} : {};
+                const info = getFrontMatterInfo(text);
+                return info.exists ? parseYaml(info.frontmatter) ?? {} : {};
             } catch (e) {
                 return undefined;
             }
@@ -199,9 +200,9 @@ class DueDate {
             result = "set";
             return now.text;
         };
-        edit(await customJS.TaskIds.readNow(note));
+        edit(await plainday.TaskIds.readNow(note));
         if (result !== "set") return result;
-        await customJS.Schedule.rewrite(note, edit);
+        await plainday.Schedule.rewrite(note, edit);
         return result;
     }
 
@@ -252,14 +253,14 @@ class DueDate {
     said({ missed = [], failed = [], kept = [], unread = [], odd = [] }) {
         const out = [];
         const list = (names) => (names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-        const where = (file) => customJS.TaskChange.dayName(file);
+        const where = (file) => plainday.TaskChange.dayName(file);
         if (failed.length) out.push(`Couldn't write to ${list(failed.map(where))}; run DueDate again to finish`);
         if (missed.length === 1) out.push(`${where(missed[0].file)}'s line changed meanwhile, so it kept its old deadline. Run DueDate again to finish`);
         else if (missed.length) out.push(`${missed.length} lines (${list([...new Set(missed.map((l) => where(l.file)))])}) changed meanwhile, so they kept their old deadline. Run DueDate again to finish`);
         for (const note of unread) out.push(`${note.basename}'s properties can't be read, so its due wasn't changed. Fix them, then run DueDate again`);
         for (const note of odd) out.push(`${note.basename}'s due is written in a way DueDate doesn't change, so it wasn't changed. Set it by hand`);
         for (const note of kept) {
-            const place = note.path.startsWith(customJS.TaskIds.constructor.ARCHIVE) ? "is in Archive" : "isn't in Projects or the Inbox";
+            const place = note.path.startsWith(plainday.TaskIds.constructor.ARCHIVE) ? "is in Archive" : "isn't in Projects or the Inbox";
             out.push(`${note.basename} ${place}, so its due wasn't changed`);
         }
         return out;

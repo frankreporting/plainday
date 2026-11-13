@@ -1,7 +1,7 @@
 // Tests for plugin/src/classes/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The classes are loaded with vm beside AddTaskNote, AddProjectLink and TimeReport, whose helpers
-// they use through `customJS`, the way Plainday gives it to them. The planning and the line edits
+// they use through `plainday`, the way Plainday gives it to them. The planning and the line edits
 // are pure; the move itself runs against a small stand-in for the vault that records what was
 // renamed and written. That checks the order of things and what's asked, not Obsidian's own move
 // and link updates, which are checked in a dev vault.
@@ -9,17 +9,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { COMMANDS, STARTUP } from "../../../plugin/src/commands.js";
+import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+const { COMMANDS } = readIndex("commands").exports;
+const { STARTUP } = readIndex("startup").exports;
 
 const here = new URL(".", import.meta.url);
 const notices = [];
 const logged = [];
 const context = vm.createContext({
-    customJS: {}, app: null, window: {}, setTimeout, clearTimeout,
+    plainday: {}, app: null, window: {}, setTimeout, clearTimeout,
     console: { ...console, info: (...a) => logged.push(a) },
     Notice: class { constructor(message) { notices.push(message); } },
 });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
 const TimeReport = load("timeReport.js", "TimeReport");
@@ -89,16 +91,16 @@ function setup(notes, { texts = {}, links = {}, active = null } = {}) {
     };
     context.app = app;
     // Plainday, loaded
-    context.customJS.plugin = {};
+    context.plainday.plugin = {};
     const helper = new AddTaskNote();
     const mover = new MoveToProject();
-    context.customJS.AddTaskNote = helper;
-    context.customJS.AddProjectLink = new AddProjectLink();
-    context.customJS.TimeReport = new TimeReport();
-    context.customJS.MoveToProject = mover;
-    context.customJS.TaskIds = new TaskIds();
-    context.customJS.TaskChange = new TaskChange();
-    context.customJS.Schedule = { isDailyNote: (f) => f.path.startsWith("Reference/Planner/days/"), periodOf: () => null };
+    context.plainday.AddTaskNote = helper;
+    context.plainday.AddProjectLink = new AddProjectLink();
+    context.plainday.TimeReport = new TimeReport();
+    context.plainday.MoveToProject = mover;
+    context.plainday.TaskIds = new TaskIds();
+    context.plainday.TaskChange = new TaskChange();
+    context.plainday.Schedule = { isDailyNote: (f) => f.path.startsWith("Reference/Planner/days/"), periodOf: () => null };
     notices.length = 0;
     logged.length = 0;
     const asked = { picker: [], confirm: [] };
@@ -359,7 +361,7 @@ test("MoveToProjectMenu: adds the item to Obsidian's file menus and Notebook Nav
     assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel") })), ["Move to project…"]);
     assert.deepEqual(m.titles((addItem) => nnFolder({ addItem, folder: t.file("Projects/Freelance/Kestrel/›logs") })), [], "a plain folder");
 
-    context.customJS.plugin = null;
+    context.plainday.plugin = null;
     assert.deepEqual(fileMenu(t.file("Inbox/Loose idea.md")), [], "Plainday unloaded, the listener left behind: no item");
 
     menu.deconstructor();

@@ -1,4 +1,7 @@
-class MoveToProjectMenu {
+import { Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class MoveToProjectMenu {
     // Startup script: puts *Move to project…* (MoveToProject's move) in the menus that act on files:
     //   - Notebook Navigator's menu for a note, or for several selected, and for a project or area's
     //     folder, through its API, since it builds its own menus;
@@ -61,12 +64,12 @@ class MoveToProjectMenu {
     // Adds the item through `addItem` (a menu's, or Notebook Navigator's) when MoveToProject would
     // move any of `files`. Menus are built synchronously; the move runs on the click.
     add(addItem, files, { homes = true } = {}) {
-        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
-        if (!customJS.plugin) return;
-        const mover = customJS.MoveToProject;
+        // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
+        if (!plainday.plugin) return;
+        const mover = plainday.MoveToProject;
         if (!mover || !files.length || !mover.movable(files, { homes })) return;
         addItem((item) => item.setTitle(MoveToProjectMenu.TITLE).setIcon(MoveToProjectMenu.ICON).onClick(() => {
-            customJS.MoveToProject.move(files).catch((e) => {
+            plainday.MoveToProject.move(files).catch((e) => {
                 console.error("MoveToProject failed", e);
                 new Notice(`Move to project failed: ${e.message}`);
             });

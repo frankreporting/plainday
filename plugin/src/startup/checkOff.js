@@ -1,4 +1,9 @@
-class CheckOff {
+import { ButtonComponent, editorInfoField, Modal, moment, Notice } from "obsidian";
+import { EditorView } from "@codemirror/view";
+import { EditorState, StateEffect, Transaction } from "@codemirror/state";
+import { app, plainday } from "../host.js";
+
+export default class CheckOff {
     // Startup script (OBS-232): a task sent out of a note has two lines, the source line left as [>] in the note
     // it was sent from and its open line on a day (or a week, month or year). A tick on either line checks off
     // both, where they are, and a click on a [>] box asks what you meant, since a click alone would leave the task
@@ -210,7 +215,7 @@ class CheckOff {
     // Whether line `i` (lineAt(i)) of `file` is a line CheckOff acts on: a checklist line at the top of its nest
     // (rule 5) that ends in a block ID, in a note in the system (rule 12), and not an event (rule 1)
     actsOn(file, lineAt, i) {
-        const tasks = customJS.TaskIds, tr = customJS.TimeReport;
+        const tasks = plainday.TaskIds, tr = plainday.TimeReport;
         const text = lineAt(i);
         if (!file || !text || !tasks.inSystem(file) || !CheckOff.BOX.test(text) || !CheckOff.ID_AT_END.test(text)) return false;
         return !tr.eventKind(text) && tr.nestTop(lineAt, i) === i;
@@ -221,31 +226,31 @@ class CheckOff {
     static lineIn(ls, line, text) {
         const same = (i) => ls[i]?.replace(/\r$/, "") === text;
         if (same(line)) return line;
-        const id = customJS.TaskIds.constructor.idOf(text);
-        const at = id ? customJS.Schedule.constructor.taskLine(ls, id) : -1;
+        const id = plainday.TaskIds.constructor.idOf(text);
+        const at = id ? plainday.Schedule.constructor.taskLine(ls, id) : -1;
         return at !== -1 && same(at) ? at : -1;
     }
 
     // Today's date, YYYY-MM-DD
     today() {
-        return window.moment().format("YYYY-MM-DD");
+        return moment().format("YYYY-MM-DD");
     }
 
     // Where Reopen today puts a task: today's daily note (Schedule.destination)
     todayDest() {
-        return customJS.Schedule.destination(customJS.DatePrompt.result(this.today(), "day"), customJS.DatePrompt.weekRules());
+        return plainday.Schedule.destination(plainday.DatePrompt.result(this.today(), "day"), plainday.DatePrompt.weekRules());
     }
 
     // A task's lines as they are now: the notes `text` (one of its lines) links, among them where a forward
     // date points, are read whatever the cache says
     async linesOf(id, text, file) {
-        return customJS.TaskIds.gather(id, customJS.Schedule.linkedNotes(text, file.path));
+        return plainday.TaskIds.gather(id, plainday.Schedule.linkedNotes(text, file.path));
     }
 
     // Where a task is, for a question about one of its [>] boxes: { kind, line }. Its open line on a periodic
     // note, else its done or canceled one there (Schedule.whereIs). Kind null when it has neither.
     where(lines) {
-        const { open, done } = customJS.Schedule.whereIs(lines);
+        const { open, done } = plainday.Schedule.whereIs(lines);
         if (open) return { kind: "open", line: open };
         if (done) return { kind: "done", line: done };
         return { kind: null, line: null };
@@ -276,7 +281,7 @@ class CheckOff {
     // moved since (an earlier change in the same edit) is found by its ID; one that changed again is left alone,
     // and so is a line whose task was never sent (a block ID of your own).
     async follow(file, { line, before, after }) {
-        const tasks = customJS.TaskIds, T = tasks.constructor, S = customJS.Schedule;
+        const tasks = plainday.TaskIds, T = tasks.constructor, S = plainday.Schedule;
         const C = CheckOff;
         const was = C.markOf(before), now = C.markOf(after), id = T.idOf(after);
         if (!id || was === now) return;
@@ -317,7 +322,7 @@ class CheckOff {
     // The source lines of a task whose line on a periodic note (`file`) became `mark`: finished, or back to [>]
     // when it opened again, their forward date pointing at `file`
     async followSources(file, id, lines, mark) {
-        const tasks = customJS.TaskIds, S = customJS.Schedule, C = CheckOff;
+        const tasks = plainday.TaskIds, S = plainday.Schedule, C = CheckOff;
         const sources = lines.filter((l) => tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task));
         if (!sources.length) return;
         await S.followForward(id, S.destinationOf(file), sources, C.isOpen(mark) ? { reopen: true } : { mark });
@@ -328,7 +333,7 @@ class CheckOff {
     // is, open again as Schedule reopens a task ([/] when the task has time logged, else [ ]), or finished the
     // same way; an unticked source goes back to [>], its forward date pointing at that line.
     async followDone(file, line, after, id, lines, mark) {
-        const tasks = customJS.TaskIds, T = tasks.constructor, S = customJS.Schedule, C = CheckOff;
+        const tasks = plainday.TaskIds, T = tasks.constructor, S = plainday.Schedule, C = CheckOff;
         const periodic = lines.filter((l) => tasks.kindOf(l.file) !== "other");
         const fwd = T.forwardOf(after);
         const named = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, file.path)?.path : null;
@@ -363,7 +368,7 @@ class CheckOff {
     // lines with it, their forward date naming that line's day. Nothing moves: to finish it on another day,
     // Schedule it there first (Brian, 11/8). True when it was open.
     async complete(id, lines, mark = "x") {
-        const S = customJS.Schedule;
+        const S = plainday.Schedule;
         const { open, sources } = S.whereIs(lines);
         if (!open) { new Notice("This task is already finished, so nothing changed"); return false; }
         await this.setBox(open.file, open.line, open.text, mark);
@@ -405,7 +410,7 @@ class CheckOff {
     // `read`: clicked in reading view, where the page can be behind the note: a line that changed since it was
     // drawn says so, as tickRead does, rather than asking nothing
     async question({ file, line, text, want, read = false }) {
-        const tasks = customJS.TaskIds, T = tasks.constructor, S = customJS.Schedule;
+        const tasks = plainday.TaskIds, T = tasks.constructor, S = plainday.Schedule;
         await this.settled(file);
         // The line, found again by its ID when something above it moved it (a question before this one)
         const lineNow = async () => {
@@ -456,20 +461,19 @@ class CheckOff {
 
     // Line `line` of `file`, while it's still `text`, with its box set to `mark`, as the system's own write
     async setBox(file, line, text, mark) {
-        await customJS.Schedule.rewrite(file, (t) => {
+        await plainday.Schedule.rewrite(file, (t) => {
             const ls = t.split("\n");
             const at = CheckOff.lineIn(ls, line, text);
             if (at !== -1) ls[at] = ls[at].replace(/\[(.)\]/, `[${mark}]`);
             return ls.join("\n");
         });
-        customJS.TaskIds.touched(file);
+        plainday.TaskIds.touched(file);
     }
 
     // The question: `title`, the task's name highlighted, `words` under it when there are any, and `buttons`
     // left to right, `cta` highlighted and focused. Enter takes the focused button (the highlighted one unless you tabbed away).
     // Resolves to the button's text, or null for Esc.
     choose({ title, name, words = null, buttons, cta }) {
-        const { Modal, ButtonComponent } = customJS.obsidian;
         return new Promise((resolve) => {
             let choice = null, focus = null, typed = false;
             const made = [];
@@ -533,7 +537,7 @@ class CheckOff {
         const C = CheckOff;
         if (!box || box.ownerDocument?.querySelector(".modal-container")) return null;
         const hit = this.readingView(box);
-        if (!hit?.file || !customJS.TaskIds.inSystem(hit.file)) return null;
+        if (!hit?.file || !plainday.TaskIds.inSystem(hit.file)) return null;
         const section = hit.renderer.getSectionContainer?.(box);
         const drawn = typeof hit.renderer.lastText === "string" ? hit.renderer.lastText : hit.renderer.text;
         const li = box.closest("li");
@@ -550,11 +554,11 @@ class CheckOff {
     async tickRead({ file, line, text, want }) {
         const C = CheckOff;
         await this.settled(file);
-        const ls = (await customJS.TaskIds.readNow(file)).split("\n").map((l) => l.replace(/\r$/, ""));
+        const ls = (await plainday.TaskIds.readNow(file)).split("\n").map((l) => l.replace(/\r$/, ""));
         const after = text.replace(/\[(.)\]/, `[${want}]`);
         const at = C.lineIn(ls, line, text);
         // A second click on a line this one's tick, or its follow, has just changed (a double click) does nothing
-        const key = `${file.path}\n${customJS.TaskIds.constructor.idOf(text)?.toLowerCase()}`;
+        const key = `${file.path}\n${plainday.TaskIds.constructor.idOf(text)?.toLowerCase()}`;
         this.ticked ??= new Map();
         if (at === -1) {
             const recent = Date.now() - (this.ticked.get(key) ?? -Infinity) < C.TICKED_MS;
@@ -593,7 +597,7 @@ class CheckOff {
         const doc = box?.ownerDocument;
         if (!doc?.body || doc.querySelector(".modal-container")) return;
         const hit = this.readingView(box);
-        if (!hit?.file || !customJS.TaskIds.inSystem(hit.file) || typeof hit.renderer.text !== "string") return;
+        if (!hit?.file || !plainday.TaskIds.inSystem(hit.file) || typeof hit.renderer.text !== "string") return;
         this.unwatch();
         // `before` is the note as the vault has it, which the menu changes and `modified` reads: a pane in Live
         // Preview can show the reading pane edits it hasn't saved yet
@@ -674,7 +678,7 @@ class CheckOff {
     // `file`'s text once an editor showing it in editing view has the vault's: a write through the vault reaches
     // the editor a moment later (as "set"). Gives up after a third of a second, as settled does.
     async caughtUp(file) {
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         let now = await tasks.readNow(file);
         for (let k = 0; k < 10 && now !== (await app.vault.cachedRead(file)); k++) {
             await new Promise((ok) => setTimeout(ok, 35));
@@ -689,11 +693,7 @@ class CheckOff {
         // The handles live on window, so a second run undoes the first: one set of listeners, however
         // often it runs
         this.deconstructor();
-        const { view, state } = customJS.codemirror;
         const C = CheckOff;
-        const { EditorView } = view;
-        const { EditorState, Transaction, StateEffect } = state;
-        const { editorInfoField } = customJS.obsidian;
         const ws = app.workspace;
 
         // One registered slot per load of Plainday; a rerun swaps what's in it
@@ -701,7 +701,7 @@ class CheckOff {
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [], refs: [], docs: new Set(), click: null };
         window.pmCheckOff = handles;
-        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
+        if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
         // A [>] line an edit was about to open, held, to ask about once the edit is dispatched
         const asked = StateEffect.define();
@@ -737,7 +737,7 @@ class CheckOff {
                 const found = C.boxChanges(C.lineFn(tr.startState.doc), C.lineFn(tr.newDoc), C.rangesOf(C.changesOf(tr.changes, tr.startState.doc, tr.newDoc)));
                 if (!found.length) continue;
                 const file = u.state.field(editorInfoField, false)?.file;
-                if (!file || !customJS.TaskIds.inSystem(file)) continue;
+                if (!file || !plainday.TaskIds.inSystem(file)) continue;
                 for (const c of found) this.enqueue(() => this.follow(file, c));
             }
         });

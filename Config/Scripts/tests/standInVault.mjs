@@ -3,8 +3,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { classScript } from "../../../plugin/classShape.mjs";
 
-export const src = (name) => fs.readFileSync(new URL(`../../../plugin/src/classes/${name}.js`, import.meta.url), "utf8");
+export const src = (name) => classScript(`${name}.js`);
 
 export const PLANNER = "Reference/Planner";
 export const NN = {
@@ -259,17 +260,20 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
     const frontMatter = (text) => { const m = text.match(/^---\r?\n([\s\S]*?)\r?\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
-    const customJS = { obsidian: { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter } };
+    // What the class files import from Obsidian, by name, as the context's globals (plugin/classShape.mjs)
+    const obsidian = { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter };
+    const plainday = {};
     // MutationObserver for CheckOff's watch on Task Status's menu: `observers` lets a test say a dialog opened or closed
     const observers = [];
     // A dialog up: Task Status's picker ("prompt", a SuggestModal) or the system's own question ("question")
     let dialogUp = false;
     const page = { body: {}, querySelector: (sel) => (dialogUp && (sel === ".modal-container" || (sel === ".modal-container .prompt" && dialogUp === "prompt")) ? {} : null) };
     const MutationObserver = class { constructor(fn) { this.fn = fn; this.on = false; observers.push(this); } observe() { this.on = true; } disconnect() { this.on = false; } };
-    const context = vm.createContext({ app, customJS, window: { moment: momentOn(today) }, Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, MutationObserver, console: { ...console, error: () => {}, info: () => {} } });
+    // `window`: where the editor features keep their handles
+    const context = vm.createContext({ ...obsidian, app, plainday, window: {}, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, MutationObserver, console: { ...console, error: () => {}, info: () => {} } });
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
-    Object.assign(customJS, {
+    Object.assign(plainday, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
@@ -277,15 +281,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         CheckOff: make("checkOff", "CheckOff"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
-    const ask = customJS.TaskChange.ask.bind(customJS.TaskChange);
-    customJS.TaskChange.ask = async (weighed, ...rest) => {
-        const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => customJS.TaskChange.dayName(l.file)))].join(", ");
+    const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);
+    plainday.TaskChange.ask = async (weighed, ...rest) => {
+        const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => plainday.TaskChange.dayName(l.file)))].join(", ");
         covers = { lines: days(weighed.lines), time: days(weighed.days.map((d) => d.l)), stops: days(weighed.stops.map((d) => d.l)) };
         try { return await ask(weighed, ...rest); } finally { covers = null; }
     };
     // Templater's part: a task note or log made where the Task and Log templates would put it
     const made2 = (path, text) => { put(path, text); return fileOf(path); };
-    customJS.AddTaskNote.createTaskNote = async (name, parent = null) => {
+    plainday.AddTaskNote.createTaskNote = async (name, parent = null) => {
         // Templater can't make a file whose name holds a character Obsidian refuses (OBS-111): on a Mac, `\ / :`
         // ("Couldn't create md file", seen in the app 2026-11-12), and on Windows `* " < > | ?` too. It says so,
         // and there's no note
@@ -297,14 +301,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         const title = name.replaceAll(/[0-9]{4}-[0-9]{2}-[0-9]{2}/g, "").replace("!task", "").trim() || name;
         return made2(`${parent ? parent.parent.path : "Inbox"}/${title}.md`, `---\ntags: [task]\n${parent ? `parent: "[[${parent.basename}]]"\n` : ""}---\n`);
     };
-    customJS.AddTaskNote.makeLog = async (name) => {
+    plainday.AddTaskNote.makeLog = async (name) => {
         if (app.metadataCache.getFirstLinkpathDest(name)) return;
         made2(`Inbox/${name}.md`, "---\ntags: [log]\n---\n");
     };
     let n = 0;
-    customJS.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);
+    plainday.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);
     return {
-        app, customJS, notices, left, tick,
+        // `globals`: the context the classes run in, whose stand-ins for Obsidian a test can swap
+        app, plainday, notices, left, tick, globals: context,
         // Where a command last put the cursor (setCursor), or null
         placed: () => placed,
         notes: () => Object.fromEntries(vault),
@@ -315,9 +320,9 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         async schedule(date, unit = "day") {
             tick();
             let prompt = null;
-            customJS.DatePrompt.open = (title, onPick, opts) => { prompt = { title, onPick, opts }; return {}; };
-            await customJS.Schedule.invoke();
-            if (prompt) await prompt.onPick(customJS.DatePrompt.result(date, unit), { close() {} });
+            plainday.DatePrompt.open = (title, onPick, opts) => { prompt = { title, onPick, opts }; return {}; };
+            await plainday.Schedule.invoke();
+            if (prompt) await prompt.onPick(plainday.DatePrompt.result(date, unit), { close() {} });
             return prompt?.title ?? null;
         },
         // DueDate, the date box handing on `date` ("YYYY-MM-DD") and the whole pick awaited, the search after it
@@ -325,9 +330,9 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         async dueDate(date) {
             tick();
             let prompt = null;
-            customJS.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
-            await customJS.DueDate.invoke();
-            if (prompt) await prompt.onPick(customJS.DatePrompt.result(date, "day"), { close() {} });
+            plainday.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
+            await plainday.DueDate.invoke();
+            if (prompt) await prompt.onPick(plainday.DatePrompt.result(date, "day"), { close() {} });
             return prompt?.title ?? null;
         },
         check: () => JSON.parse(JSON.stringify(checkAll())),
@@ -338,10 +343,10 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         asked, menus,
         // A command, answering its menu with `pick` (a path, or null for Esc) and its question with `answer`
         answering,
-        async addProjectLink(pick, answer = "move") { tick(); answering(pick, answer); await customJS.AddProjectLink.invoke(); },
+        async addProjectLink(pick, answer = "move") { tick(); answering(pick, answer); await plainday.AddProjectLink.invoke(); },
         // With no cursor placed (open's `ch`), it's in the task's text, as you'd run the command
-        async addTaskNote(answer = "move", pick = null) { tick(); answering(pick, answer); cursorCh ??= customJS.AddTaskNote.afterCheckbox(lines[cursor]); await customJS.AddTaskNote.invoke(); },
-        async moveToProject(pick, answer = "move", files = null) { tick(); answering(pick, answer); await customJS.MoveToProject.move(files ? files.map(fileOf) : [view.file]); },
+        async addTaskNote(answer = "move", pick = null) { tick(); answering(pick, answer); cursorCh ??= plainday.AddTaskNote.afterCheckbox(lines[cursor]); await plainday.AddTaskNote.invoke(); },
+        async moveToProject(pick, answer = "move", files = null) { tick(); answering(pick, answer); await plainday.MoveToProject.move(files ? files.map(fileOf) : [view.file]); },
         // CheckOff (OBS-232): the box on the cursor's line set to `mark` by your own edit (a click, ⌘⏎, Task
         // Status's picker, typing), then what CheckOff does. A [>] box about to become [ ] or [/] is held and
         // asked about, as CheckOff's click listener and edit filter do: the question answered with `answer`
@@ -349,15 +354,15 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         // runs while the question is up. Returns the question's spec, or null when none was asked.
         async box(mark, { answer = null, date = null, before = null } = {}) {
             tick();
-            const C = customJS.CheckOff, text = lines[cursor], file = view.file;
+            const C = plainday.CheckOff, text = lines[cursor], file = view.file;
             const at = text.match(/^\s*[-*+]\s+\[/)[0].length;
             const write = () => editor.replaceRange(mark, { line: cursor, ch: at }, { line: cursor, ch: at + 1 });
             if (C.constructor.markOf(text) === ">" && " /".includes(mark) && C.actsOn(file, (n) => lines[n], cursor)) {
                 let spec = null, prompt = null;
                 C.choose = async (s) => { spec = s; questions.push(s); await before?.(s); return answer; };
-                customJS.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
+                plainday.DatePrompt.open = (title, onPick) => { prompt = { title, onPick }; return {}; };
                 await C.ask({ file, line: cursor, text, editor, want: mark });
-                if (prompt) { spec = { ...spec, dated: prompt.title }; if (date) await prompt.onPick(customJS.DatePrompt.result(date, "day"), { close() {} }); }
+                if (prompt) { spec = { ...spec, dated: prompt.title }; if (date) await prompt.onPick(plainday.DatePrompt.result(date, "day"), { close() {} }); }
                 return spec;
             }
             const line = cursor;
@@ -366,7 +371,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             return null;
         },
         // A click on the cursor's line's box, as Obsidian toggles it: [ ] becomes [x], anything else [ ]
-        async click(options = {}) { return this.box(customJS.CheckOff.constructor.markOf(lines[cursor]) === " " ? "x" : " ", options); },
+        async click(options = {}) { return this.box(plainday.CheckOff.constructor.markOf(lines[cursor]) === " " ? "x" : " ", options); },
         // The open note in reading view (true) or editing view (false)
         reading(on = true) { flush(); readingMode = on; },
         // A dialog up ("prompt", Task Status's picker, or "question", the system's) or not (false), on the page
@@ -383,7 +388,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
             let s0 = start ?? line;
             if (start === null) while (s0 > 0 && ls[s0 - 1].trim() !== "" && ls[s0 - 1] !== "---") s0--;
             // Obsidian draws `[ ]`'s data-task empty (seen in 1.15.1)
-            const drawn = mark ?? customJS.CheckOff.constructor.markOf(ls[line]), task = drawn === " " ? "" : drawn;
+            const drawn = mark ?? plainday.CheckOff.constructor.markOf(ls[line]), task = drawn === " " ? "" : drawn;
             const matches = (sel) => sel.split(",").map((x) => x.trim()).some((x) => inside.includes(x));
             return {
                 view, embedded, section: { start: { line: s0 } },
@@ -398,7 +403,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         // and whether the click was left to Obsidian.
         async readClick({ answer = null, before = null, ...where } = {}) {
             tick();
-            const C = customJS.CheckOff, file = view.file, box = this.readingBox(where);
+            const C = plainday.CheckOff, file = view.file, box = this.readingBox(where);
             const job = C.readingClick(box);
             if (!job) {
                 const at = box.section.start.line + Number(box.getAttribute("data-line"));
@@ -418,7 +423,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         // The question's spec, or null.
         async menu(mark, { answer = null, press = cursor, line = press, between = null } = {}) {
             tick();
-            const C = customJS.CheckOff, file = view.file;
+            const C = plainday.CheckOff, file = view.file;
             const jobs = [], asks = [], enqueue = C.enqueue, askLater = C.askLater;
             C.enqueue = (job) => jobs.push(job);
             C.askLater = (args) => asks.push(args);
@@ -441,8 +446,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         file: fileOf,
     };
     function ownNotes() {
-        const tr = customJS.TimeReport, index = tr.appIndex();
-        const notes = [...vault.keys()].filter((p) => customJS.TaskIds.inSystem(fileOf(p))).map((p) => ({ path: p, text: vault.get(p) }));
+        const tr = plainday.TimeReport, index = tr.appIndex();
+        const notes = [...vault.keys()].filter((p) => plainday.TaskIds.inSystem(fileOf(p))).map((p) => ({ path: p, text: vault.get(p) }));
         return [...new Set(tr.ownNoteProblems(notes, index).map((p) => `${p.conflict.path}:${p.conflict.line}`))].map((at) => `own note ${at}`);
     }
     // The report's own checks (OBS-233) over the notes checkAll reads: every subtask's day line that names
@@ -450,7 +455,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // 2026-11-02); every task whose deadlines differ, which DueDate keeps the same; and every ⭕ at the end of
     // a task line outside the periodic notes, which no command writes since OBS-225
     function parents() {
-        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor, index = tr.appIndex();
+        const tr = plainday.TimeReport, T = plainday.TaskIds.constructor, index = tr.appIndex();
         const notes = checked();
         return [
             ...tr.subtaskProjectProblems(notes, index, T).map((l) => `parent ${l.path}:${l.line + 1}`),
@@ -460,8 +465,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     }
     function answering(pick, answer) {
         const answers = [].concat(answer);
-        customJS.AddTaskNote.pickHome = async (name, options = {}) => { menus.push({ name, options }); return pick ? fileOf(pick) : null; };
-        customJS.AddTaskNote.confirmMove = async (note, from, to, words = {}) => {
+        plainday.AddTaskNote.pickHome = async (name, options = {}) => { menus.push({ name, options }); return pick ? fileOf(pick) : null; };
+        plainday.AddTaskNote.confirmMove = async (note, from, to, words = {}) => {
             asked.push({ note: note?.basename ?? null, from: from?.basename ?? null, to: to?.basename ?? null, ...words, ...covers });
             return answers.length > 1 ? answers.shift() : answers[0];
         };
@@ -470,12 +475,12 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // the live text says (`vault`, not `disk`: the notes as you'd see them open, which is what must agree;
     // disk lags by design), projects read as the time report reads them
     function checked() {
-        const T = customJS.TaskIds.constructor;
-        const read = (p) => !p.startsWith("Config/") && (customJS.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
-        return [...vault.keys()].filter(read).map((p) => ({ path: p, kind: customJS.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
+        const T = plainday.TaskIds.constructor;
+        const read = (p) => !p.startsWith("Config/") && (plainday.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
+        return [...vault.keys()].filter(read).map((p) => ({ path: p, kind: plainday.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
     }
     function checkAll() {
-        const tr = customJS.TimeReport, T = customJS.TaskIds.constructor;
+        const tr = plainday.TimeReport, T = plainday.TaskIds.constructor;
         const index = tr.appIndex();
         const notes = checked();
         return T.check(notes, {

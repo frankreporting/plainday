@@ -1,10 +1,12 @@
-class ConvertToProject {
+import { MarkdownView, Notice } from "obsidian";
+import { app } from "../host.js";
+
+export default class ConvertToProject {
     // Turns the selected text into a project, replacing the old QuickAdd "Convert to project"
     // choice: creates a note named after the selection in Inbox from the Project template, which
     // moves it into a new project folder at the top of Projects (OBS-55: no menu; MoveToProject
     // files it under an area afterwards), then swaps the selection for a link to the new note.
     async invoke() {
-        const { MarkdownView } = customJS.obsidian;
         const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
         if (!editor) return;
 

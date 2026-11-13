@@ -6,8 +6,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
-// `customJS` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
-const TaskIds = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/taskIds.js", here), "utf8") + "\n;TaskIds", vm.createContext({ customJS: {} }));
+// `plainday` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
+const TaskIds = vm.runInContext(classScript("taskIds.js") + "\n;TaskIds", vm.createContext({ plainday: {} }));
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const F = "[[2026-10-08#^k3x9m2|10/8]]";
 
@@ -116,6 +116,7 @@ test("reopenIn: a task's done or canceled lines become [>], top-level lines only
 });
 
 import { standIn, PLANNER } from "./standInVault.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const D8 = `${PLANNER}/days/2026-10-08.md`;
 const KES = "Projects/Freelance/Kestrel/Kestrel.md";
@@ -128,7 +129,7 @@ const LOOK = {
 const at = (lines) => plain(lines.map((l) => `${l.file.path}:${l.line}:${l.task}`).sort());
 
 test("linesOf: every line ending in the ID, from the cache, with its checkbox; Config and notes outside the system left out (OBS-208)", () => {
-    const t = standIn({ notes: LOOK }).customJS.TaskIds;
+    const t = standIn({ notes: LOOK }).plainday.TaskIds;
     assert.deepEqual(at(t.linesOf("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `]);
     assert.deepEqual(at(t.linesOf("Ab3-x9")), [`${D8}:1: `], "a mixed-case ID from Copy link to block");
     assert.equal(t.linesOf("plain1")[0].task, undefined, "a list item with no checkbox");
@@ -139,7 +140,7 @@ test("linesOf: every line ending in the ID, from the cache, with its checkbox; C
 
 test("gather: lines as they are now: open editors, and a note the caller names that the cache hasn't seen", async () => {
     const v = standIn({ notes: LOOK, open: D8, at: 0, lag: true });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     const W = `${PLANNER}/weeks/2026w41.md`;
     v.tick();
     await v.app.vault.create(W, "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n");
@@ -156,14 +157,14 @@ test("gather: lines as they are now: open editors, and a note the caller names t
 test("gather: top-level lines only; a nested line ending in the ID is a sub-task of the line it's under (OBS-193, rule 5)", async () => {
     const D9 = `${PLANNER}/days/2026-10-09.md`;
     const v = standIn({ notes: { ...LOOK, [D9]: "- [ ] Errands\n\t- [ ] Book the photographer ^k3x9m2\n- Plain\n\t- [ ] Under a plain bullet ^k3x9m2\n" } });
-    assert.deepEqual(at(await v.customJS.TaskIds.gather("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `, `${D9}:3: `], "a checklist line under nothing but plain bullets is top-level");
+    assert.deepEqual(at(await v.plainday.TaskIds.gather("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `, `${D9}:3: `], "a checklist line under nothing but plain bullets is top-level");
 });
 
 test("readNow: the open note's editor text, ahead of disk under lag", async () => {
     const v = standIn({ notes: LOOK, open: D8, at: 0, lag: true });
     v.app.workspace.getActiveViewOfType().editor.replaceRange("Typed. ", { line: 0, ch: 0 });
     const f = v.app.vault.getFileByPath(D8);
-    assert.match(await v.customJS.TaskIds.readNow(f), /^Typed\. /);
+    assert.match(await v.plainday.TaskIds.readNow(f), /^Typed\. /);
     assert.doesNotMatch(await v.app.vault.cachedRead(f), /Typed/);
     v.tick();
     assert.match(await v.app.vault.cachedRead(f), /^Typed\. /, "saved at the next command");
@@ -180,7 +181,7 @@ test("stand-in vault: create on an existing path throws; a folder exists once ma
 
 test("gather: a note a command just wrote is read for a few seconds, whatever the cache says", async () => {
     const v = standIn({ notes: LOOK, lag: true });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     const M = `${PLANNER}/months/2026-10.md`;
     v.tick();
     t.touched(await v.app.vault.create(M, "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n"));
@@ -190,7 +191,7 @@ test("gather: a note a command just wrote is read for a few seconds, whatever th
 
 test("allIds and freshId: every list item's ID; a new one no block has", () => {
     const v = standIn({ notes: { ...LOOK, "Reference/Notes/Taken.md": "- [ ] Taken ^aaaaaa" } });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     // The task checks read the notes in the system and Archive; Taken.md is in neither
     assert.deepEqual(plain([...t.allIds().keys()].sort()), ["ab3-x9", "k3x9m2", "plain1"]);
     let draws = 0;
@@ -200,7 +201,7 @@ test("allIds and freshId: every list item's ID; a new one no block has", () => {
 
 test("kindOf: daily, weekly, monthly and yearly notes, and any other note", () => {
     const v = standIn({ notes: { ...LOOK, [`${PLANNER}/weeks/2026w41.md`]: "", [`${PLANNER}/months/2026-10.md`]: "" } });
-    const k = (p) => v.customJS.TaskIds.kindOf(v.app.vault.getFileByPath(p));
+    const k = (p) => v.plainday.TaskIds.kindOf(v.app.vault.getFileByPath(p));
     assert.deepEqual([k(D8), k(`${PLANNER}/weeks/2026w41.md`), k(`${PLANNER}/months/2026-10.md`), k(KES)], ["day", "week", "month", "other"]);
 });
 
@@ -227,7 +228,7 @@ test("map and gatherMany: one pass for a command, notes in the system only, task
         [MINE]: "- [ ] Mine too ^myown\n",
         [NOTE]: "- [ ] Outside ^k3x9m2\n",
     } });
-    const t = v.customJS.TaskIds;
+    const t = v.plainday.TaskIds;
     const map = t.map();
     assert.deepEqual([...map.keys()].sort(), ["k3x9m2", "myown"]);
     assert.ok(!map.get("k3x9m2").some((l) => l.file.path === NOTE), "a note outside the system isn't in it");
@@ -287,7 +288,7 @@ test("check 5: a block ID of your own twice in one note, never sent, isn't a tas
 });
 
 test("TRAIL_ITEM and trailItem are AddTaskNote's, kept as copies by hand (OBS-185, OBS-199)", () => {
-    const AddTaskNote = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/addTaskNote.js", here), "utf8") + "\n;AddTaskNote", vm.createContext({}));
+    const AddTaskNote = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({}));
     // One writes the U+FE0F as itself, the other as ️
     assert.equal(TaskIds.TRAIL_ITEM.source.replace(/️/g, "\\uFE0F"), AddTaskNote.TRAIL_ITEM.source);
     assert.equal(TaskIds.TRAIL_ITEM.flags, AddTaskNote.TRAIL_ITEM.flags);

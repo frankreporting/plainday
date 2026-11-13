@@ -1,4 +1,7 @@
-class TimeReportOnStartup {
+import { Platform } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class TimeReportOnStartup {
     // Startup script, desktop only: refreshes the time reports (see TimeReport) once Obsidian has
     // loaded and finished indexing the vault, so the project notes and timesheets are current after
     // every launch. To see fresh numbers after logging time, reload Obsidian, or run
@@ -12,7 +15,7 @@ class TimeReportOnStartup {
     static NEEDS = ["TimeReport", "Schedule", "Billing", "TaskIds"];
 
     async invoke() {
-        if (!customJS.obsidian.Platform.isDesktop) return;
+        if (!Platform.isDesktop) return;
         await new Promise((resolve) => app.workspace.onLayoutReady(resolve));
         // Before indexing finishes, no note looks like a project and every entry would be Unassigned
         if (!(await this.indexed())) {
@@ -20,15 +23,15 @@ class TimeReportOnStartup {
             return;
         }
         // Plainday can be turned off or reloaded while this waits
-        if (!customJS.plugin) return;
+        if (!plainday.plugin) return;
         const missing = await this.missing();
         if (missing.length) {
             // A class that failed to start needs fixing, and the console says why
-            const names = missing.map((name) => `customJS.${name}`).join(" and ");
+            const names = missing.map((name) => `plainday.${name}`).join(" and ");
             console.warn(`TimeReportOnStartup: ${names} ${missing.length === 1 ? "isn't" : "aren't"} registered (Plainday couldn't start it: see the error above); skipped`);
             return;
         }
-        await customJS.TimeReport.refresh({ quiet: true });
+        await plainday.TimeReport.refresh({ quiet: true });
     }
 
     // Resolves true once the metadata cache is clean, or false after INDEX_WAIT_MS
@@ -45,9 +48,9 @@ class TimeReportOnStartup {
         return Promise.race([clean, timeout]);
     }
 
-    // The classes in NEEDS that customJS still lacks after up to READY_WAIT_MS of polling
+    // The classes in NEEDS that plainday still lacks after up to READY_WAIT_MS of polling
     async missing() {
-        const missing = () => TimeReportOnStartup.NEEDS.filter((name) => !customJS?.[name]);
+        const missing = () => TimeReportOnStartup.NEEDS.filter((name) => !plainday?.[name]);
         const deadline = Date.now() + TimeReportOnStartup.READY_WAIT_MS;
         while (missing().length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250));
         return missing();

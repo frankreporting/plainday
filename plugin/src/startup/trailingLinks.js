@@ -1,4 +1,9 @@
-class TrailingLinks {
+import { editorInfoField, editorLivePreviewField, Keymap, moment } from "obsidian";
+import { Decoration, EditorView, keymap, ViewPlugin } from "@codemirror/view";
+import { EditorSelection, EditorState, Prec, StateEffect, Transaction } from "@codemirror/state";
+import { app, plainday } from "../host.js";
+
+export default class TrailingLinks {
     // Startup script (OBS-84): draws the links that end a task or event line small, at the right
     // of the line's last row, the way Things shows a deadline. Display only, except that it keeps a
     // task's ID at the end of its line (below): notes never change otherwise.
@@ -25,7 +30,8 @@ class TrailingLinks {
     // It only draws the lines on screen, and while you type only the edited line and the lines
     // nested under it; a cursor move redraws only the lines it left and reached that have an ID.
     //
-    // It needs Obsidian's own CodeMirror, which Plainday passes in as `customJS.codemirror`.
+    // It needs Obsidian's own CodeMirror, which it imports; the build leaves it out of main.js, as
+    // Obsidian gives it to every plugin.
     static STYLE_ID = "pm-trailing-links";
     // Gaps and padding around the links, in px, for a first guess at their width until it's measured
     static PILL_PX = 14;
@@ -315,11 +321,7 @@ class TrailingLinks {
         // The handles live on window, so a second run undoes the first: one set of listeners, however
         // often it runs
         this.deconstructor();
-        const { view, state } = customJS.codemirror;
         const T = TrailingLinks;
-        const { ViewPlugin, Decoration, EditorView, keymap } = view;
-        const { Prec, EditorSelection, StateEffect, EditorState, Transaction } = state;
-        const { editorLivePreviewField, editorInfoField, Keymap } = customJS.obsidian;
         const ws = app.workspace;
 
         // One registered slot per load of Plainday; a rerun swaps what's in it
@@ -327,7 +329,7 @@ class TrailingLinks {
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [], refs: [], docs: new Set(), widths: new Map(), size: null, timer: null, midnight: null };
         window.pmTrailingLinks = handles;
-        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
+        if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
         // Redraw every line on screen: a note moved or retagged, or the day changed
         const refresh = StateEffect.define();
@@ -345,7 +347,7 @@ class TrailingLinks {
             if (!v.state.field(editorLivePreviewField, false)) return none;
             const doc = v.state.doc;
             const sourcePath = sourceOf(v);
-            const today = window.moment().format("YYYY-MM-DD");
+            const today = moment().format("YYYY-MM-DD");
             const outer = [], inner = [];
             let unmeasured = false;
             for (const { from, to } of ranges) {
@@ -644,11 +646,11 @@ class TrailingLinks {
         );
         // A due date turns red at midnight
         const atMidnight = () => {
-            const next = window.moment().add(1, "day").startOf("day").add(1, "second");
+            const next = moment().add(1, "day").startOf("day").add(1, "second");
             handles.midnight = setTimeout(() => {
                 redrawAll();
                 atMidnight();
-            }, next.diff(window.moment()));
+            }, next.diff(moment()));
         };
         atMidnight();
     }

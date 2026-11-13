@@ -1,4 +1,7 @@
-class MoveToProject {
+import { Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class MoveToProject {
     // Moves the note you're on into a project or area picked from the menu AddProjectLink uses, or, when
     // Notebook Navigator's pane has the focus, the notes selected there (rule 8):
     //   - a task note, a log (see AddTaskNote.isLog) or a plain note in `Projects` or the `Inbox`: the note
@@ -36,7 +39,7 @@ class MoveToProject {
 
     // Why this command leaves `file`, a note or file (not a folder), where it is, or null when it doesn't
     stays(file) {
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         if (file.extension !== "md") return `${file.name} isn't a note, so it wasn't moved`;
         const kind = this.billingNote(file);
         if (kind) return `${file.basename} stays where it is: ${kind === "invoice" ? "an invoice" : "a timesheet"} belongs to the time report`;
@@ -47,7 +50,7 @@ class MoveToProject {
     // "invoice" or "timesheet" for a note the time report writes and reads wherever it is, else null
     billingNote(file) {
         const cache = app.metadataCache.getFileCache(file);
-        const tags = cache ? customJS.AddTaskNote.tagsOf(cache) : [];
+        const tags = cache ? plainday.AddTaskNote.tagsOf(cache) : [];
         return ["invoice", "timesheet"].find((t) => tags.includes(t)) ?? null;
     }
 
@@ -63,7 +66,7 @@ class MoveToProject {
     // Moves `files` (notes, and projects or areas as their folders) into a project or area picked
     // from the menu
     async move(files) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         if (!helper) return;
         const items = [];
         const told = [];
@@ -76,7 +79,7 @@ class MoveToProject {
             else if (!items.some((i) => i.path === item.path)) items.push(item);
         }
         if (!items.length) return tell();
-        if (!customJS.TaskChange.ready()) return;
+        if (!plainday.TaskChange.ready()) return;
 
         const folders = items.filter((i) => i.folder).map((i) => i.path);
         const label = items.length === 1 ? items[0].label : `${items.length} ${items.every((i) => !i.home) ? "notes" : "items"}`;
@@ -129,7 +132,7 @@ class MoveToProject {
     // One note's change (TaskChange), `here` when it's already in the project picked. The menus waited on
     // you, so it's checked again first.
     async moveNote(step, home, into) {
-        const change = customJS.TaskChange;
+        const change = plainday.TaskChange;
         if (app.vault.getAbstractFileByPath(step.path) !== step.file || app.vault.getAbstractFileByPath(home.path) !== home || home.parent?.path !== into) {
             return { told: `${step.label} or ${home.basename} moved meanwhile, so ${step.label} wasn't moved` };
         }
@@ -145,7 +148,7 @@ class MoveToProject {
     //     folder, home: it's a project or area, log, from: the project or area it's in now (for a
     //     project or area, the one above it), homeFolder: that one's folder }
     itemFor(f) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         if (f.children) {
             const note = app.vault.getFileByPath(`${f.path}/${f.name}.md`);
             if (!note || !this.isHomeNote(note)) return null;
@@ -161,7 +164,7 @@ class MoveToProject {
     // The project or area above `file` (a note, or a folder): the nearest folder note tagged
     // #project or #area, not finished, in the folders above it. Null outside any.
     homeAbove(file) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
             const note = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
             if (note && note !== file && helper.isHome(note)) return note;
@@ -177,7 +180,7 @@ class MoveToProject {
 
     isHomeNote(file) {
         const cache = app.metadataCache.getFileCache(file);
-        return !!cache && customJS.AddTaskNote.tagsOf(cache).some((t) => t === "project" || t === "area");
+        return !!cache && plainday.AddTaskNote.tagsOf(cache).some((t) => t === "project" || t === "area");
     }
 
     // Whether `path` is inside any of `folders`
@@ -198,7 +201,7 @@ class MoveToProject {
     //     `›logs`, a folder already in that folder, anything already at the very path);
     //   "clash": something of that name is there already (`exists`, any case), or another item in
     //     this move is going there.
-    plan(items, into, exists, logs = customJS.AddTaskNote.logsFolderIn(into)) {
+    plan(items, into, exists, logs = plainday.AddTaskNote.logsFolderIn(into)) {
         const folders = items.filter((i) => i.folder).map((i) => i.path);
         const parentOf = (path) => path.slice(0, Math.max(path.lastIndexOf("/"), 0));
         const under = (path, folder) => path.toLowerCase().startsWith(`${folder.toLowerCase()}/`);
@@ -226,7 +229,7 @@ class MoveToProject {
 
     // Moves a project or area's folder, asking first (when `ask`). Resolves to { moved, told, cancelled }.
     async moveFolder(step, home, into, ask) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         const { file, from } = step;
         if (ask) {
             const choice = await helper.confirmMove(step.note, from, home);
@@ -252,7 +255,7 @@ class MoveToProject {
 
     // "2 lines now link ⭕ Pinecrest Library Brochure"
     linesNow(count, home) {
-        const mark = customJS.AddTaskNote.isArea(home) ? "🗃️" : "⭕";
+        const mark = plainday.AddTaskNote.isArea(home) ? "🗃️" : "⭕";
         return `${count === 1 ? "A line now links" : `${count} lines now link`} ${mark} ${home.basename}`;
     }
 

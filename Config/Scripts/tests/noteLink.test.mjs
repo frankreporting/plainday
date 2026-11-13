@@ -10,12 +10,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const context = vm.createContext({ customJS: {}, app: {}, window: {}, console });
-const load = (file, name) => vm.runInContext(fs.readFileSync(new URL(`../../../plugin/src/classes/${file}`, here), "utf8") + `\n;${name}`, context);
+const context = vm.createContext({ plainday: {}, app: {}, window: {}, console });
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
-context.customJS.AddTaskNote = new AddTaskNote();
+context.plainday.AddTaskNote = new AddTaskNote();
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");
 const Schedule = load("schedule.js", "Schedule");
 const DueDate = load("setDueDate.js", "DueDate");

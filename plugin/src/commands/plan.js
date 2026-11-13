@@ -1,11 +1,13 @@
-class Plan {
+import { DropdownComponent, MarkdownView, Modal, moment, Notice } from "obsidian";
+import { app } from "../host.js";
+
+export default class Plan {
     // A single day is the note you're already on, so the range starts at two.
     // Beyond five, the panes are too narrow to be useful on a laptop screen.
     static MIN_DAYS = 2;
     static MAX_DAYS = 5;
 
     async invoke() {
-        const { Modal, DropdownComponent } = customJS.obsidian;
         const { MIN_DAYS: min, MAX_DAYS: max } = Plan;
 
         const modal = new Modal(app);
@@ -31,7 +33,6 @@ class Plan {
     }
 
     async openDays(days) {
-        const { MarkdownView } = customJS.obsidian;
         const { format } = this.dailyOpts();
 
         const view = app.workspace.getActiveViewOfType(MarkdownView);
@@ -44,8 +45,8 @@ class Plan {
         const activeFile = view?.file;
         const anchorIsDaily = activeFile ? this.isDailyNote(activeFile) : false;
         const start = anchorIsDaily
-            ? window.moment(activeFile.basename, format, true)
-            : window.moment().startOf("day");
+            ? moment(activeFile.basename, format, true)
+            : moment().startOf("day");
 
         const dates = [];
         for (let i = 0; i < days; i++) dates.push(start.clone().add(i, "days"));
@@ -109,7 +110,7 @@ class Plan {
     isDailyNote(file) {
         const { folder, format } = this.dailyOpts();
         const inFolder = (file.parent?.path ?? "/") === (folder || "/");
-        return inFolder && window.moment(file.basename, format, true).isValid();
+        return inFolder && moment(file.basename, format, true).isValid();
     }
 
     async ensureDailyNote(m) {

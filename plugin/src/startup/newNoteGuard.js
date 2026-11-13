@@ -1,4 +1,6 @@
-class NewNoteGuard {
+import { app, plainday } from "../host.js";
+
+export default class NewNoteGuard {
     // Startup script (OBS-171): keeps Templater's trigger for new notes off notes that aren't new.
     //
     // Templater ("Trigger Templater on new file creation") waits 300ms after Obsidian reports a new
@@ -84,8 +86,8 @@ class NewNoteGuard {
 
     // A note appeared: held when it already has properties and nothing below them
     async onCreate(file) {
-        // A listener left over from an earlier load of Plainday stops here: its `customJS.plugin` is gone
-        if (!customJS.plugin) return;
+        // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
+        if (!plainday.plugin) return;
         if (file?.extension !== "md") return;
         // By the file itself, not its path: a new note is often renamed straight away
         if (file.stat?.size === 0) {
@@ -107,7 +109,7 @@ class NewNoteGuard {
     // Templater has written a template into a note (made from a template, or by its trigger): once it
     // has let the note go, hold it where it is now, through the trigger's 300ms check
     onTemplated(file) {
-        if (!customJS.plugin || !file?.path) return;
+        if (!plainday.plugin || !file?.path) return;
         const started = Date.now();
         const wait = () => {
             const pending = this.pending();

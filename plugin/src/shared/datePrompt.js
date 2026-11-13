@@ -1,4 +1,7 @@
-class DatePrompt {
+import { getLanguage, Modal, moment, Notice, TextComponent } from "obsidian";
+import { app } from "../host.js";
+
+export default class DatePrompt {
     // The date prompt behind Schedule, Due and JumpToDate: type a date in words, see the date it
     // means while you type, and Enter hands it on. Natural Language Dates reads the words. Revived
     // comes first: it reads a bare weekday as the coming one, where the original plugin gives last
@@ -33,7 +36,7 @@ class DatePrompt {
     //   closer, this year's or the next, where Revived always takes the next one.
     // "week of <a date>" is the week that date is in.
     // - `today` and `now` are for tests.
-    read(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = window.moment().format("YYYY-MM-DD"), now = new Date() } = {}) {
+    read(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = moment().format("YYYY-MM-DD"), now = new Date() } = {}) {
         const t = String(text ?? "").trim();
         if (!t || !nld) return null;
 
@@ -122,13 +125,12 @@ class DatePrompt {
     // Returns { locale, weekStart (0 is Sunday), format: { week, month, year } } (the file part of
     // Notebook Navigator's patterns, else this vault's names).
     weekRules() {
-        const moment = window.moment;
         const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
         const current = moment.locale();
         let locale = current;
         if (nn && nn.calendarPeriodicNotesLocaleSource !== "obsidian") {
             const chosen = !nn.calendarLocale || nn.calendarLocale === "system-default"
-                ? (customJS.obsidian?.getLanguage?.() || current)
+                ? (getLanguage?.() || current)
                 : nn.calendarLocale;
             locale = this.knownLocale(chosen) ?? current;
         }
@@ -143,7 +145,7 @@ class DatePrompt {
     // The moment locale a language or locale code names ("en_US" → "en-us" or "en"), matched the way
     // Notebook Navigator matches them, or null
     knownLocale(code) {
-        const all = window.moment.locales();
+        const all = moment.locales();
         const exact = String(code ?? "").replace(/_/g, "-");
         const lower = exact.toLowerCase();
         const base = lower.split("-")[0];
@@ -153,12 +155,12 @@ class DatePrompt {
     }
 
     result(date, unit) {
-        return { date, unit, m: window.moment(date, "YYYY-MM-DD", true) };
+        return { date, unit, m: moment(date, "YYYY-MM-DD", true) };
     }
 
     // The line under the input: what Enter would pick. `weekStart` as in read(). A week says the day
     // it starts, so "week of oct 5" reads "Week starting 10/4" rather than seeming to disagree.
-    describe(result, today = window.moment().format("YYYY-MM-DD"), weekStart = 0) {
+    describe(result, today = moment().format("YYYY-MM-DD"), weekStart = 0) {
         if (!result) return "";
         const { date, unit } = result;
         const [y, mo] = date.split("-").map(Number);
@@ -208,7 +210,6 @@ class DatePrompt {
     // to the preview. `extra(contentEl, { focus })` adds anything under the preview, and `focus()`
     // puts the cursor back in the box. Returns the modal, or null when no date plugin is on.
     open(title, onPick, { periods = false, name = null, nearest = false, label = null, extra } = {}) {
-        const { Modal, TextComponent } = customJS.obsidian;
         const nld = this.plugin();
         if (!nld) { new Notice("Turn on Natural Language Dates (Revived) in Community plugins"); return null; }
         let weekStart = 0;

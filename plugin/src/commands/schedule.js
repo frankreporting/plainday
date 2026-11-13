@@ -1,4 +1,7 @@
-class Schedule {
+import { getAllTags, MarkdownView, moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class Schedule {
     // A task's link to its own note: ⋯ (OBS-208). Schedule reads a line's note link through AddTaskNote
     // (trailingNote), whose NOTE_LINK reads its ⋯, else its ↗.
     static NOTE_MARK = "⋯";
@@ -9,17 +12,16 @@ class Schedule {
     static ORIGIN = "obsidian-pm";
 
     async invoke() {
-        const { MarkdownView } = customJS.obsidian;
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         const srcFile = app.workspace.getActiveFile();
         if (!view || !srcFile) { new Notice("Need an active editor"); return; }
-        if (customJS.TaskIds && !customJS.TaskIds.works(srcFile)) return;
+        if (plainday.TaskIds && !plainday.TaskIds.works(srcFile)) return;
         const editor = view.editor;
         const cursor = editor.getCursor().line;
         // Rule 5 (OBS-193): on a sub-task, or any line under a task or event, Schedule acts on the line at the
         // top of the nest, in every note. Events belong to the calendar, in any of their forms (rule 1): moving
         // one here would put the note out of sync with it.
-        const top = customJS.TimeReport.topOf((n) => editor.getLine(n), cursor);
+        const top = plainday.TimeReport.topOf((n) => editor.getLine(n), cursor);
         if (top.event) {
             new Notice(top.event === "canceled" ? "This event was canceled in your calendar" : "Events must be moved in your calendar app");
             return;
@@ -38,7 +40,7 @@ class Schedule {
         const periodic = sourceIsDaily || !!sourcePeriod;
         // Until Obsidian has indexed the vault at startup, a task's other lines can't be found
         if (app.metadataCache.initialized === false) { new Notice("Obsidian is still indexing the vault; try again in a moment"); return; }
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         const T = tasks.constructor;
         const id = T.idOf(lineText);
         // The task's lines as they are now, for a line with an ID outside the periodic notes (the first
@@ -72,9 +74,9 @@ class Schedule {
 
         const foldBefore = view.currentMode.getFoldInfo?.();
 
-        const rules = customJS.DatePrompt.weekRules();
-        const jump = customJS.JumpToDate;
-        customJS.DatePrompt.open("Schedule for", async (result, modal) => {
+        const rules = plainday.DatePrompt.weekRules();
+        const jump = plainday.JumpToDate;
+        plainday.DatePrompt.open("Schedule for", async (result, modal) => {
             const dest = this.destination(result, rules);
             // Into the note it's already in: nothing to move. A done or canceled line there reopens in place (rule 13).
             if (dest.path === srcFile.path) {
@@ -260,7 +262,7 @@ class Schedule {
 
     // A task line's name for a notice: its text, without checkbox, links that end it, or ID
     nameOf(line) {
-        return customJS.TimeReport.taskText(line.replace(/^\s*[-*+]\s+/, ""));
+        return plainday.TimeReport.taskText(line.replace(/^\s*[-*+]\s+/, ""));
     }
 
     // The editor's lines, as an array
@@ -279,14 +281,14 @@ class Schedule {
             const label = m.format("M/D");
             const name = path.split("/").pop().replace(/\.md$/, "");
             // By its path when another note has its name, as for a week or a month
-            const linktext = () => customJS.AddTaskNote.linktextFor({ path, basename: name }, app.vault.getMarkdownFiles().map((f) => f.path));
+            const linktext = () => plainday.AddTaskNote.linktextFor({ path, basename: name }, app.vault.getMarkdownFiles().map((f) => f.path));
             return { path, unit, kind: "daily", label, linktext, link: () => `[[${name}|${label}]]`, ensure: () => this.ensureDailyNote(path) };
         }
-        const jump = customJS.JumpToDate;
+        const jump = plainday.JumpToDate;
         const target = jump.target(result, rules);
         // An ISO week's note starts on Monday, whatever day the locale starts weeks on
         const label = Schedule.periodLabel(result, { weekStart: jump.isoWeeks(rules) ? 1 : rules.weekStart, ...jump.monthNames(rules) });
-        const linktext = () => customJS.AddTaskNote.linktextFor({ path: target.path, basename: target.name }, app.vault.getMarkdownFiles().map((f) => f.path));
+        const linktext = () => plainday.AddTaskNote.linktextFor({ path: target.path, basename: target.name }, app.vault.getMarkdownFiles().map((f) => f.path));
         return {
             path: target.path, unit, kind: target.kind, label, linktext,
             // By its path when another note has its name, so the link can't land on that one
@@ -305,7 +307,7 @@ class Schedule {
     // A sent line with the ID says it's this task's: a second open line is then a copy (or a click turned
     // a [>] back), which keeps the ID so the checks list it.
     foreignId(lines, srcFile) {
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         const others = (lines ?? []).filter((l) => l.file.path !== srcFile.path);
         const periodic = (l) => tasks.kindOf(l.file) !== "other";
         const sent = others.some((l) => ">xX-".includes(l.task));
@@ -324,7 +326,7 @@ class Schedule {
     // (as ToggleTimeEntry found, 2026-09-15).
     async rewrite(file, fn) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
-        customJS.TaskIds?.touched?.(file);
+        plainday.TaskIds?.touched?.(file);
         if (!view) return app.vault.process(file, fn);
         const before = view.editor.getValue(), after = fn(before);
         if (after === before) return after;
@@ -344,7 +346,7 @@ class Schedule {
     // breadcrumb in front of it comes off (TaskIds.setForwardIn). `reopen` sets a finished one to [>]; `mark`
     // ("x" or "-") finishes each one instead (CheckOff, OBS-232).
     async followForward(id, dest, sources, { reopen = false, mark = null } = {}) {
-        const T = customJS.TaskIds.constructor;
+        const T = plainday.TaskIds.constructor;
         const link = T.forwardLink(dest.linktext(), dest.label, id);
         for (const file of new Map(sources.map((s) => [s.file.path, s.file])).values()) {
             try {
@@ -366,7 +368,7 @@ class Schedule {
     // (OBS-181). The upgrade stays even if the date prompt is then dismissed: it only rewrites the line
     // as it is now.
     async adopt(editor, srcFile, lineNum, lineText, own = null) {
-        const tasks = customJS.TaskIds, T = tasks.constructor;
+        const tasks = plainday.TaskIds, T = tasks.constructor;
         const old = T.oldForward(lineText);
         const day = app.metadataCache.getFirstLinkpathDest(old.linkpath, srcFile.path);
         if (!day) return null;
@@ -382,7 +384,7 @@ class Schedule {
             id = own ?? tasks.freshId();
             const { l, i } = matches[0];
             await this.rewrite(day, (t) => { const ls = t.split("\n"); if (ls[i] === l) ls[i] = T.withId(l, id); return ls.join("\n"); });
-            if (this.isDailyNote(day)) await customJS.RefoldDailyNotes?.onLeave?.(day);
+            if (this.isDailyNote(day)) await plainday.RefoldDailyNotes?.onLeave?.(day);
         } else if (sent.length === 1 && (!own || own.toLowerCase() === T.idOf(sent[0]).toLowerCase())) {
             id = T.idOf(sent[0]);
             const now = (await tasks.gather(id, [day])).filter((l) => tasks.kindOf(l.file) !== "other");
@@ -407,16 +409,16 @@ class Schedule {
     // of a source clicked back to [ ] (or ticked) is, set to [>] again once the move goes ahead, or when it's
     // refused (while the line is as it was). `named`: the task's name, for the notice, when run from under it.
     async reschedule({ editor, srcFile, lineNum, lineText, id, lines: given = null, restore = null, named = null }) {
-        const tasks = customJS.TaskIds, T = tasks.constructor;
+        const tasks = plainday.TaskIds, T = tasks.constructor;
         const fwd = T.forwardOf(lineText);
         const pointed = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, srcFile.path) : null;
         const lines = given ?? await tasks.gather(id, [pointed]);
         const { open, done } = this.whereIs(lines);
-        const rules = customJS.DatePrompt.weekRules();
-        const jump = customJS.JumpToDate;
+        const rules = plainday.DatePrompt.weekRules();
+        const jump = plainday.JumpToDate;
         const title = open ? `Scheduled for ${this.labelOf(open.file)}. Move it to`
             : done ? `${done.task === "-" ? "Canceled" : "Done"} on ${this.labelOf(done.file)}. Reopen it on` : "Schedule for";
-        customJS.DatePrompt.open(title, async (result, modal) => {
+        plainday.DatePrompt.open(title, async (result, modal) => {
             const dest = this.destination(result, rules);
             modal.close();
             const moved = await this.moveTask({ editor, srcFile, lineNum, lineText, id, lines, restore, named, dest });
@@ -433,7 +435,7 @@ class Schedule {
     // finished task reopens it (rule 13); `current`: whichever of the two it has; `sources`: its sent lines
     // outside the periodic notes ([>], or done or canceled once finished).
     whereIs(lines) {
-        const tasks = customJS.TaskIds;
+        const tasks = plainday.TaskIds;
         const periodic = (l) => tasks.kindOf(l.file) !== "other";
         const open = lines.find((l) => " /".includes(l.task) && periodic(l)) ?? null;
         const done = open ? null : lines.find((l) => "xX-".includes(l.task) && periodic(l)) ?? null;
@@ -449,7 +451,7 @@ class Schedule {
     // reopened, moved, from }: what Schedule says, whether a line on `dest` was reopened, "moved" or "forwarded"
     // (null when nothing moved), and the note the line came from.
     async moveTask({ editor = null, srcFile = null, lineNum = null, lineText = null, id, lines, restore = null, named = null, dest }) {
-        const tasks = customJS.TaskIds, T = tasks.constructor;
+        const tasks = plainday.TaskIds, T = tasks.constructor;
         const { open, done, current, sources } = this.whereIs(lines);
         const fromSource = !!srcFile && tasks.kindOf(srcFile) === "other";
         const none = { reopened: false, moved: null, from: null };
@@ -534,7 +536,7 @@ class Schedule {
                     return p.lines.join("\n");
                 });
                 if (changed) said = `The task changed while it was scheduled: it's on ${dest.label} now, so take it out of ${this.labelOf(current.file)} by hand`;
-                else if (this.isDailyNote(current.file)) await customJS.RefoldDailyNotes?.onLeave?.(current.file);
+                else if (this.isDailyNote(current.file)) await plainday.RefoldDailyNotes?.onLeave?.(current.file);
             }
             // A source clicked back to [ ] is a sent line again, now that the task has moved, while it's the line it was
             if (restore !== null && editor.getLine(lineNum) === lineText) editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 }, Schedule.ORIGIN);
@@ -550,11 +552,11 @@ class Schedule {
     // Where `file`, a periodic note, puts a task, as destination() gives it for that day, week, month or year:
     // how CheckOff moves a task onto a note it has (OBS-232). Null for any other note.
     destinationOf(file) {
-        const rules = customJS.DatePrompt.weekRules();
-        if (this.isDailyNote(file)) return this.destination(customJS.DatePrompt.result(window.moment(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
+        const rules = plainday.DatePrompt.weekRules();
+        if (this.isDailyNote(file)) return this.destination(plainday.DatePrompt.result(moment(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
         const unit = this.periodOf(file);
         if (!unit) return null;
-        return this.destination(customJS.DatePrompt.result(window.moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD"), unit), rules);
+        return this.destination(plainday.DatePrompt.result(moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD"), unit), rules);
     }
 
     // Reopens the [>], done or canceled line ending in `id` in `file` with `outgoing`, the lines moving there
@@ -562,8 +564,8 @@ class Schedule {
     // is left as it was, so the caller puts the lines in as usual rather than lose them
     async reopen(file, id, outgoing, { started = false } = {}) {
         // Where that day's time counts, as the report reads it, before and after: the notice says when it changed
-        const tr = customJS.TimeReport, index = tr.appIndex();
-        const note = { path: file.path, kind: customJS.TaskIds.kindOf(file) };
+        const tr = plainday.TimeReport, index = tr.appIndex();
+        const note = { path: file.path, kind: plainday.TaskIds.kindOf(file) };
         const name = (path) => (path ? path.split("/").pop().replace(/\.md$/, "") : "no project");
         let reopened = false;
         await this.rewrite(file, (t) => {
@@ -576,14 +578,14 @@ class Schedule {
             reopened = { counts: now !== was && Schedule.nest(before, at).time ? name(now) : null };
             return next;
         });
-        if (reopened && this.isDailyNote(file)) await customJS.RefoldDailyNotes?.onLeave?.(file);
+        if (reopened && this.isDailyNote(file)) await plainday.RefoldDailyNotes?.onLeave?.(file);
         return reopened;
     }
 
     // Each done or canceled line of a task among `lines` (from gather) in a periodic note, other than in
     // `skip` (files), set to [>]: the task is open elsewhere now (rule 13)
     async reopenFinished(id, lines, skip = []) {
-        const tasks = customJS.TaskIds, T = tasks.constructor;
+        const tasks = plainday.TaskIds, T = tasks.constructor;
         const files = new Map(lines.filter((l) => "xX-".includes(l.task) && tasks.kindOf(l.file) !== "other" && !skip.some((f) => f?.path === l.file.path)).map((l) => [l.file.path, l.file]));
         for (const f of files.values()) {
             try {
@@ -598,7 +600,7 @@ class Schedule {
     async started(lines) {
         for (const l of lines) {
             if (!this.isDailyNote(l.file)) continue;
-            if (Schedule.nest((await customJS.TaskIds.readNow(l.file)).split("\n"), l.line).time) return true;
+            if (Schedule.nest((await plainday.TaskIds.readNow(l.file)).split("\n"), l.line).time) return true;
         }
         return false;
     }
@@ -608,7 +610,7 @@ class Schedule {
     // a running clock, or a range it lists as a Problem; not a time in a line's text, or a commented-out one.
     // A line's \r is read past.
     static nest(lines, at) {
-        const tr = customJS.TimeReport;
+        const tr = plainday.TimeReport;
         const raw = lines.map((l) => l.replace(/\r$/, ""));
         const end = tr.subtreeEnd(raw, at);
         const { visible, hidden } = tr.scan(raw.slice(at, end + 1));
@@ -620,7 +622,7 @@ class Schedule {
     // each open sub-task ([ ] or [/]) directly under it, with everything under that one, unless time is logged
     // under it. A Set of line indexes.
     static openSteps(lines, at, end) {
-        const tr = customJS.TimeReport;
+        const tr = plainday.TimeReport;
         const raw = lines.map((l) => l.replace(/\r$/, ""));
         const go = new Set();
         for (let j = at + 1; j <= end;) {
@@ -684,7 +686,7 @@ class Schedule {
     // old note link stays when the moving line has none. That day's entries stay under the line and count where the
     // line now says (the report lists a billed one that changed). The note link stays last before the ID.
     static keepLinks(line, old) {
-        const T = customJS.TaskIds.constructor;
+        const T = plainday.TaskIds.constructor;
         // Its own note (its ⋯) stays when the moving line has none; the ↗ is the moving line's (OBS-208)
         const note = (i) => /\|\s*⋯\s*\]\]$/u.test(i);
         const from = (i) => /\|\s*↗\uFE0F?\s*\]\]$/u.test(i);
@@ -702,7 +704,7 @@ class Schedule {
     // one of `boxes` (" /" open, ">" forwarded; any box when omitted), or -1. A nested line is a sub-task, and
     // its ID counts for nothing (rule 5).
     static taskLine(lines, id, boxes = null) {
-        const T = customJS.TaskIds.constructor, want = id.toLowerCase();
+        const T = plainday.TaskIds.constructor, want = id.toLowerCase();
         return lines.findIndex((l, i) => {
             const box = l.match(T.CHECKBOX)?.[1];
             return box !== undefined && (!boxes || boxes.includes(box)) && T.idOf(l)?.toLowerCase() === want && T.isTop(lines, i);
@@ -713,8 +715,8 @@ class Schedule {
     // lines), or null. A note holds one line of a task, but if a hand edit left two, an open one comes first,
     // then a finished one, so a move never reopens a line beside an open one.
     async taskLineIn(file, id) {
-        const T = customJS.TaskIds.constructor, want = id.toLowerCase();
-        const lines = (await customJS.TaskIds.readNow(file)).split("\n");
+        const T = plainday.TaskIds.constructor, want = id.toLowerCase();
+        const lines = (await plainday.TaskIds.readNow(file)).split("\n");
         const ours = lines.map((l, at) => ({ at, task: l.match(T.CHECKBOX)?.[1] }))
             .filter(({ at, task }) => task !== undefined && T.idOf(lines[at])?.toLowerCase() === want && T.isTop(lines, at));
         const hit = ours.find((l) => " /".includes(l.task)) ?? ours.find((l) => l.task !== ">") ?? ours[0];
@@ -724,19 +726,19 @@ class Schedule {
     // The forward date to task `id`'s line in `file`, a periodic note, as Schedule writes one for a date it's given:
     // by name, or by path when another note has it; "10/8", "Wk of 10/4", "Oct. 2026" or "2027"
     forwardTo(file, id) {
-        const label = this.isDailyNote(file) ? window.moment(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
-        const linktext = customJS.AddTaskNote.linktextFor(file, app.vault.getMarkdownFiles().map((f) => f.path));
-        return customJS.TaskIds.constructor.forwardLink(linktext, label, id);
+        const label = this.isDailyNote(file) ? moment(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
+        const linktext = plainday.AddTaskNote.linktextFor(file, app.vault.getMarkdownFiles().map((f) => f.path));
+        return plainday.TaskIds.constructor.forwardLink(linktext, label, id);
     }
 
     // Where a periodic note puts a task, as a prompt says it: "Thu 10/8", "Wk of 10/4", "Oct. 2026", "2027"
     labelOf(file) {
-        if (this.isDailyNote(file)) return window.moment(file.basename, this.dailyOpts().format, true).format("ddd M/D");
+        if (this.isDailyNote(file)) return moment(file.basename, this.dailyOpts().format, true).format("ddd M/D");
         const unit = this.periodOf(file);
         if (!unit) return file.basename;
-        const rules = customJS.DatePrompt.weekRules();
-        const jump = customJS.JumpToDate;
-        const date = window.moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD");
+        const rules = plainday.DatePrompt.weekRules();
+        const jump = plainday.JumpToDate;
+        const date = moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD");
         return Schedule.periodLabel({ date, unit }, { weekStart: jump.isoWeeks(rules) ? 1 : rules.weekStart, ...jump.monthNames(rules) });
     }
 
@@ -772,17 +774,17 @@ class Schedule {
     isDailyNote(file) {
         const { folder, format } = this.dailyOpts();
         const inFolder = (file.parent?.path ?? "/") === (folder || "/");
-        return inFolder && window.moment(file.basename, format, true).isValid();
+        return inFolder && moment(file.basename, format, true).isValid();
     }
 
     // "week", "month" or "year" for a weekly, monthly or yearly note, else null. One is named strictly
     // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in its folder
     // (TimeReport.periodFolders), so a note elsewhere with such a name isn't one. A report passes the
     // two in, read when it began, so the whole run uses the same ones.
-    periodOf(file, rules = customJS.DatePrompt.weekRules(), folders = customJS.TimeReport.periodFolders()) {
+    periodOf(file, rules = plainday.DatePrompt.weekRules(), folders = plainday.TimeReport.periodFolders()) {
         const folder = file.parent?.path ?? "";
         for (const unit of ["week", "month", "year"]) {
-            if (folder === folders[unit] && window.moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
+            if (folder === folders[unit] && moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
         }
         return null;
     }
@@ -796,7 +798,7 @@ class Schedule {
     // ↗ links the task's own line there by its ID, `Source#^id`, the line that keeps the same ID (Brian,
     // 2026-10-28).
     sentLine(line, src) {
-        const helper = customJS.AddTaskNote;
+        const helper = plainday.AddTaskNote;
         const paths = app.vault.getMarkdownFiles().map((f) => f.path);
         const tagged = this.isProjectNote(src) || this.isAreaNote(src);
         const own = helper.trailingNote(line, helper.constructor.OWN_NOTE_LINK);
@@ -807,20 +809,20 @@ class Schedule {
             : tagged ? `[[${helper.linktextFor(src, paths)}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]`
             : srcHome ? helper.homeLink(srcHome, helper.linktextFor(srcHome, paths)) : null;
         const sent = helper.withHome(line, homeLink, helper.trailingProjectLinks(line).map((l) => l.raw), { inRun: true });
-        const id = customJS.TaskIds?.constructor.idOf?.(line);
+        const id = plainday.TaskIds?.constructor.idOf?.(line);
         return tagged ? sent : helper.withFrom(sent, `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${Schedule.FROM_MARK}]]`);
     }
 
     isProjectNote(file) {
         const cache = app.metadataCache.getFileCache(file);
-        const tags = cache ? (customJS.obsidian.getAllTags(cache) ?? []) : [];
+        const tags = cache ? (getAllTags(cache) ?? []) : [];
         return tags.some(t => t === "#project" || t.startsWith("#project/"));
     }
 
     // A line forwarded out of an area note links the area with its own suffix, 🗃️ (OBS-36)
     isAreaNote(file) {
         const cache = app.metadataCache.getFileCache(file);
-        const tags = cache ? (customJS.obsidian.getAllTags(cache) ?? []) : [];
+        const tags = cache ? (getAllTags(cache) ?? []) : [];
         return tags.some(t => t === "#area" || t.startsWith("#area/"));
     }
 

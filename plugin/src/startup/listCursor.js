@@ -1,4 +1,10 @@
-class ListCursor {
+import { editorLivePreviewField } from "obsidian";
+import { keymap } from "@codemirror/view";
+import { EditorSelection, EditorState, Prec } from "@codemirror/state";
+import { foldedRanges } from "@codemirror/language";
+import { app, plainday } from "../host.js";
+
+export default class ListCursor {
     // Startup script (OBS-221): on a list line in Live Preview, the cursor rests after the bullet or
     // checkbox, never in front of them, so a drawn checkbox doesn't turn back into `- [ ]`. The idea is
     // Outliner's "Stick the cursor to the content" setting (github.com/vslinko/obsidian-outliner, MIT).
@@ -43,12 +49,7 @@ class ListCursor {
         // The handles live on window, so a second run undoes the first: one copy running, however
         // often it runs
         this.deconstructor();
-        const { view, state, language } = customJS.codemirror;
         const L = ListCursor;
-        const { keymap } = view;
-        const { Prec, EditorSelection, EditorState } = state;
-        const { foldedRanges } = language;
-        const { editorLivePreviewField } = customJS.obsidian;
         const ws = app.workspace;
 
         // One registered slot per load of Plainday; a rerun swaps what's in it
@@ -56,7 +57,7 @@ class ListCursor {
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [] };
         window.pmListCursor = handles;
-        if (!slot) customJS.plugin.registerEditorExtension(handles.slot);
+        if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
         // Whether `selection` is one plain cursor, in Live Preview
         const plain = (selection, s) => selection.ranges.length === 1 && selection.main.empty && s.field(editorLivePreviewField, false);

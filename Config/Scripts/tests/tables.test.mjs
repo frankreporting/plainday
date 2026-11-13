@@ -6,9 +6,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { obsidianPadded, shapeOf, segments, tablesIn } from "./tables.mjs";
+import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
-const TimeReport = vm.runInContext(fs.readFileSync(new URL("../../../plugin/src/classes/timeReport.js", here), "utf8") + "\n;TimeReport", vm.createContext({}));
+const TimeReport = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({}));
 const tr = new TimeReport();
 const table = (head, align, rows) => [...tr.table(head, align, rows)];
 
@@ -136,7 +137,7 @@ test("every table the system writes comes from TimeReport.table: no script build
     };
     walk(new URL("Config/Scripts/", repo));
     walk(new URL("plugin/src/", repo));
-    assert.ok(scripts.some((u) => u.pathname.endsWith("plugin/src/classes/timeReport.js")), "the scan reaches the class files");
+    assert.ok(scripts.some((u) => u.pathname.endsWith("plugin/src/commands/timeReport.js")), "the scan reaches the class files");
     assert.ok(scripts.some((u) => u.pathname.endsWith("Config/Scripts/Templater/recordEvent.js")), "and the Templater scripts");
     const found = [];
     for (const url of scripts) {
@@ -144,7 +145,7 @@ test("every table the system writes comes from TimeReport.table: no script build
         const from = lines.findIndex((l) => /^\s+table\(head, align, rows(?:, \{[^}]*\} = \{\})?\) \{$/.test(l));
         const to = from === -1 ? -1 : lines.findIndex((l, i) => i > from && /^    \}$/.test(l));
         lines.forEach((line, i) => {
-            if (url.pathname.endsWith("plugin/src/classes/timeReport.js") && i >= from && i <= to) return;
+            if (url.pathname.endsWith("plugin/src/commands/timeReport.js") && i >= from && i <= to) return;
             const code = line.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/\s.*$/, "");
             if (/join\(\s*["'`] \| ["'`]\s*\)|["'`]\|(?: |\$\{)/.test(code)) found.push(`${url.pathname.slice(repo.pathname.length)}:${i + 1}: ${line.trim()}`);
         });

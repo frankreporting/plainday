@@ -1,4 +1,7 @@
-class JumpToDate {
+import { Modal, moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class JumpToDate {
     // Set on this device when "Don't ask again" is ticked; the prompt offers to undo it
     static SKIP_KEY = "obsidian-pm-jump-create-without-asking";
     static TEMPLATE = { week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
@@ -10,8 +13,8 @@ class JumpToDate {
     // opens it in a split to the right. A note that doesn't exist yet is created from its template,
     // after asking.
     async invoke() {
-        const rules = customJS.DatePrompt.weekRules();
-        customJS.DatePrompt.open("Jump to", async (result, modal, event) => {
+        const rules = plainday.DatePrompt.weekRules();
+        plainday.DatePrompt.open("Jump to", async (result, modal, event) => {
             modal.close();
             let target;
             try {
@@ -70,7 +73,7 @@ class JumpToDate {
     // The locale's month names, full and short (a locale can keep separate forms for "in a date" and
     // "on its own"; the ones on their own are what you'd type)
     monthNames(rules) {
-        const data = window.moment.localeData(rules.locale);
+        const data = moment.localeData(rules.locale);
         const list = (names) => (Array.isArray(names) ? names : names?.standalone ?? names?.format ?? []);
         return { months: list(data.months()), short: list(data.monthsShort()) };
     }
@@ -79,16 +82,16 @@ class JumpToDate {
     // "2027"): { date, unit }, or null. With `ahead` (Schedule), words without a year for a week or a
     // month that's over mean next year's: "jan" in October is the coming January.
     fromName(text, rules, { ahead = false } = {}) {
-        const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: window.moment().year() });
+        const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: moment().year() });
         if (words) {
             const found = this.fromWords(words, rules);
-            if (ahead && found && !words.withYear && JumpToDate.over(found, window.moment().format("YYYY-MM-DD"))) {
+            if (ahead && found && !words.withYear && JumpToDate.over(found, moment().format("YYYY-MM-DD"))) {
                 return this.fromWords({ ...words, year: words.year + 1 }, rules);
             }
             return found;
         }
         for (const unit of ["week", "month", "year"]) {
-            const m = window.moment(text, rules.format[unit], rules.locale, true);
+            const m = moment(text, rules.format[unit], rules.locale, true);
             if (m.isValid() && m.format(rules.format[unit]) === text) {
                 // A week's name already reads as its first day; startOf("week") would move that to the
                 // locale's first day, which for ISO weeks in English is the Sunday of the week before
@@ -103,7 +106,7 @@ class JumpToDate {
     fromWords({ unit, year, n }, rules) {
         if (unit === "month") return n >= 1 && n <= 12 ? { date: `${year}-${String(n).padStart(2, "0")}-01`, unit } : null;
         const iso = this.isoWeeks(rules);
-        const m = window.moment().locale(rules.locale);
+        const m = moment().locale(rules.locale);
         if (iso) m.isoWeekYear(year).isoWeek(n).startOf("isoWeek");
         else m.weekYear(year).week(n).startOf("week");
         const same = iso ? m.isoWeekYear() === year && m.isoWeek() === n : m.weekYear() === year && m.week() === n;
@@ -117,20 +120,20 @@ class JumpToDate {
 
     // A week's, month's or year's note name, in the pattern's spelling and the user's locale
     periodName({ date, unit }, rules) {
-        return window.moment(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
+        return moment(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
     }
 
     // The note a date opens: { path, name, kind, when, result }
     target(result, rules) {
         const { unit, m } = result;
-        const when = customJS.DatePrompt.spell(result, rules.weekStart);
+        const when = plainday.DatePrompt.spell(result, rules.weekStart);
         if (unit === "day") {
-            const path = customJS.Plan.dailyNotePath(m);
+            const path = plainday.Plan.dailyNotePath(m);
             return { path, name: path.split("/").pop().replace(/\.md$/, ""), kind: "daily", when, result };
         }
         const name = this.periodName(result, rules);
         const kind = { week: "weekly", month: "monthly", year: "yearly" }[unit];
-        return { path: `${customJS.TimeReport.periodFolders()[unit]}/${name}.md`, name, kind, when, result };
+        return { path: `${plainday.TimeReport.periodFolders()[unit]}/${name}.md`, name, kind, when, result };
     }
 
     // A new daily note goes through Plan, which runs the Daily Note template; a weekly, monthly or
@@ -139,7 +142,7 @@ class JumpToDate {
     // trigger fills it as it would any new note.
     async create(target) {
         const { unit, m } = target.result;
-        if (unit === "day") return customJS.Plan.ensureDailyNote(m);
+        if (unit === "day") return plainday.Plan.ensureDailyNote(m);
         const folder = target.path.slice(0, target.path.lastIndexOf("/"));
         if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
         const tpl = this.templateFor(unit);
@@ -147,7 +150,7 @@ class JumpToDate {
         const file = await app.vault.create(target.path, "");
         if (tpl && templater) {
             await templater.write_template_to_file(tpl, file);
-            customJS.Plan.holdOffTemplater(file.path);
+            plainday.Plan.holdOffTemplater(file.path);
         } else if (tpl) {
             new Notice("Templater unavailable — created a blank note");
         }
@@ -177,7 +180,6 @@ class JumpToDate {
 
     // Asks before creating a note. Enter creates, Escape and Cancel don't. Resolves true to create.
     confirm(target) {
-        const { Modal } = customJS.obsidian;
         return new Promise((resolve) => {
             const modal = new Modal(app);
             let create = false;

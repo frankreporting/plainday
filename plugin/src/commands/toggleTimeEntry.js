@@ -1,4 +1,7 @@
-class ToggleTimeEntry {
+import { FuzzySuggestModal, Keymap, MarkdownView, moment, Notice } from "obsidian";
+import { app, plainday } from "../host.js";
+
+export default class ToggleTimeEntry {
     // The "Toggle time entry" command, on ⌘ T. On or under a task or event it starts a time entry
     // ("- 9:01am - ") after its sub-bullets, or fills in the end time on its running one (the entry
     // on the cursor's line wins; with several, a dropdown asks which). Anywhere else, in reading
@@ -12,9 +15,9 @@ class ToggleTimeEntry {
     // The logic, with its tests, is in TimeReport (toggleEntry, runningChoices, taskChoices,
     // toggleText, lineCursor, foldsAfterInsert).
     async invoke() {
-        const report = customJS.TimeReport;
-        const now = () => window.moment().format("h:mma");
-        const view = app.workspace.getActiveViewOfType(customJS.obsidian.MarkdownView);
+        const report = plainday.TimeReport;
+        const now = () => moment().format("h:mma");
+        const view = app.workspace.getActiveViewOfType(MarkdownView);
         // In reading view the cursor is hidden, so that goes to the dropdown too
         const editor = view?.getMode() === "source" ? view.editor : null;
 
@@ -59,22 +62,22 @@ class ToggleTimeEntry {
 
     // How many days before today a daily note's date is; 0 for any other note
     daysAgo(file) {
-        if (!file || !customJS.Schedule.isDailyNote(file)) return 0;
-        const { format } = customJS.Schedule.dailyOpts();
-        return window.moment().startOf("day").diff(window.moment(file.basename, format, true), "days");
+        if (!file || !plainday.Schedule.isDailyNote(file)) return 0;
+        const { format } = plainday.Schedule.dailyOpts();
+        return moment().startOf("day").diff(moment(file.basename, format, true), "days");
     }
 
     // Whether a timer can start in this note: only in today's daily note. The time report reads only
     // daily notes and dates each entry by its note, so a timer anywhere else would be lost or misdated.
     canStart(file) {
-        return !!file && customJS.Schedule.isDailyNote(file) && this.daysAgo(file) === 0;
+        return !!file && plainday.Schedule.isDailyNote(file) && this.daysAgo(file) === 0;
     }
 
     // [{ file, text, line, daysAgo, label }]: running timers in every daily note, today's first
     // and then newest day first, followed by today's open tasks and events
     async choices(report) {
         const days = app.vault.getMarkdownFiles()
-            .filter((f) => customJS.Schedule.isDailyNote(f))
+            .filter((f) => plainday.Schedule.isDailyNote(f))
             .map((file) => ({ file, daysAgo: this.daysAgo(file) }))
             .sort((a, b) => a.daysAgo - b.daysAgo);
         const texts = await Promise.all(days.map((d) => this.textOf(d.file)));
@@ -90,7 +93,7 @@ class ToggleTimeEntry {
                 todays.push(...report.runningChoices(lines).map(at));
                 tasks.push(...report.taskChoices(lines).map(at));
             } else {
-                others.push(...report.runningChoices(lines, window.moment().subtract(d.daysAgo, "days").format("M/D")).map(at));
+                others.push(...report.runningChoices(lines, moment().subtract(d.daysAgo, "days").format("M/D")).map(at));
             }
         });
         // Future notes (negative daysAgo) sort ahead of today; timers there are unlikely, but go last
@@ -101,7 +104,6 @@ class ToggleTimeEntry {
     // A type-to-filter dropdown of { label } items. Resolves to { item, go } (go: picked with ⌘ ↵,
     // to go to its line), or null.
     pick(items, placeholder) {
-        const { FuzzySuggestModal, Keymap } = customJS.obsidian;
         return new Promise((resolve) => {
             let chosen = false;
             const modal = new (class extends FuzzySuggestModal {
@@ -121,13 +123,13 @@ class ToggleTimeEntry {
     // Opens the note in the current tab (unless it's already in front, in editing view) and puts
     // the cursor at `pos`, unfolding only what hides that line
     async goTo(file, pos) {
-        let view = app.workspace.getActiveViewOfType(customJS.obsidian.MarkdownView);
+        let view = app.workspace.getActiveViewOfType(MarkdownView);
         if (view?.file !== file || view.getMode() !== "source") {
             const leaf = app.workspace.getLeaf(false);
             await leaf.openFile(file, { active: true, state: { mode: "source" } });
             view = leaf.view;
             // A daily note refolds as it opens (RefoldOnOpen); let that finish before unfolding
-            await customJS.RefoldDailyNotes?.onOpen(file);
+            await plainday.RefoldDailyNotes?.onOpen(file);
         }
         const info = view.currentMode.getFoldInfo?.();
         if (info) {

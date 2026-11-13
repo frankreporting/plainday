@@ -139,9 +139,9 @@ scenario("Cancel writes nothing; Esc on the menu writes nothing; the line changi
     v = standIn({ notes, open: day("2026-09-11"), at: 0, lag });
     const editor = v.app.workspace.activeLeaf.view.editor;
     v.answering(NEW, "move");
-    const ask = v.customJS.AddTaskNote.confirmMove;
-    v.customJS.AddTaskNote.confirmMove = async (...a) => { editor.replaceRange("!", { line: 0, ch: 6 }); return ask(...a); };
-    await v.customJS.AddProjectLink.invoke();
+    const ask = v.plainday.AddTaskNote.confirmMove;
+    v.plainday.AddTaskNote.confirmMove = async (...a) => { editor.replaceRange("!", { line: 0, ch: 6 }); return ask(...a); };
+    await v.plainday.AddProjectLink.invoke();
     assert.equal(v.notes()[day("2026-09-11")], "- [x] !Copy [[Old|⭕]] [[Write copy|⋯]]\n\t- 3:00pm - 4:20pm\n");
     assert.ok(v.notes()[NOTE], "nothing moved");
     assert.equal(v.notices.at(-1), "The line changed while you were asked, so nothing changed");
@@ -241,7 +241,7 @@ scenario("MoveToProject leaves alone what it doesn't work on, and says why, befo
         assert.deepEqual(v.notes(), notes, path);
         assert.deepEqual(plain(v.menus), [], path);
         assert.equal(v.notices.at(-1), said, path);
-        assert.ok(!v.customJS.MoveToProject.movable([v.file(path)]), `${path}: the menus don't offer it`);
+        assert.ok(!v.plainday.MoveToProject.movable([v.file(path)]), `${path}: the menus don't offer it`);
     }
 });
 
@@ -280,9 +280,9 @@ scenario("the menus leave out a #project note that isn't its folder's own; a fil
     assert.equal(exclude({ extension: "md", basename: "Car checklist", parent: { name: "Old" } }), true);
     assert.equal(exclude(v.file(NEW)), false);
     const pdf = { path: "Inbox/contract.pdf", name: "contract.pdf", extension: "pdf", parent: { path: "Inbox", name: "Inbox" } };
-    assert.ok(!v.customJS.MoveToProject.movable([pdf]));
+    assert.ok(!v.plainday.MoveToProject.movable([pdf]));
     v.answering(NEW, "move");
-    await v.customJS.MoveToProject.move([pdf]);
+    await v.plainday.MoveToProject.move([pdf]);
     assert.equal(v.notices.at(-1), "contract.pdf isn't a note, so it wasn't moved");
 });
 
@@ -588,7 +588,7 @@ scenario("the moved note's lines are still found right after a move, when a look
 
 test("placeInToDo: the end of the section; made above the report when a note has none, or at the end with no report; a line already there isn't added", async () => {
     const v = standIn({ notes: base });
-    const place = (text, block) => v.customJS.TaskChange.constructor.placeInToDo(text, block);
+    const place = (text, block) => v.plainday.TaskChange.constructor.placeInToDo(text, block);
     const block = ["- [ ] Moved", "\t- nested"];
     assert.equal(place(`${PROJECT}## To Do\n\n- [ ] One\n\n## Notes\n\nText\n`, block), `${PROJECT}## To Do\n\n- [ ] One\n- [ ] Moved\n\t- nested\n\n## Notes\n\nText\n`);
     assert.equal(place(`${PROJECT}## To Do\n\n## Time Report\n`, block), `${PROJECT}## To Do\n\n- [ ] Moved\n\t- nested\n\n## Time Report\n`);
@@ -699,7 +699,7 @@ test("every AddTaskNote method a template calls exists, and the Log template fil
     const fs = await import("node:fs");
     const dir = new URL("../../Templates/", import.meta.url);
     const v = standIn({ notes: { ...base, "Projects/Done/Done.md": "---\ntags: [project]\nstatus: Done\n---\n", "Archive/Gone/Gone.md": PROJECT, [day("2026-09-14")]: "" } });
-    const helper = v.customJS.AddTaskNote;
+    const helper = v.plainday.AddTaskNote;
     for (const name of fs.readdirSync(dir)) {
         const text = fs.readFileSync(new URL(name, dir), "utf8");
         for (const m of text.matchAll(/\btasks\??\.(\w+)/g)) assert.equal(typeof helper[m[1]], "function", `${name}: tasks.${m[1]}`);
@@ -822,7 +822,7 @@ scenario("a fresh note named apart is found again: the task's next line, or a ru
     assert.deepEqual(named(v), [ARCHIVED, FRESH]);
     // The line changes while the template runs: the note is made but not linked, and running it again links it
     v = standIn({ notes, open: day("2026-09-15"), at: 0, lag });
-    const helper = v.customJS.AddTaskNote, make = helper.createTaskNote, editor = v.app.workspace.activeLeaf.view.editor;
+    const helper = v.plainday.AddTaskNote, make = helper.createTaskNote, editor = v.app.workspace.activeLeaf.view.editor;
     let once = true;
     helper.createTaskNote = async (...a) => {
         const note = await make(...a);
@@ -983,13 +983,13 @@ scenario("a line that shifted while the question was open is found by where its 
     }, open: day("2026-09-12"), at: 0, lag });
     v.answering(NEW, "move");
     // A synced event arrives above the lines while you're asked, and the moved note's links come back as paths
-    const ask = v.customJS.AddTaskNote.confirmMove;
-    v.customJS.AddTaskNote.confirmMove = async (...a) => {
+    const ask = v.plainday.AddTaskNote.confirmMove;
+    v.plainday.AddTaskNote.confirmMove = async (...a) => {
         await v.app.vault.process(v.file(day("2026-09-11")), (t) => `- [<] 8:00am\tSynced event\n${t}`);
         return ask(...a);
     };
     v.tick();
-    await v.customJS.AddProjectLink.invoke();
+    await v.plainday.AddProjectLink.invoke();
     assert.equal(v.notes()[day("2026-09-11")], "- [<] 8:00am\tSynced event\n- [x] Call [[Other|⭕]] [[Notes2|⋯]]\n- [x] Call [[New|⭕]] [[Projects/New/Notes|⋯]]\n");
 });
 
@@ -1169,7 +1169,7 @@ scenario("AddTaskNote takes the live note of a name an archived note shares, and
 test("a note in a folder of its own name that the cache doesn't know yet is taken for a project's own note, and doesn't move", () => {
     const WEB = "Projects/Old/Website/Website.md";
     const v = standIn({ notes: { ...base, [WEB]: PROJECT } });
-    const change = v.customJS.TaskChange, get = v.app.metadataCache.getFileCache.bind(v.app.metadataCache);
+    const change = v.plainday.TaskChange, get = v.app.metadataCache.getFileCache.bind(v.app.metadataCache);
     v.app.metadataCache.getFileCache = (f) => (f.path === WEB ? null : get(f));
     assert.equal(change.ours(v.file(WEB)), false);
 });
@@ -1201,7 +1201,7 @@ const clean = () => ({
 // the task's: every line outside the task keeps the 🚩 it had `before` (the notes before DueDate, which adds no
 // line but a `due:` in a note's properties).
 const deadlines = (v, path, at, date, before) => {
-    const tr = v.customJS.TimeReport, ids = v.customJS.TaskIds, T = ids.constructor, change = v.customJS.TaskChange;
+    const tr = v.plainday.TimeReport, ids = v.plainday.TaskIds, T = ids.constructor, change = v.plainday.TaskChange;
     const taskNote = (n) => { const tags = change.constructor.frontTags(v.notes()[n].split("\n")); return tags.includes("task") && !tags.includes("log") && !n.includes("/›logs/"); };
     if (!/^- \[/.test(v.notes()[path].split("\n")[at]) || tr.eventKind(v.notes()[path].split("\n")[at])) return [];
     const all = [];
@@ -1340,7 +1340,7 @@ test("planted bugs in DueDate: the sequences catch each one", async () => {
             if (script !== "setDueDate") return text;
             assert.ok(text.includes(from), `${name}: nothing to plant`);
             // A subtask's lines are found only past the start's task
-            const planted = text.replace(from, to).replace("const change = customJS.TaskChange, tr = customJS.TimeReport;", "const change = customJS.TaskChange, tr = customJS.TimeReport, T = customJS.TaskIds.constructor;");
+            const planted = text.replace(from, to).replace("const change = plainday.TaskChange, tr = plainday.TimeReport;", "const change = plainday.TaskChange, tr = plainday.TimeReport, T = plainday.TaskIds.constructor;");
             return name.includes("subtask") ? planted.replace("change.find(start, { family: false })", "change.find(start)") : planted;
         };
         let caught = false;

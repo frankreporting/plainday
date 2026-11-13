@@ -34,6 +34,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
+import { loadClass } from "../../../../plugin/classShape.mjs";
 
 export const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 export const PLANNER = "Reference/Planner";
@@ -52,18 +53,17 @@ const contexts = new WeakMap();
 // logs folder is called (OBS-233: a note in one is a log)
 export function loadTimeReport(root = ROOT) {
     const ctx = vm.createContext({});
-    const load = (file, name) => vm.runInContext(fs.readFileSync(path.join(root, `plugin/src/classes/${file}.js`), "utf8") + `\n;${name}`, ctx);
-    ctx.customJS = { AddTaskNote: new (load("addTaskNote", "AddTaskNote"))() };
-    const TimeReport = load("timeReport", "TimeReport");
+    const load = (file) => loadClass(`${file}.js`, ctx, path.join(root, "plugin/src"));
+    ctx.plainday = { AddTaskNote: new (load("addTaskNote"))() };
+    const TimeReport = load("timeReport");
     const tr = new TimeReport();
-    contexts.set(tr, { TaskIds: load("taskIds", "TaskIds") });
+    contexts.set(tr, { TaskIds: load("taskIds") });
     return tr;
 }
 
 // Billing, which reads the invoice notes for the project timesheets (OBS-5)
 export function loadBilling(root = ROOT) {
-    const code = fs.readFileSync(path.join(root, "plugin/src/classes/billing.js"), "utf8");
-    const Billing = vm.runInContext(code + "\n;Billing", vm.createContext({}));
+    const Billing = loadClass("billing.js", vm.createContext({}), path.join(root, "plugin/src"));
     return new Billing();
 }
 
