@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/trailingLinks.js. Run from the vault root:
+// Tests for plugin/src/startup/trailingLinks.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // Only the text rules are pure; the editor extension and its CSS are checked in a dev vault.
 import { test } from "node:test";

@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/syncArea.js. Run from the vault root:
+// Tests for plugin/src/startup/syncArea.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the parts that don't touch `app`
 // are tested: isInvoice, and how `parent` replaces the older `area` (OBS-175). SyncArea leaves an

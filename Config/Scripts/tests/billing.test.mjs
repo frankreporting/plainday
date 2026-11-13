@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/billing.js. Run from the vault root:
+// Tests for plugin/src/shared/billing.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, next to TimeReport, whose parser and
 // model it reads. Every project, client, amount and entry here is invented.

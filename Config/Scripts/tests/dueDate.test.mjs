@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/setDueDate.js. Run from the vault root:
+// Tests for plugin/src/commands/setDueDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // `placement` and `cursorAfter` first; then the command on a stand-in vault, with and without the cache a
 // command behind: the deadline on every line of the task, and its task note's `due` (OBS-229). Every name,

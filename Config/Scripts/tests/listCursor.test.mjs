@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/listCursor.js. Run from the vault root:
+// Tests for plugin/src/startup/listCursor.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // Only the text and fold rules are pure; the editor extension is checked in a vault, with real key presses.
 import { test } from "node:test";

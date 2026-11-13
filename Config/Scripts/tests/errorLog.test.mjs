@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/errorLog.js (OBS-218). Run from the vault root:
+// Tests for plugin/src/shared/errorLog.js (OBS-218). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, next to TimeReport and Billing, whose
 // model it reads. Every project, note and entry here is invented.

@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/taskIds.js. Run from the vault root:
+// Tests for plugin/src/shared/taskIds.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";

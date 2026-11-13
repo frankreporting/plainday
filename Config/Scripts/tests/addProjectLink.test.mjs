@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/addProjectLink.js. Run from the vault root:
+// Tests for plugin/src/commands/addProjectLink.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm beside AddTaskNote, whose pure helpers it uses through `plainday`;
 // only the methods that don't touch `app` are tested. The menu,

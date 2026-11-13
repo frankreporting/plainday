@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
+// Tests for plugin/src/commands/moveToProject.js and moveToProjectMenu.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The classes are loaded with vm beside AddTaskNote, AddProjectLink and TimeReport, whose helpers
 // they use through `plainday`, the way Plainday gives it to them. The planning and the line edits

@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/refoldDailyNotes.js. Run from the vault root:
+// Tests for plugin/src/shared/refoldDailyNotes.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, against a stub of what refold() asks
 // of `app`: the note's text, one open view of it, the saved fold record and local storage. Folds

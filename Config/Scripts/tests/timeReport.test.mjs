@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/timeReport.js. Run from the vault root:
+// Tests for plugin/src/commands/timeReport.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Checks against a real vault's data can go in

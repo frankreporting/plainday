@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
+// Tests for plugin/src/startup/newNoteGuard.js (OBS-171) and the two template guards that go with it. Run from
 // the vault root: node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm, with a fake `app`. The last test reads
 // Templater's own code when it's installed in this folder (the dev vault), since the guard leans on

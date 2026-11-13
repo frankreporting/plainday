@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/schedule.js. Run from the vault root:
+// Tests for plugin/src/commands/schedule.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";

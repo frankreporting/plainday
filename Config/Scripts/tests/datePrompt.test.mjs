@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/datePrompt.js and jumpToDate.js. Run from the vault root:
+// Tests for plugin/src/shared/datePrompt.js and jumpToDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The date plugin's answers come from datePrompt.revived.json, recorded from Natural Language Dates
 // (Revived) itself with a fixed clock, so these check the prompt against what the plugin really says.

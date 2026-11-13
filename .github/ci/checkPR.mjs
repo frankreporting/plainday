@@ -18,7 +18,7 @@ export const SYSTEM_DIRS = [
     "Config/Scripts/Templater/",
     "Config/Scripts/Calendar/",
     "Config/Templates/",
-    // Plainday (OBS-226), with the class files in plugin/src/classes/ (OBS-270)
+    // Plainday (OBS-226), with the class files in plugin/src/ (OBS-270, OBS-271)
     "plugin/",
     "manifest.json",
 ];

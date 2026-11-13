@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/updateObsidianPM.js. Run from the vault root:
+// Tests for plugin/src/commands/updateObsidianPM.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the planning, which doesn't
 // touch `app`, the file system or git, is tested.

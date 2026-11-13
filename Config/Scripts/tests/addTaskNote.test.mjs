@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/addTaskNote.js. Run from the vault root:
+// Tests for plugin/src/commands/addTaskNote.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm; only the methods that don't touch
 // `app` are tested. Creating the note through Templater is checked in a dev vault.

@@ -1,4 +1,4 @@
-// Tests for plugin/src/classes/calendarSync.js. Run from the vault root:
+// Tests for plugin/src/commands/calendarSync.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm. The pure parts (applyOne, runOps,
 // findBlock) are tested on note text; whole runs go through run() against an in-memory vault, with
