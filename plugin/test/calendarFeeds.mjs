@@ -158,7 +158,8 @@ function home(day) {
 }
 
 // Library, an Outlook published calendar: a weekly series in Outlook's "Eastern Standard Time",
-// and an invitation the owner declined, found as the attendee on the most events
+// and an invitation the owner declined. Outlook lists a meeting's organizer as its ORGANIZER only,
+// never among its attendees; the owner is found as the person on the most events
 function library(day) {
     const d = (n) => dayOf(day, n);
     const ET = "TZID=Eastern Standard Time";
@@ -166,14 +167,14 @@ function library(day) {
     return ics([
         "BEGIN:VCALENDAR", "METHOD:PUBLISH", "PRODID:Microsoft Exchange Server 2010", "VERSION:2.0", "X-WR-CALNAME:Library",
         ...EASTERN_OUTLOOK,
-        ...event(["ORGANIZER;CN=Coordinator:mailto:coord@example.org", outlook("Coordinator", "coord@example.org", "ACCEPTED"),
-            outlook("Library Desk", owner, "ACCEPTED"), "DESCRIPTION;LANGUAGE=en-US:Weekly look at the brochure drafts.\\n",
+        ...event(["ORGANIZER;CN=Coordinator:mailto:coord@example.org", outlook("Library Desk", owner, "ACCEPTED"),
+            "DESCRIPTION;LANGUAGE=en-US:Weekly look at the brochure drafts.\\n",
             `RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=${weekday(day, 7)};WKST=SU`, "UID:040000008200E00074C5B7101A82E0080000000000000000000000000000000000000001",
             "SUMMARY;LANGUAGE=en-US:Brochure check-in", `DTSTART;${ET}:${d(7)}T110000`, `DTEND;${ET}:${d(7)}T113000`,
             "CLASS:PUBLIC", "PRIORITY:5", `DTSTAMP:${STAMP}`, "TRANSP:OPAQUE", "STATUS:CONFIRMED", "SEQUENCE:0",
             "X-MICROSOFT-CDO-BUSYSTATUS:BUSY"]),
-        ...event(["ORGANIZER;CN=Audit Lead:mailto:audit@example.org", outlook("Audit Lead", "audit@example.org", "ACCEPTED"),
-            outlook("Library Desk", owner, "DECLINED"), "UID:040000008200E00074C5B7101A82E0080000000000000000000000000000000000000002",
+        ...event(["ORGANIZER;CN=Audit Lead:mailto:audit@example.org", outlook("Library Desk", owner, "DECLINED"),
+            "UID:040000008200E00074C5B7101A82E0080000000000000000000000000000000000000002",
             "SUMMARY;LANGUAGE=en-US:Shelf audit", `DTSTART;${ET}:${d(3)}T090000`, `DTEND;${ET}:${d(3)}T100000`,
             "CLASS:PUBLIC", "PRIORITY:5", `DTSTAMP:${STAMP}`, "TRANSP:OPAQUE", "STATUS:CONFIRMED", "SEQUENCE:0",
             "X-MICROSOFT-CDO-BUSYSTATUS:BUSY"]),

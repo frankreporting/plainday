@@ -87,7 +87,8 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, when its link says it: a Google link's path holds the calendar
-    // ID. Otherwise null, and the reader takes the attendee on the most events.
+    // ID. Otherwise null, and the reader takes the person on the most events, as an attendee or the
+    // organizer.
     owner(link) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (!m) return null;

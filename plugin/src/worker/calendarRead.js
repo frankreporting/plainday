@@ -9,7 +9,8 @@
 //   → { name, events, failed: [{ uid, title }], stats } or { problem: "unreadable" }
 //
 // `window` holds the instants (or ms) an event's start must fall between; `owner` is the calendar's
-// own address when the link says it (Google's), else the attendee on the most events is taken.
+// own address when the link says it (Google's), else the person on the most events, as an attendee
+// or the organizer, is taken.
 //
 // How it reads a feed, from what OBS-227's spike found on real feeds:
 // - One-off events that ended more than a day before the window are dropped from the text before
@@ -188,7 +189,8 @@ export class CalendarReader {
             const fail = (uid, title) => { if (!failed.get(uid)) failed.set(uid, title || null); };
             const series = new Map();
             const all = [];
-            // The attendees of events that didn't parse, which still count toward the owner
+            // The attendees and organizers of events that didn't parse, which still count toward
+            // the owner
             const unread = [];
             for (const block of blocks) {
                 let ve = null;
@@ -201,10 +203,10 @@ export class CalendarReader {
                 if (ve?.name !== "vevent") {
                     // An event that doesn't parse: left out by its UID, or, with none to name it,
                     // the whole feed is unreadable
-                    const { uid, title, attendees } = this.unparsed(block);
+                    const { uid, title, people } = this.unparsed(block);
                     if (!uid) return { problem: "unreadable" };
                     fail(uid, title);
-                    unread.push(attendees);
+                    unread.push(people);
                     continue;
                 }
                 const uid = String(ve.getFirstPropertyValue("uid") ?? "").trim();
@@ -318,12 +320,13 @@ export class CalendarReader {
         return !!m && Number(m[1]) < cutoff;
     }
 
-    // The UID, title and attendees of an event that doesn't parse, read as ical.js reads those of
-    // events that do (parameters left out, escapes undone), from the event's own lines: not those
-    // of an alarm or anything else inside it, which can have a UID of its own
+    // The UID, title and people (attendees and organizer) of an event that doesn't parse, read as
+    // ical.js reads those of events that do (parameters left out, escapes undone), from the
+    // event's own lines: not those of an alarm or anything else inside it, which can have a UID of
+    // its own
     unparsed(block) {
         let depth = 0, uid = null, title = null;
-        const attendees = [];
+        const people = [];
         for (const line of block.replace(/\r?\n[ \t]/g, "").split(/\r?\n/)) {
             if (/^BEGIN:/i.test(line)) { depth++; continue; }
             if (/^END:/i.test(line)) { depth--; continue; }
@@ -332,12 +335,12 @@ export class CalendarReader {
                 const value = () => String(ICAL.Property.fromString(line.trim()).getFirstValue() ?? "").trim() || null;
                 if (!uid && /^UID[;:]/i.test(line)) uid = value();
                 if (!title && /^SUMMARY[;:]/i.test(line)) title = value();
-                if (/^ATTENDEE[;:]/i.test(line)) attendees.push(this.attendee(ICAL.Property.fromString(line.trim())));
+                if (/^(?:ATTENDEE|ORGANIZER)[;:]/i.test(line)) people.push(this.attendee(ICAL.Property.fromString(line.trim())));
             } catch {
                 // a line that doesn't parse names nothing
             }
         }
-        return { uid, title, attendees };
+        return { uid, title, people };
     }
 
     // Readies the zones for the read: a time in a zone the device knows by its full name is read
@@ -432,6 +435,7 @@ export class CalendarReader {
             emit(master, ev.startDate, ev.endDate, null);
             return true;
         }
+        if (ev.startDate.isDate) for (const ex of exceptions) this.asDate(ex);
         const byInstant = this.overrides(exceptions);
         if (!this.written(ev, byInstant)) return false;
         // Occurrences are looked at from a day before the window to a day after it; an override
@@ -472,8 +476,9 @@ export class CalendarReader {
     // Whether a series is as Google Calendar, Apple's Calendar and Outlook write one, each a plain
     // yes or no, so nothing past that is worked out by hand. The apps write a moved occurrence's
     // original start, and any extra date (RDATE), in the zone of the series' own start (or all of
-    // them in UTC, or as dates for an all-day series), and split a series in two for a "this and
-    // all following" change rather than writing one (RANGE=THISANDFUTURE).
+    // them in UTC, or as dates for an all-day series, iCloud's midnights read by asDate()), and
+    // split a series in two for a "this and all following" change rather than writing one
+    // (RANGE=THISANDFUTURE).
     written(ev, byInstant) {
         const zone = this.zoneOf(ev.startDate);
         for (const e of byInstant.values()) {
@@ -483,6 +488,17 @@ export class CalendarReader {
             if (p.type === "period" || p.getValues().some((t) => this.zoneOf(t) !== zone)) return false;
         }
         return true;
+    }
+
+    // An override of an all-day series whose original date is written as midnight, a time rather
+    // than a date, as iCloud has been reported to write it: that midnight is read as the date. Any
+    // other time can't be told for sure, and written() leaves the series out.
+    asDate(ex) {
+        const p = ex.getFirstProperty("recurrence-id");
+        const t = p?.getFirstValue();
+        if (!t || t.isDate || t.hour || t.minute || t.second) return;
+        p.removeParameter("tzid");
+        p.setValue(new ICAL.Time({ year: t.year, month: t.month, day: t.day, isDate: true }));
     }
 
     // How a time is written: as a date, in UTC, floating, or in a named zone
@@ -569,14 +585,17 @@ export class CalendarReader {
         };
     }
 
-    // The attendee on the most events read, those that didn't parse included (`unread`, each a
-    // list of addresses), lowercased. Null when there's none, or two are on as many.
+    // The person on the most events read, as an attendee or the organizer, those that didn't parse
+    // included (`unread`, each a list of addresses), lowercased. Null when there's none, or two are
+    // on as many. The organizer counts because Outlook doesn't list the organizer among the
+    // attendees: counting attendees alone, a guest on many of the owner's meetings could be taken
+    // for the owner, and a meeting that guest declined left out.
     owner(vevents, unread = []) {
         const counts = new Map();
         const count = (addresses) => {
             for (const who of new Set(addresses)) if (who) counts.set(who, (counts.get(who) ?? 0) + 1);
         };
-        for (const ve of vevents) count(ve.getAllProperties("attendee").map((a) => this.attendee(a)));
+        for (const ve of vevents) count(this.people(ve).map((a) => this.attendee(a)));
         for (const addresses of unread) count(addresses);
         // On a tie it can't tell, and takes no one: no event is left out
         let best = null, most = 0, tie = false;
@@ -586,7 +605,13 @@ export class CalendarReader {
         return tie ? null : best;
     }
 
-    // An attendee's address: its EMAIL parameter (iCloud's), or its value without `mailto:`
+    // An event's attendees and organizer
+    people(ve) {
+        return [...ve.getAllProperties("attendee"), ...ve.getAllProperties("organizer")];
+    }
+
+    // An attendee's or organizer's address: its EMAIL parameter (iCloud's), or its value without
+    // `mailto:`
     attendee(property) {
         return this.address(property.getParameter("email") ?? property.getFirstValue());
     }
