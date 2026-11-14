@@ -665,29 +665,51 @@ test("a meeting the owner organized stays when a guest on more of the owner's me
     assert.equal(got.stats.declined, 1);
 });
 
-test("a moved day of an all-day series, its original date written as midnight as iCloud has, is read; any other time leaves the series out by name", async () => {
-    const weekly = (uid, title, rid) => [
-        ...vevent(`UID:${uid}`, `SUMMARY:${title}`, "DTSTART;VALUE=DATE:20261102", "DTEND;VALUE=DATE:20261103", "RRULE:FREQ=WEEKLY"),
+test("a placeholder for an address, as Exchange writes an organizer it can't name, isn't taken for the owner", async () => {
+    const nomail = "ORGANIZER;CN=Library Desk:invalid:nomail";
+    const text = calendar([
+        ...vevent("UID:m1@example.org", "SUMMARY:Planning", "DTSTART:20261113T140000Z", nomail),
+        ...vevent("UID:m2@example.org", "SUMMARY:Story time", "DTSTART:20261114T140000Z", nomail),
+        ...vevent("UID:m3@example.org", "SUMMARY:Book fair", "DTSTART:20261115T140000Z", nomail),
+        ...vevent("UID:i1@example.org", "SUMMARY:Budget", "DTSTART:20261116T140000Z", "ORGANIZER:mailto:lead@example.org",
+            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:desk@example.org", "ATTENDEE;PARTSTAT=DECLINED:invalid:nomail"),
+        ...vevent("UID:i2@example.org", "SUMMARY:Inventory", "DTSTART:20261117T140000Z", "ORGANIZER:mailto:chair@example.org",
+            "ATTENDEE;PARTSTAT=DECLINED:mailto:desk@example.org"),
+    ]);
+    const { feed } = reader();
+    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
+    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Planning", "Story time", "Book fair", "Budget"]);
+    assert.equal(got.stats.declined, 1);
+});
+
+test("an all-day series' moved and deleted days, their dates written as midnight as iCloud has, are read; any other time leaves the series out by name", async () => {
+    const weekly = (uid, title, rid, ...more) => [
+        ...vevent(`UID:${uid}`, `SUMMARY:${title}`, "DTSTART;VALUE=DATE:20261102", "DTEND;VALUE=DATE:20261103", "RRULE:FREQ=WEEKLY", ...more),
         ...vevent(`UID:${uid}`, `SUMMARY:${title}, moved`, rid, "DTSTART;VALUE=DATE:20261117", "DTEND;VALUE=DATE:20261118"),
     ];
     const text = calendar([
-        ...weekly("floating@example.org", "Floating", "RECURRENCE-ID:20261116T000000"),
-        ...weekly("zoned@example.org", "Zoned", "RECURRENCE-ID;TZID=America/New_York:20261116T000000"),
-        ...weekly("date@example.org", "Date", "RECURRENCE-ID;VALUE=DATE:20261116"),
+        // Monday the 16th moved to Tuesday the 17th, and Monday the 23rd deleted
+        ...weekly("floating@example.org", "Floating", "RECURRENCE-ID:20261116T000000", "EXDATE:20261123T000000"),
+        ...weekly("zoned@example.org", "Zoned", "RECURRENCE-ID;TZID=America/New_York:20261116T000000", "EXDATE;TZID=America/New_York:20261123T000000"),
+        ...weekly("utc@example.org", "UTC", "RECURRENCE-ID:20261116T000000Z", "EXDATE:20261123T000000Z"),
+        ...weekly("date@example.org", "Date", "RECURRENCE-ID;VALUE=DATE:20261116", "EXDATE;VALUE=DATE:20261123"),
+        // Any other time, on a moved day or a deleted one, and a "this and all following" change
         ...weekly("nine@example.org", "Nine", "RECURRENCE-ID:20261116T090000"),
+        ...weekly("nine-out@example.org", "Nine, deleted", "RECURRENCE-ID:20261116T000000", "EXDATE:20261123T090000"),
+        ...weekly("range@example.org", "Range", "RECURRENCE-ID;RANGE=THISANDFUTURE:20261116T000000"),
     ]);
     const before = process.env.TZ;
     try {
-        // In New York, and in Tokyo, where New York's midnight is another day's afternoon
-        for (const zone of ["America/New_York", "Asia/Tokyo"]) {
+        // In New York, and where New York's midnight falls on another day, or at another hour
+        for (const zone of ["America/New_York", "Asia/Tokyo", "America/Los_Angeles"]) {
             process.env.TZ = zone;
             const { feed } = reader();
-            const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(14, at("2026-11-12")) });
-            assert.deepEqual(uids(got.failed), ["nine@example.org"], zone);
-            for (const [uid, title] of [["floating@example.org", "Floating"], ["zoned@example.org", "Zoned"], ["date@example.org", "Date"]]) {
+            const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(21, at("2026-11-12")) });
+            assert.deepEqual(uids(got.failed), ["nine-out@example.org", "nine@example.org", "range@example.org"], zone);
+            for (const [uid, title] of [["floating@example.org", "Floating"], ["zoned@example.org", "Zoned"], ["utc@example.org", "UTC"], ["date@example.org", "Date"]]) {
                 assert.deepEqual(plain(got.events.filter((e) => e.id === uid).map((e) => [e.key, e.title, e.date, e.allDay])), [
                     [`${uid}@2026-11-16`, `${title}, moved`, "2026-11-17", true],
-                    [`${uid}@2026-11-23`, title, "2026-11-23", true],
+                    [`${uid}@2026-11-30`, title, "2026-11-30", true],
                 ], `${zone}: ${uid}`);
             }
         }

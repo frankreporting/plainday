@@ -435,7 +435,7 @@ export class CalendarReader {
             emit(master, ev.startDate, ev.endDate, null);
             return true;
         }
-        if (ev.startDate.isDate) for (const ex of exceptions) this.asDate(ex);
+        if (ev.startDate.isDate && !this.asDates(master, exceptions)) return false;
         const byInstant = this.overrides(exceptions);
         if (!this.written(ev, byInstant)) return false;
         // Occurrences are looked at from a day before the window to a day after it; an override
@@ -476,7 +476,7 @@ export class CalendarReader {
     // Whether a series is as Google Calendar, Apple's Calendar and Outlook write one, each a plain
     // yes or no, so nothing past that is worked out by hand. The apps write a moved occurrence's
     // original start, and any extra date (RDATE), in the zone of the series' own start (or all of
-    // them in UTC, or as dates for an all-day series, iCloud's midnights read by asDate()), and
+    // them in UTC, or as dates for an all-day series, iCloud's midnights read by asDates()), and
     // split a series in two for a "this and all following" change rather than writing one
     // (RANGE=THISANDFUTURE).
     written(ev, byInstant) {
@@ -490,15 +490,38 @@ export class CalendarReader {
         return true;
     }
 
-    // An override of an all-day series whose original date is written as midnight, a time rather
-    // than a date, as iCloud has been reported to write it: that midnight is read as the date. Any
-    // other time can't be told for sure, and written() leaves the series out.
-    asDate(ex) {
-        const p = ex.getFirstProperty("recurrence-id");
-        const t = p?.getFirstValue();
-        if (!t || t.isDate || t.hour || t.minute || t.second) return;
-        p.removeParameter("tzid");
-        p.setValue(new ICAL.Time({ year: t.year, month: t.month, day: t.day, isDate: true }));
+    // An all-day series' days written as midnight, a time rather than a date, as iCloud has been
+    // reported to write a moved day's original date (RECURRENCE-ID): read as the dates they are,
+    // and a deleted day's (EXDATE) likewise. Compared as instants, a midnight in a named zone
+    // would match no day on a device elsewhere, and a deleted day would come back. Any other time
+    // can't be told for sure: false for a deleted day's, and written() leaves the series out for
+    // a moved day's.
+    asDates(master, exceptions) {
+        for (const ex of exceptions) {
+            const p = ex.getFirstProperty("recurrence-id");
+            const t = p?.getFirstValue();
+            if (!t || !this.midnight(t)) continue;
+            p.removeParameter("tzid");
+            p.setValue(this.dayOf(t));
+        }
+        for (const p of master.getAllProperties("exdate")) {
+            const values = p.getValues();
+            if (values.every((t) => t.isDate)) continue;
+            if (!values.every((t) => this.midnight(t))) return false;
+            p.removeParameter("tzid");
+            p.setValues(values.map((t) => this.dayOf(t)));
+        }
+        return true;
+    }
+
+    // Whether a time is midnight, written as a time, not a date
+    midnight(t) {
+        return !t.isDate && !t.hour && !t.minute && !t.second;
+    }
+
+    // A time's date as written, as ical.js reads a date
+    dayOf(t) {
+        return new ICAL.Time({ year: t.year, month: t.month, day: t.day, isDate: true });
     }
 
     // How a time is written: as a date, in UTC, floating, or in a named zone
@@ -589,11 +612,13 @@ export class CalendarReader {
     // included (`unread`, each a list of addresses), lowercased. Null when there's none, or two are
     // on as many. The organizer counts because Outlook doesn't list the organizer among the
     // attendees: counting attendees alone, a guest on many of the owner's meetings could be taken
-    // for the owner, and a meeting that guest declined left out.
+    // for the owner, and a meeting that guest declined left out. Only email addresses count: not a
+    // placeholder such as Exchange's `invalid:nomail` for an organizer it can't name, which would
+    // be on every meeting the owner organized.
     owner(vevents, unread = []) {
         const counts = new Map();
         const count = (addresses) => {
-            for (const who of new Set(addresses)) if (who) counts.set(who, (counts.get(who) ?? 0) + 1);
+            for (const who of new Set(addresses)) if (who.includes("@")) counts.set(who, (counts.get(who) ?? 0) + 1);
         };
         for (const ve of vevents) count(this.people(ve).map((a) => this.attendee(a)));
         for (const addresses of unread) count(addresses);
