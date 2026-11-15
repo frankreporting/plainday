@@ -3212,7 +3212,7 @@ test("OBS-185: the open-twice Problem for a sent line a click turned into [ ] sa
     assert.equal(open.rule, "open");
     const fix = "set it back to `[>]`, or Schedule it, which moves the task and puts the `[>]` back";
     assert.deepEqual(said(open), {
-        [KES]: `is a sent line a click turned from \`[>]\` into \`[ ]\`, so its task is open here and at [[2026-09-17|9/17/26]] line 2; ${fix}`,
+        [KES]: `is a sent line a click turned from \`[>]\` into \`[ ]\`, so its task is open here and at [[2026-09-17|9/17/26]] line 1; ${fix}`,
         [DAY]: `is open, and so is the same task at [[Kestrel|Kestrel]] line 6; [[Kestrel|Kestrel]] line 6 is a sent line a click turned from \`[>]\` into \`[ ]\`: ${fix}`,
     });
     // A line copied by hand to another day: the copy advice, as before

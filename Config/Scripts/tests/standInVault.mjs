@@ -278,7 +278,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
-        CheckOff: make("checkOff", "CheckOff"),
+        CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);

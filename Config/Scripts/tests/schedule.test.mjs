@@ -4,14 +4,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { src, PLANNER, NN, MONTHS, SHORT, momentOn } from "./standInVault.mjs";
+import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn } from "./standInVault.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
-// Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn)
+// Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn) and the
+// calendar sync, whose top list placeInTopList writes into (OBS-280)
 const statics = vm.createContext({ plainday: {} });
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
 statics.plainday.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
 statics.plainday.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
+statics.plainday.CalendarSync = new (vm.runInContext(src("calendarSync") + "\n;CalendarSync", statics))();
 // Values made in the vm, as plain ones, so deepEqual doesn't trip on the vm's own Array
 const plainOf = (x) => JSON.parse(JSON.stringify(x));
 const file = (path) => ({ basename: path.split("/").pop().replace(/\.md$/, ""), parent: { path: path.slice(0, path.lastIndexOf("/")) } });
@@ -19,9 +21,12 @@ const file = (path) => ({ basename: path.split("/").pop().replace(/\.md$/, ""), 
 // Schedule on a stand-in vault and editor, beside the scripts it leans on, all real: DatePrompt for
 // the week rules, JumpToDate for a period's note, TimeReport for the periodic folders, AddTaskNote
 // for links. `notes` maps paths to their text (a note's tags come from a `tags: [..]` line); `open` is
-// the note in the editor, with the cursor on line `at`. The date box hands on `pick(datePrompt)`.
-// Returns the editor's text, the notes after, the notices, and the options the date box was opened with.
-const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16", nn = NN, failCreate = false }) => {
+// the note in the editor, with the cursor on line `at`. The date box hands on `pick(datePrompt)`. `folds`
+// maps paths to their saved fold records, as Obsidian keeps them for a note that isn't open.
+// Returns the editor's text, the notes after, the notices, the options the date box was opened with, and
+// the fold records saved.
+const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16", nn = NN, failCreate = false, folds = {} }) => {
+    const saved = {};
     const vault = new Map(Object.entries(notes));
     const folders = new Map();
     const folder = (path) => {
@@ -54,7 +59,7 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
         internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: `${PLANNER}/days`, format: "YYYY-MM-DD" } } } } },
         plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {}, getPlugin: () => null },
         workspace: { getActiveViewOfType: () => view, getActiveFile: () => view.file, getLeavesOfType: () => [] },
-        foldManager: { load: () => null, save: async () => {} },
+        foldManager: { load: (f) => folds[f.path] ?? null, save: async (f, info) => { saved[f.path] = plainOf(info); } },
         metadataCache: {
             getFileCache: (f) => ({ frontmatter: { tags: tagsOf(f.path) } }),
             getFirstLinkpathDest: (name) => [...vault.keys()].map(fileOf).find((f) => f.basename.toLowerCase() === name.toLowerCase()) ?? null,
@@ -80,14 +85,14 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
     Object.assign(plainday, {
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
-        TaskIds: make("taskIds", "TaskIds"),
+        TaskIds: make("taskIds", "TaskIds"), CalendarSync: make("calendarSync", "CalendarSync"),
     });
     plainday.TaskIds.freshId = () => "k3x9m2";
     let prompt = null;
     plainday.DatePrompt.open = (title, onPick, opts) => { prompt = { onPick, opts }; return {}; };
     await plainday.Schedule.invoke();
     if (prompt && pick) await prompt.onPick(pick(plainday.DatePrompt), { close() {} });
-    return { editor: lines.join("\n"), notes: Object.fromEntries(vault), notices, opts: prompt?.opts, schedule: plainday.Schedule, dp: plainday.DatePrompt };
+    return { editor: lines.join("\n"), notes: Object.fromEntries(vault), notices, opts: prompt?.opts, schedule: plainday.Schedule, dp: plainday.DatePrompt, folds: saved };
 };
 
 test("periodic notes: a weekly, monthly or yearly note is named by its pattern, in its folder (OBS-9, OBS-96)", async () => {
@@ -129,51 +134,129 @@ test("periodLabel: the link text for a week, a month or a year, as short as a da
     assert.equal(Schedule.periodLabel({ date: "2027-01-01", unit: "year" }, en), "2027");
 });
 
-test("placeInPeriod: a task goes to the end of the first checklist, never into the time report (OBS-96)", () => {
-    const place = (lines, add = ["- [ ] Call the printer"]) => {
-        const r = Schedule.placeInPeriod(lines.join("\n"), add);
-        return { lines: r.content.split("\n"), at: r.at, count: r.count, item: r.item };
-    };
-    const REPORT = ["## Time Report", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", ""];
+// placeInTopList's result as lines, with where it put them
+const placed = (lines, add = ["- [ ] Send September invoices"]) => {
+    const r = Schedule.placeInTopList(lines.join("\n"), add);
+    return { lines: r.content.split("\n"), at: r.at, count: r.count, item: r.item };
+};
+const PROPS = ["---", "aliases: 9/19/26 Saturday", "---"];
+const TASK = "- [ ] Send September invoices";
 
-    // A checklist above the report: its end, as in a daily note
-    const week = place(["---", "aliases: Week of 9/13/26", "---", "## This week", "- [x] Brochure proofs", "- [ ] Product list", "\t- the fall colors", "", ...REPORT]);
-    assert.deepEqual(week.lines.slice(3, 9), ["## This week", "- [x] Brochure proofs", "- [ ] Product list", "\t- the fall colors", "- [ ] Call the printer", ""]);
-    assert.deepEqual([week.at, week.count, week.item], [7, 1, 7]);
+test("placeInTopList: in a day's note, a task goes at the end of the list the note opens with (OBS-280)", () => {
+    const top = placed([...PROPS, "- [<] 10:00am\tStandup", "- [ ] Order fabric swatches", "\t- ask for the linen", "", "## Notes", ""]);
+    assert.deepEqual(top.lines, [...PROPS, "- [<] 10:00am\tStandup", "- [ ] Order fabric swatches", "\t- ask for the linen", TASK, "", "## Notes", ""]);
+    assert.deepEqual([top.at, top.count, top.item], [6, 1, 6]);
+    // Its sub-bullets come along; a blank line under the properties is still the top
+    const spaced = placed([...PROPS, "", "- [ ] Order fabric swatches", ""], [TASK, "\t- the September ones"]);
+    assert.deepEqual(spaced.lines, [...PROPS, "", "- [ ] Order fabric swatches", TASK, "\t- the September ones", ""]);
+    assert.deepEqual([spaced.at, spaced.count, spaced.item], [5, 2, 5]);
+    // A list that ends the note without a line break gets one
+    assert.deepEqual(placed([...PROPS, "- [ ] Order fabric swatches"]).lines, [...PROPS, "- [ ] Order fabric swatches", TASK, ""]);
+});
 
-    // No checklist: a new one just above the report, after the frontmatter with no blank line
-    const month = place(["---", "aliases: September 2026", "---", "", ...REPORT]);
-    assert.deepEqual(month.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"]);
-    assert.deepEqual([month.at, month.count, month.item], [3, 1, 3]);
-    const tight = place(["---", "aliases: September 2026", "---", ...REPORT]);
-    assert.deepEqual(tight.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"], "a blank line before the report");
-    assert.deepEqual([tight.at, tight.count, tight.item], [3, 2, 3]);
-
-    // After other content, blank lines set it off, so it doesn't run into a list above it
-    const year = place(["## Goals", "- Two new clients", "", ...REPORT]);
-    assert.deepEqual(year.lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time Report"]);
-    assert.deepEqual([year.at, year.count, year.item], [2, 2, 3]);
-    assert.deepEqual(place(["## Goals", "- Two new clients", ...REPORT]).lines.slice(0, 6), ["## Goals", "- Two new clients", "", "- [ ] Call the printer", "", "## Time Report"]);
-
-    // No report: at the end, ending the note with a newline
-    assert.deepEqual(place(["## Goals", "- Two new clients", ""]).lines, ["## Goals", "- Two new clients", "", "- [ ] Call the printer", ""]);
-    assert.deepEqual(place(["## Goals"]).lines, ["## Goals", "", "- [ ] Call the printer", ""]);
-    assert.deepEqual(place(["---", "aliases: Week of 10/4/26", "---", ""]).lines, ["---", "aliases: Week of 10/4/26", "---", "- [ ] Call the printer", ""], "a note fresh from its template");
-    const empty = place([""], ["- [ ] Call the printer", "\t- ask about card stock"]);
+test("placeInTopList: with no list at the top, a task starts one right under the properties, above everything else (OBS-280)", () => {
+    // Notes under a heading and no task lines: the shape seen on 11/15
+    const notes = placed([...PROPS, "## Notes", "", "- The library book sale moved to Sunday", "\t- doors open at 10am", ""]);
+    assert.deepEqual(notes.lines, [...PROPS, TASK, "", "## Notes", "", "- The library book sale moved to Sunday", "\t- doors open at 10am", ""]);
+    assert.deepEqual([notes.at, notes.count, notes.item], [3, 2, 3]);
+    // A checklist under a heading isn't the top list, so it stays where it is
+    assert.deepEqual(placed([...PROPS, "## Notes", "- A note", "- [ ] Call the vet", ""]).lines,
+        [...PROPS, TASK, "", "## Notes", "- A note", "- [ ] Call the vet", ""]);
+    assert.deepEqual(placed([...PROPS, "## Notes", "- [ ] Call the vet", ""]).lines, [...PROPS, TASK, "", "## Notes", "- [ ] Call the vet", ""]);
+    // Nor is a list that starts with a plain bullet, or one after a label
+    assert.deepEqual(placed([...PROPS, "- Bring the folding table", "- [ ] Call the vet", ""]).lines,
+        [...PROPS, TASK, "", "- Bring the folding table", "- [ ] Call the vet", ""]);
+    assert.deepEqual(placed([...PROPS, "After lunch:", "- [ ] Call the vet", ""]).lines, [...PROPS, TASK, "", "After lunch:", "- [ ] Call the vet", ""]);
+    // A blank line already there: no second one
+    const blank = placed([...PROPS, "", "## Notes", "- A note", ""]);
+    assert.deepEqual(blank.lines, [...PROPS, TASK, "", "## Notes", "- A note", ""]);
+    assert.deepEqual([blank.at, blank.count, blank.item], [3, 1, 3]);
+    // Properties only, with and without a line break at the end
+    const props = placed([...PROPS, ""]);
+    assert.deepEqual(props.lines, [...PROPS, TASK, ""]);
+    assert.deepEqual([props.at, props.count, props.item], [3, 1, 3]);
+    const bare = placed(PROPS);
+    assert.deepEqual(bare.lines, [...PROPS, TASK, ""]);
+    assert.deepEqual([bare.at, bare.count, bare.item], [3, 2, 3]);
+    // An empty note: the first line
+    const empty = placed([""], ["- [ ] Call the printer", "\t- ask about card stock"]);
     assert.deepEqual(empty.lines, ["- [ ] Call the printer", "\t- ask about card stock", ""]);
     assert.deepEqual([empty.at, empty.count, empty.item], [0, 2, 0]);
+    // Text with no properties: the first line too
+    assert.deepEqual(placed(["Some text", ""]).lines, [TASK, "", "Some text", ""]);
+});
 
-    // A checklist inside the report's markers isn't one; one below the report is
-    assert.deepEqual(place(["## Time Report", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]).lines,
+test("placeInTopList: a note fresh from the Daily Note template, its code not yet run, takes the task after the code (OBS-280)", () => {
+    const template = fs.readFileSync("Config/Templates/Daily Note.md", "utf8");
+    assert.match(template, /^<%/, "the template opens with its code");
+    const r = Schedule.placeInTopList(template, [TASK]);
+    assert.equal(r.content, `${template.replace(/\s+$/, "")}\n${TASK}\n`);
+    const head = template.replace(/\s+$/, "").split("\n").length;
+    assert.deepEqual([r.at, r.count, r.item], [head, 1, head]);
+    assert.equal(Schedule.placeInTopList(`\n${template}`, [TASK]).content, `\n${template.replace(/\s+$/, "")}\n${TASK}\n`, "after a blank line too");
+});
+
+test("placeInTopList: a CRLF note keeps its line endings, the new blank line included (OBS-280)", () => {
+    const add = ["- [ ] Two", "\t- note"];
+    assert.equal(Schedule.placeInTopList("---\r\naliases: x\r\n---\r\n## Notes\r\nSome text\r\n", add).content, "---\r\naliases: x\r\n---\r\n- [ ] Two\r\n\t- note\r\n\r\n## Notes\r\nSome text\r\n");
+    assert.equal(Schedule.placeInTopList("- [ ] One\r\n\r\n## Time Report\r\n", add).content, "- [ ] One\r\n- [ ] Two\r\n\t- note\r\n\r\n## Time Report\r\n");
+    assert.equal(Schedule.placeInTopList("---\r\naliases: x\r\n---", ["- [ ] Two"]).content, "---\r\naliases: x\r\n---\r\n- [ ] Two\r\n", "properties with no line break at the end");
+    assert.equal(Schedule.placeInTopList("- [ ] One\r\n- [ ] Two", ["- [ ] Three"]).content, "- [ ] One\r\n- [ ] Two\r\n- [ ] Three\r\n", "a list with no line break at the end");
+    assert.equal(Schedule.placeInTopList("## A\n- [ ] One\n", ["- [ ] Two"]).content, "- [ ] Two\n\n## A\n- [ ] One\n", "an LF note stays LF");
+});
+
+test("placeInTopList: weekly, monthly and yearly notes follow the day's rule, and nothing goes into the time report (OBS-280)", () => {
+    const REPORT = ["## Time Report", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", ""];
+    const add = ["- [ ] Call the printer"];
+
+    // A top list above the report: its end
+    const week = placed(["---", "aliases: Week of 9/13/26", "---", "- [x] Brochure proofs", "- [ ] Product list", "\t- the fall colors", "", ...REPORT], add);
+    assert.deepEqual(week.lines.slice(3, 9), ["- [x] Brochure proofs", "- [ ] Product list", "\t- the fall colors", "- [ ] Call the printer", "", "## Time Report"]);
+    assert.deepEqual([week.at, week.count, week.item], [6, 1, 6]);
+    assert.deepEqual(placed(["---", "aliases: Week of 9/13/26", "---", "- [ ] Product list", ...REPORT], add).lines.slice(3, 6),
+        ["- [ ] Product list", "- [ ] Call the printer", "## Time Report"], "the report's heading ends the list");
+    // A list under a heading: a new one under the properties
+    assert.deepEqual(placed(["---", "aliases: Week of 9/13/26", "---", "## This week", "- [ ] Product list", "", ...REPORT], add).lines.slice(0, 8),
+        ["---", "aliases: Week of 9/13/26", "---", "- [ ] Call the printer", "", "## This week", "- [ ] Product list", ""]);
+
+    // Only the report: right under the properties, with or without a blank line before it
+    const month = placed(["---", "aliases: September 2026", "---", "", ...REPORT], add);
+    assert.deepEqual(month.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"]);
+    assert.deepEqual([month.at, month.count, month.item], [3, 1, 3]);
+    const tight = placed(["---", "aliases: September 2026", "---", ...REPORT], add);
+    assert.deepEqual(tight.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"], "a blank line before the report");
+    assert.deepEqual([tight.at, tight.count, tight.item], [3, 2, 3]);
+    assert.deepEqual(placed(["---", "aliases: Week of 10/4/26", "---", ""], add).lines, ["---", "aliases: Week of 10/4/26", "---", "- [ ] Call the printer", ""], "a note fresh from its template");
+
+    // Text and no list, like the yearly note's goals: first in the note
+    const year = placed(["## Goals", "- Two new clients", "- A bigger studio", "", ...REPORT], add);
+    assert.deepEqual(year.lines.slice(0, 7), ["- [ ] Call the printer", "", "## Goals", "- Two new clients", "- A bigger studio", "", "## Time Report"]);
+    assert.deepEqual([year.at, year.count, year.item], [0, 2, 0]);
+
+    // A checklist inside the report's markers is never the list, nor is one below the report
+    assert.deepEqual(placed(["## Time Report", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""], add).lines,
         ["- [ ] Call the printer", "", "## Time Report", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""]);
-    assert.deepEqual(place([...REPORT.slice(0, -1), "", "- [ ] Later", ""]).lines.slice(-3), ["- [ ] Later", "- [ ] Call the printer", ""]);
-    // The markers without their heading still mark the report
-    assert.deepEqual(place(["Notes", "", "%% time:start %%", "%% time:end %%"]).lines, ["Notes", "", "- [ ] Call the printer", "", "%% time:start %%", "%% time:end %%"]);
-    // A report still under its heading from before OBS-133, or in another case, is the report too, heading and all
+    assert.deepEqual(placed(["---", "aliases: September 2026", "---", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""], add).lines,
+        ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "%% time:start %%", "- [ ] not a task", "%% time:end %%", ""], "the markers without their heading");
+    const below = placed(["---", "aliases: September 2026", "---", ...REPORT.slice(0, -1), "", "- [ ] Later", ""], add);
+    assert.deepEqual(below.lines.slice(0, 6), ["---", "aliases: September 2026", "---", "- [ ] Call the printer", "", "## Time Report"]);
+    assert.deepEqual(below.lines.slice(-2), ["- [ ] Later", ""], "the checklist below the report stays where it is");
+    // A report still under its heading from before OBS-133, or in another case, too
     for (const heading of ["## Time tracking", "## Time Tracking", "## Time report"]) {
-        assert.deepEqual(place(["---", "aliases: September 2026", "---", heading, "", "%% time:start %%", "%% time:end %%"]).lines.slice(3, 6),
+        assert.deepEqual(placed(["---", "aliases: September 2026", "---", heading, "", "%% time:start %%", "%% time:end %%"], add).lines.slice(3, 6),
             ["- [ ] Call the printer", "", heading], heading);
     }
+});
+
+test("placeInTopList and the calendar sync write into the same list, whichever comes first (OBS-280)", () => {
+    const sync = statics.plainday.CalendarSync, EVENT = "- [<] 10:00am\tFarmers market";
+    const NOTES = [...PROPS, "## Notes", "- The library book sale moved to Sunday", ""];
+    // The task first, then an event: the event goes above it, in the same list
+    const task = Schedule.placeInTopList(NOTES.join("\n"), [TASK]).content;
+    assert.equal(sync.insert(task.split("\n"), [EVENT]), [...PROPS, EVENT, TASK, "", ...NOTES.slice(3)].join("\n"));
+    // The event first, then the task: the task goes after it
+    const event = sync.insert(NOTES, [EVENT]);
+    assert.equal(Schedule.placeInTopList(event, [TASK]).content, [...PROPS, EVENT, TASK, "", ...NOTES.slice(3)].join("\n"));
 });
 
 const DAY = `${PLANNER}/days/2026-09-16.md`;
@@ -188,7 +271,6 @@ const DAY_TEXT = [
 const WEEK = `${PLANNER}/weeks/2026w39.md`;
 const WEEK_TEXT = [
     "---", "aliases: Week of 9/20/26", "---",
-    "## This week",
     "- [ ] Pick the paper stock", "\t- 2:00pm - 3:00pm",
     "", "## Time Report", "", "%% time:start %%", "*Updated 2026-09-16 9:00pm*", "%% time:end %%", "",
 ].join("\n");
@@ -224,6 +306,32 @@ test("Schedule: a worked-on task is forwarded to a week, its time entries stayin
     assert.deepEqual(r.notices, ["Forwarded to Wk of 9/20"]);
 });
 
+test("Schedule: onto a day with notes and no task list, the task starts one under the properties, and the notes keep their folds (OBS-280)", async () => {
+    const SAT = `${PLANNER}/days/2026-09-19.md`;
+    const SAT_TEXT = [...PROPS, "## Notes", "", "- The library book sale moved to Sunday", "\t- doors open at 10am", "- Ask the market manager about a stall for October", "\t- bring the folding table", ""].join("\n");
+    // The second note folded, the first open
+    const r = await scheduleIn({ notes: { [DAY]: DAY_TEXT, [SAT]: SAT_TEXT }, open: DAY, at: 4, pick: (dp) => dp.result("2026-09-19", "day"), folds: { [SAT]: { folds: [{ from: 7, to: 8 }], lines: 10 } } });
+    assert.equal(r.notes[SAT], [...PROPS, "- [ ] Order fabric swatches", "\t- ask for the linen", "", ...SAT_TEXT.split("\n").slice(3)].join("\n"));
+    assert.equal(r.editor, DAY_TEXT.replace("- [ ] Order fabric swatches\n\t- ask for the linen\n", ""));
+    assert.deepEqual(r.notices, ["Moved to 9/19"]);
+    // The fold moved down with its note, three lines; the task that came along is folded, as before
+    assert.deepEqual(r.folds[SAT], { folds: [{ from: 3, to: 4 }, { from: 10, to: 11 }], lines: 13 });
+});
+
+test("Schedule: a sent task's open line moved onto a day with notes and no task list starts the list there (OBS-280)", async () => {
+    const day = (d) => `${PLANNER}/days/${d}.md`, KES = "Projects/Freelance/Kestrel/Kestrel.md";
+    const TUE = [...PROPS.slice(0, 1), "aliases: 9/22/26 Tuesday", "---", "## Notes", "- Call back about the quote", ""].join("\n");
+    const v = standIn({ notes: { [KES]: "---\ntags: [project]\n---\n## To Do\n\n- [ ] Book the photographer\n", [day("2026-09-22")]: TUE }, open: KES, at: 5 });
+    await v.schedule("2026-09-17");
+    const id = v.notes()[KES].match(/\^([a-z0-9]{6})$/m)[1];
+    v.open(KES, 5);
+    assert.equal(await v.schedule("2026-09-22"), "Scheduled for Thu 9/17. Move it to");
+    assert.equal(v.notes()[day("2026-09-22")], `---\naliases: 9/22/26 Tuesday\n---\n- [ ] Book the photographer [[Kestrel|⭕]] ^${id}\n\n## Notes\n- Call back about the quote\n`);
+    assert.equal(v.notes()[day("2026-09-17")].trim(), "");
+    assert.equal(v.notes()[KES].split("\n")[5], `- [>] Book the photographer [[2026-09-22#^${id}|9/22]] ^${id}`);
+    assert.deepEqual(v.check(), []);
+});
+
 test("Schedule: from a project note, the line stays as [>] with a forward date at the end and the task's ID; the new line has the ID too (OBS-181)", async () => {
     const month = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, "Reference/Journal/2026-10.md": "" }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-10-01", "month") });
     assert.equal(month.editor.split("\n")[3], `- [>] Plan the spring sale [[${PLANNER}/months/2026-10#^k3x9m2|Oct. 2026]] ^k3x9m2`, "by path: another note is named 2026-10");
@@ -255,7 +363,7 @@ test("Schedule: a day's forward date uses the note's path when another note has 
 
 test("Schedule: a task in a weekly note moves with its sub-bullets, like one in a monthly note (OBS-96)", async () => {
     const DAY2 = `${PLANNER}/days/2026-09-22.md`;
-    const r = await scheduleIn({ notes: { [WEEK]: WEEK_TEXT, [DAY2]: "---\naliases: 9/22/26 Tuesday\n---\n- [ ] Call the printer\n" }, open: WEEK, at: 4, pick: (dp) => dp.result("2026-09-22", "day") });
+    const r = await scheduleIn({ notes: { [WEEK]: WEEK_TEXT, [DAY2]: "---\naliases: 9/22/26 Tuesday\n---\n- [ ] Call the printer\n" }, open: WEEK, at: 3, pick: (dp) => dp.result("2026-09-22", "day") });
     assert.equal(r.editor, WEEK_TEXT.replace("- [ ] Pick the paper stock\n\t- 2:00pm - 3:00pm\n", ""));
     assert.equal(r.notes[DAY2], "---\naliases: 9/22/26 Tuesday\n---\n- [ ] Call the printer\n- [ ] Pick the paper stock\n\t- 2:00pm - 3:00pm\n");
     assert.deepEqual(r.notices, ["Moved to 9/22"]);
@@ -266,7 +374,7 @@ test("Schedule: a task scheduled into the note it's in stays put (OBS-96)", asyn
     assert.equal(day.editor, DAY_TEXT);
     assert.equal(day.notes[DAY], DAY_TEXT);
     assert.deepEqual(day.notices, ["Already in this note"]);
-    const week = await scheduleIn({ notes: { [WEEK]: WEEK_TEXT }, open: WEEK, at: 4, pick: (dp) => dp.result("2026-09-24", "week") });
+    const week = await scheduleIn({ notes: { [WEEK]: WEEK_TEXT }, open: WEEK, at: 3, pick: (dp) => dp.result("2026-09-24", "week") });
     assert.equal(week.editor, WEEK_TEXT);
     assert.deepEqual(week.notices, ["Already in this note"]);
 });
@@ -397,12 +505,6 @@ test("Schedule: when the note it goes to can't be made, the line stays where it 
 });
 
 // ------------------------------------------------------------------ review fixes (OBS-193)
-
-test("appending, PR 54 review: lines go into a CRLF note with its line ending; placeInPeriod too", () => {
-    const r = Schedule.placeInPeriod("## This week\r\n- [ ] One\r\n\r\n## Time Report\r\n", ["- [ ] Two", "\t- note"]);
-    assert.equal(r.content, "## This week\r\n- [ ] One\r\n- [ ] Two\r\n\t- note\r\n\r\n## Time Report\r\n");
-    assert.equal(Schedule.placeInPeriod("## A\n- [ ] One\n", ["- [ ] Two"]).content, "## A\n- [ ] One\n- [ ] Two\n", "an LF note stays LF");
-});
 
 test("reopenIn: 🆓 follows the moving line, added or taken off, as its 🚩 does (Brian, 2026-10-26)", () => {
     assert.equal(Schedule.reopenIn("- [>] B [[Studio|⭕]] ^bbbbbb\n\t- 9:00am - 9:30am", "bbbbbb", ["- [ ] B 🆓 [[Studio|⭕]] ^bbbbbb"]), "- [/] B 🆓 [[Studio|⭕]] ^bbbbbb\n\t- 9:00am - 9:30am");
