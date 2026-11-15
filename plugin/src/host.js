@@ -22,6 +22,11 @@
 // unbinds, and stops.
 import * as obsidian from "obsidian";
 
+// The calendar reader's background worker, as the text of a script: plugin/src/worker/ with ical.js,
+// which the build bundles on its own and puts in here (plugin/esbuild.config.mjs). CalendarFeed
+// starts a worker from it for each read (OBS-274).
+export { default as calendarWorkerSource } from "plainday:calendar-worker";
+
 /**
  * @typedef {typeof import("./commands/index.js").CLASSES} CommandClasses
  * @typedef {typeof import("./startup/index.js").CLASSES} StartupClasses
