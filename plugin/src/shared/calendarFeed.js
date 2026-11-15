@@ -35,7 +35,7 @@ export default class CalendarFeed {
     // The answers that mean the link itself stopped working (reset, unpublished or deleted).
     // Anything else that fails means the calendar couldn't be reached this time.
     static DEAD = [401, 403, 404, 410];
-    static GOOGLE = /^https:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
+    static GOOGLE = /^https?:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
     async load(link, { calendar, window }) {

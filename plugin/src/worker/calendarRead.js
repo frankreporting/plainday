@@ -486,12 +486,14 @@ export class CalendarReader {
 
     // An all-day series' days written as midnight, a time rather than a date, as iCloud has been
     // reported to write a moved day's original date (RECURRENCE-ID): read as the dates they are,
-    // and a deleted day's (EXDATE) and the series' last day (its rule's UNTIL) likewise. An
-    // all-day series has only dates, so a midnight is the date written, wherever the device is;
-    // compared as instants, a midnight in a named zone would match no day on a device elsewhere, a
-    // deleted day would come back, and the last day could be lost or one added. Any other time
-    // can't be told for sure: false for a deleted day's or the last day's, and written() leaves
-    // the series out for a moved day's.
+    // and a deleted day's (EXDATE) likewise. An all-day series has only dates, so a midnight is the
+    // date written, wherever the device is; compared as instants, a midnight in a named zone would
+    // match no day on a device elsewhere, and a deleted day would come back. Any other time can't
+    // be told for sure: false for a deleted day's, and written() leaves the series out for a
+    // moved day's. The series' last day (its rule's UNTIL) written as a time is a bound, not a
+    // day: ical.js compares a floating one, or midnight in UTC, with the dates as written, the
+    // same on every device. Any other time in UTC was converted from a zone the feed doesn't
+    // name, so which day is the last can't be told: false.
     asDates(master, exceptions) {
         for (const ex of exceptions) {
             const p = ex.getFirstProperty("recurrence-id");
@@ -508,10 +510,8 @@ export class CalendarReader {
             p.setValues(values.map((t) => this.dayOf(t)));
         }
         for (const p of master.getAllProperties("rrule")) {
-            const rule = p.getFirstValue();
-            if (!rule?.until || rule.until.isDate) continue;
-            if (!this.midnight(rule.until)) return false;
-            rule.until = this.dayOf(rule.until);
+            const until = p.getFirstValue()?.until;
+            if (until && this.zoneOf(until) === "utc" && !this.midnight(until)) return false;
         }
         return true;
     }

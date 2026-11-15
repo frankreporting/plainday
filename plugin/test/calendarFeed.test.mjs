@@ -234,8 +234,8 @@ test("a long-running series started near the window gives the occurrences it giv
                 // An RDATE turns starting near the window off, so only the UTC series have one, past
                 // the window's end: on a day a daily rule also lands on, the series would repeat
                 // twice that day, and be left out
-                // An all-day series' last day is a date, or midnight (see the test of UNTIL); any
-                // other time leaves it out by name
+                // An all-day series' last day in UTC is a date or midnight (see the test of UNTIL);
+                // any other time in UTC leaves it out by name
                 const own = kind === "allDay" ? rule.replace(/UNTIL=(\d{8})T235959Z/, "UNTIL=$1") : rule;
                 lines.push("BEGIN:VEVENT", value("DTSTART", start, "083000"), kind === "allDay" ? value("DTEND", start + 1, "") : value("DTEND", start, "090000"),
                     `RRULE:${own}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 70, "070000")] : []), "END:VEVENT");
@@ -276,6 +276,19 @@ test("an event early on the window's first day, written in UTC from a zone east 
         assert.equal(feed.reader.old(`\n${block}`, 20261111), false);
     } finally {
         process.env.TZ = before;
+    }
+});
+
+test("a Google link's path names the calendar's own address, in every form Google has given links out; no other link names one", () => {
+    const { feed } = reader();
+    for (const link of [
+        LINKS.studio,
+        "http://www.google.com/calendar/ical/studio-owner%40example.com/private-0000invented0000/basic.ics",
+        "webcal://calendar.google.com/calendar/ical/Studio-Owner%40example.com/private-0000invented0000/basic.ics",
+        "https://calendar.google.com/calendar/ical/mailto%3Astudio-owner%40example.com/private-0000invented0000/basic.ics",
+    ]) assert.equal(feed.owner(link), "studio-owner@example.com", link);
+    for (const link of [LINKS.home, LINKS.library, "https://example.com/calendar/ical/studio-owner%40example.com/x/basic.ics", "", null]) {
+        assert.equal(feed.owner(link), null, String(link));
     }
 });
 
@@ -704,15 +717,17 @@ test("an all-day series' moved and deleted days, their dates written as midnight
     }
 });
 
-test("an all-day series' last day (UNTIL) written as midnight is read as its date, wherever the device is; any other time leaves the series out by name", async () => {
+test("an all-day series' last day (UNTIL) written as a floating time or midnight in UTC is read the same wherever the device is; any other time in UTC leaves the series out by name", async () => {
     const weekly = (uid, until) => vevent(`UID:${uid}`, `SUMMARY:${uid}`, "DTSTART;VALUE=DATE:20261102", "DTEND;VALUE=DATE:20261103", `RRULE:FREQ=WEEKLY;UNTIL=${until}`);
     // Mondays through the 23rd
     const text = calendar([
         ...weekly("floating@example.org", "20261123T000000"),
         ...weekly("utc@example.org", "20261123T000000Z"),
         ...weekly("date@example.org", "20261123"),
-        ...weekly("nine@example.org", "20261123T090000Z"),
         ...weekly("late@example.org", "20261123T235959"),
+        // Converted from a zone the feed doesn't name: 5am in UTC is New York's midnight
+        ...weekly("nine@example.org", "20261123T090000Z"),
+        ...weekly("five@example.org", "20261123T050000Z"),
     ]);
     const before = process.env.TZ;
     try {
@@ -720,8 +735,8 @@ test("an all-day series' last day (UNTIL) written as midnight is read as its dat
             process.env.TZ = zone;
             const { feed } = reader();
             const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(21, at("2026-11-12")) });
-            assert.deepEqual(uids(got.failed), ["late@example.org", "nine@example.org"], zone);
-            for (const uid of ["floating@example.org", "utc@example.org", "date@example.org"]) {
+            assert.deepEqual(uids(got.failed), ["five@example.org", "nine@example.org"], zone);
+            for (const uid of ["floating@example.org", "utc@example.org", "date@example.org", "late@example.org"]) {
                 assert.deepEqual(plain(got.events.filter((e) => e.id === uid).map((e) => e.date)), ["2026-11-16", "2026-11-23"], `${zone}: ${uid}`);
             }
         }
