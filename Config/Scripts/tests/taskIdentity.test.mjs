@@ -71,15 +71,15 @@ const idsIn = (v) => new Set(Object.values(v.notes()).flatMap((t) => [...t.match
 scenario("a day's [>] line clicked back to [ ] and scheduled is forwarded with its task's ID: one ID, and the checks say the task is open twice", async ({ lag }) => {
     const v = standIn({ notes: { [KES]: KES_TEXT }, open: KES, at: 5, lag });
     await v.schedule("2026-09-16");
-    v.open(day("2026-09-16"), 1);
+    v.open(day("2026-09-16"), 0);
     const editor = v.app.workspace.activeLeaf.view.editor;
-    editor.replaceRange("\n\t- 9:00am - 9:30am", { line: 1, ch: editor.getLine(1).length });
+    editor.replaceRange("\n\t- 9:00am - 9:30am", { line: 0, ch: editor.getLine(0).length });
     await v.schedule("2026-09-18");
     assert.deepEqual(v.check(), []);
     const id = idIn(v.notes()[KES]);
     // One click on 9/16's [>] box, then Schedule on it
-    v.open(day("2026-09-16"), 1);
-    editor.replaceRange(" ", { line: 1, ch: 3 }, { line: 1, ch: 4 });
+    v.open(day("2026-09-16"), 0);
+    editor.replaceRange(" ", { line: 0, ch: 3 }, { line: 0, ch: 4 });
     await v.schedule("2026-09-21");
     assert.deepEqual([...idsIn(v)], [id], "one ID: 9/16's time stays with its task");
     assert.equal(v.notes()[day("2026-09-16")].trim(), `- [>] Book the photographer [[Kestrel|⭕]] ^${id}\n\t- 9:00am - 9:30am`);
@@ -589,9 +589,9 @@ for (const lag of [false, true]) {
         await v.schedule("2026-09-16");
         assert.deepEqual(v.check(), []);
         const id = idIn(v.notes()[KES]);
-        v.open(day("2026-09-16"), 1);
+        v.open(day("2026-09-16"), 0);
         const editor = v.app.workspace.activeLeaf.view.editor;
-        editor.replaceRange("\n\t- 9:00am - 9:30am", { line: 1, ch: editor.getLine(1).length });
+        editor.replaceRange("\n\t- 9:00am - 9:30am", { line: 0, ch: editor.getLine(0).length });
         await v.schedule("2026-09-18");
         assert.deepEqual(v.check(), []);
         v.open(KES, 5);
@@ -1274,7 +1274,8 @@ scenario("PR 54 review: Schedule does nothing on or under a forwarded or cancele
 scenario("PR 54 confirmation: a task scheduled onto a CRLF day with no checklist yet gets its line ending", async ({ lag }) => {
     const v = standIn({ notes: { [day("2026-09-16")]: "- [ ] Draft\n", [day("2026-09-18")]: "## Notes\r\nSome text\r\n" }, open: day("2026-09-16"), at: 0, lag });
     await v.schedule("2026-09-18");
-    assert.equal(v.notes()[day("2026-09-18")], "## Notes\r\nSome text\r\n- [ ] Draft\r\n");
+    // Above the notes, since OBS-280, the blank line after it in CRLF too
+    assert.equal(v.notes()[day("2026-09-18")], "- [ ] Draft\r\n\r\n## Notes\r\nSome text\r\n");
 });
 
 scenario("PR 54 confirmation: a note added under a worked-on task while its destination is written stays under the [>] line, and the forward goes through", async ({ lag }) => {

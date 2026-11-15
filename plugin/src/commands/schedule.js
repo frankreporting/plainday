@@ -186,9 +186,7 @@ export default class Schedule {
                 if (!reopened) {
                     const before = await tasks.readNow(file);
                     const prevFolds = this.captureFolds(file, before.split("\n").length);
-                    const { content, at, count, item } = dest.unit === "day"
-                        ? await this.appendToTopChecklist(file, outgoing)
-                        : await this.appendToPeriodNote(file, outgoing);
+                    const { content, at, count, item } = await this.appendToTopChecklist(file, outgoing);
                     tasks.touched(file);
                     await this.semiFold(file, content, prevFolds, at, count, item);
                 }
@@ -522,7 +520,7 @@ export default class Schedule {
             if (!reopened) {
                 const before = await tasks.readNow(file);
                 const prevFolds = this.captureFolds(file, before.split("\n").length);
-                const { content, at, count, item } = dest.unit === "day" ? await this.appendToTopChecklist(file, outgoing) : await this.appendToPeriodNote(file, outgoing);
+                const { content, at, count, item } = await this.appendToTopChecklist(file, outgoing);
                 await this.semiFold(file, content, prevFolds, at, count, item);
                 tasks.touched(file);
             }
@@ -839,88 +837,59 @@ export default class Schedule {
         return app.vault.create(path, content);
     }
 
-    // Insert after the last item of the first checklist.
-    // Returns the new content plus where the block landed, so the fold pass can find it. Written through the
-    // note's editor when it's open (rewrite), so an edit there not yet saved is never merged with this one: a
-    // line just taken out in that editor would come back (OBS-232).
+    // Puts the lines into a day's, a week's, a month's or a year's note (placeInTopList), and returns the new
+    // content plus where the block landed, so the fold pass can find it. Written through the note's editor
+    // when it's open (rewrite), so an edit there not yet saved is never merged with this one: a line just
+    // taken out in that editor would come back (OBS-232).
     async appendToTopChecklist(file, newLines) {
         let out;
         await this.rewrite(file, (content) => {
-            const lines = content.split("\n");
-            const first = lines.findIndex(l => Schedule.CHECKBOX.test(l));
-            if (first === -1) {
-                // A CRLF note keeps its line endings
-                const eol = content.includes("\r\n") ? "\r\n" : "\n";
-                const head = content.replace(/\s+$/, "").split(/\r?\n/);
-                out = { content: [...head, ...newLines].join(eol) + eol, at: head.length, count: newLines.length, item: head.length };
-                return out.content;
-            }
-            const destIndent = lines[first].match(/^\s*/)[0];
-            let end = first;
-            while (end + 1 < lines.length) {
-                const next = lines[end + 1];
-                if (next.trim() === "" || !(/^\s*[-*+]\s/.test(next) || /^\s/.test(next))) break;
-                end++;
-            }
-            const at = end + 1;
-            // A CRLF note keeps its line endings
-            const cr = content.includes("\r\n") ? "\r" : "";
-            lines.splice(at, 0, ...newLines.map(l => destIndent + l + cr));
-            out = { content: lines.join("\n"), at, count: newLines.length, item: at };
+            out = Schedule.placeInTopList(content, newLines);
             return out.content;
         });
         return out;
     }
 
-    // The same for a weekly, monthly or yearly note (placeInPeriod)
-    async appendToPeriodNote(file, newLines) {
-        let out;
-        await this.rewrite(file, (content) => {
-            out = Schedule.placeInPeriod(content, newLines);
-            return out.content;
-        });
-        return out;
-    }
-
-    static CHECKBOX = /^\s*[-*+]\s+\[.\]/;
-
-    // Where lines go in a weekly, monthly or yearly note: the end of its first checklist, as in a daily
-    // note, but never inside the time report (its "## Time Report" heading in any case, "## Time tracking"
-    // before OBS-133, or its start marker, down to its end marker). With no checklist, they start one just
-    // above the report, or at the end when
-    // there's none, set off by a blank line from what's above (none straight after the frontmatter) and
-    // by another from the report. Returns { content, at, count, item }: the new content, the line the
-    // insert starts at, how many lines it adds, and the line of the first one moved there.
-    static placeInPeriod(content, newLines) {
-        const lines = content.split("\n");
-        // A CRLF note keeps its line endings
-        const cr = content.includes("\r\n") ? "\r" : "";
-        newLines = newLines.map((l) => l + cr);
-        const fmEnd = lines[0]?.trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
-        const start = lines.findIndex((l, i) => i > fmEnd && (/^##\s+time\s+(?:report|tracking)$/i.test(l.trim()) || l.trim() === "%% time:start %%"));
-        const endMark = start === -1 ? -1 : lines.findIndex((l, i) => i >= start && l.trim() === "%% time:end %%");
-        const end = endMark === -1 ? start : endMark;
-        const inReport = (i) => start !== -1 && i >= start && i <= end;
-
-        const first = lines.findIndex((l, i) => i > fmEnd && !inReport(i) && Schedule.CHECKBOX.test(l));
-        if (first !== -1) {
-            const indent = lines[first].match(/^\s*/)[0];
-            let last = first;
-            while (last + 1 < lines.length && !inReport(last + 1)) {
-                const next = lines[last + 1];
-                if (next.trim() === "" || !(/^\s*[-*+]\s/.test(next) || /^\s/.test(next))) break;
-                last++;
-            }
-            lines.splice(last + 1, 0, ...newLines.map((l) => indent + l));
-            return { content: lines.join("\n"), at: last + 1, count: newLines.length, item: last + 1 };
+    // Where Schedule puts lines in a note, of any of the four kinds (OBS-280): at the end of the top list,
+    // the checklist the note opens with, which is the calendar sync's own (CalendarSync.checklist): the
+    // first thing after the properties, blank lines aside, its first line a task or event at the left edge,
+    // and ending at the first blank line or heading. A checklist under `## Notes`, one that starts with a
+    // plain bullet or comes after a label line, or one inside or below a period note's time report (which
+    // starts with its heading or its `%% time:start %%` marker) isn't it. With no top list, the lines start
+    // one right under the properties, above whatever the note holds, set off from it by a blank line unless
+    // one is there already, as the calendar sync does with an event; a note they end ends with a line break.
+    // A note just made from the Daily Note template still opens with the template's code (`<%`), which
+    // Templater turns into the properties a moment later; above it, the lines would end up above the
+    // properties, so they go at the end, after the code, as the Log template's line does (recordEvent.js).
+    // A CRLF note keeps its line endings. Returns { content, at, count, item }: the new content, the line
+    // the insert starts at, how many lines it adds, and the line of the first one moved there.
+    static placeInTopList(content, newLines) {
+        if (/^\s*<%/.test(content)) {
+            const eol = content.includes("\r\n") ? "\r\n" : "\n";
+            const head = content.replace(/\s+$/, "").split(/\r?\n/);
+            return { content: [...head, ...newLines].join(eol) + eol, at: head.length, count: newLines.length, item: head.length };
         }
-
-        let at = start === -1 ? lines.length : start;
-        while (at > fmEnd + 1 && lines[at - 1].trim() === "") at--;
-        const above = at > fmEnd + 1 ? [cr] : [];
-        const block = [...above, ...newLines, ...(at === start ? [cr] : []), ...(at === lines.length ? [""] : [])];
+        const lines = content.split("\n");
+        const cr = content.includes("\r\n") ? "\r" : "";
+        const sync = plainday.CalendarSync;
+        const list = sync.checklist(lines);
+        let at, block;
+        if (list) {
+            at = list.end + 1;
+            block = newLines.map((l) => l + cr);
+        } else {
+            at = sync.afterFrontmatter(lines);
+            const tail = lines.slice(at);
+            const spacer = tail.some((l) => l.trim() !== "") && tail[0].trim() !== "" ? [cr] : [];
+            block = [...newLines.map((l) => l + cr), ...spacer];
+        }
+        if (at === lines.length) {
+            // They end the note: the line above gets its line break, and so does the last of them
+            if (at > 0 && cr && !lines[at - 1].endsWith(cr)) lines[at - 1] += cr;
+            block.push("");
+        }
         lines.splice(at, 0, ...block);
-        return { content: lines.join("\n"), at, count: block.length, item: at + above.length };
+        return { content: lines.join("\n"), at, count: block.length, item: at };
     }
 
     // Every list item that has children is foldable; headings never get an entry
