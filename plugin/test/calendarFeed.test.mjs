@@ -18,7 +18,7 @@ import ICAL from "ical.js";
 import { loadClass } from "../classShape.mjs";
 import { workerSource } from "../esbuild.config.mjs";
 import { CalendarReader } from "../src/worker/calendarRead.js";
-import { BIG, feeds, HEAVY, LINKS } from "./calendarFeeds.mjs";
+import { BIG, feeds, HEAVY, LINKS, OWNERS } from "./calendarFeeds.mjs";
 
 const moment = createRequire(import.meta.url)("moment");
 // What the reader gives back was made in its own context, whose objects compare as different
@@ -113,14 +113,15 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
             ...standup,
             `- [<] 3:30pm\tFocus block ${INFO}`, "\t- 5:00pm",
         ]);
-        assert.deepEqual(got[d(2)], [...standup, "- [<] 10:00pm\tLate launch", "\t- 1:00am"]);
-        assert.equal(got[d(3)], undefined, "day 3: the standup's skipped, the haircut canceled, the shelf audit declined");
+        // The book swap and the shelf audit were declined, in feeds that don't say whose calendar they are
+        assert.deepEqual(got[d(2)], [...standup, "- [<] 6:00pm\tBook swap", "\t- 7:00pm", "- [<] 10:00pm\tLate launch", "\t- 1:00am"]);
+        assert.deepEqual(got[d(3)], ["- [<] 9:00am\tShelf audit", "\t- 10:00am"], "day 3: the standup's skipped, the haircut canceled");
         assert.deepEqual(got[d(4)], ["- [<] All day\tCatalog shoot", "- [<] 10:00am\tKestrel standup", "\t- 10:15am"]);
         assert.deepEqual(got[d(5)], [...standup, "- [<] 1:00pm\tPinecrest call", "\t- 1:30pm"]);
         assert.deepEqual(got[d(6)], [...standup, "- [<] 7:00pm\tGarden club", "\t- 8:30pm"]);
         assert.deepEqual(got[d(7)], [...standup, "- [<] 11:00am\tBrochure check-in", "\t- 11:30am"]);
         assert.deepEqual(got[d(14)], ["- [<] 11:00am\tBrochure check-in", "\t- 11:30am"]);
-        assert.deepEqual(Object.keys(got).sort(), [1, 2, 4, 5, 6, 7, 14].map(d));
+        assert.deepEqual(Object.keys(got).sort(), [1, 2, 3, 4, 5, 6, 7, 14].map(d));
     });
 
     test(`${day}: a moved occurrence stays in its series, and an invitation to one occurrence counts as one (1.2, 1.3)`, async () => {
@@ -154,25 +155,33 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
         assert.equal(reads.home.events.find((e) => e.title === "Dentist").status, "none");
     });
 
-    test(`${day}: declined invitations are left out, by the Google link's path or the most frequent attendee (1.5)`, async () => {
+    test(`${day}: declined invitations are left out only when the calendar's own address is known, as a Google link's path holds it (1.5)`, async () => {
         const { reads, window, feed } = await readAll(day);
         assert.equal(reads.studio.events.some((e) => e.title === "Vendor demo"), false);
-        assert.equal(reads.home.events.some((e) => e.title === "Book swap"), false);
-        assert.equal(reads.library.events.some((e) => e.title === "Shelf audit"), false);
-        assert.deepEqual([reads.studio.stats.declined, reads.home.stats.declined, reads.library.stats.declined], [1, 1, 1]);
-        // Without the link, Studio's most frequent attendee is a colleague, who declined nothing:
-        // so it's the path that leaves the vendor demo out
-        const guessed = await feed.read(feeds(day).studio.text, { calendar: CALENDARS.studio, window });
-        assert.equal(guessed.events.some((e) => e.title === "Vendor demo"), true);
+        // iCloud's and Outlook's feeds don't say whose calendar they are: their declined
+        // invitations are read as any other event
+        assert.equal(reads.home.events.some((e) => e.title === "Book swap"), true);
+        assert.equal(reads.library.events.some((e) => e.title === "Shelf audit"), true);
+        assert.deepEqual([reads.studio.stats.declined, reads.home.stats.declined, reads.library.stats.declined], [1, 0, 0]);
+        // Without its link, nothing says whose calendar Studio is either
+        const unknown = await feed.read(feeds(day).studio.text, { calendar: CALENDARS.studio, window });
+        assert.equal(unknown.events.some((e) => e.title === "Vendor demo"), true);
+        assert.equal(unknown.stats.declined, 0);
+        // Given the address, as a setting could give it (OBS-275), iCloud's and Outlook's own
+        // declined invitations are left out too: iCloud's by its EMAIL parameter
+        const ms = { start: window.start.getTime(), end: window.end.getTime() };
+        for (const [name, title] of [["home", "Book swap"], ["library", "Shelf audit"]]) {
+            const got = feed.reader.read(feeds(day)[name].text, { calendar: CALENDARS[name], window: ms, owner: OWNERS[name] });
+            assert.equal(got.events.some((e) => e.title === title), false, name);
+            assert.equal(got.stats.declined, 1, name);
+        }
     });
 
-    // Google-shaped feeds, whose owner comes from the link: for any other, the attendee counted as
-    // the owner is the one on the most events read, so dropping old events can change who that is
     test(`${day}: old one-offs are dropped before reading, and the same events come out either way (1.6)`, async () => {
         const { reads, window } = await readAll(day);
         assert.equal(reads.studio.stats.skipped, 1);
         assert.equal(reads.studio.events.some((e) => e.title === "Old kickoff"), false);
-        for (const name of ["studio", "big", "heavy"]) {
+        for (const name of ["studio", "home", "library", "big", "heavy"]) {
             const text = feeds(day)[name].text;
             const skipping = await reader().feed.read(text, { calendar: CALENDARS[name], window, link: LINKS[name] });
             const all = reader().feed;
@@ -225,8 +234,11 @@ test("a long-running series started near the window gives the occurrences it giv
                 // An RDATE turns starting near the window off, so only the UTC series have one, past
                 // the window's end: on a day a daily rule also lands on, the series would repeat
                 // twice that day, and be left out
+                // An all-day series' last day is a date, or midnight (see the test of UNTIL); any
+                // other time leaves it out by name
+                const own = kind === "allDay" ? rule.replace(/UNTIL=(\d{8})T235959Z/, "UNTIL=$1") : rule;
                 lines.push("BEGIN:VEVENT", value("DTSTART", start, "083000"), kind === "allDay" ? value("DTEND", start + 1, "") : value("DTEND", start, "090000"),
-                    `RRULE:${rule}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 70, "070000")] : []), "END:VEVENT");
+                    `RRULE:${own}`, `UID:${uid}`, `SUMMARY:${rule}`, value("EXDATE", 5, "083000"), ...(kind === "utc" ? [value("RDATE", 70, "070000")] : []), "END:VEVENT");
                 if (kind !== "allDay") lines.push("BEGIN:VEVENT", value("RECURRENCE-ID", 9, "083000"),
                     value("DTSTART", 10, "120000"), value("DTEND", 10, "130000"), `UID:${uid}`, "SUMMARY:moved", "END:VEVENT");
             }
@@ -633,53 +645,27 @@ test("two events with one UID, and an event that doesn't parse whose alarm comes
     assert.deepEqual(plain(got.events.map((e) => e.title)), ["Fine"]);
 });
 
-test("the owner is counted on events that didn't parse too, as an attendee or the organizer", async () => {
-    const att = (who, partstat) => `ATTENDEE;PARTSTAT=${partstat}:mailto:${who}`;
-    for (const desk of [att("desk@example.org", "ACCEPTED"), "ORGANIZER;CN=Desk:mailto:desk@example.org"]) {
-        const text = calendar([
-            ...vevent("UID:a@example.org", "SUMMARY:Declined", "DTSTART:20261113T140000Z", att("desk@example.org", "DECLINED"), att("x@example.org", "ACCEPTED")),
-            ...vevent("UID:b@example.org", "SUMMARY:Broken", "DTSTART:20261114T140000Z", desk, "X-BROKEN;=:"),
-            ...vevent("UID:c@example.org", "SUMMARY:Other", "DTSTART:20261115T140000Z", att("y@example.org", "ACCEPTED")),
-        ]);
-        const { feed } = reader();
-        const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
-        assert.deepEqual(uids(got.failed), ["b@example.org"], desk);
-        assert.deepEqual(plain(got.events.map((e) => e.title)), ["Other"], desk);
-    }
-});
-
-test("a meeting the owner organized stays when a guest on more of the owner's meetings declines it: Outlook lists no organizer among the guests", async () => {
-    const att = (cn, who, partstat) => `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=${partstat};RSVP=TRUE;CN=${cn}:mailto:${who}`;
-    const mine = "ORGANIZER;CN=Library Desk:mailto:desk@example.org";
-    const lead = "ORGANIZER;CN=Branch Lead:mailto:lead@example.org";
+test("an invitation is left out as declined only by the calendar's own address, when it's known: never by whoever is on the most events", async () => {
+    const att = (who, partstat) => `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=${partstat};RSVP=TRUE:mailto:${who}`;
+    // A lead on every meeting, who declined one, and the desk, who declined another
     const text = calendar([
-        ...vevent("UID:m1@example.org", "SUMMARY:Planning", "DTSTART:20261113T140000Z", mine, att("Volunteer", "helper@example.org", "ACCEPTED")),
-        ...vevent("UID:m2@example.org", "SUMMARY:Story time", "DTSTART:20261114T140000Z", mine, att("Volunteer", "helper@example.org", "ACCEPTED")),
-        ...vevent("UID:m3@example.org", "SUMMARY:Book fair", "DTSTART:20261115T140000Z", mine, att("Volunteer", "helper@example.org", "DECLINED")),
-        ...vevent("UID:i1@example.org", "SUMMARY:Budget", "DTSTART:20261116T140000Z", lead, att("Library Desk", "desk@example.org", "ACCEPTED")),
-        ...vevent("UID:i2@example.org", "SUMMARY:Inventory", "DTSTART:20261117T140000Z", lead, att("Library Desk", "desk@example.org", "DECLINED")),
+        ...vevent("UID:m1@example.org", "SUMMARY:Planning", "DTSTART:20261113T140000Z", "ORGANIZER:mailto:lead@example.org", att("desk@example.org", "ACCEPTED")),
+        ...vevent("UID:m2@example.org", "SUMMARY:Budget", "DTSTART:20261114T140000Z", "ORGANIZER:mailto:desk@example.org", att("lead@example.org", "DECLINED")),
+        ...vevent("UID:m3@example.org", "SUMMARY:Inventory", "DTSTART:20261115T140000Z", "ORGANIZER:mailto:lead@example.org", att("Desk@Example.org", "DECLINED")),
+        ...vevent("UID:m4@example.org", "SUMMARY:Story time", "DTSTART:20261116T140000Z", "ORGANIZER;CN=Desk:invalid:nomail", att("lead@example.org", "ACCEPTED")),
+        ...vevent("UID:m5@example.org", "SUMMARY:Broken", "DTSTART:20261117T140000Z", att("lead@example.org", "ACCEPTED"), "X-BROKEN;=:"),
     ]);
     const { feed } = reader();
-    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
-    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Planning", "Story time", "Book fair", "Budget"]);
-    assert.equal(got.stats.declined, 1);
-});
-
-test("a placeholder for an address, as Exchange writes an organizer it can't name, isn't taken for the owner", async () => {
-    const nomail = "ORGANIZER;CN=Library Desk:invalid:nomail";
-    const text = calendar([
-        ...vevent("UID:m1@example.org", "SUMMARY:Planning", "DTSTART:20261113T140000Z", nomail),
-        ...vevent("UID:m2@example.org", "SUMMARY:Story time", "DTSTART:20261114T140000Z", nomail),
-        ...vevent("UID:m3@example.org", "SUMMARY:Book fair", "DTSTART:20261115T140000Z", nomail),
-        ...vevent("UID:i1@example.org", "SUMMARY:Budget", "DTSTART:20261116T140000Z", "ORGANIZER:mailto:lead@example.org",
-            "ATTENDEE;PARTSTAT=ACCEPTED:mailto:desk@example.org", "ATTENDEE;PARTSTAT=DECLINED:invalid:nomail"),
-        ...vevent("UID:i2@example.org", "SUMMARY:Inventory", "DTSTART:20261117T140000Z", "ORGANIZER:mailto:chair@example.org",
-            "ATTENDEE;PARTSTAT=DECLINED:mailto:desk@example.org"),
-    ]);
-    const { feed } = reader();
-    const got = await feed.read(text, { calendar: CALENDARS.library, window: feed.window(7, at("2026-11-12")) });
-    assert.deepEqual(plain(got.events.map((e) => e.title)), ["Planning", "Story time", "Book fair", "Budget"]);
-    assert.equal(got.stats.declined, 1);
+    const window = feed.window(7, at("2026-11-12"));
+    // An Outlook link: nothing says whose calendar it is, so nothing is left out as declined
+    const unknown = await feed.read(text, { calendar: CALENDARS.library, window, link: LINKS.library });
+    assert.deepEqual(plain(unknown.events.map((e) => e.title)), ["Planning", "Budget", "Inventory", "Story time"]);
+    assert.equal(unknown.stats.declined, 0);
+    assert.deepEqual(uids(unknown.failed), ["m5@example.org"]);
+    // The desk's address, as a setting could give it (OBS-275), in any case: only its own decline
+    const known = feed.reader.read(text, { calendar: CALENDARS.library, window: { start: window.start.getTime(), end: window.end.getTime() }, owner: "mailto:DESK@example.org" });
+    assert.deepEqual(plain(known.events.map((e) => e.title)), ["Planning", "Budget", "Story time"]);
+    assert.equal(known.stats.declined, 1);
 });
 
 test("an all-day series' moved and deleted days, their dates written as midnight as iCloud has, are read; any other time leaves the series out by name", async () => {
@@ -711,6 +697,32 @@ test("an all-day series' moved and deleted days, their dates written as midnight
                     [`${uid}@2026-11-16`, `${title}, moved`, "2026-11-17", true],
                     [`${uid}@2026-11-30`, title, "2026-11-30", true],
                 ], `${zone}: ${uid}`);
+            }
+        }
+    } finally {
+        process.env.TZ = before;
+    }
+});
+
+test("an all-day series' last day (UNTIL) written as midnight is read as its date, wherever the device is; any other time leaves the series out by name", async () => {
+    const weekly = (uid, until) => vevent(`UID:${uid}`, `SUMMARY:${uid}`, "DTSTART;VALUE=DATE:20261102", "DTEND;VALUE=DATE:20261103", `RRULE:FREQ=WEEKLY;UNTIL=${until}`);
+    // Mondays through the 23rd
+    const text = calendar([
+        ...weekly("floating@example.org", "20261123T000000"),
+        ...weekly("utc@example.org", "20261123T000000Z"),
+        ...weekly("date@example.org", "20261123"),
+        ...weekly("nine@example.org", "20261123T090000Z"),
+        ...weekly("late@example.org", "20261123T235959"),
+    ]);
+    const before = process.env.TZ;
+    try {
+        for (const zone of ["America/New_York", "Asia/Tokyo", "America/Los_Angeles", "Pacific/Kiritimati", "Etc/GMT+12"]) {
+            process.env.TZ = zone;
+            const { feed } = reader();
+            const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(21, at("2026-11-12")) });
+            assert.deepEqual(uids(got.failed), ["late@example.org", "nine@example.org"], zone);
+            for (const uid of ["floating@example.org", "utc@example.org", "date@example.org"]) {
+                assert.deepEqual(plain(got.events.filter((e) => e.id === uid).map((e) => e.date)), ["2026-11-16", "2026-11-23"], `${zone}: ${uid}`);
             }
         }
     } finally {
@@ -753,17 +765,6 @@ test("an event that doesn't parse is named by its UID as ical.js reads UIDs, so 
         assert.deepEqual(uids(got.failed), [uid]);
         assert.deepEqual(plain(got.events), []);
     }
-});
-
-test("when two attendees are on as many events, no one is taken for the owner, and nothing is left out", async () => {
-    const att = (who, partstat) => `ATTENDEE;PARTSTAT=${partstat}:mailto:${who}`;
-    const text = calendar([
-        ...vevent("UID:t1@example.org", "SUMMARY:One", "DTSTART:20261113T140000Z", att("guest@example.org", "DECLINED"), att("me@example.org", "ACCEPTED")),
-        ...vevent("UID:t2@example.org", "SUMMARY:Two", "DTSTART:20261114T140000Z", att("guest@example.org", "ACCEPTED"), att("me@example.org", "ACCEPTED")),
-    ]);
-    const { feed } = reader();
-    const got = await feed.read(text, { calendar: CALENDARS.home, window: feed.window(7, at("2026-11-12")) });
-    assert.deepEqual(plain(got.events.map((e) => e.title)), ["One", "Two"]);
 });
 
 test("an override that changes no occurrence of its series, and a one-off with an override, are left out by name", async () => {

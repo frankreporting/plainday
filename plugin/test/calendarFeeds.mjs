@@ -93,7 +93,7 @@ export const LINKS = {
 
 // Studio, a Google calendar's secret address: a series with a skipped day and a moved one, an
 // event in London's time, a declined invitation (found by the address in the link's path: a
-// colleague is on more events than the owner), an event shown as free, a two-day all-day event,
+// colleague is on more events than the owner, and is no one's guess), an event shown as free, a two-day all-day event,
 // one past midnight, a canceled one, an invitation to one occurrence of someone else's series,
 // and an old one-off
 function studio(day) {
@@ -133,8 +133,9 @@ function studio(day) {
     ]);
 }
 
-// Home, an iCloud public calendar: two events, and an invitation the owner declined, found as the
-// attendee on the most events (by the EMAIL parameter iCloud writes, whatever the value says)
+// Home, an iCloud public calendar: two events, and an invitation the owner declined, which is read
+// as any other event, since the feed doesn't say whose calendar it is; given the owner's address,
+// it's found by the EMAIL parameter iCloud writes, whatever the value says
 function home(day) {
     const d = (n) => dayOf(day, n);
     const NY = "TZID=America/New_York";
@@ -158,8 +159,9 @@ function home(day) {
 }
 
 // Library, an Outlook published calendar: a weekly series in Outlook's "Eastern Standard Time",
-// and an invitation the owner declined. Outlook lists a meeting's organizer as its ORGANIZER only,
-// never among its attendees; the owner is found as the person on the most events
+// and an invitation the owner declined, read as any other event, since the feed doesn't say whose
+// calendar it is. Outlook lists a meeting's organizer as its ORGANIZER only, never among its
+// attendees
 function library(day) {
     const d = (n) => dayOf(day, n);
     const ET = "TZID=Eastern Standard Time";

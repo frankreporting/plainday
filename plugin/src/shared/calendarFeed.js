@@ -87,8 +87,8 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, when its link says it: a Google link's path holds the calendar
-    // ID. Otherwise null, and the reader takes the person on the most events, as an attendee or the
-    // organizer.
+    // ID. Otherwise null, and no invitation is left out as declined: an iCloud or Outlook feed
+    // doesn't say whose calendar it is, so the reader doesn't guess (OBS-274, 11/15).
     owner(link) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (!m) return null;
@@ -101,7 +101,8 @@ export default class CalendarFeed {
 
     // Reads a feed's text in a background worker: { name, events, failed, stats }, or a problem.
     // `calendar` is the calendar's { id, name, account } in Plainday's settings, `window` from
-    // window(), and `link` the link it came from, which only says whose invitations were declined.
+    // window(), and `link` the link it came from, which only says whose calendar it is, when it's
+    // Google's.
     async read(text, { calendar = {}, window: range, link = null }) {
         if (!this.isCalendar(text)) return { problem: "unreadable" };
         const started = performance.now();
