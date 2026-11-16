@@ -700,14 +700,18 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         }
         /** @param {Calendar[]} calendars @returns {[Calendar, string][]} */
         const named = (calendars) => {
-            /** @type {Map<string, number>} */
-            const seen = new Map();
-            return calendars.map((c) => {
+            /** @type {Set<string>} */
+            const used = new Set();
+            /** @type {[Calendar, string][]} */
+            const out = [];
+            for (const c of calendars) {
                 const base = c.name || "Untitled calendar";
-                const n = (seen.get(base) ?? 0) + 1;
-                seen.set(base, n);
-                return [c, n === 1 ? base : `${base} (${n})`];
-            });
+                let name = base;
+                for (let n = 2; used.has(name); n++) name = `${base} (${n})`;
+                used.add(name);
+                out.push([c, name]);
+            }
+            return out;
         };
         return [
             {

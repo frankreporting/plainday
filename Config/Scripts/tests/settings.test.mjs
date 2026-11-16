@@ -9,7 +9,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
 
-const load = (file, name, context = vm.createContext({})) => vm.runInContext(classScript(file) + `\n;${name}`, context);
+const load = (file, name, context = vm.createContext({ URL })) => vm.runInContext(classScript(file) + `\n;${name}`, context);
 const billing = new (load("billing.js", "Billing"))();
 const Settings = load("settings.js", "Settings");
 const settings = new Settings();
@@ -206,6 +206,7 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
     };
     const context = vm.createContext({
         app,
+        URL,
         crypto: globalThis.crypto,
         Notice: class { constructor(text) { notices.push(text); } },
         // As Obsidian's: the frontmatter between the first two ---, and YAML enough for these notes
@@ -712,8 +713,10 @@ test("a link without its scheme is a link too; a pasted http:// link is taken on
     for (const t of ["calendar.google.com/calendar/ical/x/basic.ics", "p00-caldav.icloud.com/published/2/abc", "outlook.office365.com/owa/calendar/x"]) {
         assert.equal(settings.linkFree(t), "", t);
     }
-    for (const t of ["Team A/B", "Home", "Q3: planning", "v2.1 release"]) assert.equal(settings.linkFree(t), t, t);
-    const text = JSON.stringify({ "plainday-settings": 1, calendars: { list: ["a", "b", "c", "d"].map((id) => ({ id, name: id })) },
-        links: { a: "http://example.org/x.ics", b: "http://127.0.0.1:8765/x.ics", c: "https://example.org/x.ics", d: "webcal://example.org/x" } });
+    for (const t of ["Team A/B", "Home", "Q3: planning", "v2.1 release", "Team 2.0/Ops", "v1.2/beta"]) assert.equal(settings.linkFree(t), t, t);
+    const links = { a: "http://example.org/x.ics", b: "http://127.0.0.1:8765/x.ics", c: "https://example.org/x.ics", d: "webcal://example.org/x",
+        // A user name in front of the server: the server is example.net, not this device
+        e: "http://127.0.0.1:80@feeds.example.net/private/basic.ics", f: "https://", g: "https://exa mple.org/x.ics" };
+    const text = JSON.stringify({ "plainday-settings": 1, calendars: { list: Object.keys(links).map((id) => ({ id, name: id })) }, links });
     assert.deepEqual(Object.keys(settings.readCopy(text, billing).links ?? {}).sort(), ["b", "c", "d"]);
 });

@@ -767,12 +767,13 @@ test("a calendar's switch that can't be saved goes back once, and a calendar gon
 test("Edit: a name typed while a new link is checked is the one saved; repeated names and an account named like a section are told apart (OBS-282)", async () => {
     const stored = { calendars: { list: [
         { id: "cal0000001", name: "Calendar", account: "iCloud" }, { id: "cal0000002", name: "Calendar", account: "iCloud" },
+        { id: "cal0000003", name: "Calendar (2)", account: "iCloud" },
         { id: "inv0000001", name: "Billing", account: "Invoices" },
     ] } };
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs.slice(5).map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs.slice(5).map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");

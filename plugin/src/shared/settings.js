@@ -64,12 +64,10 @@ export default class Settings {
     // An email address, as much as the reader needs: something@something, with no spaces, and no / or
     // : so no link is ever taken for one
     static ADDRESS = /^[^\s@,;<>()"/:]+@[^\s@,;<>()"/:]+$/;
-    // Text that holds a link, with its scheme or without (a server's name, then a path): a calendar's
-    // link pasted into its name or account is never kept there
-    static LINKISH = /:\/\/|^\s*(?:https?|webcals?):|[a-z0-9-]+(?:\.[a-z0-9-]+)+\/\S/i;
-    // What a pasted copy's link may be, as Add calendar takes one: https:// or webcal://, or http:// from
-    // this device itself, with no spaces
-    static LINK = /^(?:(?:https|webcals?):\/\/|http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?:[:/]|$))\S*$/i;
+    // Text that holds a link, with its scheme or without (a server's name ending in a top-level domain,
+    // then a path): a calendar's link pasted into its name or account is never kept there. "Team 2.0/Ops"
+    // isn't one.
+    static LINKISH = /:\/\/|^\s*(?:https?|webcals?):|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\/\S/i;
     // Where this vault keeps its key for the names of its secrets (app.saveLocalStorage: this vault's,
     // on this device)
     static VAULT_KEY = "plainday-calendar-key";
@@ -323,6 +321,24 @@ export default class Settings {
     }
 
     /**
+     * Whether a pasted copy's link is one Add calendar would take: https:// or webcal:// to a server, or
+     * http:// to this device itself, with no spaces
+     * @param {unknown} link
+     * @returns {boolean}
+     */
+    isLink(link) {
+        const text = String(link ?? "").trim();
+        if (!/^(?:https?|webcals?):\/\/\S+$/i.test(text)) return false;
+        try {
+            const url = new URL(text.replace(/^webcals?:\/\//i, "https://"));
+            if (!url.hostname) return false;
+            return url.protocol === "https:" || ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * The IDs of every calendar link this vault keeps on this device, whether or not a calendar in the
      * list has it (one removed on another device, which Sync took out of the list, keeps its link here).
      * Another vault's are never among them.
@@ -571,7 +587,7 @@ export default class Settings {
         const given = typeof raw.links === "object" && raw.links !== null ? raw.links : {};
         for (const { id } of settings.calendars.list) {
             const link = given[id];
-            if (typeof link === "string" && Settings.LINK.test(link.trim())) links[id] = link.trim();
+            if (typeof link === "string" && this.isLink(link)) links[id] = link.trim();
         }
         return { settings, links, withCalendars: this.hasCalendars(raw) };
     }
