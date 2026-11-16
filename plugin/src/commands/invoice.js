@@ -1,4 +1,4 @@
-import { ButtonComponent, FuzzySuggestModal, Modal, moment, Notice, Platform, TextComponent } from "obsidian";
+import { ButtonComponent, FuzzySuggestModal, getFrontMatterInfo, Modal, moment, Notice, parseYaml, Platform, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class Invoice {
@@ -655,6 +655,12 @@ export default class Invoice {
         const missing = this.missing(s, { folder });
         if (missing) { new Notice(missing, 0); return null; }
         return { name: s.name, address: [...s.address], terms: s.terms, paymentNote: s.paymentNote, folder: s.folder };
+    }
+
+    // A note's properties, read from its text (the metadata cache can lag an edit)
+    async propsOf(file, tr) {
+        const info = getFrontMatterInfo(await tr.textOf(file));
+        try { return info.exists ? parseYaml(info.frontmatter) ?? {} : {}; } catch (e) { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
     }
 
     // Resolves once the metadata cache has read `file` (or after two seconds)

@@ -190,7 +190,7 @@ test("its settings load before anything runs; the panel is added; the old notes 
     }
 });
 
-test("a device with no settings saved starts from the defaults, and saves what it read once the layout is ready", async () => {
+test("a device with no settings saved and no old notes starts from the defaults, and writes nothing", async () => {
     const { plugin, layout, notices } = load();
     await plugin.onload();
     try {
@@ -198,7 +198,7 @@ test("a device with no settings saved starts from the defaults, and saves what i
         assert.equal(window.plainday.Settings.saved, false);
         for (const name of STARTUP) window.plainday[name].invoke = async () => {};
         await layout[0]();
-        assert.equal(plugin.saved.length, 1, "the defaults, so the old notes are never read again");
+        assert.deepEqual(plugin.saved, [], "nothing to move, so no file written over one Sync may still bring");
         assert.deepEqual(notices, [], "no old notes, nothing to say");
     } finally {
         plugin.onunload();

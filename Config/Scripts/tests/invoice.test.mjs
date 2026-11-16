@@ -8,6 +8,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { compactTable, obsidianPadded } from "./tables.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { frontmatter } from "./demo/renderReports.mjs";
 
 const here = new URL(".", import.meta.url);
 const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
@@ -333,6 +334,24 @@ test("suggestCode and nameFor", () => {
     assert.equal(inv.suggestCode("@Pinecrest Public Library"), "PPL");
     assert.equal(inv.suggestCode("Harbor"), "HAR");
     assert.equal(inv.nameFor(1001, "KES"), "1001-KES");
+});
+
+test("Invoice on an invoice note reads its properties from its text and offers what fits its status", async () => {
+    const notices = [], offered = [];
+    const text = inv.noteText(DATA(), tr, billing);
+    const context = vm.createContext({
+        app: { metadataCache: { getFileCache: () => null } }, setTimeout,
+        Notice: class { constructor(t) { notices.push(t); } },
+        getFrontMatterInfo: (t) => { const m = String(t).match(/^---\n([\s\S]*?)\n---/); return { exists: !!m, frontmatter: m ? m[1] : "" }; },
+        parseYaml: (yaml) => frontmatter(`---\n${yaml}\n---\n`),
+    });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
+    invoice.pickAction = async (inv, choices) => { offered.push([inv.name, inv.status, choices.map(([k]) => k)]); return null; };
+    // The note as the editor holds it, and the vault's index
+    const reader = Object.assign(Object.create(tr), { textOf: async () => text, appIndex: () => index });
+    await invoice.actions({ path: "Reference/Invoices/1001-HBR.md" }, reader, billing);
+    assert.deepEqual(notices, []);
+    assert.deepEqual(plain(offered), [["1001-HBR", "draft", ["rebuild", "sent"]]]);
 });
 
 // ------------------------------------------------------------------ what the check and the draft say

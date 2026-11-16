@@ -19,7 +19,9 @@ export default class UpdateObsidianPM {
     // base's place changes, the copy it had is moved there, edits and all (a base saves its own sorting
     // and filters into its file), and then treated like any installed file: updated if you never
     // changed it, left alone if you did. While the invoice folder can't hold it (a file is in the
-    // way), the base sits this update out, wherever it is.
+    // way), the base sits this update out, wherever it is, and so does a base already placed beside
+    // the invoices while this computer has no invoice folder chosen (its Plainday settings aren't
+    // pasted yet), so two computers don't move it back and forth.
     //
     // Nothing is written until you've seen the list. Removals (a file the repository dropped) are
     // listed on their own, and a file you've changed yourself is never removed and only overwritten
@@ -126,6 +128,12 @@ export default class UpdateObsidianPM {
         return rel === UpdateObsidianPM.INVOICES_BASE;
     }
 
+    // Whether an Invoices base this command installed sits outside Config/Bases, by the manifest
+    placedElsewhere(manifest) {
+        const name = UpdateObsidianPM.INVOICES_BASE.split("/").pop();
+        return [...manifest.keys()].some((p) => p.split("/").pop() === name && p !== UpdateObsidianPM.INVOICES_BASE_HOME);
+    }
+
     // The manifest split for an update the Invoices base sits out: { manifest, held }, where `held`
     // is every record of an installed Invoices base, put back as it was afterwards
     hold(manifest) {
@@ -229,7 +237,7 @@ export default class UpdateObsidianPM {
         };
         if (source) lines.push(`From \`${source}\`${commit ? ` at ${commit}` : ""}`, "");
         if (invoiceFolder) lines.push(`The Invoices base goes in \`${invoiceFolder}\`, the invoice folder in Settings → Plainday.`, "");
-        if (held) lines.push("The Invoices base is left as it is this time: the invoice folder can't hold it (see the notice).", "");
+        if (held) lines.push(`The Invoices base is left as it is this time: ${typeof held === "string" ? held : "the invoice folder can't hold it (see the notice)"}.`, "");
         if (firstRun && plan.local.length) {
             lines.push("No record of an earlier install here, so every file that differs is listed as changed in this vault."
                 + " On a vault that already ran the system, tick the box below to take the repository's versions.", "");
@@ -333,9 +341,12 @@ export default class UpdateObsidianPM {
         // From here on, every path is where the file goes in the vault; `origin` says where a file
         // placed elsewhere comes from in the clone. While the invoice folder can't hold it, the
         // Invoices base sits the update out, and its records are kept as they are.
-        const where = this.invoiceFolder(vaultPath);
-        const { files: sourceFiles, origin } = this.placed(repoFiles, { invoiceFolder: where.folder, hold: where.hold });
         const recorded = new Map(Object.entries(JSON.parse((await this.read(UpdateObsidianPM.MANIFEST_FILE)) || "{}").files ?? {}));
+        let where = this.invoiceFolder(vaultPath);
+        if (!where.folder && !where.hold && this.placedElsewhere(recorded)) {
+            where = { folder: "", hold: true, why: "no invoice folder is chosen in Settings → Plainday on this computer" };
+        }
+        const { files: sourceFiles, origin } = this.placed(repoFiles, { invoiceFolder: where.folder, hold: where.hold });
         const { manifest, held } = where.hold ? this.hold(recorded) : { manifest: recorded, held: new Map() };
         const vaultFiles = new Map();
         for (const rel of new Set([...sourceFiles.keys(), ...manifest.keys()])) {
@@ -348,7 +359,7 @@ export default class UpdateObsidianPM {
         // assume-unchanged. Both tell git to ignore changes, so neither shows in a diff.
         const hidden = (this.git(source, ["ls-files", "-v"]).out ?? "").split("\n")
             .filter((line) => /^(S|[a-z]) /.test(line)).map((line) => line.slice(2)).filter(Boolean).sort();
-        const summary = this.summary(plan, { source, commit, firstRun: recorded.size === 0, hidden, invoiceFolder: where.folder, held: where.hold });
+        const summary = this.summary(plan, { source, commit, firstRun: recorded.size === 0, hidden, invoiceFolder: where.folder, held: where.hold && (where.why ?? true) });
         if (this.upToDate(plan)) {
             // Still record what's already in place, so a later update reaches it
             const after = new Map([...this.manifestAfter(sourceFiles, manifest, this.steps(plan)), ...held]);

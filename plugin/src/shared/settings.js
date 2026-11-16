@@ -102,15 +102,22 @@ export default class Settings {
 
     /**
      * How many rows or columns to freeze: a whole number from 0 to 9, as a number or as digits. { number,
-     * error }, with 0 when blank; more than 9 is 9.
+     * error, capped }, with 0 when blank; more than 9 is 9, and `capped` says so.
      * @param {unknown} raw
-     * @returns {{ number: number, error: string | null }}
+     * @returns {{ number: number, error: string | null, capped: boolean }}
      */
     frozenOf(raw) {
-        if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) return { number: 0, error: null };
+        if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) return { number: 0, error: null, capped: false };
         const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
-        if (Number.isInteger(n) && n >= 0) return { number: Math.min(n, Settings.MAX_FROZEN), error: null };
-        return { number: 0, error: "isn't a whole number" };
+        if (Number.isInteger(n) && n >= 0) return { number: Math.min(n, Settings.MAX_FROZEN), error: null, capped: n > Settings.MAX_FROZEN };
+        return { number: 0, error: "isn't a whole number", capped: false };
+    }
+
+    // A note's property by its name, in any case, as the old notes were read (TimeReport.prop)
+    prop(props, key) {
+        if (key in props) return props[key];
+        const k = Object.keys(props).find((x) => x.toLowerCase() === key.toLowerCase());
+        return k === undefined ? undefined : props[k];
     }
 
     /**
@@ -139,8 +146,8 @@ export default class Settings {
     /**
      * Settings from the notes that held them before (OBS-281): `invoice` and `table` are each { props },
      * the note's properties, { error } when they don't read, or null when the note isn't there.
-     * { settings, read: the notes that were there, bad: what didn't read, by the note's own name for it }.
-     * A value that doesn't read is left at its default.
+     * { settings, read: the notes that were there, bad: what didn't read, by the note's own name for it,
+     * capped: a freeze over 9, which is 9 now }. A value that doesn't read is left at its default.
      * @typedef {{ props: Record<string, unknown>, error?: undefined } | { error: string, props?: undefined } | null} OldNote
      * @param {{ invoice?: OldNote, table?: OldNote }} notes
      * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
@@ -150,23 +157,23 @@ export default class Settings {
         /** @type {("invoice" | "table")[]} */
         const read = [];
         /** @type {string[]} */
-        const bad = [];
+        const bad = [], capped = [];
         const shown = (v) => (typeof v === "string" ? v.trim() : JSON.stringify(v));
         if (invoice) {
             read.push("invoice");
             if (!invoice.props) {
                 bad.push("Invoice Settings' properties");
             } else {
-                const s = settings.invoices, p = invoice.props;
-                s.name = this.text(p.name);
-                s.address = this.lines(p.address);
-                s.terms = this.text(p.terms);
-                s.paymentNote = this.multiline(typeof p.payment_note === "string" ? p.payment_note : this.text(p.payment_note));
-                const folder = billing.folderOf(p.folder);
-                if (folder.error) bad.push(`\`folder\` in Invoice Settings (${shown(p.folder)})`);
+                const s = settings.invoices, p = invoice.props, get = (k) => this.prop(p, k);
+                s.name = this.text(get("name"));
+                s.address = this.lines(get("address"));
+                s.terms = this.text(get("terms"));
+                s.paymentNote = this.multiline(typeof get("payment_note") === "string" ? get("payment_note") : this.text(get("payment_note")));
+                const folder = billing.folderOf(get("folder"));
+                if (folder.error) bad.push(`\`folder\` in Invoice Settings (${shown(get("folder"))})`);
                 else s.folder = folder.folder;
-                const last = this.lastNumberOf(p.last_number);
-                if (last.error) bad.push(`\`last_number\` in Invoice Settings (${shown(p.last_number)})`);
+                const last = this.lastNumberOf(get("last_number"));
+                if (last.error) bad.push(`\`last_number\` in Invoice Settings (${shown(get("last_number"))})`);
                 else if (last.number !== null) s.lastNumber = last.number;
             }
         }
@@ -176,26 +183,28 @@ export default class Settings {
                 bad.push("Table Settings' properties");
             } else {
                 for (const [key, to] of /** @type {const} */ ([["freeze_rows", "freezeRows"], ["freeze_columns", "freezeColumns"]])) {
-                    const n = this.frozenOf(table.props[key]);
-                    if (n.error) bad.push(`\`${key}\` in Table Settings (${shown(table.props[key])})`);
+                    const raw = this.prop(table.props, key), n = this.frozenOf(raw);
+                    if (n.error) bad.push(`\`${key}\` in Table Settings (${shown(raw)})`);
                     else settings.tables[to] = n.number;
+                    if (n.capped) capped.push(`\`${key}\` in Table Settings (${shown(raw)})`);
                 }
             }
         }
-        return { settings, read, bad };
+        return { settings, read, bad, capped };
     }
 
     /**
      * What the first load says after reading the old notes, or null when there were none
-     * @param {{ read: ("invoice" | "table")[], bad: string[] }} result
+     * @param {{ read: ("invoice" | "table")[], bad: string[], capped?: string[] }} result
      * @returns {string | null}
      */
-    movedNotice({ read, bad }) {
+    movedNotice({ read, bad, capped = [] }) {
         if (!read.length) return null;
         const what = read.map((r) => (r === "invoice" ? "invoice" : "table")).join(" and ");
         const notes = read.map((r) => (r === "invoice" ? "Invoice Settings" : "Table Settings")).join(" or ");
         const lines = [`Plainday moved your ${what} settings into Settings → Plainday. It no longer reads ${notes}; you can delete ${read.length === 1 ? "it" : "them"}.`];
         if (bad.length) lines.push(`${bad.length === 1 ? "This" : "These"} didn't read, so ${bad.length === 1 ? "it starts" : "they start"} from the default: ${bad.join(", ")}.`);
+        if (capped.length) lines.push(`Plainday freezes at most ${Settings.MAX_FROZEN} rows or columns, so ${capped.length === 1 ? "this is" : "these are"} ${Settings.MAX_FROZEN} now: ${capped.join(", ")}.`);
         return lines.join("\n\n");
     }
 
@@ -222,7 +231,20 @@ export default class Settings {
         let raw;
         try { raw = JSON.parse(t); } catch { return not; }
         if (typeof raw !== "object" || raw === null || !(Settings.COPY_MARK in raw)) return not;
-        return { settings: this.normalize(raw, billing), holds: "Invoices, tables and the editor switch" };
+        const settings = this.normalize(raw, billing);
+        return { settings, holds: this.holds(settings) };
+    }
+
+    /**
+     * What a copy holds, as Paste settings says it before you choose: enough of its invoice details to
+     * tell whose copy it is
+     * @param {ReturnType<Settings["defaults"]>} settings
+     * @returns {string}
+     */
+    holds(settings) {
+        const inv = settings.invoices;
+        const details = [inv.name || "no name", inv.folder ? `invoices in ${inv.folder}` : "no invoice folder", `last invoice number ${inv.lastNumber}`];
+        return `invoices (${details.join(", ")}), tables (freeze ${settings.tables.freezeRows} rows and ${settings.tables.freezeColumns} columns) and the editor switch (${settings.editor.listCursor ? "on" : "off"})`;
     }
 
     /**
@@ -294,15 +316,23 @@ export default class Settings {
         await plainday.ListCursor?.invoke();
     }
 
-    // Sync changed the data file: read it again, and apply the editor switch
+    // Sync changed the data file: read it again, and apply the editor switch. A file caught mid-write (or
+    // not downloaded yet) reads as undefined: the settings in memory stay until it reads.
     async reload() {
-        await this.load();
+        const plugin = plainday.plugin;
+        if (!plugin) return;
+        const raw = await plugin.loadData();
+        if (raw === undefined) return;
+        this.unreadable = false;
+        this.saved = raw !== null;
+        this.data = this.normalize(raw ?? {});
         await plainday.ListCursor?.invoke();
     }
 
-    // On a device with no settings saved: reads the old settings notes once, saves what they held (the
-    // defaults when there are none, so this never runs again), and says what moved. The notes are left
-    // as they are.
+    // On a device with no settings saved: reads the old settings notes, and when there are any, saves
+    // what they held, so they're never read again, and says what moved. The notes are left as they are.
+    // With none, nothing is written: a device whose notes Sync hasn't brought yet reads them at a later
+    // load, and one whose data file Sync is still bringing doesn't write defaults over it.
     async readOldNotes() {
         if (this.saved) return;
         const props = async (path) => {
@@ -318,6 +348,7 @@ export default class Settings {
             }
         };
         const result = this.fromOldNotes({ invoice: await props(Settings.INVOICE_NOTE), table: await props(Settings.TABLE_NOTE) });
+        if (!result.read.length) return;
         this.data = result.settings;
         await this.save();
         const notice = this.movedNotice(result);

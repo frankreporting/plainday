@@ -7,8 +7,11 @@
 // (getSettingDefinitions); an older Obsidian, down to the manifest's 1.11.4, calls display(), which
 // draws the same list itself with Setting and SettingGroup. Each row draws its own control (`render`).
 //
-// Each change is saved as it's made. A value that doesn't read (an invoice folder outside the vault,
-// a number that isn't one) is refused with a line under the field, and the old value stays.
+// Each change is saved as it's made. The invoice folder and the last invoice number are checked as you
+// type and saved when you leave the field (or the panel closes), so a value on its way to another one
+// (`Archiv` on the way to `Archive/Invoices`) is never kept. A value that doesn't read (a folder outside
+// the vault or in Archive, a number that isn't one) is refused with a line under the field, and the old
+// value stays.
 //
 // The sections, in order: Invoices, Tables, Editor, and Another device, with Copy settings and
 // Paste settings. OBS-282 adds Calendars and OBS-283 Folders.
@@ -17,7 +20,7 @@ import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {import("obsidian").Setting} Setting */
-/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void }} Row */
+/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void) }} Row */
 /** @typedef {{ heading: string, rows: Row[] }} Section */
 
 /** @param {unknown} e */
@@ -31,20 +34,33 @@ const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string"
 const row = (name, desc, draw) => ({ name, desc, render: (s) => { draw(s); } });
 
 /**
- * Folders to choose an invoice folder from: the vault's own, with `Invoices` first while there's none
+ * A row whose value is saved when you leave the field: `draw` returns what saves a value still waiting,
+ * which runs when the row is taken down (the panel closing, or drawn again)
+ * @param {string} name @param {string} desc @param {(setting: Setting) => () => void} draw
+ * @returns {Row}
+ */
+const field = (name, desc, draw) => ({ name, desc, render: (s) => draw(s) });
+
+/**
+ * Folders to choose an invoice folder from: the vault's own that the field would take, with `Invoices`
+ * first while there's none
  * @extends {AbstractInputSuggest<string>}
  */
 class FolderSuggest extends AbstractInputSuggest {
-    /** @param {import("obsidian").App} app @param {HTMLInputElement} inputEl @param {string} suggested */
-    constructor(app, inputEl, suggested) {
+    /**
+     * @param {import("obsidian").App} app @param {HTMLInputElement} inputEl @param {string} suggested
+     * @param {(folder: string) => boolean} takes
+     */
+    constructor(app, inputEl, suggested, takes) {
         super(app, inputEl);
         this.suggested = suggested;
+        this.takes = takes;
     }
 
     /** @param {string} query @returns {string[]} */
     getSuggestions(query) {
         const q = query.trim().toLowerCase();
-        const folders = this.app.vault.getAllFolders(false).map((f) => f.path).sort((a, b) => a.localeCompare(b));
+        const folders = this.app.vault.getAllFolders(false).map((f) => f.path).filter((f) => this.takes(f)).sort((a, b) => a.localeCompare(b));
         const all = folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
         return all.filter((f) => f.toLowerCase().includes(q));
     }
@@ -88,7 +104,7 @@ class PasteModal extends Modal {
         box.onChange((text) => {
             const read = settings.readCopy(text);
             copy = read.settings ?? null;
-            said.setText(read.settings ? `It holds: ${read.holds}. This device's last invoice number stays if it's higher.` : read.error ?? "");
+            said.setText(read.settings ? `It holds ${read.holds}. This device's last invoice number stays if it's higher.` : read.error ?? "");
             replace.setDisabled(!copy);
         });
         window.setTimeout(() => box.inputEl.focus(), 0);
@@ -109,18 +125,27 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         }));
     }
 
-    // An Obsidian before 1.13: the same sections, drawn here
+    // An Obsidian before 1.13: the same sections, drawn here. What a row returns saves a value still
+    // waiting when the panel closes (hide), as Obsidian 1.13 runs it when it takes the row down.
     display() {
         this.containerEl.empty();
+        /** @type {(() => void)[]} */
+        const waiting = [];
+        this.waiting = waiting;
         for (const { heading, rows } of this.sections()) {
             const group = new SettingGroup(this.containerEl).setHeading(heading);
             for (const { name, desc, render } of rows) {
                 group.addSetting((s) => {
                     s.setName(name).setDesc(desc);
-                    render(s);
+                    const save = render(s);
+                    if (save) waiting.push(save);
                 });
             }
         }
+    }
+
+    hide() {
+        for (const save of this.waiting?.splice(0) ?? []) save();
     }
 
     // Draws the panel again, after a paste changed every value
@@ -151,7 +176,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
          * @param {Setting} setting @param {K} section @param {Partial<Values[K]>} values
          * @returns {Promise<void>}
          */
-        const save = (setting, section, values) => settings.set(section, values).then(
+        const store = (setting, section, values) => settings.set(section, values).then(
             () => problem(setting, ""),
             (e) => problem(setting, `Couldn't save: ${messageOf(e)}`),
         );
@@ -162,39 +187,65 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 heading: "Invoices",
                 rows: [
                     row("Your name", "Heads each new invoice, above your address. Invoice asks for it before your first invoice.",
-                        (s) => s.addText((t) => t.setValue(now().invoices.name).onChange((v) => { void save(s, "invoices", { name: v.trim() }); }))),
+                        (s) => s.addText((t) => t.setValue(now().invoices.name).onChange((v) => { void store(s, "invoices", { name: v.trim() }); }))),
                     row("Address", "Under your name, one line per item.", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
-                        t.setValue(now().invoices.address.join("\n")).onChange((v) => { void save(s, "invoices", { address: settings.lines(v) }); });
+                        t.setValue(now().invoices.address.join("\n")).onChange((v) => { void store(s, "invoices", { address: settings.lines(v) }); });
                     })),
                     row("Terms", "Printed on each invoice, such as Net 30. A project's own terms win over these.",
-                        (s) => s.addText((t) => t.setPlaceholder("Net 30").setValue(now().invoices.terms).onChange((v) => { void save(s, "invoices", { terms: v.trim() }); }))),
+                        (s) => s.addText((t) => t.setPlaceholder("Net 30").setValue(now().invoices.terms).onChange((v) => { void store(s, "invoices", { terms: v.trim() }); }))),
                     row("Payment note", "Closes each invoice, such as how to pay you.", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
-                        t.setValue(now().invoices.paymentNote).onChange((v) => { void save(s, "invoices", { paymentNote: settings.multiline(v) }); });
+                        t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
-                    row("Invoice folder", "Where new invoices go, with the Invoices base beside them. Invoice asks you to choose one before your first invoice. Changing it doesn't move the invoices already made, and invoices in a project's own invoices folder still count.", (s) => s.addText((t) => {
+                    field("Invoice folder", "Where new invoices go, with the Invoices base beside them. Invoice asks you to choose one before your first invoice. Changing it doesn't move the invoices already made, and invoices in a project's own invoices folder still count.", (s) => {
+                        /** @type {string | null} */
+                        let waiting = null;
+                        const save = () => {
+                            if (waiting === null) return;
+                            const folder = waiting;
+                            waiting = null;
+                            if (folder !== now().invoices.folder) void store(s, "invoices", { folder });
+                        };
                         /** @param {string} v */
-                        const change = (v) => {
+                        const check = (v) => {
                             const { folder, error } = plainday.Billing.folderOf(v);
                             const was = now().invoices.folder;
-                            if (error) { problem(s, `Not used: it ${error}. The invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.`); return; }
-                            void save(s, "invoices", { folder });
+                            waiting = error ? null : folder;
+                            problem(s, error ? `Not used: it ${error}. The invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.` : "");
                         };
-                        t.setPlaceholder("Invoices").setValue(now().invoices.folder).onChange(change);
-                        new FolderSuggest(this.app, t.inputEl, "Invoices").onSelect((folder) => {
-                            t.setValue(folder);
-                            change(folder);
+                        s.addText((t) => {
+                            t.setPlaceholder("Invoices").setValue(now().invoices.folder).onChange(check);
+                            t.inputEl.addEventListener("change", save);
+                            const suggest = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f).error);
+                            suggest.onSelect((folder) => {
+                                t.setValue(folder);
+                                check(folder);
+                                save();
+                                suggest.close();
+                            });
                         });
-                    })),
-                    row("Last invoice number", "The highest invoice number given so far. The next invoice gets one more than this, or than the highest invoice note's number if that's higher, and Invoice raises it each time, so a deleted invoice's number is never given again.", (s) => s.addText((t) => {
-                        t.inputEl.inputMode = "numeric";
-                        t.setValue(String(now().invoices.lastNumber)).onChange((v) => {
-                            const { number } = settings.lastNumberOf(v);
-                            if (number === null) { problem(s, `Not used: it isn't a whole number from 0 to 999999. The last invoice number stays ${now().invoices.lastNumber}.`); return; }
-                            void save(s, "invoices", { lastNumber: number });
+                        return save;
+                    }),
+                    field("Last invoice number", "The highest invoice number given so far. The next invoice gets one more than this, or than the highest invoice note's number if that's higher, and Invoice raises it each time, so a deleted invoice's number is never given again.", (s) => {
+                        /** @type {number | null} */
+                        let waiting = null;
+                        const save = () => {
+                            if (waiting === null) return;
+                            const lastNumber = waiting;
+                            waiting = null;
+                            if (lastNumber !== now().invoices.lastNumber) void store(s, "invoices", { lastNumber });
+                        };
+                        s.addText((t) => {
+                            t.inputEl.inputMode = "numeric";
+                            t.setValue(String(now().invoices.lastNumber)).onChange((v) => {
+                                waiting = settings.lastNumberOf(v).number;
+                                problem(s, waiting === null ? `Not used: it isn't a whole number from 0 to 999999. The last invoice number stays ${now().invoices.lastNumber}.` : "");
+                            });
+                            t.inputEl.addEventListener("change", save);
                         });
-                    })),
+                        return save;
+                    }),
                 ],
             },
             {
@@ -202,10 +253,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 rows: [
                     row("Freeze rows", "Keeps a table's first rows in view as you scroll it, with the Selectable Tables plugin: the time report's tables, timesheets and invoices. 0 is off. The next time report writes every table with it, and a table you froze or unfroze yourself keeps your choice.",
                         (s) => s.addDropdown((d) => d.addOptions(counts).setValue(String(now().tables.freezeRows))
-                            .onChange((v) => { void save(s, "tables", { freezeRows: Number(v) }); }))),
+                            .onChange((v) => { void store(s, "tables", { freezeRows: Number(v) }); }))),
                     row("Freeze columns", "Keeps a table's first columns in view, counted from its first named column, so a timesheet's status column comes along with its date. 0 is off.",
                         (s) => s.addDropdown((d) => d.addOptions(counts).setValue(String(now().tables.freezeColumns))
-                            .onChange((v) => { void save(s, "tables", { freezeColumns: Number(v) }); }))),
+                            .onChange((v) => { void store(s, "tables", { freezeColumns: Number(v) }); }))),
                 ],
             },
             {
@@ -213,7 +264,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 rows: [
                     row("Keep the cursor after a list line's bullet or checkbox", "In Live Preview, the cursor rests after a list line's bullet, number or checkbox, never in front of them, so a checkbox stays drawn. Off, it can rest anywhere on the line.",
                         (s) => s.addToggle((t) => t.setValue(now().editor.listCursor).onChange((v) => {
-                            void save(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
+                            void store(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
                         }))),
                 ],
             },

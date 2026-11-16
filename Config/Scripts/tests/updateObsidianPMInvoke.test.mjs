@@ -590,6 +590,26 @@ test("invoke: a base you sorted before the invoice folder was chosen moves with 
     assert.doesNotMatch(f.answers.sawSummary, /\*\*New/);
 });
 
+test("invoke: with no invoice folder chosen on this computer, a base already beside the invoices stays there (OBS-281)", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    f.setFolder("Business/Invoices");
+    await f.up.invoke();
+    const placed = "Business/Invoices/Invoices.base";
+    assert.equal(read(f.vault, placed), "invoices base\n");
+    // Another computer, whose Plainday settings aren't pasted yet, runs the next update
+    f.setFolder("");
+    write(f.source, "Config/Scripts/Templater/recordEvent.js", "report 2\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
+    await f.up.invoke();
+    assert.equal(read(f.vault, placed), "invoices base\n", "not moved back to Config");
+    assert.equal(exists(f.vault, BASE), false);
+    assert.deepEqual(f.moved, []);
+    assert.match(f.answers.sawSummary, /The Invoices base is left as it is this time: no invoice folder is chosen in Settings → Plainday on this computer\./);
+    assert.ok(JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json")).files[placed], "its record kept");
+});
+
 test("invoke: an invoice folder that goes through a file leaves the base where it is", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));

@@ -78,17 +78,28 @@ const INVOICE_NOTE = { props: { id: 2026091210000000, tags: null, name: "Juniper
 
 test("fromOldNotes: Invoice Settings and Table Settings, as the notes held them", () => {
     const r = settings.fromOldNotes({ invoice: INVOICE_NOTE, table: { props: { freeze_rows: 1, freeze_columns: "1" } } }, billing);
-    assert.deepEqual(plain(r), { settings: { ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }, read: ["invoice", "table"], bad: [] });
+    assert.deepEqual(plain(r), { settings: { ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }, read: ["invoice", "table"], bad: [], capped: [] });
     // the address as lines, numbers as text, the freeze blank
     const lines = settings.fromOldNotes({ invoice: { props: { name: "J", address: "a\nb", last_number: "1033" } }, table: { props: { freeze_rows: null, freeze_columns: "" } } }, billing);
     assert.deepEqual(plain(lines.settings.invoices.address), ["a", "b"]);
     assert.equal(lines.settings.invoices.lastNumber, 1033);
     assert.deepEqual(plain(lines.settings.tables), { freezeRows: 0, freezeColumns: 0 });
     assert.deepEqual(plain(lines.bad), []);
+    // a property spelled in another case, as the old notes were read
+    const cased = settings.fromOldNotes({ invoice: { props: { Name: "Juniper Hale", Last_Number: 1033 } }, table: { props: { Freeze_Rows: 1 } } }, billing);
+    assert.deepEqual(plain([cased.settings.invoices.name, cased.settings.invoices.lastNumber, cased.settings.tables.freezeRows]), ["Juniper Hale", 1033, 1]);
+});
+
+test("fromOldNotes: a freeze over 9 is 9, and the notice says so", () => {
+    const r = settings.fromOldNotes({ table: { props: { freeze_rows: 12, freeze_columns: 1 } } }, billing);
+    assert.deepEqual(plain([r.settings.tables, r.bad, r.capped]), [{ freezeRows: 9, freezeColumns: 1 }, [], ["`freeze_rows` in Table Settings (12)"]]);
+    assert.equal(settings.movedNotice(r),
+        "Plainday moved your table settings into Settings → Plainday. It no longer reads Table Settings; you can delete it.\n\n"
+        + "Plainday freezes at most 9 rows or columns, so this is 9 now: `freeze_rows` in Table Settings (12).");
 });
 
 test("fromOldNotes: no notes reads nothing; a blank folder or number starts from the defaults, unnamed", () => {
-    assert.deepEqual(plain(settings.fromOldNotes({}, billing)), { settings: DEFAULTS, read: [], bad: [] });
+    assert.deepEqual(plain(settings.fromOldNotes({}, billing)), { settings: DEFAULTS, read: [], bad: [], capped: [] });
     const blank = settings.fromOldNotes({ invoice: { props: { name: "J", folder: null, last_number: null } } }, billing);
     assert.deepEqual(plain([blank.settings.invoices.folder, blank.settings.invoices.lastNumber, blank.bad, blank.read]), ["", 1000, [], ["invoice"]]);
 });
@@ -104,7 +115,7 @@ test("fromOldNotes: a value that doesn't read keeps its default, and is named", 
     assert.deepEqual(plain(r.settings.tables), { freezeRows: 0, freezeColumns: 2 });
     assert.deepEqual(plain(r.bad), ["`folder` in Invoice Settings (../x)", "`last_number` in Invoice Settings (abc)", "`freeze_rows` in Table Settings (a lot)"]);
     const unreadable = settings.fromOldNotes({ invoice: { error: "bad indentation" }, table: { error: "bad" } }, billing);
-    assert.deepEqual(plain(unreadable), { settings: DEFAULTS, read: ["invoice", "table"], bad: ["Invoice Settings' properties", "Table Settings' properties"] });
+    assert.deepEqual(plain(unreadable), { settings: DEFAULTS, read: ["invoice", "table"], bad: ["Invoice Settings' properties", "Table Settings' properties"], capped: [] });
 });
 
 test("movedNotice: what moved, that the notes can go, and what didn't read", () => {
@@ -126,7 +137,8 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     assert.ok(!text.includes("\n"), "one line, so nothing on the way breaks it");
     const read = settings.readCopy(text, billing);
     assert.deepEqual(plain(read.settings), JUNIPER);
-    assert.equal(read.holds, "Invoices, tables and the editor switch");
+    assert.equal(read.holds, "invoices (Juniper Hale, invoices in Reference/Invoices, last invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
+    assert.equal(settings.holds(DEFAULTS), "invoices (no name, no invoice folder, last invoice number 1000), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
     assert.deepEqual(plain(settings.readCopy(`  ${text}\n`, billing).settings), JUNIPER, "spaces around it are fine");
     for (const t of ["{}", '{"invoices":{}}', "[1]", "not json", "null", '"plainday-settings"']) {
         assert.match(settings.readCopy(t, billing).error, /^That isn't a copy of Plainday's settings/, t);
@@ -187,7 +199,7 @@ function withPlugin({ stored = null, notes = {}, unreadable = false } = {}) {
         plainday: { plugin, Billing: billing, ListCursor: { invoke: async () => { listCursorRuns++; } } },
     });
     const s = new (load("settings.js", "Settings", context))();
-    return { s, saves, notices, reads, runs: () => listCursorRuns };
+    return { s, plugin, saves, notices, reads, runs: () => listCursorRuns };
 }
 const INVOICE_TEXT = "---\nid: 2026091210000000\ntags:\nname: Juniper Hale\naddress:\n  - 418 Larkspur Lane\n  - Maple Falls, ST 00000\nterms: Net 30\n"
     + "payment_note: Please pay by bank transfer within 30 days.\nfolder: Reference/Invoices\nlast_number: 1001\n---\nYour details for invoices.\n";
@@ -218,16 +230,39 @@ test("readOldNotes: on a device with none saved, the old notes once, saved, and 
     assert.deepEqual([f.saves.length, f.notices.length, f.reads.length], [1, 1, 2]);
 });
 
-test("readOldNotes: a device with settings saved reads nothing; one with no notes saves the defaults, silently", async () => {
+test("readOldNotes: a device with settings saved reads nothing; one with no notes writes nothing, and reads them once they arrive", async () => {
     const saved = withPlugin({ stored: JUNIPER, notes: { "Config/Invoice Settings.md": INVOICE_TEXT.replace("Juniper Hale", "Someone Else") } });
     await saved.s.load();
     await saved.s.readOldNotes();
     assert.deepEqual([saved.saves, saved.notices, saved.reads], [[], [], []]);
     assert.equal(saved.s.get().invoices.name, "Juniper Hale", "the note's name changes nothing");
-    const fresh = withPlugin();
+    const notes = {};
+    const fresh = withPlugin({ notes });
     await fresh.s.load();
     await fresh.s.readOldNotes();
-    assert.deepEqual([fresh.saves, fresh.notices], [[DEFAULTS], []]);
+    assert.deepEqual([fresh.saves, fresh.notices, fresh.s.saved], [[], [], false], "nothing to move: no file written over one Sync may still bring");
+    // Sync brings the note later: the next load reads it
+    notes["Config/Invoice Settings.md"] = INVOICE_TEXT;
+    await fresh.s.load();
+    await fresh.s.readOldNotes();
+    assert.equal(fresh.saves.length, 1);
+    assert.equal(fresh.s.get().invoices.name, "Juniper Hale");
+});
+
+test("reload: Sync's new data file is read; one caught mid-write keeps what's in memory", async () => {
+    const f = withPlugin({ stored: { invoices: { name: "Juniper Hale", lastNumber: 1004 }, editor: { listCursor: false } } });
+    await f.s.load();
+    f.plugin.loadData = async () => undefined;
+    await f.s.reload();
+    assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor.listCursor]), ["Juniper Hale", 1004, false]);
+    assert.deepEqual([f.notices, f.saves, f.runs()], [[], [], 0], "no notice, nothing written, nothing applied");
+    f.plugin.loadData = async () => ({ invoices: { name: "From the phone" } });
+    await f.s.reload();
+    assert.equal(f.s.get().invoices.name, "From the phone");
+    assert.equal(f.runs(), 1, "the editor switch applied");
+    f.plugin.loadData = async () => null;
+    await f.s.reload();
+    assert.deepEqual(plain(f.s.get()), DEFAULTS, "the file gone: the defaults");
 });
 
 test("a data file that doesn't read: the defaults, a notice, and neither the old notes nor a save over it", async () => {

@@ -57,6 +57,8 @@ export default class Plainday extends Plugin {
 
         // Before anything reads them; the defaults when they don't load
         await this.attempt("its settings", () => plainday.Settings.load());
+        // Turned off while they loaded
+        if (plainday.plugin !== this) return;
 
         for (const c of COMMANDS) {
             this.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: () => this.run(c.script) });
@@ -65,6 +67,8 @@ export default class Plainday extends Plugin {
         this.addSettingTab(new PlaindaySettingTab(this.app, this));
 
         this.app.workspace.onLayoutReady(async () => {
+            // Unloaded before the layout was ready
+            if (window.plainday !== plainday) return;
             // The settings notes from before, read once, before a startup script reads the settings
             await this.attempt("reading the old settings notes", () => plainday.Settings.readOldNotes());
             for (const name of STARTUP) {

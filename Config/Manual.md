@@ -809,7 +809,7 @@ On a project note, makes a draft invoice from its unbilled time through a date y
 Installs the system from a local clone of the repository into the vault it runs in. See the README. It also puts the two bases where they open as files:
 
 - **`Projects/Projects.base`** beside the projects, the `Projects` folder's note in Notebook Navigator: an *Active* view (anything not Done, Canceled or On Hold) and an *Inactive* one, each grouped by status.
-- **`Invoices.base`** beside the invoices, in the invoice folder *Settings → Plainday* names (see *Where invoices live*), else in `Config/Bases/`. When the invoice folder changes, the next update moves it there as it is, with any sorting or filters you added. While a file is in the folder's way, the base stays where it is and the update says why.
+- **`Invoices.base`** beside the invoices, in the invoice folder *Settings → Plainday* names (see *Where invoices live*), else in `Config/Bases/`. When the invoice folder changes, the next update moves it there as it is, with any sorting or filters you added. While a file is in the folder's way, or on a computer with no invoice folder chosen once the base has a place, the base stays where it is and the update says why.
 
 **`Config/Invoice Settings.md` and `Config/Table Settings.md`**, from before *Settings → Plainday*, are yours: an update never installs, changes, lists or removes them (see *Vaults from before*).
 
@@ -830,7 +830,9 @@ These run on their own when Obsidian starts, one after the other once the vault'
 
 ## Settings
 
-Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. Each change is saved as you make it. A value that can't work (an invoice folder outside the vault, a number that isn't one) is refused with a line under the field, and the old value stays.
+Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; the invoice folder and the last invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (an invoice folder outside the vault or in `Archive`, a number that isn't one) is refused with a line under the field, and the old value stays.
+
+A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again.
 
 ### Invoices
 
@@ -853,16 +855,20 @@ Plugin settings stay on the device unless Obsidian Sync carries installed commun
 1. On the device with your settings: *Settings → Plainday → Copy settings*. It puts one block of text on the clipboard, with every setting. It holds your invoice details, so paste it only into Plainday's settings; a clipboard manager may keep a copy.
 2. On the other device: *Paste settings*, paste into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. The box says what the copy holds first, and *Cancel* changes nothing.
 
-*Replace* makes that device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again, or the two devices file invoices and freeze tables differently. Each device raises its own last invoice number, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
+The box says what the copy holds, with its name, invoice folder and last invoice number, so you can tell whose it is. *Replace* makes that device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again. Until you do, each device uses its own:
+
+- **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
+- **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.
+- **Numbers:** each device raises its own last invoice number, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
 
 ### Vaults from before
 
 Before *Settings → Plainday*, your invoice details were in `Config/Invoice Settings.md` and the default freeze in `Config/Table Settings.md`. The first time Plainday loads on a device with no settings saved, it reads both notes once, saves what they held, and says so: "Plainday moved your invoice and table settings into Settings → Plainday. It no longer reads Invoice Settings or Table Settings; you can delete them." The notes are left as they are, and editing them changes nothing from then on.
 
 - **Each device does this once,** so a phone that Sync carried the notes to reads the same notes.
-- **A value that doesn't read** (a `folder` of `../x`, a `last_number` of `abc`) starts from its default, and the notice names it.
+- **A value that doesn't read** (a `folder` of `../x`, a `last_number` of `abc`) starts from its default, and the notice names it. A freeze over 9 is 9, and the notice says so.
 - **A blank `folder`,** which filed each invoice in its project's `invoices/` folder, leaves the invoice folder unchosen: *Invoice* asks you to choose one before the next invoice. The invoices already in a project's folder still count.
-- **A device that first loads after you've deleted the notes** starts from the defaults; *Paste settings* brings the rest.
+- **A device with neither note** writes nothing and starts from the defaults, so a note Sync brings later is still read at the next start. Once you've deleted the notes, *Paste settings* brings the rest.
 - *Update Obsidian PM* never installs, changes or removes either note.
 
 ## Templates
