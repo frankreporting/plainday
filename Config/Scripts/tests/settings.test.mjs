@@ -715,8 +715,8 @@ test("a link without its scheme is a link too; a pasted http:// link is taken on
     }
     for (const t of ["Team A/B", "Home", "Q3: planning", "v2.1 release", "Team 2.0/Ops", "v1.2/beta"]) assert.equal(settings.linkFree(t), t, t);
     const links = { a: "http://example.org/x.ics", b: "http://127.0.0.1:8765/x.ics", c: "https://example.org/x.ics", d: "webcal://example.org/x",
-        // A user name in front of the server: the server is example.net, not this device
-        e: "http://127.0.0.1:80@feeds.example.net/private/basic.ics", f: "https://", g: "https://exa mple.org/x.ics" };
+        // A user name in front of the server: the server is example.org, not this device
+        e: "http://127.0.0.1:80@example.org/private/basic.ics", f: "https://", g: "https://exa mple.org/x.ics" };
     const text = JSON.stringify({ "plainday-settings": 1, calendars: { list: Object.keys(links).map((id) => ({ id, name: id })) }, links });
     assert.deepEqual(Object.keys(settings.readCopy(text, billing).links ?? {}).sort(), ["b", "c", "d"]);
 });
