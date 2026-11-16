@@ -20,6 +20,9 @@ export default class ListCursor {
     //     list line, and `> - ` doesn't.
     //
     // It needs Obsidian's own CodeMirror, which Plainday passes in, as TrailingLinks does.
+    //
+    // Settings → Plainday → Editor turns it off and on (OBS-281). Off, its slot is empty, so nothing of
+    // it runs on a keystroke; the panel runs invoke() again on each change, and every open note follows.
 
     // A list line's marker. A checkbox only counts with a space after it, so one being typed by hand
     // (`- []`, with the cursor between the brackets) isn't pushed past.
@@ -49,6 +52,7 @@ export default class ListCursor {
         // The handles live on window, so a second run undoes the first: one copy running, however
         // often it runs
         this.deconstructor();
+        if (plainday.Settings?.get().editor.listCursor === false) return;
         const L = ListCursor;
         const ws = app.workspace;
 

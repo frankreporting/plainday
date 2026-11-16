@@ -1,5 +1,5 @@
-// Freezing the tables the system writes, for the Selectable Tables plugin (OBS-238): a default from Table
-// Settings, labeled `%%default R C%%`, and a freeze you set yourself, labeled `%%custom%%`, kept through
+// Freezing the tables the system writes, for the Selectable Tables plugin (OBS-238): a default from
+// Settings → Plainday → Tables (OBS-281), labeled `%%default R C%%`, and a freeze you set yourself, labeled `%%custom%%`, kept through
 // every rewrite. Every project, entry and amount here is invented.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -177,16 +177,19 @@ test("freezeDefault: freeze_columns counts from the first named column, so a sta
     assert.equal(tr.freezeDefault(null, ["Project"]), null);
 });
 
-test("tableSettingsOf: whole numbers, blank or 0 for off, anything else counts as 0", () => {
-    assert.equal(tr.tableSettingsOf({}), null);
-    assert.equal(tr.tableSettingsOf(undefined), null);
-    assert.equal(tr.tableSettingsOf({ freeze_rows: null, freeze_columns: "" }), null);
-    assert.equal(tr.tableSettingsOf({ freeze_rows: 0, freeze_columns: 0 }), null);
-    assert.deepEqual(plain(tr.tableSettingsOf({ freeze_rows: 1, freeze_columns: 1 })), ON);
-    assert.deepEqual(plain(tr.tableSettingsOf({ freeze_rows: "2", freeze_columns: 0 })), { rows: 2, columns: 0 });
-    assert.deepEqual(plain(tr.tableSettingsOf({ freeze_rows: -1, freeze_columns: 1.5 })), null);
-    assert.deepEqual(plain(tr.tableSettingsOf({ freeze_rows: "a lot", freeze_columns: 12 })), { rows: 0, columns: 9 });
-    assert.equal(tr.tableSettingsOf({ freeze_rows: true, freeze_columns: [1] }), null, "a checkbox or a list isn't a number");
+test("tableDefault: the Tables settings as the default freeze, null when both are 0 (OBS-281)", () => {
+    assert.equal(tr.tableDefault({ freezeRows: 0, freezeColumns: 0 }), null);
+    assert.equal(tr.tableDefault(undefined), null);
+    assert.deepEqual(plain(tr.tableDefault({ freezeRows: 1, freezeColumns: 1 })), ON);
+    assert.deepEqual(plain(tr.tableDefault({ freezeRows: 2, freezeColumns: 0 })), { rows: 2, columns: 0 });
+    assert.deepEqual(plain(tr.tableDefault({ freezeRows: 0, freezeColumns: 12 })), { rows: 0, columns: 9 }, "at most 9 columns");
+    assert.equal(tr.tableDefault({ freezeRows: -1, freezeColumns: 1.5 }), null, "anything but a whole number is off");
+    // In the app, the settings Plainday holds
+    const ctx = vm.createContext({ plainday: { Settings: { get: () => ({ tables: { freezeRows: 1, freezeColumns: 1 } }) } } });
+    const live = new (vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", ctx))();
+    assert.deepEqual(plain(live.tableDefault()), ON);
+    ctx.plainday.Settings = { get: () => ({ tables: { freezeRows: 0, freezeColumns: 0 } }) };
+    assert.equal(live.tableDefault(), null, "read at each run, so a change counts at the next one");
 });
 
 test("withFreezes leaves a table alone when a row has more cells than its columns, rather than stop", () => {
@@ -401,20 +404,22 @@ test("Rebuild keeps the freeze you set on an invoice's table, and the other foll
 
 // ------------------------------------------------------------------ installing
 
-test("UpdateObsidianPM installs Table Settings when the vault has none, and then leaves it alone", () => {
+test("UpdateObsidianPM never installs, lists or removes a vault's own Table Settings or Invoice Settings (OBS-281)", () => {
     const up = new UpdateObsidianPM();
-    const PATH = "Config/Table Settings.md";
-    assert.ok(up.installs(PATH));
-    const source = new Map([[PATH, "repo"], ["Config/Scripts/Templater/recordEvent.js", "s1"]]);
-    const listed = (plan) => Object.entries(plain(plan)).filter(([, paths]) => paths.some?.((p) => p === PATH || p?.to === PATH)).map(([k]) => k);
-    assert.deepEqual(listed(up.plan(source, new Map())), ["add"]);
-    assert.deepEqual(listed(up.plan(source, new Map([[PATH, "yours"]]), new Map([[PATH, "repo"]]))), [], "changed by you: not updated, not listed");
-    assert.deepEqual(listed(up.plan(source, new Map([[PATH, "yours"]]))), [], "on a first run too");
-    assert.deepEqual(listed(up.plan(source, new Map([[PATH, "old"]]), new Map([[PATH, "old"]]))), [], "an older copy you never changed stays too");
-    assert.deepEqual(listed(up.plan(new Map([[PATH, "repo"]]), new Map([[PATH, "repo"]]))), []);
-    // Should the repository ever drop it, the vault's own stays: not removed, not listed
-    const dropped = new Map([["Config/Scripts/Templater/recordEvent.js", "s1"]]);
-    for (const vault of ["repo", "yours"]) assert.deepEqual(listed(up.plan(dropped, new Map([[PATH, vault]]), new Map([[PATH, "repo"]]))), [], vault);
+    for (const PATH of ["Config/Table Settings.md", "Config/Invoice Settings.md"]) {
+        assert.equal(up.installs(PATH), false, PATH);
+        const listed = (plan) => Object.entries(plain(plan)).filter(([, paths]) => paths.some?.((p) => p === PATH || p?.to === PATH)).map(([k]) => k);
+        // The repository dropped them; a vault that was given Table Settings keeps its copy, as you left it
+        // or as it was installed, and it leaves the record of what's installed
+        const source = new Map([["Config/Scripts/Templater/recordEvent.js", "s1"]]);
+        for (const vault of ["repo", "yours"]) {
+            const plan = up.plan(source, new Map([[PATH, vault]]), new Map([[PATH, "repo"]]));
+            assert.deepEqual(listed(plan), [], `${PATH}: ${vault}`);
+            assert.equal(up.manifestAfter(source, new Map([[PATH, "repo"]]), up.steps(plan)).has(PATH), false);
+        }
+        // Even a clone that still had one wouldn't install it
+        assert.deepEqual(listed(up.plan(new Map([[PATH, "repo"]]), new Map())), [], `${PATH} from an older clone`);
+    }
 });
 
 // ------------------------------------------------------------------ writing to an open note

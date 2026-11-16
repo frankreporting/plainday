@@ -6,7 +6,10 @@
 // - a command for each class in the command list, with its icon (src/commands/index.js);
 // - the startup scripts' invoke(), one after the other, once the layout is ready, in the order
 //   src/startup/index.js gives;
-// - a script that throws shows a notice and logs the error, and never stops the next one.
+// - a script that throws shows a notice and logs the error, and never stops the next one;
+// - its settings (shared/settings.js), loaded before any of that, and the panel that shows them in
+//   Settings → Plainday (src/settingsTab.js). On a device with no settings saved, the old settings
+//   notes are read once the layout is ready, before the startup scripts (OBS-281).
 // Unloading the plugin runs every class's deconstructor(), so the listeners the startup scripts
 // keep go with it. Obsidian itself removes the commands and editor extensions.
 import { Notice, Plugin } from "obsidian";
@@ -14,6 +17,7 @@ import { CLASSES as COMMAND_CLASSES, COMMANDS } from "./commands/index.js";
 import { CLASSES as SHARED_CLASSES } from "./shared/index.js";
 import { CLASSES as STARTUP_CLASSES, STARTUP } from "./startup/index.js";
 import { bind, plainday, unbind } from "./host.js";
+import PlaindaySettingTab from "./settingsTab.js";
 
 /** @typedef {import("./host.js").ClassName} ClassName */
 
@@ -36,7 +40,7 @@ const messageOf = (e) => {
 const has = (obj, method) => typeof obj === "object" && obj !== null && typeof (/** @type {Record<string, unknown>} */ (obj))[method] === "function";
 
 export default class Plainday extends Plugin {
-    onload() {
+    async onload() {
         bind(this);
         /** @type {Record<string, unknown>} */
         const registry = plainday;
@@ -51,11 +55,18 @@ export default class Plainday extends Plugin {
         // eval: `plainday.SnapshotDailyNotes.invoke()`
         window.plainday = plainday;
 
+        // Before anything reads them; the defaults when they don't load
+        await this.attempt("its settings", () => plainday.Settings.load());
+
         for (const c of COMMANDS) {
             this.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: () => this.run(c.script) });
         }
 
+        this.addSettingTab(new PlaindaySettingTab(this.app, this));
+
         this.app.workspace.onLayoutReady(async () => {
+            // The settings notes from before, read once, before a startup script reads the settings
+            await this.attempt("reading the old settings notes", () => plainday.Settings.readOldNotes());
             for (const name of STARTUP) {
                 // Unloaded while an earlier one ran
                 if (window.plainday !== plainday) return;
@@ -75,6 +86,24 @@ export default class Plainday extends Plugin {
         }
         unbind();
         if (window.plainday === plainday) delete window.plainday;
+    }
+
+    // Sync or another tool changed Plainday's data file
+    async onExternalSettingsChange() {
+        await this.attempt("its settings", () => plainday.Settings.reload());
+    }
+
+    /**
+     * Runs `step`, and says so when it fails, without stopping what comes after
+     * @param {string} what @param {() => Promise<void>} step
+     */
+    async attempt(what, step) {
+        try {
+            await step();
+        } catch (e) {
+            new Notice(`Plainday: ${what} failed\n${messageOf(e)}\nSee the developer console for details`);
+            console.error(`Plainday: ${what} failed`, e);
+        }
     }
 
     /** @param {string} name */

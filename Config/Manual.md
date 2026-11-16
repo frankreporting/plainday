@@ -28,7 +28,6 @@ Archive/                         finished projects, moved here whole
 Config/                          the system: templates, scripts, bases, this manual
   Bases/                         Bases views (and the Invoices base, in a vault with no invoice folder)
   Error Log.md                   every Problem in one place (see The error log)
-  Invoice Settings.md            your details for invoices, and where they go (see Invoices)
   Scripts/                       Templater, Calendar, tests
   Templates/
 Inbox/                           new notes that haven't been filed
@@ -45,14 +44,14 @@ Projects/
   Household/                     an area with only task notes
 Reference/
   Entities/
-  Invoices/                      every invoice, with Invoices.base as the folder's note (see Invoices)
+  Invoices/                      every invoice, with Invoices.base as the folder's note: the invoice folder (see Settings)
   Notes/
   People/
   Planner/
     days/ weeks/ months/ years/  the periodic notes
 ```
 
-Area and project names are yours; the top-level folders and `Planner` are what the scripts expect.
+Area and project names are yours; the top-level folders and `Planner` are what the scripts expect. The invoice folder is yours to choose, in *Settings → Plainday* (see *Settings*).
 
 ## Naming conventions
 
@@ -324,8 +323,8 @@ Updated 9/16 9:00pm · 3 open
 
 With the [Selectable Tables](https://github.com/frankreporting/selectable-tables) plugin, a long table can keep its first rows and columns in view as you scroll it in Live Preview, like a spreadsheet. The plugin keeps a freeze as a comment in the table's header row: `%%freeze 2 1%%` keeps 2 rows and 1 column in view. A comment draws as nothing, so you see only the cell's text.
 
-- **A default for every table the system writes:** set `freeze_rows` and `freeze_columns` in `Config/Table Settings.md`, as whole numbers. Blank or 0 is off, as it comes. With both at 1, every table keeps its header row and first column in view: the time report's tables in weekly, monthly, yearly, project and area notes, every timesheet, and an invoice's *Billable hours* and *Billed entries*. A short table gets it too, which changes nothing you'd see. The next run, or *Rebuild* on a draft, writes it.
-- **`freeze_columns` counts from the first named column:** a timesheet's unnamed status column, and the one in a project's *Invoices*, comes along without counting. So with 1, a timesheet keeps its status column and its Date / Time in view, and its header starts `%%freeze 1 2%%`. Selectable Tables freezes at most 9 columns, a status column included.
+- **A default for every table the system writes:** set *Freeze rows* and *Freeze columns* in *Settings → Plainday → Tables*, from 0 to 9. 0 is off, as it comes. With both at 1, every table keeps its header row and first column in view: the time report's tables in weekly, monthly, yearly, project and area notes, every timesheet, and an invoice's *Billable hours* and *Billed entries*. A short table gets it too, which changes nothing you'd see. The next run, or *Rebuild* on a draft, writes it.
+- **Freeze columns counts from the first named column:** a timesheet's unnamed status column, and the one in a project's *Invoices*, comes along without counting. So with 1, a timesheet keeps its status column and its Date / Time in view, and its header starts `%%freeze 1 2%%`. Selectable Tables freezes at most 9 columns, a status column included.
 - **The label beside it:** the report writes a second comment saying whose freeze it is, `%%default 1 2%%` for its own default, `%%custom%%` for yours. It's hidden like the mark, and you never type it. Both start the header row's first cell, so in Source mode that column is wider.
 - **Your freezes are kept:** freeze or unfreeze a table with Selectable Tables' commands, or type a mark yourself, and that table keeps it through every rewrite. The next run labels it `%%custom%%`. An unfrozen table gets `%%freeze 0 0%% %%custom%%`, so it stays unfrozen.
 - **A table with a cell selected:** Selectable Tables' freeze commands, and its arrow keys, leave a cell selected, and while one is, the plugin turns away any change to that table, the report's and *Invoice*'s included. So a run right after *Unfreeze table* can't update that note. It says so ("the open note didn't take the change") rather than counting the note as written: click outside its tables and run the command again.
@@ -335,7 +334,7 @@ With the [Selectable Tables](https://github.com/frankreporting/selectable-tables
 - **Only the freeze is kept.** Anything else you change in a report's table, its header included, is rewritten as always. A table of yours outside the report's block is never read or touched.
 - **Invoices:** a new draft's tables get the default. *Rebuild* keeps a freeze you set on a draft's table, as it keeps a description you changed. A sent or paid invoice is never rewritten, so it keeps what it has. Billing reads *Billed entries* with the comments in it, and *Export to PDF* prints neither comment.
 - **Without the plugin** the comments stay hidden, so the tables look as before. Nothing checks whether it's installed.
-- **The note is yours:** *Update Obsidian PM* installs `Table Settings.md` when the vault has none, and never changes it after that. A run reads it from the note's text, so a change counts at once.
+- **Where it's set:** in Plainday's settings (see *Settings*), which each run reads, so a change counts at the next one. Before them it was `Config/Table Settings.md`, which Plainday reads once (see *Vaults from before*).
 
 ### Links at the end of a line
 
@@ -479,7 +478,7 @@ A task sent out of a note has two lines: its source line, `[>]` in the note it w
 - **Previous and next daily note:** Daily notes' commands, or Notebook Navigator's calendar.
 - ***Plan*** ("Plainday: Plan"): opens the next 2–5 days side by side, starting from the day you're on, or from today.
 - ***Jump to date*** ("Plainday: Jump to date"): type a date in words and open its daily note, or its weekly or monthly note for `next week` or `last month`.
-- **On a list line:** in Live Preview the cursor rests after the bullet, number or checkbox, never in front of them, so a checkbox stays drawn. ⌘←, Home and a click land at the start of the text, and ← from there goes to the very end of the line above, folded or not. → from the very end of a folded line goes straight to the line below it. Shift-arrows can still select the bullet or checkbox, and Source mode stays raw. End and ⌘→ stop at the end of the text first (see *Links at the end of a line*). The *ListCursor* startup script does this; the idea comes from the *Stick the cursor to the content* setting in [Outliner](https://github.com/vslinko/obsidian-outliner).
+- **On a list line:** in Live Preview the cursor rests after the bullet, number or checkbox, never in front of them, so a checkbox stays drawn. ⌘←, Home and a click land at the start of the text, and ← from there goes to the very end of the line above, folded or not. → from the very end of a folded line goes straight to the line below it. Shift-arrows can still select the bullet or checkbox, and Source mode stays raw. End and ⌘→ stop at the end of the text first (see *Links at the end of a line*). The *ListCursor* startup script does this (*Settings → Plainday → Editor* turns it off); the idea comes from the *Stick the cursor to the content* setting in [Outliner](https://github.com/vslinko/obsidian-outliner).
 
 ### Calendar sync
 
@@ -573,10 +572,10 @@ Run *Invoice* on a project note (anywhere else, it asks which project has time t
 
 **A flat fee** can't be invoiced yet. Run on a flat-fee project, *Invoice* asks the day the fee was earned instead, in words like *Bill through*, and sets `earned` on the project's note; the time report then counts the fee in that week's, month's and year's Earnings (see *Earnings in weekly and monthly notes*). Run again, it changes the day. A day still to come is fine, for a fee invoiced ahead: it counts at once, in its period, and the project's summary shows the date, so a year read wrong (`2/1` typed in October is next year's) is easy to spot. On a sub-project that's part of a flat fee set above it, it names that project and writes nothing; on a flat project that invoices its sub-projects' time (`include_subprojects`), it asks which you mean.
 
-It needs your details first: the first run makes `Config/Invoice Settings.md` to fill in (`name`, `address` a line per item, `terms`, `payment_note`, `folder`, `last_number`). That note is yours: *Update Obsidian PM* never installs or changes it. The demo has its own, with invented details.
+It needs your details first, from *Settings → Plainday → Invoices* (see *Settings*): your name, address, terms and payment note, the invoice folder and the last invoice number. Before the first invoice it needs your name and the invoice folder: without them it says "Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again", and makes nothing. *Rebuild* needs only your name, since its draft is already filed. The demo's details are in its own settings, invented.
 
-- **`last_number`:** the highest invoice number given so far, up to 999999. A new invoice takes one more than it, or than the highest invoice note's number if that's higher, and raises it to its own number once the note is made. A new settings note starts at `1000`, so the first invoice is `1001`; set it once to continue the numbers you used before. An older settings note without it, in a vault with no invoices yet, is opened for you to set it.
-- **`folder`:** where every new invoice goes, like `Business/Invoices`. Left blank, each goes into its project's `invoices/` folder, and only a project's own folder note can be invoiced. It can't be inside `Config` or `Archive`.
+- **Last invoice number:** the highest invoice number given so far, up to 999999. A new invoice takes one more than it, or than the highest invoice note's number if that's higher, and raises it to its own number once the note is made. A new vault starts at 1000, so the first invoice is 1001; set it once to continue the numbers you used before.
+- **Invoice folder:** where every new invoice goes, like `Invoices` or `Business/Invoices`. You choose it; the field suggests `Invoices`. It can't be inside `Config` or `Archive`. Invoices already in a project's own `invoices/` folder, where a blank `folder` used to file them, still count.
 
 **Who it bills:** one note, whose details head the invoice under *Bill to*.
 
@@ -589,11 +588,11 @@ It needs your details first: the first run makes `Config/Invoice Settings.md` to
 
 One folder for every invoice is the better choice: invoices are business records, and a project's folder moves when it's archived. The demo keeps its invoices, and the base, in `Reference/Invoices/`.
 
-- **A base leaves out excluded files.** With `Archive` excluded (Settings → Files and links → Excluded files), an archived project's `invoices/` drop out of the *Invoices* base, and the record of what you've invoiced goes incomplete. So pick a `folder` that's never excluded and never archived, outside `Projects/`.
+- **A base leaves out excluded files.** With `Archive` excluded (Settings → Files and links → Excluded files), an archived project's `invoices/` drop out of the *Invoices* base, and the record of what you've invoiced goes incomplete. So choose an invoice folder that's never excluded and never archived, outside `Projects/`.
 - **Billing doesn't care where an invoice is.** Invoices are found by their `invoice` tag anywhere in the vault, `Archive` included, and each knows its project from its `parent` link. So nothing is billed twice, numbering continues, *Mark paid* works wherever the note sits, and the time report lists an invoice's changes wherever it's filed.
-- **Moving your invoices into the folder** by hand, once `folder` is set, breaks nothing.
+- **Moving your invoices into the folder** by hand, once you've chosen it, breaks nothing. Changing the invoice folder moves nothing: new invoices go to the new one.
 - **Name the folder `Invoices`,** without a number in front, like `Reference/Invoices`. Then the base, `Invoices.base`, has the folder's name, which is what makes a file a folder's note in Notebook Navigator (a base counts). Clicking the folder opens the base. The `Projects` folder and `Projects.base` work the same way.
-- **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. *Update Obsidian PM* puts it there, and moves it when `folder` changes. Until you set `folder`, it stays in `Config/Bases/`. See *Update Obsidian PM* for how its updates arrive.
+- **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. *Update Obsidian PM* puts it there, and moves it when the invoice folder changes. Until you choose one, it stays in `Config/Bases/`. See *Update Obsidian PM* for how its updates arrive.
 
 ### The note
 
@@ -810,9 +809,9 @@ On a project note, makes a draft invoice from its unbilled time through a date y
 Installs the system from a local clone of the repository into the vault it runs in. See the README. It also puts the two bases where they open as files:
 
 - **`Projects/Projects.base`** beside the projects, the `Projects` folder's note in Notebook Navigator: an *Active* view (anything not Done, Canceled or On Hold) and an *Inactive* one, each grouped by status.
-- **`Invoices.base`** beside the invoices, in the `folder` Invoice Settings names (see *Where invoices live*), else in `Config/Bases/`. When `folder` changes, the next update moves it there as it is, with any sorting or filters you added. While Invoice Settings can't be read (its properties don't parse, or `folder` isn't a folder), the base stays where it is and the update says why.
+- **`Invoices.base`** beside the invoices, in the invoice folder *Settings → Plainday* names (see *Where invoices live*), else in `Config/Bases/`. When the invoice folder changes, the next update moves it there as it is, with any sorting or filters you added. While a file is in the folder's way, the base stays where it is and the update says why.
 
-**`Config/Table Settings.md`** is installed when the vault has none, with both settings blank, and is yours from then on: an update never changes or lists it (see *Freezing tables*).
+**`Config/Invoice Settings.md` and `Config/Table Settings.md`**, from before *Settings → Plainday*, are yours: an update never installs, changes, lists or removes them (see *Vaults from before*).
 
 **A base saves your view changes into its file:** sorting, filters, column widths. So once you've used a base, an update sees it as changed by you and leaves it alone: it's listed under *Changed in this vault*. To take a new version from the repository, turn on *Take the repository's version* in the update's dialog; your copy of a file outside `Config` goes to the vault's trash first, so you can copy a view back from it.
 
@@ -825,9 +824,46 @@ These run on their own when Obsidian starts, one after the other once the vault'
 - ***RefoldOnOpen*** refolds each daily note as it opens, on every device. See *Folding*.
 - ***MoveToProjectMenu*** puts *Move to project…* in the file menus: Notebook Navigator's menu for a note, for several selected, and for a project or area's folder; a tab's **⋯** menu; a link's right-click menu (for notes, not the project a ⭕ points at); and the core file explorer's. The item appears only for what *Move to project* moves.
 - ***TrailingLinks*** draws the links that end a task or event line small, at the right of the line, on every device, hides a task's ID until the cursor reaches the end of the line, and makes End and ⌘→ stop at the end of the text first (see *Links at the end of a line*). It only looks at the lines on screen, and while you type only at the line you're on and the lines nested under it. It uses Obsidian's own editor code, which Plainday passes in.
-- ***ListCursor*** keeps the cursor out of a list line's marker (its indent, its bullet or number, and its checkbox) in Live Preview, on every device. A plain cursor that would land there goes to the start of the text, whatever put it there, a write from outside Obsidian included. ← and → count a folded line as one line, so the cursor never lands on a line the fold hides. A selection and two or more cursors are left alone. It reads only the cursor's own line, so a line starting with `- ` in a code block counts as a list line, and `> - ` in a quote doesn't. Like *TrailingLinks*, it uses Obsidian's own editor code.
+- ***ListCursor*** keeps the cursor out of a list line's marker (its indent, its bullet or number, and its checkbox) in Live Preview, on every device. A plain cursor that would land there goes to the start of the text, whatever put it there, a write from outside Obsidian included. ← and → count a folded line as one line, so the cursor never lands on a line the fold hides. A selection and two or more cursors are left alone. It reads only the cursor's own line, so a line starting with `- ` in a code block counts as a list line, and `> - ` in a quote doesn't. Like *TrailingLinks*, it uses Obsidian's own editor code. *Settings → Plainday → Editor* turns it off and on, at once in every open note; off, none of it runs.
 - ***CheckOff*** keeps a sent task's two lines in step: a tick on either one checks off both, and a click on a `[>]` box asks first (see *Checking off a task*). It acts only on your own edits in the editor, and on your clicks and Task Status's menu in reading view, on the device and in the pane where you make them, and while you type it only checks whether an edit changed a checkbox's mark. Like *TrailingLinks*, it uses Obsidian's own editor code.
 - ***TimeReportOnStartup*** refreshes the time reports and the error log on the desktop once the vault is indexed, with a toast when there are new Problems. It needs the *TaskIds* script too (for the task checks); if a script it needs is missing, it waits a few seconds for it and otherwise skips with a console warning. A report already running finishes with the scripts it started with.
+
+## Settings
+
+Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. Each change is saved as you make it. A value that can't work (an invoice folder outside the vault, a number that isn't one) is refused with a line under the field, and the old value stays.
+
+### Invoices
+
+- **Your name, Address, Terms, Payment note:** they head and close each new invoice (see *Making one*). The address takes one line per item. A project's own `terms` wins over yours.
+- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders. It can't be inside `Config` or `Archive`. Changing it moves nothing already made.
+- **Last invoice number:** the highest number given so far, from 0 to 999999. A new vault starts at 1000, so the first invoice is 1001. *Invoice* raises it each time.
+
+### Tables
+
+**Freeze rows** and **Freeze columns,** from 0 to 9: the default freeze for every table the system writes, 0 for off (see *Freezing tables*).
+
+### Editor
+
+**Keep the cursor after a list line's bullet or checkbox:** *ListCursor* (see *Startup scripts*), on as it comes. Off, none of it runs, and the cursor can rest anywhere on a list line. The switch takes effect at once, in every open note.
+
+### Another device
+
+Plugin settings stay on the device unless Obsidian Sync carries installed community plugins (*Settings → Sync → Installed community plugins*), which it doesn't by default. So another device starts from the defaults. To give it yours:
+
+1. On the device with your settings: *Settings → Plainday → Copy settings*. It puts one block of text on the clipboard, with every setting. It holds your invoice details, so paste it only into Plainday's settings; a clipboard manager may keep a copy.
+2. On the other device: *Paste settings*, paste into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. The box says what the copy holds first, and *Cancel* changes nothing.
+
+*Replace* makes that device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again, or the two devices file invoices and freeze tables differently. Each device raises its own last invoice number, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
+
+### Vaults from before
+
+Before *Settings → Plainday*, your invoice details were in `Config/Invoice Settings.md` and the default freeze in `Config/Table Settings.md`. The first time Plainday loads on a device with no settings saved, it reads both notes once, saves what they held, and says so: "Plainday moved your invoice and table settings into Settings → Plainday. It no longer reads Invoice Settings or Table Settings; you can delete them." The notes are left as they are, and editing them changes nothing from then on.
+
+- **Each device does this once,** so a phone that Sync carried the notes to reads the same notes.
+- **A value that doesn't read** (a `folder` of `../x`, a `last_number` of `abc`) starts from its default, and the notice names it.
+- **A blank `folder`,** which filed each invoice in its project's `invoices/` folder, leaves the invoice folder unchosen: *Invoice* asks you to choose one before the next invoice. The invoices already in a project's folder still count.
+- **A device that first loads after you've deleted the notes** starts from the defaults; *Paste settings* brings the rest.
+- *Update Obsidian PM* never installs, changes or removes either note.
 
 ## Templates
 
@@ -847,7 +883,7 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 - [Notebook Navigator](https://github.com/johansan/notebook-navigator): a calendar for the periodic notes, and folder notes. The scripts read its week, month and year patterns when it's installed, and new project and area folders get a look in it: a red circle or a green archive, or the look you've given their tag.
 - [Task Status](https://github.com/ebullient/obsidian-task-status): shows `[<]`, `[>]`, `[-]` and the other markers as their own icons, and `⇧⌘⏎` picks one.
-- [Selectable Tables](https://github.com/frankreporting/selectable-tables): arrow keys select and move through a table's cells, and a table can keep its first rows and columns in view as it scrolls. `Config/Table Settings.md` sets a default for the system's tables (see *Freezing tables*).
+- [Selectable Tables](https://github.com/frankreporting/selectable-tables): arrow keys select and move through a table's cells, and a table can keep its first rows and columns in view as it scrolls. *Settings → Plainday → Tables* sets a default for the system's tables (see *Freezing tables*).
 
 ## Working on the system
 

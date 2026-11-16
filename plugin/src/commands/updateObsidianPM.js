@@ -1,5 +1,5 @@
-import { Component, getFrontMatterInfo, MarkdownRenderer, Modal, moment, Notice, parseYaml, Setting } from "obsidian";
-import { app } from "../host.js";
+import { Component, MarkdownRenderer, Modal, moment, Notice, Setting } from "obsidian";
+import { app, plainday } from "../host.js";
 
 export default class UpdateObsidianPM {
     // Command "Update Obsidian PM": installs this repository's system files into the vault it runs
@@ -7,19 +7,19 @@ export default class UpdateObsidianPM {
     // never be committed, overwritten by the repository's sample notes, or emptied by a git command.
     //
     // It copies only what the repository holds under `Config/`, plus README.md, CLAUDE.md, the
-    // Projects base and the three settings files the scripts depend on. It never touches a note,
+    // Projects base and the two settings files the scripts depend on. It never touches a note,
     // never touches anything under `Config/` that the repository doesn't have (your own fonts,
     // templates, notes or tests stay), and never copies the repository's tests: they read the class
     // files in plugin/src/, which a vault doesn't get (Plainday runs its own build of them), and the
     // demo's own rewrite notes when they run.
     //
     // One file goes somewhere of the vault's choosing (OBS-112): the Invoices base sits beside the
-    // invoices, in the `folder` Invoice Settings names, so it can be opened as a file even when
-    // `Config` is excluded. Everything is planned by where it goes in the vault. When the base's
-    // place changes, the copy it had is moved there, edits and all (a base saves its own sorting and
-    // filters into its file), and then treated like any installed file: updated if you never
-    // changed it, left alone if you did. While Invoice Settings can't be read, the base sits this
-    // update out, wherever it is.
+    // invoices, in the invoice folder Settings → Plainday names (OBS-281), so it can be opened as a file
+    // even when `Config` is excluded. Everything is planned by where it goes in the vault. When the
+    // base's place changes, the copy it had is moved there, edits and all (a base saves its own sorting
+    // and filters into its file), and then treated like any installed file: updated if you never
+    // changed it, left alone if you did. While the invoice folder can't hold it (a file is in the
+    // way), the base sits this update out, wherever it is.
     //
     // Nothing is written until you've seen the list. Removals (a file the repository dropped) are
     // listed on their own, and a file you've changed yourself is never removed and only overwritten
@@ -48,10 +48,9 @@ export default class UpdateObsidianPM {
     static SOURCE_FILE = "Config/Scripts/update-source";
     // The base that goes beside the invoices: the repository keeps it beside the demo's invoices, and
     // a vault gets it beside its own, or in Config/Bases with no invoice folder (where every
-    // version before OBS-112 put it). The note that says where the invoices are is the vault's own.
+    // version before OBS-112 put it)
     static INVOICES_BASE = "Reference/Invoices/Invoices.base";
     static INVOICES_BASE_HOME = "Config/Bases/Invoices.base";
-    static INVOICE_SETTINGS = "Config/Invoice Settings.md";
     static MANIFEST_FILE = "Config/Scripts/update-manifest.json";
     // The plugin's id in a clone's manifest.json
     static PLUGIN_ID = "plainday";
@@ -77,13 +76,12 @@ export default class UpdateObsidianPM {
     static EXCLUDE = [
         "Config/Scripts/tests/",
         "Config/Scripts/dev-vault.sh",
-        // The demo's invented details: a vault's own settings note is never the repository's
-        "Config/Invoice Settings.md",
     ];
-    // Settings notes a vault gets once, as the repository has them, and keeps as its own: installed when
-    // the vault has none, then never updated, listed or removed (OBS-238). Nothing makes them on first use,
-    // as the Invoice command makes Invoice Settings, and the repository's copy holds no demo details.
-    static ONCE = [
+    // The settings notes from before Settings → Plainday (OBS-281), a vault's own: Plainday reads them
+    // once and leaves them for you to delete. An update never installs, updates, lists or removes them,
+    // though Table Settings was once installed and the repository no longer has either.
+    static YOURS = [
+        "Config/Invoice Settings.md",
         "Config/Table Settings.md",
     ];
 
@@ -97,24 +95,8 @@ export default class UpdateObsidianPM {
 
     installs(path) {
         return UpdateObsidianPM.INCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
-            && !UpdateObsidianPM.EXCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p));
-    }
-
-    // Invoice Settings' `folder` as a vault path: { folder, error }, with "" for none. The same rules
-    // as Billing.folderOf (a test holds them to it): this command uses no other script, so it can
-    // install them.
-    folderOf(raw) {
-        if (raw === undefined || raw === null) return { folder: "", error: null };
-        const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
-        const bad = { folder: "", error: `isn't a folder in the vault (${shown})` };
-        if (typeof raw !== "string" || /[\u0000-\u001f\u007f]/.test(raw)) return bad;
-        const folder = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
-        if (!folder) return { folder: "", error: null };
-        const parts = folder.split("/");
-        if (/[\\:*?"<>|[\]#^]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
-        // The system's folder and the archive are often excluded, and a base doesn't list what's excluded
-        if (["config", "archive"].includes(parts[0].toLowerCase())) return { folder: "", error: `is inside ${parts[0]}, where invoices don't belong (${shown})` };
-        return { folder, error: null };
+            && !UpdateObsidianPM.EXCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
+            && !UpdateObsidianPM.YOURS.includes(path);
     }
 
     // The repository's files keyed by where they go in this vault: { files: Map(vault path → hash),
@@ -158,7 +140,7 @@ export default class UpdateObsidianPM {
     //   manifest Map(path → hash)  what this command installed last time, empty on a first run
     //   origin   Map(path → path)  the repository path of a file placed elsewhere (placed())
     // Every list is sorted, and each path appears in exactly one of the first six, but for a file in
-    // ONCE that the vault has, which is in none:
+    // YOURS, which is in none:
     //   add      not in the vault
     //   update   differs from the repository, and matches what was installed (so it's an old version)
     //   local    differs from both: changed in the vault since it was installed (or never installed)
@@ -195,13 +177,12 @@ export default class UpdateObsidianPM {
                 }
             }
             if (have === undefined) out.add.push(path);
-            else if (UpdateObsidianPM.ONCE.includes(rel)) continue;
             else if (have === hash) out.same.push(path);
             else if (was === have) out.update.push(path);
             else out.local.push(path);
         }
         for (const [path, hash] of sorted(manifest)) {
-            if (moved.has(path) || placed.has(fold(path)) || !vault.has(path) || UpdateObsidianPM.ONCE.includes(path)) continue;
+            if (moved.has(path) || placed.has(fold(path)) || !vault.has(path) || UpdateObsidianPM.YOURS.includes(path)) continue;
             (vault.get(path) === hash ? out.remove : out.keep).push(path);
         }
         return out;
@@ -247,8 +228,8 @@ export default class UpdateObsidianPM {
             lines.push("");
         };
         if (source) lines.push(`From \`${source}\`${commit ? ` at ${commit}` : ""}`, "");
-        if (invoiceFolder) lines.push(`The Invoices base goes in \`${invoiceFolder}\`, the \`folder\` in Invoice Settings.`, "");
-        if (held) lines.push("The Invoices base is left as it is this time: Invoice Settings can't be read (see the notice).", "");
+        if (invoiceFolder) lines.push(`The Invoices base goes in \`${invoiceFolder}\`, the invoice folder in Settings → Plainday.`, "");
+        if (held) lines.push("The Invoices base is left as it is this time: the invoice folder can't hold it (see the notice).", "");
         if (firstRun && plan.local.length) {
             lines.push("No record of an earlier install here, so every file that differs is listed as changed in this vault."
                 + " On a vault that already ran the system, tick the box below to take the repository's versions.", "");
@@ -350,9 +331,9 @@ export default class UpdateObsidianPM {
         }
         if (!repoFiles.size) { new Notice("That clone has no system files to install", 0); return; }
         // From here on, every path is where the file goes in the vault; `origin` says where a file
-        // placed elsewhere comes from in the clone. While Invoice Settings can't be read, the
+        // placed elsewhere comes from in the clone. While the invoice folder can't hold it, the
         // Invoices base sits the update out, and its records are kept as they are.
-        const where = await this.invoiceFolder(vaultPath);
+        const where = this.invoiceFolder(vaultPath);
         const { files: sourceFiles, origin } = this.placed(repoFiles, { invoiceFolder: where.folder, hold: where.hold });
         const recorded = new Map(Object.entries(JSON.parse((await this.read(UpdateObsidianPM.MANIFEST_FILE)) || "{}").files ?? {}));
         const { manifest, held } = where.hold ? this.hold(recorded) : { manifest: recorded, held: new Map() };
@@ -431,30 +412,19 @@ export default class UpdateObsidianPM {
 
     // ---------------------------------------------------------------- the bits that touch the app
 
-    // Where the Invoices base goes: { folder, hold }. `folder` is Invoice Settings' `folder`, spelled
-    // as the vault's folders are, or "" with no settings note or no `folder` (Config/Bases). A
-    // note whose properties don't read, or a `folder` that isn't a folder, says so and holds the
-    // base where it is for this update: guessing would move it out of sight.
-    async invoiceFolder(vaultPath) {
-        const hold = (why) => {
-            new Notice(`Update Obsidian PM: ${why}, so the Invoices base is left where it is this time`, 0);
-            return { folder: "", hold: true };
-        };
-        const text = await this.read(UpdateObsidianPM.INVOICE_SETTINGS);
-        if (!text) return { folder: "", hold: false };
-        let raw;
-        try {
-            const info = getFrontMatterInfo(text);
-            raw = info.exists ? (parseYaml(info.frontmatter) ?? {}).folder : undefined;
-        } catch (e) {
-            return hold(`Invoice Settings' properties don't read (${String(e?.message ?? e).split("\n")[0]})`);
-        }
-        const { folder, error } = this.folderOf(raw);
-        if (error) return hold(`\`folder\` in Invoice Settings ${error}`);
+    // Where the Invoices base goes: { folder, hold }. `folder` is the invoice folder in Settings →
+    // Plainday (which keeps it a folder in the vault), spelled as the vault's folders are, or "" before
+    // one is chosen (Config/Bases). A folder that goes through a file says so and holds the base where
+    // it is for this update: guessing would move it out of sight.
+    invoiceFolder(vaultPath) {
+        const folder = plainday.Settings?.get().invoices.folder ?? "";
         if (!folder) return { folder: "", hold: false };
         const real = this.realFolder(vaultPath, folder);
         const file = this.fileOnTheWay(vaultPath, real);
-        if (file) return hold(`\`folder\` in Invoice Settings goes through ${file}, which is a file`);
+        if (file) {
+            new Notice(`Update Obsidian PM: the invoice folder in Settings → Plainday goes through ${file}, which is a file, so the Invoices base is left where it is this time`, 0);
+            return { folder: "", hold: true };
+        }
         return { folder: real, hold: false };
     }
 

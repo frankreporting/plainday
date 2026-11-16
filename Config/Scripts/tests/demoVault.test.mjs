@@ -10,7 +10,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import vm from "node:vm";
-import { DAYS, FOLDERS, NOTE_FOLDERS, loadTimeReport, loadBilling, readVault, planReports, dailyNotes } from "./demo/renderReports.mjs";
+import { DAYS, FOLDERS, NOTE_FOLDERS, SETTINGS_FILE, loadTimeReport, loadBilling, readVault, planReports, dailyNotes, vaultSettings } from "./demo/renderReports.mjs";
 import { compactTables, obsidianPadded, tablesIn } from "./tables.mjs";
 import { convert } from "./demo/addProjectLinks.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
@@ -35,11 +35,14 @@ const DEMO_INVOICE = "Reference/Invoices/1001-KES.md";
 
 // ------------------------------------------------------------------ where the bases and invoices are (OBS-112)
 
-test("demo vault: invoices and their base in the folder Invoice Settings names; the Projects base beside the projects", () => {
+test("demo vault: invoices and their base in the invoice folder its settings name; the Projects base beside the projects", () => {
     const billing = loadBilling();
-    const settings = vault.notes.get("Config/Invoice Settings.md");
-    assert.ok(settings, "the demo's own settings note, with invented details");
-    const folder = billing.folderOf(settings.fm.folder).folder;
+    // The demo's own Plainday settings, with invented details, and no settings notes (OBS-281)
+    assert.ok(fs.existsSync(new URL(`../../../${SETTINGS_FILE}`, import.meta.url)), SETTINGS_FILE);
+    for (const p of ["Config/Invoice Settings.md", "Config/Table Settings.md"]) assert.equal(vault.notes.has(p), false, p);
+    const settings = vaultSettings(vault, billing);
+    assert.equal(settings.invoices.name, "Juniper Hale");
+    const folder = settings.invoices.folder;
     assert.equal(folder, "Reference/Invoices");
     assert.ok(vault.files.includes(`${folder}/Invoices.base`), "the Invoices base beside the invoices");
     // named like its folder, so Notebook Navigator makes it the folder's note (OBS-115), as Projects.base is
@@ -47,9 +50,9 @@ test("demo vault: invoices and their base in the folder Invoice Settings names; 
     const invoices = [...vault.notes].filter(([, { fm }]) => [].concat(fm.tags ?? []).includes("invoice")).map(([p]) => p);
     assert.ok(invoices.length > 0);
     for (const p of invoices) assert.equal(dirname(p), folder, p);
-    // last_number is where the numbers stand
-    assert.equal(billing.nextNumber(invoices.map((p) => ({ number: vault.notes.get(p).fm.number })), settings.fm.last_number),
-        settings.fm.last_number + 1);
+    // the last invoice number is where the numbers stand
+    assert.equal(billing.nextNumber(invoices.map((p) => ({ number: vault.notes.get(p).fm.number })), settings.invoices.lastNumber),
+        settings.invoices.lastNumber + 1);
     assert.ok(vault.files.includes("Projects/Projects.base"));
     // one copy of each base
     for (const name of ["Invoices.base", "Projects.base"]) {

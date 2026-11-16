@@ -107,14 +107,14 @@ export default class TimeReport {
     static SHEET_HEADINGS = /^### (?:Billable time: # hrs(?: · 🆓 time: # hrs)?|🆓 time: # hrs)$/u;
     // An invoice's status as the mark in its links, in the timesheets and on the project's note (OBS-117)
     static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
-    // Freezing tables for the Selectable Tables plugin (OBS-238). The default is set in TABLE_SETTINGS. A
+    // Freezing tables for the Selectable Tables plugin (OBS-238). The default is set in Settings → Plainday
+    // → Tables (tableDefault, OBS-281). A
     // freeze is that plugin's mark in a table's header row, `%%freeze 2 1%%` for 2 rows and 1 column, read
     // as its src/editor/freeze-mark.ts reads it: the first one counts, spaces inside are fine, and one in a
     // code span is text. Beside it the report writes a label saying whose freeze it is: `%%default 2 1%%`,
     // its own default, or `%%custom%%`, yours. FREEZE_COMMENT is a comment as the report writes it, which
     // defuse leaves whole: never next to another `%`, or after a `<` (Templater's `<%`), which
     // splitFreeze checks.
-    static TABLE_SETTINGS = "Config/Table Settings.md";
     static FREEZE_MARK = /%%\s*freeze\s+(\d+)\s+(\d+)\s*%%/;
     static FREEZE_LABEL = /%%\s*(?:default\s+(\d+)\s+(\d+)|custom)\s*%%/;
     static FREEZE_COMMENT = /%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%)/;
@@ -2526,32 +2526,17 @@ export default class TimeReport {
 
     // ---------------------------------------------------------------- freezing tables (OBS-238)
     // Every table the system writes can come out frozen for the Selectable Tables plugin: a default from
-    // Table Settings, and a freeze you set on one table yourself is kept through every rewrite. Before a
+    // Settings → Plainday → Tables, and a freeze you set on one table yourself is kept through every rewrite. Before a
     // block or an invoice is written, each new table's header gets what its old one held (freezeHeader),
     // matched by the heading above it. A table of yours outside the block is never touched.
 
-    // The default from Table Settings' properties: { rows, columns }, or null when both are 0 or blank.
-    // Anything but a whole number (or one written as text) counts as 0. Selectable Tables freezes at most
-    // 9 columns, a status column that comes along included.
-    tableSettingsOf(props) {
-        const whole = (key) => {
-            const v = this.prop(props ?? {}, key);
-            const n = typeof v === "number" || typeof v === "string" ? Number(v) : 0;
-            return Number.isInteger(n) && n > 0 ? n : 0;
-        };
-        const rows = whole("freeze_rows"), columns = Math.min(whole("freeze_columns"), TimeReport.MAX_FROZEN_COLUMNS);
+    // The default from Settings → Plainday → Tables (`tables`, as Settings keeps it): { rows, columns },
+    // or null when both are 0. Selectable Tables freezes at most 9 columns, a status column that comes
+    // along included.
+    tableDefault(tables = plainday?.Settings?.get().tables) {
+        const whole = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+        const rows = whole(tables?.freezeRows), columns = Math.min(whole(tables?.freezeColumns), TimeReport.MAX_FROZEN_COLUMNS);
         return rows || columns ? { rows, columns } : null;
-    }
-
-    // The default as Table Settings says it now, or null with no note. Read from its text, since the
-    // metadata cache can lag an edit made just before the run.
-    async tableSettings() {
-        const file = app.vault.getFileByPath(TimeReport.TABLE_SETTINGS);
-        if (!file) return null;
-        const info = getFrontMatterInfo(await this.textOf(file));
-        let props = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
-        try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { /* the cache's, then */ }
-        return this.tableSettingsOf(props);
     }
 
     // What a header row holds: { mark: { rows, columns } or null, label: { kind: "default", rows, columns },
@@ -2669,7 +2654,7 @@ export default class TimeReport {
     }
 
     // `lines` with each table's header frozen as freezeHeader says, from `old` (freezesIn of what's there
-    // now) and `settings` (tableSettingsOf). A table matches the old one under the same heading, the first
+    // now) and `settings` (tableDefault). A table matches the old one under the same heading, the first
     // with the first. A table whose header changes is written again through `table`, so it stays padded.
     withFreezes(lines, old, settings) {
         const out = lines.slice();
@@ -2771,7 +2756,7 @@ export default class TimeReport {
     // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
     // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
     // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), a new
-    // block gets none, and the note gets its class if it hasn't (sheetClass). `tables` is the default freeze (tableSettingsOf): the block's tables are
+    // block gets none, and the note gets its class if it hasn't (sheetClass). `tables` is the default freeze (tableDefault): the block's tables are
     // frozen from it and from the block that's there now (freezeBlock), before they're compared.
     blockEdits(content, block, { onlyIfChanged = true, heading = true, tables = null } = {}) {
         const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
@@ -3477,7 +3462,7 @@ export default class TimeReport {
         this.attachBilling(model, await this.readInvoices(billing), index, billing);
         this.addTaskProblems(model, index, checked);
         // The default freeze for the tables written from it (OBS-238)
-        model.tables = await this.tableSettings();
+        model.tables = this.tableDefault();
         return { model, index };
     }
 
@@ -3486,7 +3471,7 @@ export default class TimeReport {
     // command writes it; an inline #invoice (a daily note mentioning one) doesn't make a note one.
     // [{ path, props, text }]
     async readInvoices(billing = plainday.Billing) {
-        // A note where invoices are filed (an invoices/ folder, or Invoice Settings' `folder`) that still
+        // A note where invoices are filed (an invoices/ folder, or the invoice folder in Settings → Plainday) that still
         // has its Billed entries counts too, flagged, so an invoice whose tag or frontmatter got lost
         // can't let its entries be billed again
         const folder = this.invoiceFolder(billing);
@@ -3507,11 +3492,9 @@ export default class TimeReport {
         return out;
     }
 
-    // Invoice Settings' `folder` (OBS-112), or "" when it isn't set or isn't a folder
+    // The invoice folder in Settings → Plainday (OBS-112, OBS-281), or "" before one is chosen
     invoiceFolder(billing) {
-        const settings = plainday.Invoice?.constructor.SETTINGS;
-        const file = settings ? app.vault.getFileByPath(settings) : null;
-        return billing.folderOf(file ? app.metadataCache.getFileCache(file)?.frontmatter?.folder : null).folder;
+        return billing.folderOf(plainday?.Settings?.get().invoices.folder ?? null).folder;
     }
 
     // A note's tags from its cache, frontmatter and inline, lowercased, without the #

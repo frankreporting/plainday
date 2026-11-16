@@ -17,7 +17,8 @@
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
 //   - writeBlock's plan (blockEdits): the old "## Time tracking" heading renamed "## Time Report", a
-//     blank line above it, the tables frozen as Table Settings says (OBS-238), then placeBlock unless sameBlock;
+//     blank line above it, the tables frozen as Plainday's settings say (OBS-238, OBS-281), then placeBlock
+//     unless sameBlock;
 //   - the project `link` and the weekly/monthly `linkTarget` (a name, or a path when names clash).
 // What it can't reproduce exactly (see the report in demoVault.test.mjs for the checks that stand in):
 //   - `now`: the app leaves out entries that haven't ended yet. The demo's entries are all in the
@@ -65,6 +66,20 @@ export function loadTimeReport(root = ROOT) {
 export function loadBilling(root = ROOT) {
     const Billing = loadClass("billing.js", vm.createContext({}), path.join(root, "plugin/src"));
     return new Billing();
+}
+
+// Plainday's settings as a vault keeps them (OBS-281): its data file, normalized as Settings loads it,
+// else what Plainday's first load would read from the old settings notes. The demo's are in its data
+// file, invented. Settings comes from this repository, which a private test's vault doesn't hold.
+export const SETTINGS_FILE = ".obsidian/plugins/plainday/data.json";
+export function vaultSettings(vault, billing = loadBilling()) {
+    const Settings = loadClass("settings.js", vm.createContext({}), path.join(ROOT, "plugin/src"));
+    const settings = new Settings();
+    // A vault made in memory, as the tests make them, has no root and no data file
+    const file = vault.root ? path.join(vault.root, SETTINGS_FILE) : null;
+    if (file && fs.existsSync(file)) return settings.normalize(JSON.parse(fs.readFileSync(file, "utf8")), billing);
+    const note = (p) => (vault.notes.has(p) ? { props: vault.notes.get(p).fm } : null);
+    return settings.fromOldNotes({ invoice: note(Settings.INVOICE_NOTE), table: note(Settings.TABLE_NOTE) }, billing).settings;
 }
 
 // Every file in the vault, as vault-relative paths; dot folders (.obsidian, .git) are skipped, and
@@ -163,10 +178,10 @@ export function dailyNotes(vault) {
 }
 
 // readInvoices: every note tagged `invoice` in its frontmatter, and any note where invoices are filed
-// (an invoices/ folder, or the demo Invoice Settings' `folder`) that still has its Billed entries
+// (an invoices/ folder, or the invoice folder in the vault's settings) that still has its Billed entries
 // (flagged untagged), as [{ path, props, text, tagged }]
-export function invoiceNotes(vault, billing) {
-    const folder = billing.folderOf(vault.notes.get("Config/Invoice Settings.md")?.fm.folder).folder;
+export function invoiceNotes(vault, billing, settings = vaultSettings(vault, billing)) {
+    const folder = settings.invoices.folder;
     const out = [];
     for (const [p, { text, fm }] of vault.notes) {
         const tagged = [].concat(fm.tags ?? []).some((t) => String(t).replace(/^#/, "").toLowerCase() === "invoice");
@@ -229,13 +244,13 @@ export function addDemoTaskProblems(tr, vault, model, index, checked = checkedNo
 // Everything a TimeReport run would do to the vault:
 // { model, index, targets: { project, week, month, year }, blocks: Map(path → block),
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
-export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root) } = {}) {
+export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root), settings = vaultSettings(vault, billing) } = {}) {
     const index = makeIndex(tr, vault);
     const checked = checkedNotes(tr, vault);
-    const model = tr.attachBilling(tr.build(dailyNotes(vault), index, { checked }), invoiceNotes(vault, billing), index, billing);
+    const model = tr.attachBilling(tr.build(dailyNotes(vault), index, { checked }), invoiceNotes(vault, billing, settings), index, billing);
     addDemoTaskProblems(tr, vault, model, index, checked);
-    // The default freeze, as currentModel reads it from Table Settings (OBS-238)
-    model.tables = tr.tableSettingsOf(vault.notes.get(tr.constructor.TABLE_SETTINGS)?.fm);
+    // The default freeze, as currentModel reads it from Settings → Plainday → Tables (OBS-238)
+    model.tables = tr.tableDefault(settings.tables);
     const { link, linkTarget } = linkers(tr, vault);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();

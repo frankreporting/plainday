@@ -1,0 +1,20 @@
+{
+  "invoices": {
+    "name": "Juniper Hale",
+    "address": [
+      "418 Larkspur Lane",
+      "Maple Falls, ST 00000"
+    ],
+    "terms": "Net 30",
+    "paymentNote": "Please pay by bank transfer within 30 days.",
+    "folder": "Reference/Invoices",
+    "lastNumber": 1001
+  },
+  "tables": {
+    "freezeRows": 0,
+    "freezeColumns": 0
+  },
+  "editor": {
+    "listCursor": true
+  }
+}

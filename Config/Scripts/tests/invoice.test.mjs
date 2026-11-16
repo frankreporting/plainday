@@ -212,28 +212,34 @@ test("split: the frontmatter and the body", () => {
 
 // ------------------------------------------------------------------ settings, clients, numbers
 
-test("readSettings: a name makes it usable; an address as a list or lines", () => {
-    assert.equal(inv.readSettings({ name: "" }, billing).ok, false);
-    assert.deepEqual(plain(inv.readSettings({ name: " Juniper Hale ", address: "418 Larkspur Lane\nMaple Falls, ST 00000", terms: "Net 15", payment_note: "Thanks" }, billing)),
-        { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 15", paymentNote: "Thanks", folder: "", lastNumber: null, problem: null, ok: true });
-    assert.deepEqual(plain(inv.readSettings({ name: "J", address: ["a", "", " b "] }, billing).address), ["a", "b"]);
+test("missing: a new invoice needs your name and the invoice folder; a rebuild only your name (OBS-281)", () => {
+    const where = "in Settings → Plainday → Invoices, then run Invoice again";
+    assert.equal(inv.missing({ name: "", folder: "" }), `Add your name and choose an invoice folder ${where}`);
+    assert.equal(inv.missing({ name: "Juniper Hale", folder: "" }), `Choose an invoice folder ${where}`);
+    assert.equal(inv.missing({ name: "", folder: "Invoices" }), `Add your name ${where}`);
+    assert.equal(inv.missing({ name: "Juniper Hale", folder: "Invoices" }), null);
+    assert.equal(inv.missing({ name: "Juniper Hale", folder: "" }, { folder: false }), null, "a rebuild's draft is already filed");
+    assert.equal(inv.missing({ name: "", folder: "" }, { folder: false }), `Add your name ${where}`);
 });
 
-test("readSettings: `folder` and `last_number` (OBS-112), and what's wrong with them", () => {
-    const s = (props) => inv.readSettings({ name: "J", ...props }, billing);
-    assert.equal(s({ folder: " /Reference/Invoices/ " }).folder, "Reference/Invoices");
-    for (const [raw, want] of [[1033, 1033], ["1033", 1033], [" 1033 ", 1033], [0, 0], ["", null], ["  ", null], [null, null], [undefined, null]]) {
-        assert.equal(s({ last_number: raw }).lastNumber, want, String(raw));
-        assert.equal(s({ last_number: raw }).problem, null, String(raw));
-    }
-    assert.equal(s({ last_number: 999999 }).lastNumber, 999999);
-    for (const raw of [1033.5, -1, "abc", "1,033", "1033-KES", true, [1033], 1000000, "1e5", 1e21]) {
-        assert.equal(s({ last_number: raw }).lastNumber, null, String(raw));
-        assert.match(s({ last_number: raw }).problem, /`last_number` isn't a whole number from 0 to 999999/, String(raw));
-        assert.equal(s({ last_number: raw }).ok, true, "a bad number doesn't stop a rebuild");
-    }
-    assert.match(s({ folder: "../Invoices" }).problem, /^`folder` isn't a folder in the vault/);
-    assert.equal(s({ folder: "../Invoices" }).folder, "");
+test("Invoice without your name or the invoice folder says so before asking anything, and makes nothing (OBS-281)", async () => {
+    const notices = [], made = [], asked = [];
+    let invoices = { name: "", address: [], terms: "", paymentNote: "", folder: "", lastNumber: 1000 };
+    const app = { vault: { create: async (p) => { made.push(p); }, createFolder: async (p) => { made.push(p); } } };
+    const context = vm.createContext({ app, setTimeout, Notice: class { constructor(t) { notices.push(t); } },
+        plainday: { Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } } });
+    const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
+    await invoice.create(WEB, tr, billing, index);
+    assert.deepEqual(notices, ["Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again"]);
+    invoices = { ...invoices, name: "Juniper Hale" };
+    await invoice.create(WEB, tr, billing, index);
+    assert.equal(notices[1], "Choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again");
+    assert.deepEqual([made, asked], [[], []], "no note, no settings note, no prompt");
+    // With both, it goes on to ask for the date (dismissed here)
+    invoices = { ...invoices, folder: "Reference/Invoices" };
+    await invoice.create(WEB, tr, billing, index);
+    assert.deepEqual(asked, ["Bill through"]);
+    assert.deepEqual(made, []);
 });
 
 test("readBillTo: with no bill_to, the project's client, else its parent's; the code upper-cased", () => {
@@ -327,14 +333,6 @@ test("suggestCode and nameFor", () => {
     assert.equal(inv.suggestCode("@Pinecrest Public Library"), "PPL");
     assert.equal(inv.suggestCode("Harbor"), "HAR");
     assert.equal(inv.nameFor(1001, "KES"), "1001-KES");
-});
-
-test("settingsText: blanks to fill in, and a body so Templater leaves it be", () => {
-    const text = inv.settingsText("2026092810000000");
-    assert.match(text, /^---\nid: 2026092810000000\ntags:\nname:\naddress:\nterms: Net 30\npayment_note:\nfolder:\nlast_number: 1000\n---\nYour details for invoices\./);
-    assert.match(text, /`folder`/);
-    assert.match(text, /`last_number`/);
-    assert.ok(!/invoice\n/.test(text.split("---")[1]), "the settings note isn't tagged invoice");
 });
 
 // ------------------------------------------------------------------ what the check and the draft say

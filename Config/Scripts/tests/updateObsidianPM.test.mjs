@@ -31,7 +31,7 @@ test("installs: the system, never notes, the class files or the tests", () => {
         assert.equal(up.installs(path), true, path);
     }
     for (const path of ["Welcome.md", "Projects/Freelance/Freelance.md", "Projects/Projects.md", "Projects/Freelance/Projects.base", "Reference/Planner/days/2026-09-16.md",
-        "Config/Invoice Settings.md", "Reference/Invoices/1001-KES.md",
+        "Config/Invoice Settings.md", "Config/Table Settings.md", "Reference/Invoices/1001-KES.md", ".obsidian/plugins/plainday/data.json",
         "Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand.md", "Inbox/Desk lamp for the studio.md",
         ".gitignore", "CLAUDE.local.md", ".obsidian/app.json", ".obsidian/hotkeys.json", ".obsidian/types.json", CUSTOMJS_SETTINGS,
         "Config/Scripts/tests/demoVault.test.mjs", "Config/Scripts/tests/demo/renderReports.mjs",
@@ -149,15 +149,6 @@ const SRC = "Reference/Invoices/Invoices.base";
 const BASE = "Config/Bases/Invoices.base";
 const PLACED = "Business/Invoices/Invoices.base";
 
-test("folderOf: reads Invoice Settings' `folder` exactly as Billing does", () => {
-    const Billing = vm.runInContext(classScript("billing.js") + "\n;Billing", vm.createContext({}));
-    const billing = new Billing();
-    for (const raw of ["Business/Invoices", " /a//b/ ", "Business /Invoices", "a\nb", "Config/x", "archive", "x/Config", "", "  ", "/", null, undefined, "../x", "a/../b", ".obsidian", "a/.trash",
-        "a/ /b", "C:\\x", "a\\b", "[[x]]", "x#1", "a|b", 2026, ["a"], { a: 1 }, true, "Business/Invoices 2026"]) {
-        assert.deepEqual(plain(up.folderOf(raw)), plain(billing.folderOf(raw)), String(raw));
-    }
-});
-
 test("placed: the Invoices base goes in the invoice folder, else in Config/Bases; everything else where it is", () => {
     const source = map({ [SCRIPT]: "a", [SRC]: "b", "Projects/Projects.base": "c" });
     const none = up.placed(source);
@@ -248,7 +239,7 @@ test("plan: a place outside what's installed counts only for the file placed the
 test("summary: says where the Invoices base goes, and what moves", () => {
     const plan = { add: [], update: [PLACED], local: [], remove: [], keep: [], same: [], move: [{ from: BASE, to: PLACED }] };
     const text = up.summary(plan, { invoiceFolder: "Business/Invoices" });
-    assert.ok(text.includes("The Invoices base goes in `Business/Invoices`, the `folder` in Invoice Settings."), text);
+    assert.ok(text.includes("The Invoices base goes in `Business/Invoices`, the invoice folder in Settings → Plainday."), text);
     assert.ok(text.includes(`**Moved: 1** (to where it belongs now, as it is)\n- ${BASE} → ${PLACED}`), text);
     assert.ok(!up.summary(plan).includes("goes in"));
     assert.match(up.summary({ ...plan, move: [], update: [] }, { held: true }), /The Invoices base is left as it is this time/);

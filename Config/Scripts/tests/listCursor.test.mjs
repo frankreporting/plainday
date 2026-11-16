@@ -100,3 +100,37 @@ test("foldEnd: with no fold starting there, the position stands", () => {
     assert.equal(ListCursor.foldEnd(folds(), 388), 388);
     assert.equal(ListCursor.foldEnd(folds([300, 388]), 388), 388);
 });
+
+test("the Editor switch: off empties ListCursor's one slot, so nothing of it runs; on fills it again, in every open note (OBS-281)", async () => {
+    let on = true, updates = 0;
+    const registered = [];
+    const window = {};
+    const context = vm.createContext({
+        window,
+        app: { workspace: { get editorExtensions() { return registered; }, updateOptions: () => { updates++; } } },
+        plainday: { plugin: { registerEditorExtension: (e) => registered.push(e) }, Settings: { get: () => ({ editor: { listCursor: on } }) } },
+        // CodeMirror, as much as invoke() builds with
+        EditorState: { transactionFilter: { of: (f) => ({ filter: f }) } },
+        Prec: { highest: (x) => ({ highest: x }) },
+        keymap: { of: (keys) => ({ keys }) },
+        EditorSelection: {}, editorLivePreviewField: {}, foldedRanges: () => null,
+    });
+    const lc = new (vm.runInContext(classScript("listCursor.js") + "\n;ListCursor", context))();
+    await lc.invoke();
+    assert.equal(registered.length, 1);
+    assert.equal(registered[0].length, 2, "the cursor filter and the keys");
+    on = false;
+    await lc.invoke();
+    assert.deepEqual([registered.length, registered[0].length], [1, 0], "off: the same slot, empty");
+    on = true;
+    const before = updates;
+    await lc.invoke();
+    assert.deepEqual([registered.length, registered[0].length], [1, 2], "on again, in the same slot");
+    assert.ok(updates > before, "the open editors take it at once");
+    // Off when Plainday starts: no slot is registered until it's turned on
+    window.pmListCursor = undefined;
+    registered.length = 0;
+    on = false;
+    await lc.invoke();
+    assert.equal(registered.length, 0);
+});

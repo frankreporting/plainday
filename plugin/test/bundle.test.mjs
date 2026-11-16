@@ -46,9 +46,10 @@ const copySrc = () => {
 };
 
 // Runs a built main.js the way Obsidian's plugin loader does, against stand-ins: `Plugin` records
-// what the plugin adds, `Notice` what it shows, and the app holds the layout-ready callbacks.
-// CodeMirror's modules come from the loader too, as Obsidian gives them to every plugin.
-function load(file = BUNDLE) {
+// what the plugin adds and saves, `Notice` what it shows, and the app holds the layout-ready callbacks.
+// `stored` is what loadData gives, null for a device with no settings saved. CodeMirror's modules come
+// from the loader too, as Obsidian gives them to every plugin.
+function load(file = BUNDLE, { stored = null } = {}) {
     const notices = [];
     class Plugin {
         constructor(app, manifest) {
@@ -56,28 +57,37 @@ function load(file = BUNDLE) {
             this.manifest = manifest;
             this.commands = [];
             this.extensions = [];
+            this.tabs = [];
+            this.saved = [];
         }
         addCommand(c) { this.commands.push(c); return c; }
         registerEditorExtension(e) { this.extensions.push(e); }
+        addSettingTab(tab) { this.tabs.push(tab); }
+        async loadData() { return stored; }
+        async saveData(data) { this.saved.push(JSON.parse(JSON.stringify(data))); }
     }
     class Notice { constructor(message) { notices.push(message); } }
+    // What the settings panel extends when main.js loads
+    class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }
+    class AbstractInputSuggest {}
+    class Modal {}
     const module = { exports: {} };
     const req = (id) => {
-        if (id === "obsidian") return { Plugin, Notice };
+        if (id === "obsidian") return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal };
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
     };
     globalThis.window = globalThis;
     new Function("module", "exports", "require", fs.readFileSync(file, "utf8"))(module, module.exports, req);
     const layout = [];
-    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) } };
+    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null } };
     const plugin = new module.exports.default(app, { id: "plainday" });
     return { plugin, layout, notices };
 }
 
-test("every class file is bundled, and made once by name", () => {
+test("every class file is bundled, and made once by name", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         assert.equal(CLASS_NAMES.length, classFiles.length);
         assert.ok(!CLASS_NAMES.includes(null), "each class file declares a class");
@@ -96,7 +106,7 @@ test("every class file is bundled, and made once by name", () => {
 
 test("each command in the list is added with its id, name and icon, and runs its class", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
         assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
@@ -129,7 +139,7 @@ test("each command in the list is added with its id, name and icon, and runs its
 
 test("the startup scripts wait for the layout, then run one after the other in the list's order", async () => {
     const { plugin, layout, notices } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         const ran = [];
         let running = 0;
@@ -153,6 +163,48 @@ test("the startup scripts wait for the layout, then run one after the other in t
     }
 });
 
+test("its settings load before anything runs; the panel is added; the old notes are read once the layout is ready, before the startup scripts (OBS-281)", async () => {
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
+    const { plugin, layout } = load(BUNDLE, { stored });
+    await plugin.onload();
+    try {
+        assert.equal(window.plainday.Settings.get().invoices.name, "Juniper Hale", "loaded before the commands are added");
+        assert.equal(plugin.commands.length, COMMANDS.length);
+        assert.equal(plugin.tabs.length, 1);
+        assert.equal(plugin.tabs[0].plugin, plugin, "Settings → Plainday");
+        const ran = [];
+        window.plainday.Settings.readOldNotes = async () => ran.push("readOldNotes");
+        for (const name of STARTUP) window.plainday[name].invoke = async () => ran.push(name);
+        await layout[0]();
+        assert.deepEqual(ran, ["readOldNotes", ...STARTUP]);
+        assert.deepEqual(plugin.saved, [], "loading saves nothing");
+        // Sync changed the data file: read again, and the editor switch applied
+        stored.invoices.name = "From the phone";
+        const applied = [];
+        window.plainday.ListCursor.invoke = async () => applied.push("ListCursor");
+        await plugin.onExternalSettingsChange();
+        assert.equal(window.plainday.Settings.get().invoices.name, "From the phone");
+        assert.deepEqual(applied, ["ListCursor"]);
+    } finally {
+        plugin.onunload();
+    }
+});
+
+test("a device with no settings saved starts from the defaults, and saves what it read once the layout is ready", async () => {
+    const { plugin, layout, notices } = load();
+    await plugin.onload();
+    try {
+        assert.equal(window.plainday.Settings.get().invoices.lastNumber, 1000);
+        assert.equal(window.plainday.Settings.saved, false);
+        for (const name of STARTUP) window.plainday[name].invoke = async () => {};
+        await layout[0]();
+        assert.equal(plugin.saved.length, 1, "the defaults, so the old notes are never read again");
+        assert.deepEqual(notices, [], "no old notes, nothing to say");
+    } finally {
+        plugin.onunload();
+    }
+});
+
 test("no CustomJS hook or customJS is left in the bundle", () => {
     const text = fs.readFileSync(BUNDLE, "utf8");
     for (const p of [/["'`]customjs["'`]/, /\.customjs\b/, /\bcustomJS\b/]) {
@@ -167,9 +219,9 @@ test("the bundle names no folder on the machine that built it, so a build anywhe
     assert.match(text, /^\/\/ plugin\/src\/commands\/schedule\.js$/m, "each class by its path in the repository");
 });
 
-test("unloading runs every deconstructor and removes the global", () => {
+test("unloading runs every deconstructor and removes the global", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     const ran = [];
     for (const name of CLASS_NAMES) {
         if (typeof window.plainday[name].deconstructor === "function") window.plainday[name].deconstructor = () => ran.push(name);
@@ -208,7 +260,7 @@ test("in the bundle, a class reaches Plainday through the host's plainday, and O
     const out = path.join(src, "main.js.out");
     await build({ src, outfile: out, logLevel: "silent" });
     const { plugin } = load(out);
-    plugin.onload();
+    await plugin.onload();
     const probe = window.plainday.Probe;
     assert.equal(probe.on(), true, "loaded");
     probe.add("an extension");
@@ -317,7 +369,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 30);
+    assert.equal(classFiles.length, 31);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);
