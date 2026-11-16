@@ -322,7 +322,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Tables",
                 rows: [
-                    row("Freeze rows and columns", "Requires Selectable Tables plugin", (s) => s.addToggle((t) => t.setValue(freezing).onChange((on) => {
+                    row("Freeze rows and columns", "Applies only to tables created by Plainday and requires Selectable Tables plugin.", (s) => s.addToggle((t) => t.setValue(freezing).onChange((on) => {
                         // On freezes the header row and the first column, off unfreezes both
                         freezing = on;
                         const n = on ? 1 : 0;

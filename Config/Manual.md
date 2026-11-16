@@ -842,7 +842,7 @@ A settings file that doesn't read (a write cut off, a sync conflict) is left as 
 
 ### Tables
 
-**Freeze rows and columns**, which needs the Selectable Tables plugin: on, it freezes 1 row and 1 column, and shows **Freeze rows** and **Freeze columns**, from 0 to 9, to change them; off, nothing is frozen. It's the default freeze for every table the system writes (see *Freezing tables*).
+**Freeze rows and columns**, for the tables Plainday writes, which needs the Selectable Tables plugin: on, it freezes 1 row and 1 column, and shows **Freeze rows** and **Freeze columns**, from 0 to 9, to change them; off, nothing is frozen. It's the default freeze for every table the system writes (see *Freezing tables*).
 
 ### Editor
 
