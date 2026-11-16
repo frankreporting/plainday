@@ -18,7 +18,9 @@ export default class Settings {
     //
     // Vaults from before: on a device with no settings saved, the first load reads Config/Invoice
     // Settings.md and Config/Table Settings.md once (readOldNotes), saves what they held, and says so.
-    // From then on the notes are never read again; they're left for you to delete.
+    // From then on the notes are never read again; they're left for you to delete. A data file that's
+    // there but doesn't read (a write cut off, a sync conflict) isn't "no settings": Plainday says so,
+    // uses the defaults, and leaves the file alone until you change a setting or paste your settings.
     //
     // Another device: plugin settings don't sync unless Obsidian Sync carries community plugins, so
     // copyText() is every setting as one block for the clipboard, and readCopy() and replaceWith() take
@@ -39,6 +41,8 @@ export default class Settings {
         this.data = this.defaults();
         // Whether this device has settings saved: until it has, the first load reads the old notes
         this.saved = false;
+        // Whether the data file is there but doesn't read
+        this.unreadable = false;
     }
 
     // ---------------------------------------------------------------- pure
@@ -235,11 +239,19 @@ export default class Settings {
 
     // ---------------------------------------------------------------- the data file
 
-    // Reads the saved settings, or the defaults on a device with none saved yet
+    // Reads the saved settings, or the defaults on a device with none saved yet. Obsidian's loadData
+    // gives null when there's no data file, and undefined when there is one that doesn't read: then the
+    // defaults hold, the old notes aren't read over it, and a notice says so.
     async load() {
-        const raw = await plainday.plugin?.loadData();
-        this.saved = raw !== null && raw !== undefined;
+        const plugin = plainday.plugin;
+        if (!plugin) return;
+        const raw = await plugin.loadData();
+        this.unreadable = raw === undefined;
+        this.saved = raw !== null;
         this.data = this.normalize(raw ?? {});
+        if (this.unreadable) {
+            new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
+        }
     }
 
     // Writes the settings as they are now
@@ -248,6 +260,7 @@ export default class Settings {
         if (!plugin) throw new Error("Plainday isn't loaded");
         await plugin.saveData(this.data);
         this.saved = true;
+        this.unreadable = false;
     }
 
     /**

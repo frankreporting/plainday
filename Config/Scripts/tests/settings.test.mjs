@@ -148,12 +148,17 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 
 // ------------------------------------------------------------------ the data file and the first load
 
-// Settings in a stand-in for Plainday: loadData gives `stored` (null for none), saveData records, the vault
-// holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {} } = {}) {
+// Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
+// undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
+// vault holds `notes` as text, and the notices shown are kept
+function withPlugin({ stored = null, notes = {}, unreadable = false } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0;
-    const plugin = { loadData: async () => (stored === null ? null : JSON.parse(JSON.stringify(stored))), saveData: async (d) => { saves.push(plain(d)); } };
+    const plugin = {
+        manifest: { dir: ".obsidian/plugins/plainday" },
+        loadData: async () => (unreadable ? undefined : stored === null ? null : JSON.parse(JSON.stringify(stored))),
+        saveData: async (d) => { saves.push(plain(d)); },
+    };
     const app = {
         vault: {
             getFileByPath: (p) => (p in notes ? { path: p } : null),
@@ -223,6 +228,20 @@ test("readOldNotes: a device with settings saved reads nothing; one with no note
     await fresh.s.load();
     await fresh.s.readOldNotes();
     assert.deepEqual([fresh.saves, fresh.notices], [[DEFAULTS], []]);
+});
+
+test("a data file that doesn't read: the defaults, a notice, and neither the old notes nor a save over it", async () => {
+    const f = withPlugin({ unreadable: true, notes: { "Config/Invoice Settings.md": INVOICE_TEXT } });
+    await f.s.load();
+    assert.deepEqual(plain(f.s.get()), DEFAULTS);
+    assert.equal(f.notices.length, 1);
+    assert.match(f.notices[0], /^Plainday couldn't read its settings file, \.obsidian\/plugins\/plainday\/data\.json, so it's using the defaults\. It leaves the file as it is until you change a setting/);
+    await f.s.readOldNotes();
+    assert.deepEqual([f.saves, f.reads, f.notices.length], [[], [], 1], "the old notes aren't read over it, and nothing is saved");
+    // A change you make saves, as you asked
+    await f.s.set("invoices", { name: "Juniper Hale" });
+    assert.equal(f.saves.length, 1);
+    assert.equal(f.s.unreadable, false);
 });
 
 test("readOldNotes: a bad value is named in the notice; properties that don't read leave the defaults", async () => {

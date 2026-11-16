@@ -17,7 +17,7 @@ import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {import("obsidian").Setting} Setting */
-/** @typedef {{ name: string, desc: string, render?: (setting: Setting) => void }} Row */
+/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void }} Row */
 /** @typedef {{ heading: string, rows: Row[] }} Section */
 
 /** @param {unknown} e */
@@ -105,7 +105,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         return this.sections().map(({ heading, rows }) => ({
             type: /** @type {const} */ ("group"),
             heading,
-            items: rows.map(({ name, desc, render }) => (render ? { name, desc, render } : { name, desc, searchable: false })),
+            items: rows.map(({ name, desc, render }) => ({ name, desc, render })),
         }));
     }
 
@@ -116,9 +116,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             const group = new SettingGroup(this.containerEl).setHeading(heading);
             for (const { name, desc, render } of rows) {
                 group.addSetting((s) => {
-                    if (name) s.setName(name);
-                    s.setDesc(desc);
-                    render?.(s);
+                    s.setName(name).setDesc(desc);
+                    render(s);
                 });
             }
         }
@@ -179,7 +178,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         const change = (v) => {
                             const { folder, error } = plainday.Billing.folderOf(v);
                             const was = now().invoices.folder;
-                            if (error) { problem(s, `That folder ${error}, so the invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.`); return; }
+                            if (error) { problem(s, `Not used: it ${error}. The invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.`); return; }
                             void save(s, "invoices", { folder });
                         };
                         t.setPlaceholder("Invoices").setValue(now().invoices.folder).onChange(change);
@@ -192,7 +191,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         t.inputEl.inputMode = "numeric";
                         t.setValue(String(now().invoices.lastNumber)).onChange((v) => {
                             const { number } = settings.lastNumberOf(v);
-                            if (number === null) { problem(s, `Not a whole number from 0 to 999999, so it stays ${now().invoices.lastNumber}.`); return; }
+                            if (number === null) { problem(s, `Not used: it isn't a whole number from 0 to 999999. The last invoice number stays ${now().invoices.lastNumber}.`); return; }
                             void save(s, "invoices", { lastNumber: number });
                         });
                     })),
@@ -221,8 +220,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Another device",
                 rows: [
-                    { name: "", desc: "Plainday's settings stay on this device, unless Obsidian Sync carries installed community plugins, which it doesn't by default. To set up another device, copy them here and paste them there. After changing a setting, paste again, so both devices file and freeze the same way." },
-                    row("Copy settings", "Copies every setting above as one block of text.", (s) => s.addButton((b) => b.setButtonText("Copy settings").onClick(() => {
+                    row("Copy settings", "Plainday's settings stay on this device, unless Obsidian Sync carries installed community plugins, which it doesn't by default. To set up another device, copy every setting above here, as one block of text, and paste it there. After changing a setting, paste again, so both devices file and freeze the same way.", (s) => s.addButton((b) => b.setButtonText("Copy settings").onClick(() => {
                         navigator.clipboard.writeText(settings.copyText()).then(
                             () => new Notice("Copied. It holds your invoice details: paste it only into Plainday's settings on your other device. A clipboard manager may keep a copy.", 8000),
                             (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
