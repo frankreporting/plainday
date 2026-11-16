@@ -333,7 +333,7 @@ test("owners: your addresses, else the Google link's, else none; the account a l
         "http://example.org/cal.ics", "http://192.168.1.5/cal.ics"]) assert.equal(feed.isLink(link), false, String(link));
     // The address Add calendar fills in as yours: a person's Google calendar, not a shared one's ID
     assert.equal(feed.address(LINKS.studio), "studio-owner@example.com");
-    for (const id of ["0000invented@group.calendar.google.com", "en.usa%23holiday%40group.v.calendar.google.com", "addressbook%23contacts%40group.v.calendar.google.com", "0000invented@import.calendar.google.com"]) {
+    for (const id of ["0000invented%40group.calendar.google.com", "en.usa%23holiday%40group.v.calendar.google.com", "addressbook%23contacts%40group.v.calendar.google.com", "0000invented%40import.calendar.google.com"]) {
         assert.equal(feed.address(`https://calendar.google.com/calendar/ical/${id}/private-0000invented/basic.ics`), null, id);
     }
     assert.equal(feed.address(LINKS.home), null);
