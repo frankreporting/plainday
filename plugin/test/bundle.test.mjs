@@ -392,6 +392,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
+        assert.equal(defs[0].items[0].desc, "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.");
         for (const g of defs) for (const i of g.items) {
             assert.ok(i.name, "every row has a name");
             assert.ok(!("desc" in i) || i.desc, `${i.name}: a description, or none at all`);

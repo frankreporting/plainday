@@ -543,7 +543,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: null,
                 rows: [
-                    row("Backup and transfer", "Copy settings for backup and to transfer from one device to another when you're not syncing your installed plugin settings. Paste will replace all settings with the contents of your clipboard.", (s) => {
+                    row("Backup and transfer", "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.", (s) => {
                         link(s, "Copy", () => {
                             const links = settings.links();
                             navigator.clipboard.writeText(settings.copyText(settings.get(), links)).then(
