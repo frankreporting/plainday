@@ -317,7 +317,8 @@ export default class Settings {
     }
 
     // Sync changed the data file: read it again, and apply the editor switch. A file caught mid-write (or
-    // not downloaded yet) reads as undefined: the settings in memory stay until it reads.
+    // not downloaded yet) reads as undefined: the settings in memory stay until it reads. The last invoice
+    // number stays the higher of the two.
     async reload() {
         const plugin = plainday.plugin;
         if (!plugin) return;
@@ -325,7 +326,8 @@ export default class Settings {
         if (raw === undefined) return;
         this.unreadable = false;
         this.saved = raw !== null;
-        this.data = this.normalize(raw ?? {});
+        // As a paste does: an older file from another device never lowers the number given here
+        this.data = this.pasted(this.normalize(raw ?? {}));
         await plainday.ListCursor?.invoke();
     }
 
@@ -348,7 +350,8 @@ export default class Settings {
             }
         };
         const result = this.fromOldNotes({ invoice: await props(Settings.INVOICE_NOTE), table: await props(Settings.TABLE_NOTE) });
-        if (!result.read.length) return;
+        // Sync brought a data file while the notes were read: it wins
+        if (this.saved || !result.read.length) return;
         this.data = result.settings;
         await this.save();
         const notice = this.movedNotice(result);

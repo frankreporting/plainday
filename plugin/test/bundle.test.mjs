@@ -69,7 +69,12 @@ function load(file = BUNDLE, { stored = null } = {}) {
     class Notice { constructor(message) { notices.push(message); } }
     // What the settings panel extends when main.js loads
     class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }
-    class AbstractInputSuggest {}
+    const suggests = [];
+    class AbstractInputSuggest {
+        constructor(app, el) { this.app = app; this.el = el; this.closed = 0; suggests.push(this); }
+        onSelect(cb) { this.picked = cb; return this; }
+        close() { this.closed++; }
+    }
     class Modal {}
     const module = { exports: {} };
     const req = (id) => {
@@ -82,7 +87,7 @@ function load(file = BUNDLE, { stored = null } = {}) {
     const layout = [];
     const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null } };
     const plugin = new module.exports.default(app, { id: "plainday" });
-    return { plugin, layout, notices };
+    return { plugin, layout, notices, suggests };
 }
 
 test("every class file is bundled, and made once by name", async () => {
@@ -200,6 +205,98 @@ test("a device with no settings saved and no old notes starts from the defaults,
         await layout[0]();
         assert.deepEqual(plugin.saved, [], "nothing to move, so no file written over one Sync may still bring");
         assert.deepEqual(notices, [], "no old notes, nothing to say");
+    } finally {
+        plugin.onunload();
+    }
+});
+
+// A stand-in for Obsidian's Setting, enough for a row's render: its controls record their handlers
+function standInSetting() {
+    const listeners = {};
+    const input = { value: "", rows: 0, inputMode: "", addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); } };
+    const control = {
+        inputEl: input, handlers: {},
+        setValue(v) { input.value = v; return this; }, getValue() { return input.value; },
+        setPlaceholder(p) { input.placeholder = p; return this; }, addOptions(o) { this.options = o; return this; },
+        onChange(fn) { this.handlers.change = fn; return this; }, setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.handlers.click = fn; return this; },
+    };
+    const warnings = [];
+    const setting = {
+        settingEl: { isConnected: true }, control,
+        descEl: { createDiv: () => ({ setText: (t) => warnings.push(t) }) },
+        addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
+        addToggle(cb) { cb(control); return this; }, addButton(cb) { cb(control); return this; },
+        type(v) { input.value = v; control.handlers.change(v); }, leave() { for (const fn of listeners.change ?? []) fn(); },
+        warning: () => warnings.at(-1) ?? "",
+    };
+    return setting;
+}
+
+test("Settings → Plainday: its sections and rows, and the two checked fields save only when you leave them (OBS-281)", async () => {
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
+    const { plugin, suggests } = load(BUNDLE, { stored });
+    plugin.app.vault.getAllFolders = () => [{ path: "Archive" }, { path: "Archive/Old" }, { path: "Business/Invoices" }, { path: "Config" }];
+    await plugin.onload();
+    try {
+        const tab = plugin.tabs[0];
+        const defs = tab.getSettingDefinitions();
+        assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
+            ["group", "Invoices", ["Your name", "Address", "Terms", "Payment note", "Invoice folder", "Last invoice number"]],
+            ["group", "Tables", ["Freeze rows", "Freeze columns"]],
+            ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
+            ["group", "Another device", ["Copy settings", "Paste settings"]],
+        ]);
+        for (const g of defs) for (const i of g.items) {
+            assert.ok(i.name && i.desc, `${i.name} has a name and a description, or Obsidian 1.13 drops it`);
+            assert.equal(typeof i.render, "function");
+        }
+        const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
+        const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
+        const saved = () => plugin.saved.at(-1)?.invoices;
+
+        const folder = draw("Invoice folder");
+        assert.equal(folder.s.control.inputEl.value, "Reference/Invoices");
+        folder.s.type("Archiv");
+        assert.deepEqual(plugin.saved, [], "typing saves nothing");
+        folder.s.type("Archive/Invoices");
+        assert.match(folder.s.warning(), /^Not used: it is inside Archive/);
+        folder.s.leave();
+        assert.deepEqual(plugin.saved, [], "a refused value is never saved, nor the one before it");
+        folder.s.type("Business/Invoices");
+        folder.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "saved on leaving the field");
+        // Still typing when Obsidian draws the row again in place: nothing saved
+        const count = plugin.saved.length;
+        folder.s.type("Clients/Inv");
+        folder.cleanup();
+        assert.equal(plugin.saved.length, count);
+        // The panel closing, the row already off the page: a value still waiting is saved
+        folder.s.settingEl.isConnected = false;
+        folder.cleanup();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Clients/Inv");
+        // The folder list offers only folders the field takes, with Invoices first, and closes after a pick
+        const suggest = suggests.at(-1);
+        assert.deepEqual(suggest.getSuggestions(""), ["Invoices", "Business/Invoices"]);
+        assert.deepEqual(suggest.getSuggestions("bus"), ["Business/Invoices"]);
+        folder.s.settingEl.isConnected = true;
+        suggest.picked("Business/Invoices");
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "a pick saves at once");
+        assert.equal(suggest.closed, 1);
+        assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
+
+        const last = draw("Last invoice number");
+        last.s.type("2");
+        last.s.type("");
+        last.s.leave();
+        assert.equal(window.plainday.Settings.get().invoices.lastNumber, 1001, "a blank or half-typed number is never kept");
+        assert.match(last.s.warning(), /^Not used: it isn't a whole number/);
+        last.s.type("1005");
+        last.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.lastNumber, 1005);
     } finally {
         plugin.onunload();
     }

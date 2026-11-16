@@ -832,7 +832,7 @@ These run on their own when Obsidian starts, one after the other once the vault'
 
 Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; the invoice folder and the last invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (an invoice folder outside the vault or in `Archive`, a number that isn't one) is refused with a line under the field, and the old value stays.
 
-A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again.
+A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again, and meanwhile the time report leaves every table's freeze as it is.
 
 ### Invoices
 

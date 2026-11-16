@@ -34,12 +34,20 @@ const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string"
 const row = (name, desc, draw) => ({ name, desc, render: (s) => { draw(s); } });
 
 /**
- * A row whose value is saved when you leave the field: `draw` returns what saves a value still waiting,
- * which runs when the row is taken down (the panel closing, or drawn again)
+ * A row whose value is saved when you leave the field: `draw` returns what saves a value still waiting.
+ * Obsidian 1.13+ runs a row's cleanup both when the panel closes (the row already off the page) and
+ * when it draws the row again in place (Sync changed the settings while you typed): only the first
+ * saves, so a half-typed value is never kept. display() keeps the save itself, for hide().
  * @param {string} name @param {string} desc @param {(setting: Setting) => () => void} draw
  * @returns {Row}
  */
-const field = (name, desc, draw) => ({ name, desc, render: (s) => draw(s) });
+const field = (name, desc, draw) => ({
+    name, desc,
+    render: (s) => {
+        const save = draw(s);
+        return Object.assign(() => { if (!s.settingEl.isConnected) save(); }, { save });
+    },
+});
 
 /**
  * Folders to choose an invoice folder from: the vault's own that the field would take, with `Invoices`
@@ -137,8 +145,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             for (const { name, desc, render } of rows) {
                 group.addSetting((s) => {
                     s.setName(name).setDesc(desc);
-                    const save = render(s);
-                    if (save) waiting.push(save);
+                    const cleanup = render(s);
+                    if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
                 });
             }
         }

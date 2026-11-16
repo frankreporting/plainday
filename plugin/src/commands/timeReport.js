@@ -120,6 +120,8 @@ export default class TimeReport {
     static FREEZE_COMMENT = /%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%)/;
     static FREEZE_COMMENTS = new RegExp(TimeReport.FREEZE_COMMENT.source, "g");
     static MAX_FROZEN_COLUMNS = 9;
+    // The default freeze while it isn't known (tableDefault): each table keeps what it has
+    static KEEP_FREEZES = Object.freeze({ keep: true });
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
     // Time under a sub-task isn't counted, only listed (Brian, 2026-10-30): counting it too would leave
@@ -2532,8 +2534,10 @@ export default class TimeReport {
 
     // The default from Settings → Plainday → Tables (`tables`, as Settings keeps it): { rows, columns },
     // or null when both are 0. Selectable Tables freezes at most 9 columns, a status column that comes
-    // along included.
-    tableDefault(tables = plainday?.Settings?.get().tables) {
+    // along included. While Plainday's settings file doesn't read (`unreadable`), the default isn't
+    // known: KEEP_FREEZES, so every table keeps the freeze it has rather than lose a default it had.
+    tableDefault(tables = plainday?.Settings?.get().tables, unreadable = plainday?.Settings?.unreadable) {
+        if (unreadable) return TimeReport.KEEP_FREEZES;
         const whole = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
         const rows = whole(tables?.freezeRows), columns = Math.min(whole(tables?.freezeColumns), TimeReport.MAX_FROZEN_COLUMNS);
         return rows || columns ? { rows, columns } : null;
@@ -2566,12 +2570,14 @@ export default class TimeReport {
     //   - a freeze that differs from its default label (changed with a command), one with no label (typed),
     //     or one labeled custom: that freeze, labeled custom;
     //   - a label with no freeze (Unfreeze table): `%%freeze 0 0%%`, labeled custom, so it stays unfrozen.
+    // With KEEP_FREEZES, a default freeze stays as it is, and a new table gets none.
     freezeHeader(old, settings, head = []) {
         const mark = ({ rows, columns }) => `%%freeze ${rows} ${columns}%%`;
         const custom = (freeze) => `${mark(freeze)} %%custom%%`;
-        const def = this.freezeDefault(settings, head);
-        const byDefault = def ? `${mark(def)} %%default ${def.rows} ${def.columns}%%` : "";
         const { mark: now = null, label = null } = old ?? {};
+        const keep = !!settings?.keep;
+        const def = keep ? (label?.kind === "default" ? { rows: label.rows, columns: label.columns } : null) : this.freezeDefault(settings, head);
+        const byDefault = def ? `${mark(def)} %%default ${def.rows} ${def.columns}%%` : "";
         if (!now && !label) return byDefault;
         if (!now) return custom({ rows: 0, columns: 0 });
         if (label?.kind === "default" && now.rows === label.rows && now.columns === label.columns) return byDefault;

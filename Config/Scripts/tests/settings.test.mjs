@@ -262,7 +262,22 @@ test("reload: Sync's new data file is read; one caught mid-write keeps what's in
     assert.equal(f.runs(), 1, "the editor switch applied");
     f.plugin.loadData = async () => null;
     await f.s.reload();
-    assert.deepEqual(plain(f.s.get()), DEFAULTS, "the file gone: the defaults");
+    assert.deepEqual(plain(f.s.get()), { ...DEFAULTS, invoices: { ...DEFAULTS.invoices, lastNumber: 1004 } }, "the file gone: the defaults, but never a lower number");
+    // An older file from another device doesn't lower the number given here
+    f.plugin.loadData = async () => ({ invoices: { name: "Juniper Hale", lastNumber: 1001 } });
+    await f.s.reload();
+    assert.equal(f.s.get().invoices.lastNumber, 1004);
+});
+
+test("readOldNotes: a data file Sync brings while the notes are read wins over them", async () => {
+    const f = withPlugin({ notes: { "Config/Invoice Settings.md": INVOICE_TEXT } });
+    await f.s.load();
+    // Sync delivers the other device's file during the note's read, which reload() loads
+    const original = f.s.fromOldNotes.bind(f.s);
+    f.s.fromOldNotes = (...a) => { f.s.data = { ...f.s.get(), invoices: { ...f.s.get().invoices, name: "From the phone" } }; f.s.saved = true; return original(...a); };
+    await f.s.readOldNotes();
+    assert.deepEqual([f.saves, f.notices], [[], []]);
+    assert.equal(f.s.get().invoices.name, "From the phone");
 });
 
 test("a data file that doesn't read: the defaults, a notice, and neither the old notes nor a save over it", async () => {

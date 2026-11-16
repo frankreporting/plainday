@@ -190,6 +190,19 @@ test("tableDefault: the Tables settings as the default freeze, null when both ar
     assert.deepEqual(plain(live.tableDefault()), ON);
     ctx.plainday.Settings = { get: () => ({ tables: { freezeRows: 0, freezeColumns: 0 } }) };
     assert.equal(live.tableDefault(), null, "read at each run, so a change counts at the next one");
+    // A settings file that doesn't read: the default isn't known
+    ctx.plainday.Settings = { get: () => ({ tables: { freezeRows: 0, freezeColumns: 0 } }), unreadable: true };
+    assert.equal(live.tableDefault(), live.constructor.KEEP_FREEZES);
+});
+
+test("KEEP_FREEZES: while the default isn't known, every table keeps the freeze it has, and a new one gets none", () => {
+    const KEEP = TimeReport.KEEP_FREEZES;
+    const head = ["", "Date"];
+    assert.equal(tr.freezeHeader(tr.freezeOf("| %%freeze 1 2%% %%default 1 2%% | Date |"), KEEP, head), "%%freeze 1 2%% %%default 1 2%%", "a default stays");
+    assert.equal(tr.freezeHeader(tr.freezeOf("| %%freeze 2 1%% %%custom%% | Date |"), KEEP, head), "%%freeze 2 1%% %%custom%%", "yours stays");
+    assert.equal(tr.freezeHeader(tr.freezeOf("| %%freeze 3 1%% %%default 1 2%% | Date |"), KEEP, head), "%%freeze 3 1%% %%custom%%", "changed by a command: yours, as always");
+    assert.equal(tr.freezeHeader(null, KEEP, head), "", "a new table");
+    assert.equal(tr.freezeHeader(tr.freezeOf("| | Date |"), KEEP, head), "", "a table with none");
 });
 
 test("withFreezes leaves a table alone when a row has more cells than its columns, rather than stop", () => {
