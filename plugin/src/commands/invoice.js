@@ -4,10 +4,10 @@ import { app, plainday } from "../host.js";
 export default class Invoice {
     // Command "Invoice" (OBS-5): makes an invoice note from the time logged in daily notes, and moves
     // one along once it's made. Run on a project note (or pick a project), it asks "Bill through" a
-    // date, shows what it would bill and what needs fixing first, and writes a draft into the folder
-    // Invoice Settings names (`folder`, OBS-112), else into the project's invoices/ folder. Its number
-    // is one past the highest ever given (`last_number` there, or the highest invoice note's number),
-    // so a deleted invoice's number is never used again. Run on an invoice note, it offers what fits
+    // date, shows what it would bill and what needs fixing first, and writes a draft into the invoice
+    // folder (Settings → Plainday → Invoices, OBS-281). Its number is one past the highest ever given
+    // (the last number given, kept in the settings, or the highest invoice note's number), so a deleted
+    // invoice's number is never used again, or the first invoice number there when that's higher (numberedFrom). Run on an invoice note, it offers what fits
     // the invoice's status: Rebuild or Mark sent for a draft, Check for changes, Mark paid or Cancel
     // invoice once it's sent.
     //
@@ -15,18 +15,15 @@ export default class Invoice {
     // `invoice_status`, OBS-117, and its project is the one `parent` links to, OBS-114), its body is what
     // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
-    // (Billing reads and writes it). Your details come from Config/Invoice Settings.md, which updates
-    // leave alone; the code, billing name and address of whoever is billed from the note the project's
+    // (Billing reads and writes it). Your details come from Settings → Plainday (plainday.Settings),
+    // which a new invoice needs your name and the invoice folder from; the code, billing name and address of whoever is billed from the note the project's
     // `bill_to` links to, else its `client` (OBS-109). They're copied in when the invoice is made, so a
     // sent invoice never changes.
     //
-    // Only the invoice note (and the billed note's `code` once, and the settings note) is written. Daily
-    // notes are only read. The pure methods come first, tested with vm; everything that touches `app`
+    // Only the invoice note (and the billed note's `code` once, and the last invoice number in Plainday's
+    // settings) is written. Daily notes are only read. The pure methods come first, tested with vm; everything that touches `app`
     // is at the bottom.
-    static SETTINGS = "Config/Invoice Settings.md";
-    static FOLDER = "invoices";
-    // The highest `last_number`: invoice numbers have at most six digits
-    static MAX_NUMBER = 999999;
+    static SETTINGS_PLACE = "Settings → Plainday → Invoices";
     static CHECK = "pm-invoice-check";
     static CHECK_START = "%% invoice-check:start %%";
     static CHECK_END = "%% invoice-check:end %%";
@@ -62,26 +59,20 @@ export default class Invoice {
         return [].concat(value ?? []).flatMap((v) => String(v ?? "").split(/\r?\n/)).map((v) => v.trim()).filter(Boolean);
     }
 
-    // Your details, from the settings note's properties. `ok` once there's at least a name. `folder` is
-    // where new invoices go ("" for the project's own invoices/ folder) and `lastNumber` the highest
-    // number ever given (null when blank), from `folder` and `last_number` (OBS-112); `problem` says
-    // what's wrong with either, which stops a new invoice but not a rebuild.
-    readSettings(props = {}, billing) {
-        const text = (v) => String(v ?? "").trim();
-        const name = text(props.name);
-        const folder = billing.folderOf(props.folder);
-        const last = this.lastNumberOf(props.last_number);
-        const problem = folder.error ? `\`folder\` ${folder.error}` : last.error ? `\`last_number\` ${last.error}` : null;
-        return { name, address: this.list(props.address), terms: text(props.terms), paymentNote: text(props.payment_note),
-            folder: folder.folder, lastNumber: last.number, problem, ok: !!name };
+    // What the next invoice number goes one past, besides the highest invoice in the vault: the last
+    // number given, or one less than the first invoice number when that's higher (Settings → Plainday)
+    numberedFrom(invoices) {
+        return Math.max(invoices.lastNumber, (invoices.firstNumber ?? 0) - 1);
     }
 
-    // `last_number`: a whole number from 0 to 999999, as a number or as digits, or null when blank
-    lastNumberOf(raw) {
-        if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) return { number: null, error: null };
-        const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
-        if (Number.isInteger(n) && n >= 0 && n <= Invoice.MAX_NUMBER) return { number: n, error: null };
-        return { number: null, error: `isn't a whole number from 0 to ${Invoice.MAX_NUMBER} (${typeof raw === "string" ? raw.trim() : JSON.stringify(raw)})` };
+    // What a new invoice still needs from Settings → Plainday → Invoices, as the notice that says so,
+    // or null when it has it: your name, and, unless `folder` is false (a rebuild, whose draft is
+    // already filed), the invoice folder
+    missing(invoices, { folder = true } = {}) {
+        const asks = [!invoices.name && "add your name", folder && !invoices.folder && "choose an invoice folder"].filter(Boolean);
+        if (!asks.length) return null;
+        const text = asks.join(" and ");
+        return `${text[0].toUpperCase()}${text.slice(1)} in ${Invoice.SETTINGS_PLACE}, then run Invoice again`;
     }
 
     // The note a project's invoices bill (OBS-109): the one the nearest `bill_to` links to, the project's
@@ -414,27 +405,6 @@ export default class Invoice {
         ];
     }
 
-    // The settings note a first run makes: blanks to fill in, and a line saying what it's for (a body,
-    // so Templater's new-file template leaves its frontmatter alone)
-    settingsText(id) {
-        return [
-            "---",
-            `id: ${id}`,
-            "tags:",
-            "name:",
-            "address:",
-            "terms: Net 30",
-            "payment_note:",
-            "folder:",
-            "last_number: 1000",
-            "---",
-            "Your details for invoices. The Invoice command copies them into each new invoice: `name` and `address` (one line per item) head it, `terms` and `payment_note` close it. A project's own `terms` wins over these. This note is yours: updates leave it alone.",
-            "",
-            "`folder` is where new invoices go, like `Business/Invoices`; left blank, each goes into its project's `invoices/` folder. *Update Obsidian PM* puts the Invoices base there too. `last_number` is the highest invoice number given so far: the next invoice is one more than it, or than the highest invoice note's number if that's higher, and the Invoice command raises it each time, so a deleted invoice's number is never used again.",
-            "",
-        ].join("\n");
-    }
-
     // ---------------------------------------------------------------- the command
 
     async invoke() {
@@ -526,13 +496,8 @@ export default class Invoice {
             if (pick === null) return;
             if (pick === 0) { await this.earnFlat(project, tr, index); return; }
         }
-        const settings = await this.settings(tr);
+        const settings = this.settings();
         if (!settings) return;
-        if (settings.problem) { new Notice(`${settings.problem} in ${tr.basename(Invoice.SETTINGS)}; fix it there, then run Invoice again`, 0); return; }
-        if (!settings.folder && tr.basename(tr.dirname(project)) !== tr.basename(project)) {
-            new Notice(`${tr.basename(project)} isn't its folder's own note, so it has no invoices/ folder; set \`folder\` in ${tr.basename(Invoice.SETTINGS)} to file every invoice in one place`, 0);
-            return;
-        }
         const billed = this.readBillTo(project, tr, index);
         if (billed.error) { new Notice(billed.error); return; }
 
@@ -545,12 +510,6 @@ export default class Invoice {
             sel = billing.select(model, tr, index, { project, through, ledger: model.billing.ledger });
         } finally { working.hide(); }
         if (!this.billable(project, model, sel, tr, billing, through)) return;
-        // No number to count from: an older settings note, and no invoice yet (OBS-112)
-        if (settings.lastNumber === null && billing.nextNumber(model.billing.invoices) === null) {
-            await app.workspace.getLeaf(false).openFile(app.vault.getFileByPath(Invoice.SETTINGS));
-            new Notice("Set `last_number` here to the number before your first invoice (1000 to start at 1001), then run Invoice again", 0);
-            return;
-        }
         if (!(await this.confirm(project, through, sel, model, tr, billing))) return;
 
         if (billed.code && !Invoice.CODE.test(billed.code)) {
@@ -559,12 +518,13 @@ export default class Invoice {
         }
         const code = billed.code || await this.askCode(billed, tr);
         if (!code) return;
-        // `last_number` as it is now: the prompts may have been open a while
-        const now = await this.lastNumberNow(tr, billing);
-        if (now.error) { new Notice(`\`last_number\` ${now.error} in ${tr.basename(Invoice.SETTINGS)}; fix it there, then run Invoice again`, 0); return; }
-        const next = billing.nextNumber(model.billing.invoices, now.number);
+        // The settings as they are now: the prompts may have been open a while, and a paste or another
+        // run may have raised the number
+        const now = plainday.Settings.get().invoices;
+        if (!now.folder) { new Notice(this.missing(now), 0); return; }
+        const next = billing.nextNumber(model.billing.invoices, this.numberedFrom(now));
         const name = this.nameFor(next, code);
-        const folder = this.realFolder(settings.folder || `${tr.dirname(project)}/${Invoice.FOLDER}`);
+        const folder = this.realFolder(now.folder);
         const path = `${folder}/${name}.md`;
         if (app.vault.getAbstractFileByPath(path)) { new Notice(`${name} already exists`); return; }
 
@@ -587,7 +547,7 @@ export default class Invoice {
         // Billed entries starts folded (OBS-145), saved before the note opens
         await this.foldBilled(file, text, billing);
         // Only once the note exists, so a failure before it can't skip a number
-        await this.raiseLastNumber(next, name, tr);
+        await this.raiseLastNumber(next, name);
         // Wait for the index to know it's an invoice, so a second run can't bill its entries again
         await this.indexed(file);
         await app.workspace.getLeaf(false).openFile(file);
@@ -694,18 +654,13 @@ export default class Invoice {
         return items.length ? this.checkLines("Before sending", items) : null;
     }
 
-    // The settings, or null after making or opening the settings note for you to fill in
-    async settings(tr) {
-        let file = app.vault.getFileByPath(Invoice.SETTINGS);
-        if (!file) {
-            file = await app.vault.create(Invoice.SETTINGS, this.settingsText(moment().format("YYYYMMDDHHmmssSS")));
-        } else {
-            const s = this.readSettings(await this.propsOf(file, tr), plainday.Billing);
-            if (s.ok) return s;
-        }
-        await app.workspace.getLeaf(false).openFile(file);
-        new Notice("Fill in your details for invoices here, then run Invoice again", 0);
-        return null;
+    // Your details from Settings → Plainday → Invoices, or null after saying what a new invoice (or,
+    // with `folder` false, a rebuild) still needs. Nothing is made either way.
+    settings({ folder = true } = {}) {
+        const s = plainday.Settings.get().invoices;
+        const missing = this.missing(s, { folder });
+        if (missing) { new Notice(missing, 0); return null; }
+        return { name: s.name, address: [...s.address], terms: s.terms, paymentNote: s.paymentNote, folder: s.folder };
     }
 
     // A note's properties, read from its text (the metadata cache can lag an edit)
@@ -808,34 +763,14 @@ export default class Invoice {
         }
     }
 
-    // `last_number` read from the settings note now: { number, error }
-    async lastNumberNow(tr, billing) {
-        const file = app.vault.getFileByPath(Invoice.SETTINGS);
-        if (!file) return { number: null, error: null };
-        const s = this.readSettings(await this.propsOf(file, tr), billing);
-        return { number: s.lastNumber, error: s.problem?.startsWith("`last_number`") ? s.problem.replace(/^`last_number` /, "") : null };
-    }
-
-    // Raises `last_number` in the settings note to `n`, never lowering it, by rewriting that one line,
-    // so the rest of the note stays as you wrote it. Should that fail, the new note still holds its
-    // number, which the next run counts, so no number is given twice.
-    async raiseLastNumber(n, name, tr) {
+    // Raises the last invoice number in Plainday's settings to `n`, never lowering it. Should that fail,
+    // the new note still holds its number, which the next run counts, so no number is given twice.
+    async raiseLastNumber(n, name) {
         try {
-            const file = app.vault.getFileByPath(Invoice.SETTINGS);
-            if (!file) throw new Error("the note is gone");
-            let found = true;
-            await app.vault.process(file, (text) => {
-                const info = getFrontMatterInfo(text);
-                const now = this.lastNumberOf(info.exists ? (parseYaml(info.frontmatter) ?? {}).last_number : null).number;
-                if (now !== null && now >= n) return text;
-                const after = this.setProps(text, { last_number: n });
-                if (after === null) { found = false; return text; }
-                return after;
-            });
-            if (!found) throw new Error("its properties weren't found");
+            await plainday.Settings.raiseLastNumber(n);
         } catch (e) {
-            console.error("Invoice: couldn't raise last_number", e);
-            new Notice(`${name} is made, but \`last_number\` in ${tr.basename(Invoice.SETTINGS)} couldn't be set to ${n} (${e.message}); set it there by hand`, 0);
+            console.error("Invoice: couldn't raise the last invoice number", e);
+            new Notice(`${name} is made, but the last invoice number in ${Invoice.SETTINGS_PLACE} couldn't be set to ${n} (${e.message}); set it there by hand`, 0);
         }
     }
 
@@ -1072,7 +1007,7 @@ export default class Invoice {
         if (!invoice.periodEnd) { new Notice(`${invoice.name} has no period_end to rebuild through; set it first`); return; }
         if (!invoice.project) { new Notice(`${invoice.name} has no project`); return; }
         if (tr.isArchived(invoice.project)) { new Notice(`${tr.basename(invoice.project)} is archived, so it isn't invoiced`); return; }
-        const settings = await this.settings(tr);
+        const settings = this.settings({ folder: false });
         if (!settings) return;
         const billed = this.readBillTo(invoice.project, tr, index);
         if (billed.error) { new Notice(billed.error); return; }

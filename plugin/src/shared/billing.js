@@ -359,7 +359,9 @@ export default class Billing {
         const parts = folder.split("/");
         if (/[\\:*?"<>|[\]#^]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
         // The system's folder and the archive are often excluded, and a base doesn't list what's excluded
-        if (["config", "archive"].includes(parts[0].toLowerCase())) return { folder: "", error: `is inside ${parts[0]}, where invoices don't belong (${shown})` };
+        // `taken` names it, for the panel's message
+        const taken = { config: "Config", archive: "Archive" }[parts[0].toLowerCase()];
+        if (taken) return { folder: "", error: `is inside ${parts[0]}, where invoices don't belong (${shown})`, taken };
         return { folder, error: null };
     }
 

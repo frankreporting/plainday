@@ -50,6 +50,8 @@ function makeSource(dir) {
 // Obsidian, as much of it as the command uses. `answers` decides what the modals return.
 function stubs(vaultDir, answers = {}) {
     const notices = [], trashed = [], moved = [], toggled = [];
+    // Plainday's settings, as Settings keeps them: only the invoice folder matters here (OBS-281)
+    const settings = { invoices: { folder: "" } };
     const rel = (p) => path.join(vaultDir, p);
     const app = {
         isMobile: false,
@@ -72,6 +74,7 @@ function stubs(vaultDir, answers = {}) {
     };
     const context = {
         app,
+        plainday: { Settings: { get: () => settings } },
         require: nodeRequire,
         process,
         console,
@@ -91,7 +94,8 @@ function stubs(vaultDir, answers = {}) {
         })),
     };
     context.globalThis = context;
-    return { context, notices, trashed, moved, toggled, answers };
+    const setFolder = (folder) => { settings.invoices.folder = folder; };
+    return { context, notices, trashed, moved, toggled, answers, setFolder };
 }
 
 // Loads the class in that context and replaces the three modal methods with the test's answers
@@ -449,7 +453,7 @@ const SRC = "Reference/Invoices/Invoices.base";
 const BASE = "Config/Bases/Invoices.base";
 const settingsNote = (folder) => `---\nname: Juniper Hale\nfolder: ${folder}\nlast_number: 1000\n---\nYour details for invoices.\n`;
 
-// The clone gains both bases, the demo's invoice and the demo's settings note
+// The clone gains both bases, the demo's invoice and, as an older clone had it, the demo's settings note
 function withBases(f) {
     write(f.source, SRC, "invoices base\n");
     write(f.source, "Projects/Projects.base", "projects base\n");
@@ -484,27 +488,53 @@ test("invoke: your own Invoice Settings are never listed or touched, whatever th
     assert.equal("Config/Invoice Settings.md" in manifest.files, false);
 });
 
+test("invoke: once the repository drops the settings notes, your own Invoice Settings and Table Settings stay as they are (OBS-281)", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: true, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    // An install from when the repository had Table Settings, and recorded it
+    write(f.source, "Config/Table Settings.md", "---\nfreeze_rows:\nfreeze_columns:\n---\n");
+    execFileSync("git", ["-C", f.source, "add", "-A"], { stdio: "pipe" });
+    execFileSync("git", ["-C", f.source, "commit", "-qm", "table settings"], { stdio: "pipe" });
+    await f.up.invoke();
+    const manifestPath = "Config/Scripts/update-manifest.json";
+    const recorded = JSON.parse(read(f.vault, manifestPath));
+    recorded.files["Config/Table Settings.md"] = "an old install's record";
+    write(f.vault, manifestPath, JSON.stringify(recorded));
+    const yours = { "Config/Table Settings.md": "---\nfreeze_rows: 1\nfreeze_columns: 1\n---\n", "Config/Invoice Settings.md": settingsNote("Business/Invoices") };
+    for (const [p, text] of Object.entries(yours)) write(f.vault, p, text);
+    // The repository drops it, as this change does
+    execFileSync("git", ["-C", f.source, "rm", "-q", "Config/Table Settings.md"], { stdio: "pipe" });
+    execFileSync("git", ["-C", f.source, "commit", "-qm", "settings in Plainday"], { stdio: "pipe" });
+    write(f.source, "Config/Scripts/Templater/recordEvent.js", "newer report\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
+    await f.up.invoke();
+    for (const [p, text] of Object.entries(yours)) assert.equal(read(f.vault, p), text, p);
+    assert.doesNotMatch(f.answers.sawSummary, /Settings\.md/);
+    assert.deepEqual(f.trashed, []);
+    assert.equal("Config/Table Settings.md" in JSON.parse(read(f.vault, manifestPath)).files, false, "no longer recorded as installed");
+});
+
 test("invoke: a vault that keeps its invoices where the demo does gets the base there, moved from Config", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     withBases(f);
     await f.up.invoke();
-    write(f.vault, "Config/Invoice Settings.md", settingsNote("Reference/Invoices"));
+    f.setFolder("Reference/Invoices");
     await f.up.invoke();
     assert.equal(read(f.vault, SRC), "invoices base\n");
     assert.equal(exists(f.vault, BASE), false);
     assert.deepEqual(f.moved, [[BASE, SRC]]);
 });
 
-test("invoke: setting `folder` moves the Invoices base there as it is, spelled as the vault spells it, and it updates there", async (t) => {
+test("invoke: choosing the invoice folder moves the Invoices base there as it is, spelled as the vault spells it, and it updates there", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     withBases(f);
     await f.up.invoke();
 
-    // the folder exists already, in another case; the settings name it with a trailing slash
+    // the folder exists already, in another case
     fs.mkdirSync(path.join(f.vault, "Business/Invoices"), { recursive: true });
-    write(f.vault, "Config/Invoice Settings.md", settingsNote("business/invoices/"));
+    f.setFolder("business/invoices");
     await f.up.invoke();
     const placed = "Business/Invoices/Invoices.base";
     assert.equal(read(f.vault, placed), "invoices base\n");
@@ -542,13 +572,13 @@ test("invoke: setting `folder` moves the Invoices base there as it is, spelled a
     assert.deepEqual(f.trashed, [placed]);
 });
 
-test("invoke: a base you sorted before `folder` was set moves with your sort, and stays yours", async (t) => {
+test("invoke: a base you sorted before the invoice folder was chosen moves with your sort, and stays yours", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     withBases(f);
     await f.up.invoke();
     write(f.vault, BASE, "sorted by status\n");
-    write(f.vault, "Config/Invoice Settings.md", settingsNote("Business/Invoices"));
+    f.setFolder("Business/Invoices");
     await f.up.invoke();
     const placed = "Business/Invoices/Invoices.base";
     assert.equal(read(f.vault, placed), "sorted by status\n", "your sort came along");
@@ -560,22 +590,43 @@ test("invoke: a base you sorted before `folder` was set moves with your sort, an
     assert.doesNotMatch(f.answers.sawSummary, /\*\*New/);
 });
 
-test("invoke: settings that don't read, or a `folder` that isn't one, leave the base where it is", async (t) => {
+test("invoke: with no invoice folder chosen on this computer, a base already beside the invoices stays there (OBS-281)", async (t) => {
     const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
     t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
     withBases(f);
-    write(f.vault, "Config/Invoice Settings.md", settingsNote("Business/Invoices"));
+    f.setFolder("Business/Invoices");
+    await f.up.invoke();
+    const placed = "Business/Invoices/Invoices.base";
+    assert.equal(read(f.vault, placed), "invoices base\n");
+    // Another computer, whose Plainday settings aren't pasted yet, runs the next update
+    f.setFolder("");
+    write(f.source, "Config/Scripts/Templater/recordEvent.js", "report 2\n");
+    execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
+    await f.up.invoke();
+    assert.equal(read(f.vault, placed), "invoices base\n", "not moved back to Config");
+    assert.equal(exists(f.vault, BASE), false);
+    assert.deepEqual(f.moved, []);
+    assert.match(f.answers.sawSummary, /The Invoices base is left as it is this time: no invoice folder is chosen in Settings → Plainday on this computer\./);
+    assert.ok(JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json")).files[placed], "its record kept");
+});
+
+test("invoke: an invoice folder that goes through a file leaves the base where it is", async (t) => {
+    const f = fixture({ confirm: { overwriteLocal: false, remove: true } });
+    t.after(() => fs.rmSync(f.base, { recursive: true, force: true }));
+    withBases(f);
+    f.setFolder("Business/Invoices");
     await f.up.invoke();
     const placed = "Business/Invoices/Invoices.base";
     assert.equal(read(f.vault, placed), "invoices base\n");
     const before = JSON.parse(read(f.vault, "Config/Scripts/update-manifest.json")).files;
 
-    for (const [settings, why] of [
-        ["---\nname: Juniper Hale\nnot yaml at all\n---\n", /properties don't read/],
-        [settingsNote("../outside"), /`folder` in Invoice Settings isn't a folder in the vault \(\.\.\/outside\)/],
-        [settingsNote("README.md/Invoices"), /goes through README\.md, which is a file/],
+    // Your own Invoice Settings, however it reads, no longer counts
+    write(f.vault, "Config/Invoice Settings.md", settingsNote("../outside"));
+    for (const [folder, why] of [
+        ["README.md/Invoices", /the invoice folder in Settings → Plainday goes through README\.md, which is a file/],
+        ["Business/Invoices/Invoices.base/x", /goes through Business\/Invoices\/Invoices\.base, which is a file/],
     ]) {
-        write(f.vault, "Config/Invoice Settings.md", settings);
+        f.setFolder(folder);
         write(f.source, "Config/Scripts/Templater/recordEvent.js", `report ${Math.random()}\n`);
         execFileSync("git", ["-C", f.source, "commit", "-qam", "report"], { stdio: "pipe" });
         f.notices.length = 0;

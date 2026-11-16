@@ -46,9 +46,10 @@ const copySrc = () => {
 };
 
 // Runs a built main.js the way Obsidian's plugin loader does, against stand-ins: `Plugin` records
-// what the plugin adds, `Notice` what it shows, and the app holds the layout-ready callbacks.
-// CodeMirror's modules come from the loader too, as Obsidian gives them to every plugin.
-function load(file = BUNDLE) {
+// what the plugin adds and saves, `Notice` what it shows, and the app holds the layout-ready callbacks.
+// `stored` is what loadData gives, null for a device with no settings saved. CodeMirror's modules come
+// from the loader too, as Obsidian gives them to every plugin.
+function load(file = BUNDLE, { stored = null } = {}) {
     const notices = [];
     class Plugin {
         constructor(app, manifest) {
@@ -56,28 +57,42 @@ function load(file = BUNDLE) {
             this.manifest = manifest;
             this.commands = [];
             this.extensions = [];
+            this.tabs = [];
+            this.saved = [];
         }
         addCommand(c) { this.commands.push(c); return c; }
         registerEditorExtension(e) { this.extensions.push(e); }
+        addSettingTab(tab) { this.tabs.push(tab); }
+        async loadData() { return stored; }
+        async saveData(data) { this.saved.push(JSON.parse(JSON.stringify(data))); }
     }
     class Notice { constructor(message) { notices.push(message); } }
+    // What the settings panel extends when main.js loads
+    class PluginSettingTab { constructor(app, plugin) { this.app = app; this.plugin = plugin; } }
+    const suggests = [];
+    class AbstractInputSuggest {
+        constructor(app, el) { this.app = app; this.el = el; this.closed = 0; suggests.push(this); }
+        onSelect(cb) { this.picked = cb; return this; }
+        close() { this.closed++; }
+    }
+    class Modal {}
     const module = { exports: {} };
     const req = (id) => {
-        if (id === "obsidian") return { Plugin, Notice };
+        if (id === "obsidian") return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal, requireApiVersion: () => true };
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
     };
     globalThis.window = globalThis;
     new Function("module", "exports", "require", fs.readFileSync(file, "utf8"))(module, module.exports, req);
     const layout = [];
-    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) } };
+    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null } };
     const plugin = new module.exports.default(app, { id: "plainday" });
-    return { plugin, layout, notices };
+    return { plugin, layout, notices, suggests };
 }
 
-test("every class file is bundled, and made once by name", () => {
+test("every class file is bundled, and made once by name", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         assert.equal(CLASS_NAMES.length, classFiles.length);
         assert.ok(!CLASS_NAMES.includes(null), "each class file declares a class");
@@ -96,7 +111,7 @@ test("every class file is bundled, and made once by name", () => {
 
 test("each command in the list is added with its id, name and icon, and runs its class", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
         assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
@@ -129,7 +144,7 @@ test("each command in the list is added with its id, name and icon, and runs its
 
 test("the startup scripts wait for the layout, then run one after the other in the list's order", async () => {
     const { plugin, layout, notices } = load();
-    plugin.onload();
+    await plugin.onload();
     try {
         const ran = [];
         let running = 0;
@@ -153,6 +168,227 @@ test("the startup scripts wait for the layout, then run one after the other in t
     }
 });
 
+test("its settings load before anything runs; the panel is added; the old notes are read once the layout is ready, before the startup scripts (OBS-281)", async () => {
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
+    const { plugin, layout } = load(BUNDLE, { stored });
+    await plugin.onload();
+    try {
+        assert.equal(window.plainday.Settings.get().invoices.name, "Juniper Hale", "loaded before the commands are added");
+        assert.equal(plugin.commands.length, COMMANDS.length);
+        assert.equal(plugin.tabs.length, 1);
+        assert.equal(plugin.tabs[0].plugin, plugin, "Settings → Plainday");
+        const ran = [];
+        window.plainday.Settings.readOldNotes = async () => ran.push("readOldNotes");
+        for (const name of STARTUP) window.plainday[name].invoke = async () => ran.push(name);
+        await layout[0]();
+        assert.deepEqual(ran, ["readOldNotes", ...STARTUP]);
+        assert.deepEqual(plugin.saved, [], "loading saves nothing");
+        // Sync changed the data file: read again, and the editor switch applied
+        stored.invoices.name = "From the phone";
+        const applied = [];
+        window.plainday.ListCursor.invoke = async () => applied.push("ListCursor");
+        await plugin.onExternalSettingsChange();
+        assert.equal(window.plainday.Settings.get().invoices.name, "From the phone");
+        assert.deepEqual(applied, ["ListCursor"]);
+    } finally {
+        plugin.onunload();
+    }
+});
+
+test("a device with no settings saved and no old notes starts from the defaults, and writes nothing", async () => {
+    const { plugin, layout, notices } = load();
+    await plugin.onload();
+    try {
+        assert.equal(window.plainday.Settings.get().invoices.lastNumber, 1000);
+        assert.equal(window.plainday.Settings.saved, false);
+        for (const name of STARTUP) window.plainday[name].invoke = async () => {};
+        await layout[0]();
+        assert.deepEqual(plugin.saved, [], "nothing to move, so no file written over one Sync may still bring");
+        assert.deepEqual(notices, [], "no old notes, nothing to say");
+    } finally {
+        plugin.onunload();
+    }
+});
+
+// A stand-in for Obsidian's Setting, enough for a row's render: its controls record their handlers
+function standInSetting() {
+    const listeners = {};
+    const input = { value: "", rows: 0, inputMode: "", addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); } };
+    const control = {
+        inputEl: input, handlers: {},
+        setValue(v) { input.value = v; return this; }, getValue() { return input.value; },
+        setPlaceholder(p) { input.placeholder = p; return this; }, addOptions(o) { this.options = o; return this; },
+        onChange(fn) { this.handlers.change = fn; return this; }, setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.handlers.click = fn; return this; },
+    };
+    const warnings = [];
+    const links = {};
+    const setting = {
+        settingEl: { isConnected: true }, control, links,
+        controlEl: {
+            createEl(tag, { text }, cb) {
+                const listeners = {};
+                const el = { tag, text, addEventListener: (type, fn) => { listeners[type] = fn; } };
+                cb?.(el);
+                links[text] = () => { let stopped = false; listeners.click({ preventDefault: () => { stopped = true; } }); return stopped; };
+                return el;
+            },
+            createSpan({ text }) { links[`span ${text}`] = null; },
+        },
+        descEl: { createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }) },
+        addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
+        addToggle(cb) { cb(control); return this; }, addButton(cb) { cb(control); return this; },
+        type(v) { input.value = v; control.handlers.change(v); }, leave() { for (const fn of listeners.change ?? []) fn(); },
+        tab() { for (const fn of listeners.keydown ?? []) fn({ key: "Tab" }); },
+        warning: () => warnings.at(-1) ?? "",
+    };
+    return setting;
+}
+
+test("Settings → Plainday: its sections and rows, and the two checked fields save only when you leave them (OBS-281)", async () => {
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
+    const { plugin, suggests, notices } = load(BUNDLE, { stored });
+    plugin.app.vault.getAllFolders = () => [{ path: "Archive" }, { path: "Archive/Old" }, { path: "Business/Invoices" }, { path: "Config" }];
+    const folders = new Set(["Reference/Invoices", "Business/Invoices"]);
+    plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
+    plugin.app.vault.getRoot = () => ({ children: [] });
+    await plugin.onload();
+    try {
+        const tab = plugin.tabs[0];
+        const defs = tab.getSettingDefinitions();
+        assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
+            ["group", undefined, ["Backup and transfer"]],
+            ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
+            ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
+            ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
+        ]);
+        assert.ok(!("heading" in defs[0]), "the top group has no heading");
+        for (const g of defs) for (const i of g.items) {
+            assert.ok(i.name, "every row has a name");
+            assert.ok(!("desc" in i) || i.desc, `${i.name}: a description, or none at all`);
+            assert.equal(typeof i.render, "function");
+        }
+        const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
+        assert.deepEqual(descs, ["Your name or company name", "Address", "Freeze rows", "Freeze columns"]);
+        const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
+        const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
+        const saved = () => plugin.saved.at(-1)?.invoices;
+
+        // Copy and Paste: two links at the top, as Style Settings draws Import and Export
+        const top = draw("Backup and transfer");
+        assert.deepEqual(Object.keys(top.s.links), ["Copy", "span |", "Paste"]);
+        const copied = [];
+        Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
+        try {
+            assert.equal(top.s.links.Copy(), true, "the link doesn't follow its href");
+            await new Promise((r) => setTimeout(r, 0));
+            assert.equal(copied.length, 1);
+            assert.equal(JSON.parse(copied[0]).invoices.name, "Juniper Hale");
+            assert.match(notices.at(-1), /^Copied\. It holds your invoice details/);
+        } finally {
+            delete globalThis.navigator.clipboard;
+        }
+
+        const folder = draw("Invoice folder");
+        assert.equal(folder.s.control.inputEl.value, "Reference/Invoices");
+        folder.s.type("Archiv");
+        assert.deepEqual(plugin.saved, [], "typing saves nothing");
+        folder.s.type("Archive/Invoices");
+        assert.equal(folder.s.warning(), "Archive is already used by Plainday. Please choose another location.");
+        folder.s.leave();
+        assert.deepEqual(plugin.saved, [], "a refused value is never saved, nor the one before it");
+        assert.equal(folder.s.control.inputEl.value, "Reference/Invoices", "and the field goes back to the saved folder on leaving it");
+        folder.s.type("../x");
+        assert.match(folder.s.warning(), /^Not used: it isn't a folder in the vault/);
+        folder.s.type("Business/Invoices");
+        folder.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "saved on leaving the field");
+        // Still typing when Obsidian draws the row again in place: nothing saved
+        const count = plugin.saved.length;
+        folder.s.type("Clients/Inv");
+        folder.cleanup();
+        assert.equal(plugin.saved.length, count);
+        // The panel closing, the row already off the page: a value still waiting is saved
+        folder.s.settingEl.isConnected = false;
+        folder.cleanup();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Clients/Inv");
+        // The folder list offers only folders the field takes, with Invoices first, and closes after a pick
+        const suggest = suggests.at(-1);
+        assert.deepEqual(suggest.getSuggestions(""), ["Invoices", "Business/Invoices"]);
+        assert.deepEqual(suggest.getSuggestions("bus"), ["Business/Invoices"]);
+        folder.s.settingEl.isConnected = true;
+        suggest.picked("Business/Invoices");
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "a pick saves at once");
+        assert.equal(suggest.closed, 1);
+        assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
+        // Tab with the list open takes the folder it highlights; with it closed, what's typed, and a line
+        // says a folder that isn't there yet will be made
+        const row = (folder) => {
+            const classes = new Set();
+            const el = { isConnected: true, addClass: (c) => classes.add(c), hasClass: (c) => classes.has(c), createSpan: () => {} };
+            suggest.renderSuggestion(folder, el);
+            return { el, classes };
+        };
+        assert.deepEqual(suggest.getSuggestions("inv"), ["Invoices", "Business/Invoices"], "those that start with it first");
+        const [rowA, rowB] = suggest.getSuggestions("inv").map(row);
+        rowB.classes.add("is-selected");
+        folder.s.type("inv");
+        folder.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "Tab takes the highlighted folder, not what's typed");
+        assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
+        rowA.el.isConnected = rowB.el.isConnected = false;
+        folder.s.type("Clients");
+        folder.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Clients", "the list closed: what's typed");
+        assert.equal(folder.s.warning(), "“Clients” doesn't exist yet. Invoice will create it.");
+        folder.s.type("");
+        folder.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "", "clearing the field leaves no folder chosen");
+
+        const first = draw("First invoice number");
+        assert.equal(first.s.control.inputEl.value, "1001");
+        first.s.type("2");
+        first.s.type("");
+        first.s.leave();
+        assert.equal(window.plainday.Settings.get().invoices.firstNumber, 1001, "a blank or half-typed number is never kept");
+        assert.match(first.s.warning(), /^Not used: it isn't a whole number from 1/);
+        assert.equal(first.s.control.inputEl.value, "1001", "the field goes back to the saved number on leaving it");
+        first.s.type("2001");
+        first.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual([saved()?.firstNumber, saved()?.lastNumber], [2001, 2000], "typing a first number numbers from it");
+
+        // Tables: the freezes show only while the switch is on, which freezes 1 and 1, and off unfreezes
+        const visible = () => tab.getSettingDefinitions()[2].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
+        const shown = tab.getSettingDefinitions()[2].items;
+        assert.deepEqual(shown.filter((i) => !i.visible || i.visible()).map((i) => i.name), ["Freeze rows and columns"]);
+        const sw = standInSetting();
+        shown[0].render(sw);
+        const rows = standInSetting();
+        shown[1].render(rows);
+        let refreshed = 0;
+        tab.refreshDomState = () => { refreshed++; };
+        sw.control.handlers.change(true);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(plugin.saved.at(-1).tables, { freezeRows: 1, freezeColumns: 1 });
+        assert.equal(rows.control.inputEl.value, "1", "the shown freeze follows");
+        assert.ok(shown[1].visible() && shown[2].visible());
+        sw.control.handlers.change(false);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(plugin.saved.at(-1).tables, { freezeRows: 0, freezeColumns: 0 });
+        assert.ok(!shown[1].visible());
+        assert.equal(refreshed, 2, "Obsidian shows and hides them");
+        assert.deepEqual(visible(), ["Freeze rows and columns"], "drawn again, the switch reads the saved freeze");
+    } finally {
+        plugin.onunload();
+    }
+});
+
 test("no CustomJS hook or customJS is left in the bundle", () => {
     const text = fs.readFileSync(BUNDLE, "utf8");
     for (const p of [/["'`]customjs["'`]/, /\.customjs\b/, /\bcustomJS\b/]) {
@@ -167,9 +403,9 @@ test("the bundle names no folder on the machine that built it, so a build anywhe
     assert.match(text, /^\/\/ plugin\/src\/commands\/schedule\.js$/m, "each class by its path in the repository");
 });
 
-test("unloading runs every deconstructor and removes the global", () => {
+test("unloading runs every deconstructor and removes the global", async () => {
     const { plugin } = load();
-    plugin.onload();
+    await plugin.onload();
     const ran = [];
     for (const name of CLASS_NAMES) {
         if (typeof window.plainday[name].deconstructor === "function") window.plainday[name].deconstructor = () => ran.push(name);
@@ -208,7 +444,7 @@ test("in the bundle, a class reaches Plainday through the host's plainday, and O
     const out = path.join(src, "main.js.out");
     await build({ src, outfile: out, logLevel: "silent" });
     const { plugin } = load(out);
-    plugin.onload();
+    await plugin.onload();
     const probe = window.plainday.Probe;
     assert.equal(probe.on(), true, "loaded");
     probe.add("an extension");
@@ -317,7 +553,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 30);
+    assert.equal(classFiles.length, 31);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

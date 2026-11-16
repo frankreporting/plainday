@@ -1,0 +1,27 @@
+/* Plainday's styles, beside main.js */
+
+/* Settings → Plainday → Paste: the box as wide as the window */
+.plainday-paste textarea {
+    display: block;
+    width: 100%;
+}
+
+/* Settings → Plainday: the bar between Copy and Paste */
+.plainday-separator {
+    color: var(--text-faint);
+}
+
+/* Settings → Plainday → Invoice folder: the list of folders, each apart from the next when a long one
+   wraps, its later lines indented inside the theme's own padding */
+.plainday-folder-path {
+    display: block;
+    line-height: var(--line-height-tight);
+    padding-inline-start: 1em;
+    text-indent: -1em;
+}
+
+/* Settings → Plainday: a line under a setting with something to know, such as a folder Invoice will
+   create, in the alert color */
+.plainday-caution {
+    color: var(--text-warning);
+}
