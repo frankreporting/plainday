@@ -117,7 +117,7 @@ class FolderSuggest extends AbstractInputSuggest {
 // Paste: a box to paste a copy into, as wide as the window (styles.css), then Cancel or Replace, which
 // stays off until the box holds a copy; text that isn't one says so. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
 class PasteModal extends Modal {
-    /** @param {import("obsidian").App} app @param {(copy: Values, links: Record<string, string>) => Promise<void>} onReplace */
+    /** @param {import("obsidian").App} app @param {(copy: Values, links: Record<string, string>, withCalendars: boolean) => Promise<void>} onReplace */
     constructor(app, onReplace) {
         super(app);
         this.onReplace = onReplace;
@@ -134,6 +134,7 @@ class PasteModal extends Modal {
         let copy = null;
         /** @type {Record<string, string>} */
         let links = {};
+        let withCalendars = true;
         const row = this.contentEl.createDiv({ cls: "modal-button-container" });
         new ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
         const replace = new ButtonComponent(row).setButtonText("Replace").setCta().setDisabled(true);
@@ -141,7 +142,7 @@ class PasteModal extends Modal {
             if (!copy) return;
             const chosen = copy;
             replace.setDisabled(true);
-            this.onReplace(chosen, links).then(() => this.close(), (e) => {
+            this.onReplace(chosen, links, withCalendars).then(() => this.close(), (e) => {
                 said.setText(`Couldn't save the settings: ${messageOf(e)}`);
                 replace.setDisabled(false);
             });
@@ -150,6 +151,7 @@ class PasteModal extends Modal {
             const read = settings.readCopy(text);
             copy = read.settings ?? null;
             links = read.links ?? {};
+            withCalendars = read.withCalendars ?? true;
             said.setText(read.error ?? "");
             replace.setDisabled(!copy);
         });
@@ -250,10 +252,14 @@ class CalendarModal extends Modal {
             e.preventDefault();
             new CalendarHelpModal(this.app).open();
         }));
+        // Masked by styles.css rather than as a password, so a phone's password manager doesn't offer to
+        // keep it
         const linkInput = new TextComponent(linkSetting.controlEl).setPlaceholder("https://… or webcal://…");
-        linkInput.inputEl.type = "password";
+        linkInput.inputEl.addClass("plainday-masked");
         linkInput.inputEl.autocomplete = "off";
         linkInput.inputEl.spellcheck = false;
+        linkInput.inputEl.setAttribute("autocapitalize", "off");
+        for (const ignore of ["data-1p-ignore", "data-lpignore", "data-bwignore"]) linkInput.inputEl.setAttribute(ignore, "true");
         // What the check says: "Checking the link…", or why the link fails
         const said = this.contentEl.createEl("p", { cls: "setting-item-description plainday-calendar-said" });
 
@@ -288,39 +294,53 @@ class CalendarModal extends Modal {
         let busy = false;
         const link = () => linkInput.getValue().trim();
         const addresses = () => settings.addressesOf(addressInput.getValue());
+        // A line under the address when part of it isn't one; a link is never shown back
         const showAddresses = () => {
             const { bad } = addresses();
-            addressLine.setText(bad.length ? `Not an email address: ${bad.join(", ")}` : "");
+            const shown = bad.map((b) => (settings.linkFree(b) ? b : "a link"));
+            addressLine.setText(bad.length ? `Not an email address: ${shown.join(", ")}` : "");
             return !bad.length;
         };
         addressInput.onChange(showAddresses);
 
-        // The link typed: its feed's name when it reads, or why not: not a link, another calendar
-        // already has it, or the check's problem
-        /** @returns {Promise<{ problem: string, name?: undefined } | { name: string, problem?: undefined }>} */
+        // The link typed: its feed's name and the link it checked when it reads, or why not: not a link,
+        // another calendar already has it, or the check's problem. The field takes no typing meanwhile.
+        /** @returns {Promise<{ problem: string, name?: undefined, link?: undefined } | { name: string, link: string, problem?: undefined }>} */
         const check = async () => {
             const typed = link();
             if (!feed.isLink(typed)) return { problem: problemText("notLink") };
             const other = settings.calendarWithLink(typed, editing ? editing.id : null);
             if (other) return { problem: `${other.name || "Another calendar"} already has that link.` };
             said.setText("Checking the link…");
-            const got = await feed.check(typed);
-            return got.problem !== undefined ? { problem: problemText(got.problem) } : { name: got.name };
+            linkInput.setDisabled(true);
+            try {
+                const got = await feed.check(typed);
+                if (got.problem !== undefined) return { problem: problemText(got.problem) };
+                if (link() !== typed) return { problem: "The link changed while it was checked. Check it again." };
+                return { name: got.name, link: typed };
+            } finally {
+                linkInput.setDisabled(false);
+            }
+        };
+        // A link pasted into the name or the account is never kept there
+        const linkFree = () => {
+            if (settings.linkFree(nameInput.getValue()) === nameInput.getValue().trim() && settings.linkFree(accountInput.getValue()) === accountInput.getValue().trim()) return true;
+            said.setText("That's a link: paste it into the link field, not the name or the account.");
+            return false;
         };
         // Adding, before the link has read: checks it, and shows its name, account and your address
         const checkNew = async () => {
-            const typed = link();
             const got = await check();
             if (this.closed) return;
             if (got.problem !== undefined) {
                 said.setText(got.problem);
                 return;
             }
-            checked = typed;
+            checked = got.link;
             said.setText("");
             nameInput.setValue(got.name);
-            accountInput.setValue(feed.account(typed));
-            addressInput.setValue(feed.owner(typed) ?? "");
+            accountInput.setValue(feed.account(got.link));
+            addressInput.setValue(feed.address(got.link) ?? "");
             showAddresses();
             details.show();
             go.setButtonText("Add calendar");
@@ -333,7 +353,7 @@ class CalendarModal extends Modal {
                 said.setText("Give the calendar a name.");
                 return;
             }
-            if (!showAddresses()) return;
+            if (!linkFree() || !showAddresses()) return;
             let given = addresses().addresses;
             if (!editing) {
                 await settings.addCalendar({ name, account: accountInput.getValue(), addresses: given, link: checked ?? "" });
@@ -347,9 +367,9 @@ class CalendarModal extends Modal {
                         said.setText(got.problem);
                         return;
                     }
-                    newLink = link();
+                    newLink = got.link;
                     // A Google link names the calendar's owner: your address, when you haven't given one
-                    const own = feed.owner(newLink);
+                    const own = feed.address(newLink);
                     if (!given.length && own) given = [own];
                 }
                 await settings.editCalendar(editing.id, { name, account: accountInput.getValue(), addresses: given }, newLink);
@@ -390,7 +410,9 @@ class CalendarModal extends Modal {
                 if (checked === null && link()) void run();
             }, 0));
         }
-        window.setTimeout(() => (editing ? nameInput : linkInput).inputEl.focus(), 0);
+        // Editing a calendar this device has the link for: its name; otherwise the link, which the list
+        // says to paste
+        window.setTimeout(() => (editing && settings.link(editing.id) !== null ? nameInput : linkInput).inputEl.focus(), 0);
     }
 
     onClose() {
@@ -505,8 +527,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         });
                         s.controlEl.createSpan({ text: "|", cls: "plainday-separator" });
                         link(s, "Paste", () => {
-                            new PasteModal(this.app, async (copy, links) => {
-                                await settings.replaceWith(copy, links);
+                            new PasteModal(this.app, async (copy, links, withCalendars) => {
+                                await settings.replaceWith(copy, links, withCalendars);
                                 this.redraw();
                             }).open();
                         });
@@ -680,7 +702,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 heading: account,
                 rows: calendars.map((c) => row(c.name || "Untitled calendar", settings.link(c.id) ? "Link on this device" : "Add link on this device: Edit, then paste it", (s) => {
                     s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {
-                        settings.editCalendar(c.id, { on }).catch((e) => new Notice(`Couldn't save: ${messageOf(e)}`));
+                        settings.editCalendar(c.id, { on }).catch((e) => {
+                            t.setValue(!on);
+                            new Notice(`Couldn't save: ${messageOf(e)}`);
+                        });
                     }));
                     s.addButton((b) => b.setButtonText("Edit").onClick(() => dialog(c)));
                     s.addButton((b) => b.setButtonText("Remove").setWarning().onClick(() => {

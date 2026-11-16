@@ -92,8 +92,9 @@ export default class CalendarFeed {
     }
 
     /**
-     * Whether text is a link a calendar can be downloaded from: https://, http:// or webcal://, with a
-     * server, and nothing else around it
+     * Whether text is a link a calendar can be added by: https:// or webcal://, with a server, and
+     * nothing else around it. http:// would send the link, which works like a password, unencrypted, so
+     * it's taken only from this device itself (a feed served for a test).
      * @param {unknown} link
      * @returns {boolean}
      */
@@ -101,10 +102,24 @@ export default class CalendarFeed {
         const text = String(link ?? "").trim();
         if (!/^(?:https?|webcals?):\/\//i.test(text) || /\s/.test(text)) return false;
         try {
-            return !!new URL(this.url(text)).hostname;
+            const url = new URL(this.url(text));
+            if (!url.hostname) return false;
+            return url.protocol === "https:" || ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
         } catch {
             return false;
         }
+    }
+
+    /**
+     * The address Add calendar fills in as yours on a calendar: a Google link's calendar ID when it's a
+     * person's address, not a shared, holiday or birthday calendar's own ID (…@group.calendar.google.com,
+     * …@group.v.calendar.google.com, …@import.calendar.google.com); else null
+     * @param {unknown} link
+     * @returns {string | null}
+     */
+    address(link) {
+        const own = this.owner(link);
+        return own && !/@(?:group(?:\.v)?|import)\.calendar\.google\.com$/i.test(own) ? own : null;
     }
 
     /**

@@ -327,8 +327,16 @@ test("owners: your addresses, else the Google link's, else none; the account a l
     assert.deepEqual([LINKS.studio, LINKS.home, LINKS.library, "https://outlook.live.com/owa/calendar/x/reachcalendar.ics",
         "http://127.0.0.1:8765/studio.ics", "https://example.org/cal.ics", "not a link"].map((l) => feed.account(l)),
     ["Google", "iCloud", "Outlook", "Outlook", "", "", ""]);
-    for (const link of [LINKS.studio, LINKS.home, " https://example.org/cal.ics ", "http://127.0.0.1:8765/gone.ics", "webcals://example.org/x"]) assert.equal(feed.isLink(link), true, link);
-    for (const link of ["", "example.org/cal.ics", "ftp://example.org/cal.ics", "https://", "https://exa mple.org/x", "javascript:alert(1)", null]) assert.equal(feed.isLink(link), false, String(link));
+    for (const link of [LINKS.studio, LINKS.home, " https://example.org/cal.ics ", "http://127.0.0.1:8765/gone.ics", "http://localhost:8765/x.ics", "webcals://example.org/x"]) assert.equal(feed.isLink(link), true, link);
+    // http:// would send the link unencrypted: only a feed served on this device is taken
+    for (const link of ["", "example.org/cal.ics", "ftp://example.org/cal.ics", "https://", "https://exa mple.org/x", "javascript:alert(1)", null,
+        "http://example.org/cal.ics", "http://192.168.1.5/cal.ics"]) assert.equal(feed.isLink(link), false, String(link));
+    // The address Add calendar fills in as yours: a person's Google calendar, not a shared one's ID
+    assert.equal(feed.address(LINKS.studio), "studio-owner@example.com");
+    for (const id of ["0000invented@group.calendar.google.com", "en.usa%23holiday%40group.v.calendar.google.com", "addressbook%23contacts%40group.v.calendar.google.com", "0000invented@import.calendar.google.com"]) {
+        assert.equal(feed.address(`https://calendar.google.com/calendar/ical/${id}/private-0000invented/basic.ics`), null, id);
+    }
+    assert.equal(feed.address(LINKS.home), null);
 });
 
 test("check: a link Add calendar is given, downloaded once, gives the feed's name or why not, never the link (OBS-282)", async () => {

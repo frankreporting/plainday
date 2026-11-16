@@ -558,3 +558,81 @@ test("the demo's data file holds no calendar, and no link", () => {
     assert.deepEqual(JSON.parse(text).calendars, { range: "2 months", list: [] });
     assert.doesNotMatch(text, NO_LINK);
 });
+
+// ------------------------------------------------------------------ calendars: what the reviews found (OBS-282)
+
+test("a link pasted into a calendar's name, account or address is never kept, from the panel, a paste or a file", async () => {
+    const outlookish = "https://outlook.office365.com/owa/calendar/0000aaaa@example.com/1111bbbb/calendar.ics";
+    assert.deepEqual(plain(settings.addressesOf(`${outlookish}, me@example.com`)), { addresses: ["me@example.com"], bad: [outlookish] }, "no / or : in an address");
+    assert.deepEqual(plain(settings.addressesOf("mailto:me@example.com")), { addresses: ["me@example.com"], bad: [] });
+    const n = settings.normalize({ calendars: { list: [{ id: "abc", name: STUDIO_LINK, account: "webcal://x", addresses: [outlookish] }] } }, billing);
+    assert.deepEqual(plain(n.calendars.list), [{ id: "abc", name: "", account: "", addresses: [], on: true }]);
+    assert.equal(settings.linkFree("Team: planning"), "Team: planning", "a colon alone is fine");
+    const f = withPlugin({ stored: JUNIPER });
+    await f.s.load();
+    const c = await f.s.addCalendar({ name: STUDIO_LINK, account: HOME_LINK, link: STUDIO_LINK });
+    await f.s.editCalendar(c.id, { name: ` ${HOME_LINK}` });
+    // Something put a link on a calendar in memory: the next save still writes none
+    f.s.get().calendars.list[0].link = STUDIO_LINK;
+    await f.s.set("calendars", { range: "1 week" });
+    for (const saved of f.saves) assert.doesNotMatch(JSON.stringify(saved), NO_LINK);
+    assert.deepEqual(Object.keys(f.saves.at(-1).calendars.list[0]).sort(), ["account", "addresses", "id", "name", "on"]);
+});
+
+test("Paste blanks every calendar link this device keeps but the copy's, a removed calendar's too; an older copy leaves the calendars alone; a failed save changes nothing", async () => {
+    // A link left from a calendar another device removed, which Sync took out of this device's list
+    const secrets = new Map([["plainday-calendar-gone01", "https://example.org/gone.ics"], ["other-plugin-key", "theirs"]]);
+    const f = withPlugin({ stored: JUNIPER, secrets });
+    await f.s.load();
+    const kept = await f.s.addCalendar({ name: "Studio", link: STUDIO_LINK });
+    const copy = f.s.readCopy(f.s.copyText(), billing);
+    await f.s.replaceWith(copy.settings, copy.links, copy.withCalendars);
+    assert.equal(f.s.link("gone01"), null, "blanked");
+    assert.equal(f.s.link(kept.id), STUDIO_LINK);
+    assert.equal(secrets.get("other-plugin-key"), "theirs", "another plugin's secret is left alone");
+
+    // A copy from before calendars: this device's calendars, range and links stay
+    await f.s.set("calendars", { range: "3 weeks" });
+    const old = f.s.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "From the backup" } }), billing);
+    assert.equal(old.withCalendars, false);
+    await f.s.replaceWith(old.settings, old.links, old.withCalendars);
+    assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().calendars.range, f.s.get().calendars.list.map((c) => c.name)]), ["From the backup", "3 weeks", ["Studio"]]);
+    assert.equal(f.s.link(kept.id), STUDIO_LINK);
+
+    // A paste whose save fails: nothing changes, in memory or in secret storage
+    f.plugin.failSave = true;
+    const other = f.s.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "Elsewhere" }, calendars: { list: [] } }), billing);
+    await assert.rejects(f.s.replaceWith(other.settings, other.links, other.withCalendars), /disk full/);
+    assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().calendars.list.length]), ["From the backup", 1]);
+    assert.equal(f.s.link(kept.id), STUDIO_LINK);
+});
+
+test("readCopy: only a link-shaped link for a calendar in the copy is taken", () => {
+    const text = JSON.stringify({ "plainday-settings": 1, calendars: { list: [{ id: "abc", name: "A" }, { id: "def", name: "D" }, { id: "ghi", name: "G" }] },
+        links: { abc: "javascript:alert(1)", def: " https://example.org/x.ics ", ghi: "not a link", zzz: "https://example.org/stray.ics" } });
+    assert.deepEqual(plain(settings.readCopy(text, billing).links), { def: "https://example.org/x.ics" });
+});
+
+test("reload: a data file from a device on a release before calendars leaves this device's calendars as they are", async () => {
+    const f = withPlugin({ stored: { ...JUNIPER, calendars: { range: "3 weeks", list: [{ id: "abc", name: "Studio" }] } } });
+    await f.s.load();
+    f.plugin.loadData = async () => JUNIPER_BEFORE;
+    await f.s.reload();
+    assert.deepEqual(plain([f.s.get().calendars.range, f.s.get().calendars.list.map((c) => c.name)]), ["3 weeks", ["Studio"]]);
+    f.plugin.loadData = async () => ({ ...JUNIPER, calendars: { range: "1 week", list: [] } });
+    await f.s.reload();
+    assert.deepEqual(plain(f.s.get().calendars), { range: "1 week", list: [] }, "one that has calendars is taken as it is");
+});
+
+test("readOldNotes: a new device with only the Calendar Sync note uses its range but writes nothing, and saves it with the invoice notes when they arrive", async () => {
+    const notes = { "Config/Calendar Sync.md": "Sync range: 3 weeks\n" };
+    const f = withPlugin({ notes });
+    await f.s.load();
+    await f.s.readOldNotes();
+    assert.deepEqual([f.saves, f.notices, f.s.get().calendars.range, f.s.saved], [[], [], "3 weeks", false], "no file written over one Sync may still bring");
+    notes["Config/Invoice Settings.md"] = INVOICE_TEXT;
+    await f.s.load();
+    await f.s.readOldNotes();
+    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [] } }]);
+    assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice"], bad: [] })}\n\n${settings.rangeNotice({ range: "3 weeks" })}`);
+});

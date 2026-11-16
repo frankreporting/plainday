@@ -25,3 +25,9 @@
 .plainday-caution {
     color: var(--text-warning);
 }
+
+/* Settings → Plainday → Add calendar and Edit: a calendar's private link, masked as it's typed, as a
+   password would be, without a password manager offering to keep it */
+.plainday-masked {
+    -webkit-text-security: disc;
+}

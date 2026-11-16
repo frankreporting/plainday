@@ -59,8 +59,13 @@ export default class Settings {
     // secret storage's names must be
     static ID = /^[a-z0-9]{1,32}$/;
     static SECRET_PREFIX = "plainday-calendar-";
-    // An email address, as much as the reader needs: something@something, no spaces
-    static ADDRESS = /^[^\s@,;<>()"]+@[^\s@,;<>()"]+$/;
+    // An email address, as much as the reader needs: something@something, with no spaces, and no / or
+    // : so no link is ever taken for one
+    static ADDRESS = /^[^\s@,;<>()"/:]+@[^\s@,;<>()"/:]+$/;
+    // Text that holds a link: a calendar's link pasted into its name or account is never kept there
+    static LINKISH = /:\/\/|^\s*(?:https?|webcals?):/i;
+    // What a pasted copy's link may be: https://, http:// or webcal://, and no spaces
+    static LINK = /^(?:https?|webcals?):\/\/\S+$/i;
 
     constructor() {
         this.data = this.defaults();
@@ -193,13 +198,23 @@ export default class Settings {
             const cal = obj(c), id = typeof cal.id === "string" ? cal.id : "";
             if (!Settings.ID.test(id) || ids.has(id)) continue;
             ids.add(id);
-            out.calendars.list.push({ id, name: this.text(cal.name), account: this.text(cal.account),
+            out.calendars.list.push({ id, name: this.linkFree(cal.name), account: this.linkFree(cal.account),
                 addresses: this.addressesOf(cal.addresses).addresses, on: typeof cal.on === "boolean" ? cal.on : true });
         }
         return out;
     }
 
     // ---------------------------------------------------------------- calendars (OBS-282)
+
+    /**
+     * One line of text, or "" when it holds a link, which a calendar's name and account never keep
+     * @param {unknown} v
+     * @returns {string}
+     */
+    linkFree(v) {
+        const t = this.text(v);
+        return Settings.LINKISH.test(t) ? "" : t;
+    }
 
     /**
      * A sync range as the panel and the Calendar Sync note write it ("2 months", in any case), or null
@@ -287,6 +302,17 @@ export default class Settings {
         if (this.link(id) !== null) app.secretStorage.setSecret(this.secretId(id), "");
     }
 
+    /**
+     * The IDs of every calendar link this device keeps, whether or not a calendar in the list has it
+     * (one removed on another device, which Sync took out of the list, keeps its link here)
+     * @returns {string[]}
+     */
+    storedIds() {
+        return (app.secretStorage?.listSecrets() ?? [])
+            .filter((name) => name.startsWith(Settings.SECRET_PREFIX))
+            .map((name) => name.slice(Settings.SECRET_PREFIX.length));
+    }
+
     // A link as two links to one calendar compare: trimmed, a webcal:// link as the https:// one it is
     sameLink(a, b) {
         const key = (l) => String(l ?? "").trim().replace(/^webcals?:\/\//i, "https://");
@@ -323,7 +349,7 @@ export default class Settings {
         const id = this.newId();
         this.storeLink(id, link);
         /** @type {Calendar} */
-        const calendar = { id, name: this.text(name), account: this.text(account), addresses: this.addressesOf(addresses).addresses, on: true };
+        const calendar = { id, name: this.linkFree(name), account: this.linkFree(account), addresses: this.addressesOf(addresses).addresses, on: true };
         this.data.calendars.list.push(calendar);
         try {
             await this.save();
@@ -346,8 +372,8 @@ export default class Settings {
         const calendar = this.calendar(id);
         if (!calendar) throw new Error("That calendar isn't in the list any more");
         const before = { ...calendar };
-        if (values.name !== undefined) calendar.name = this.text(values.name);
-        if (values.account !== undefined) calendar.account = this.text(values.account);
+        if (values.name !== undefined) calendar.name = this.linkFree(values.name);
+        if (values.account !== undefined) calendar.account = this.linkFree(values.account);
         if (values.addresses !== undefined) calendar.addresses = this.addressesOf(values.addresses).addresses;
         if (typeof values.on === "boolean") calendar.on = values.on;
         try {
@@ -493,11 +519,13 @@ export default class Settings {
     }
 
     /**
-     * A pasted block: { settings, links }, or { error } when it isn't a copy of Plainday's settings.
-     * `links` holds the copy's link for each of its calendars that had one, by the calendar's ID.
+     * A pasted block: { settings, links, withCalendars }, or { error } when it isn't a copy of
+     * Plainday's settings. `links` holds the copy's link for each of its calendars that had one, by the
+     * calendar's ID; `withCalendars` is false for a copy made before there were calendars, which a paste
+     * leaves this device's as they are.
      * @param {string} text
      * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
-     * @returns {{ settings: ReturnType<Settings["defaults"]>, links: Record<string, string>, error?: undefined } | { error: string, settings?: undefined, links?: undefined }}
+     * @returns {{ settings: ReturnType<Settings["defaults"]>, links: Record<string, string>, withCalendars: boolean, error?: undefined } | { error: string, settings?: undefined, links?: undefined, withCalendars?: undefined }}
      */
     readCopy(text, billing = plainday.Billing) {
         const not = { error: "That isn't a copy of Plainday's settings. Use Copy at the top of Settings → Plainday, then paste here what it copied." };
@@ -512,9 +540,9 @@ export default class Settings {
         const given = typeof raw.links === "object" && raw.links !== null ? raw.links : {};
         for (const { id } of settings.calendars.list) {
             const link = given[id];
-            if (typeof link === "string" && link.trim()) links[id] = link.trim();
+            if (typeof link === "string" && Settings.LINK.test(link.trim())) links[id] = link.trim();
         }
-        return { settings, links };
+        return { settings, links, withCalendars: this.hasCalendars(raw) };
     }
 
     /**
@@ -552,11 +580,12 @@ export default class Settings {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
 
-    // Writes the settings as they are now
+    // Writes the settings as they are now, through normalize(), so only the keys a setting has reach
+    // the file: never a link, even one something put on a calendar in memory
     async save() {
         const plugin = plainday.plugin;
         if (!plugin) throw new Error("Plainday isn't loaded");
-        await plugin.saveData(this.data);
+        await plugin.saveData(this.normalize(this.data));
         this.saved = true;
         this.calendarsSaved = true;
         this.unreadable = false;
@@ -584,19 +613,30 @@ export default class Settings {
 
     /**
      * Makes this device's settings the copy's (pasted() keeps the higher invoice number), saves, keeps
-     * the copy's links in this device's secret storage, blanks the links of the calendars the copy
-     * doesn't have, and applies the editor switch. A calendar the copy has without a link keeps the one
-     * this device has, if any.
+     * the copy's links in this device's secret storage, blanks every other calendar link this device
+     * keeps, and applies the editor switch. A calendar the copy has without a link keeps the one this
+     * device has, if any. A copy from before there were calendars (`withCalendars` false) leaves this
+     * device's calendars and links as they are. A save that fails changes nothing.
      * @param {ReturnType<Settings["defaults"]>} copy
      * @param {Record<string, string>} [links]
+     * @param {boolean} [withCalendars]
      */
-    async replaceWith(copy, links = {}) {
-        const before = this.data.calendars.list.map((c) => c.id);
-        this.data = this.pasted(copy);
-        await this.save();
-        const kept = new Set(this.data.calendars.list.map((c) => c.id));
-        for (const [id, link] of Object.entries(links)) if (kept.has(id)) this.storeLink(id, link);
-        for (const id of before) if (!kept.has(id)) this.forgetLink(id);
+    async replaceWith(copy, links = {}, withCalendars = true) {
+        const before = this.data;
+        const next = this.pasted(copy);
+        if (!withCalendars) next.calendars = JSON.parse(JSON.stringify(before.calendars));
+        this.data = next;
+        try {
+            await this.save();
+        } catch (e) {
+            this.data = before;
+            throw e;
+        }
+        if (withCalendars) {
+            const kept = new Set(next.calendars.list.map((c) => c.id));
+            for (const [id, link] of Object.entries(links)) if (kept.has(id)) this.storeLink(id, link);
+            for (const id of this.storedIds()) if (!kept.has(id)) this.forgetLink(id);
+        }
         await plainday.ListCursor?.invoke();
     }
 
@@ -612,7 +652,10 @@ export default class Settings {
         this.saved = raw !== null;
         this.calendarsSaved = this.hasCalendars(raw);
         // As a paste does: an older file from another device never lowers the number given here
-        this.data = this.pasted(this.normalize(raw ?? {}));
+        const next = this.pasted(this.normalize(raw ?? {}));
+        // A file from a device on a release before calendars leaves this device's as they are
+        if (raw !== null && !this.calendarsSaved) next.calendars = this.data.calendars;
+        this.data = next;
         await plainday.ListCursor?.invoke();
     }
 
@@ -621,7 +664,9 @@ export default class Settings {
     // With none, nothing is written: a device whose notes Sync hasn't brought yet reads them at a later
     // load, and one whose data file Sync is still bringing doesn't write defaults over it. The same for
     // the range on a device whose settings have no calendars yet: the Calendar Sync note's `Sync range:`
-    // line, read once (OBS-282).
+    // line, read once (OBS-282). On a device with no settings saved, the range alone is used but not
+    // saved, for the same reason: it's saved with the invoice and table settings when their notes
+    // arrive, or with the first change you make.
     async readOldNotes() {
         if (this.saved && this.calendarsSaved) return;
         const wasSaved = this.saved, hadCalendars = this.calendarsSaved;
@@ -647,6 +692,10 @@ export default class Settings {
         // Sync brought a data file while the notes were read: it wins
         if (this.saved !== wasSaved || this.calendarsSaved !== hadCalendars) return;
         if (!notes?.read.length && !range) return;
+        if (!wasSaved && !notes?.read.length && range) {
+            this.data.calendars.range = range.range ?? Settings.DEFAULT_RANGE;
+            return;
+        }
         /** @type {string[]} */
         const notices = [];
         if (notes?.read.length) {

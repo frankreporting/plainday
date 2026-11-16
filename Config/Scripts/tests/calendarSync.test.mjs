@@ -1251,3 +1251,32 @@ test("isLog: a note in a ›logs folder (AddTaskNote's name, any case) or tagged
     assert.ok(isLog("Inbox/2026-09-18 Printer call.md", ["log"]), "tagged, wherever it waits");
     assert.ok(!cs.isLog({ path: "Projects/Studio/›logs/2026-09-16 Planning.md" }, {}), "no AddTaskNote: the folder doesn't decide");
 });
+
+// ------------------------------------------------------------------ the range (OBS-282)
+
+test("the range comes from Plainday's settings: the fetcher is asked for its days, and the note gets no Range section", async () => {
+    const { app, map } = makeApp({});
+    app.isMobile = false;
+    app.vault.adapter.getBasePath = () => "/vault";
+    const calls = [];
+    const context = vm.createContext({
+        app, moment, console,
+        plainday: { Schedule: { dailyOpts: () => ({ folder: DAYS }) }, Settings: { rangeDays: () => 21 } },
+        require: (m) => {
+            assert.equal(m, "child_process");
+            return { execFile: (cmd, args, opts, done) => { calls.push(args); map.set(EVENTS, JSON.stringify(feed([event()]))); done(null, "", ""); } };
+        },
+    });
+    const sync = new (vm.runInContext(code + "\n;CalendarSync", context))();
+    assert.equal(sync.rangeDays(), 21);
+    await sync.run();
+    assert.deepEqual(plain(calls[0].slice(1, 3)), ["--days", "21"]);
+    assert.ok(map.has(NOTE), "the note made on the first run");
+    assert.doesNotMatch(map.get(NOTE), /## Range|Sync range/);
+    // A note from before keeps its Range section as it is: not read, not written
+    const old = "---\nid: 1\ntags: \n---\n\n## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync.\n\n" + map.get(NOTE).split("\n---\n")[1].trimStart();
+    map.set(NOTE, old);
+    await sync.run();
+    assert.match(map.get(NOTE), /## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync\.\n/);
+    assert.deepEqual(plain(calls[1].slice(1, 3)), ["--days", "21"], "the note's 3 weeks isn't read");
+});
