@@ -6,6 +6,8 @@
 // draw it from that list, as setting definitions, and find each row in the settings search
 // (getSettingDefinitions); an older Obsidian, down to the manifest's 1.11.4, calls display(), which
 // draws the same list itself with Setting and SettingGroup. Each row draws its own control (`render`).
+// A row can instead be a page of its own sections (`page`, the calendar list): Obsidian 1.13+ shows it
+// as an entry you click through; display(), with no pages to draw, puts its sections after the row's.
 //
 // Each change is saved as it's made. The invoice folder and the first invoice number are checked as you
 // type and saved when you leave the field (or the panel closes), so a value on its way to another one
@@ -27,8 +29,9 @@ import { plainday } from "./host.js";
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {Values["calendars"]["list"][number]} Calendar */
 /** @typedef {import("obsidian").Setting} Setting */
-/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean }} Row */
+/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean, page?: Page }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
+/** @typedef {{ displayValue: string, sections: Section[] }} Page */
 
 /** @param {unknown} e */
 const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string" ? e : "something went wrong");
@@ -183,7 +186,7 @@ const HELP = [
     ["Outlook", "On the web: Settings, Calendar, Shared calendars, then Publish a calendar. Choose the calendar and Can view all details, then copy the ICS link."],
     ["A subscribed calendar", "(holidays, a team's schedule) uses the address you subscribed from. Apple publishes its holiday calendars at a public address."],
 ];
-const HELP_LIMITS = "At work or school, a Google Workspace or Microsoft 365 admin can turn private links off; then the option isn't there.";
+const HELP_LIMITS = "Also note that a Google Workspace or Microsoft 365 admin can disable private links.";
 
 class CalendarHelpModal extends Modal {
     onOpen() {
@@ -434,11 +437,15 @@ class CalendarModal extends Modal {
 export default class PlaindaySettingTab extends PluginSettingTab {
     // Obsidian 1.13 and later: the sections as setting definitions, drawn and searched by Obsidian
     getSettingDefinitions() {
-        return this.sections().map(({ heading, rows }) => ({
-            type: /** @type {const} */ ("group"),
+        /** @param {Section} section @returns {import("obsidian").SettingDefinitionGroup} */
+        const group = ({ heading, rows }) => ({
+            type: "group",
             ...(heading ? { heading } : {}),
-            items: rows.map(({ name, desc, render, visible }) => ({ name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
-        }));
+            items: rows.map(({ name, desc, render, visible, page }) => (page
+                ? { type: /** @type {const} */ ("page"), name, ...(desc ? { desc } : {}), displayValue: page.displayValue, items: page.sections.map(group), ...(visible ? { visible } : {}) }
+                : { name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
+        });
+        return this.sections().map(group);
     }
 
     // An Obsidian before 1.13: the same sections, drawn here. What a row returns saves a value still
@@ -451,19 +458,30 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /** @type {{ el: HTMLElement, visible: () => boolean }[]} */
         const shown = [];
         this.shown = shown;
-        for (const { heading, rows } of this.sections()) {
-            const group = new SettingGroup(this.containerEl);
-            if (heading) group.setHeading(heading);
-            for (const { name, desc, render, visible } of rows) {
-                group.addSetting((s) => {
-                    s.setName(name);
-                    if (desc) s.setDesc(desc);
-                    const cleanup = render(s);
-                    if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
-                    if (visible) shown.push({ el: s.settingEl, visible });
-                });
+        /** @param {Section[]} sections */
+        const draw = (sections) => {
+            for (const { heading, rows } of sections) {
+                const group = new SettingGroup(this.containerEl);
+                if (heading) group.setHeading(heading);
+                /** @type {Page[]} */
+                const pages = [];
+                for (const { name, desc, render, visible, page } of rows) {
+                    if (page) {
+                        if (!visible || visible()) pages.push(page);
+                        continue;
+                    }
+                    group.addSetting((s) => {
+                        s.setName(name);
+                        if (desc) s.setDesc(desc);
+                        const cleanup = render(s);
+                        if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
+                        if (visible) shown.push({ el: s.settingEl, visible });
+                    });
+                }
+                for (const page of pages) draw(page.sections);
             }
-        }
+        };
+        draw(this.sections());
         this.refreshShown();
     }
 
@@ -679,8 +697,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     }
 
     /**
-     * Calendars (OBS-282): Add calendar, the sync range and the help, then each account's calendars,
-     * accounts and calendars in alphabetical order
+     * Calendars (OBS-282): Add calendar, whose description links to How to get the links, the sync range,
+     * and the calendar list, a page of each account's calendars, accounts and calendars in alphabetical
+     * order
      * @param {(setting: Setting, section: "calendars", values: Partial<Values["calendars"]>) => Promise<void>} store
      * @returns {Section[]}
      */
@@ -716,38 +735,56 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             }
             return out;
         };
+        const help = () => new CalendarHelpModal(this.app).open();
         return [
             {
                 heading: "Calendars",
                 rows: [
-                    row("Add calendar", list.length ? "Add another calendar by its private link." : "No calendars are added yet. Add one by its private link.",
-                        (s) => s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)))),
-                    row("Sync range", "How far ahead Sync calendars writes events into daily notes. Days beyond it are left as they are.",
+                    // Its description links to How to get the links, drawn with the row, so the link is a
+                    // new one each time Obsidian draws it
+                    row("Add calendar", "", (s) => {
+                        s.descEl.empty();
+                        s.descEl.appendText("Add using ");
+                        s.descEl.createEl("a", { text: "private calendar links", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
+                            e.preventDefault();
+                            help();
+                        }));
+                        s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)));
+                    }),
+                    row("Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
+                    // The calendars, each account's, on a page of their own
+                    {
+                        ...row("Calendar list", "", () => {}),
+                        visible: () => list.length > 0,
+                        page: {
+                            displayValue: `${list.length} calendar${list.length === 1 ? "" : "s"}`,
+                            sections: [...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
+                                heading: account,
+                                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
+                                    // Put back when its save fails, which runs onChange again: that turn is ignored
+                                    let reverting = false;
+                                    s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {
+                                        if (reverting) return;
+                                        settings.editCalendar(c.id, { on }).catch((e) => {
+                                            reverting = true;
+                                            t.setValue(!on);
+                                            reverting = false;
+                                            new Notice(`Couldn't save: ${messageOf(e)}`);
+                                            // Gone from the list (Sync brought another device's): draw the panel again
+                                            if (!settings.calendar(c.id)) this.redraw();
+                                        });
+                                    }));
+                                    s.addButton((b) => b.setButtonText("Edit").onClick(() => dialog(c)));
+                                    s.addButton((b) => b.setButtonText("Remove").setWarning().onClick(() => {
+                                        settings.removeCalendar(c.id).then(() => this.redraw(), (e) => new Notice(`Couldn't remove ${c.name}: ${messageOf(e)}`));
+                                    }));
+                                })),
+                            })),
+                        },
+                    },
                 ],
             },
-            ...[...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
-                heading: account,
-                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
-                    // Put back when its save fails, which runs onChange again: that turn is ignored
-                    let reverting = false;
-                    s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {
-                        if (reverting) return;
-                        settings.editCalendar(c.id, { on }).catch((e) => {
-                            reverting = true;
-                            t.setValue(!on);
-                            reverting = false;
-                            new Notice(`Couldn't save: ${messageOf(e)}`);
-                            // Gone from the list (Sync brought another device's): draw the panel again
-                            if (!settings.calendar(c.id)) this.redraw();
-                        });
-                    }));
-                    s.addButton((b) => b.setButtonText("Edit").onClick(() => dialog(c)));
-                    s.addButton((b) => b.setButtonText("Remove").setWarning().onClick(() => {
-                        settings.removeCalendar(c.id).then(() => this.redraw(), (e) => new Notice(`Couldn't remove ${c.name}: ${messageOf(e)}`));
-                    }));
-                })),
-            })),
         ];
     }
 }

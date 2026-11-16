@@ -45,6 +45,9 @@ const copySrc = () => {
     return copy;
 };
 
+// Every group in a panel's definitions, a page's own groups included (the calendar list)
+const groupsOf = (defs) => defs.flatMap((g) => [g, ...groupsOf((g.items ?? []).filter((i) => i.type === "page").flatMap((i) => i.items))]);
+
 // Stand-ins for the elements and components a dialog and the panel's older drawing (display()) use:
 // enough to type into a field, click a button and read what's shown. `fake.focused` is the element
 // last focused; `fake.modals` and `fake.groups` the dialogs opened and the groups drawn.
@@ -386,16 +389,16 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Calendars", ["Add calendar", "Sync range"]],
+            ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
         for (const g of defs) for (const i of g.items) {
             assert.ok(i.name, "every row has a name");
             assert.ok(!("desc" in i) || i.desc, `${i.name}: a description, or none at all`);
-            assert.equal(typeof i.render, "function");
+            assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Your name or company name", "Address", "Freeze rows", "Freeze columns"]);
+        assert.deepEqual(descs, ["Your name or company name", "Address", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"]);
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
@@ -533,15 +536,21 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         let redrawn = 0;
         tab.update = () => { redrawn++; };
         const defs = tab.getSettingDefinitions();
-        assert.deepEqual(defs.slice(4).map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
+        assert.deepEqual(defs.slice(4).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
             ["Calendars", [
-                ["Add calendar", "Add another calendar by its private link."],
-                ["Sync range", "How far ahead Sync calendars writes events into daily notes. Days beyond it are left as they are."],
+                ["row", "Add calendar", undefined],
+                ["row", "Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are."],
+                ["page", "Calendar list", undefined],
             ]],
+        ]);
+        // The calendar list: a page of its own, each account's calendars on it
+        const page = defs[4].items[2];
+        assert.deepEqual([page.displayValue, page.visible()], ["3 calendars", true]);
+        assert.deepEqual(page.items.map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
             ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", undefined]]],
-        ], "accounts and calendars in alphabetical order, each saying whether this device has its link");
-        const item = (group, name) => defs.find((g) => g.heading === group).items.find((i) => i.name === name);
+        ], "accounts and calendars in alphabetical order, each saying when this device has no link");
+        const item = (group, name) => groupsOf(defs).find((g) => g.heading === group).items.find((i) => i.name === name);
 
         // The range: the seven choices, saved as chosen
         const range = standInSetting();
@@ -584,10 +593,9 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         assert.equal(redrawn, 1, "the panel drawn again without it");
         for (const saved of plugin.saved) assert.ok(!JSON.stringify(saved).includes("private-0000"), "no link in the settings file");
 
-        // With none left: the panel says so
+        // With none left: no calendar list
         for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
-        assert.equal(tab.getSettingDefinitions()[4].items[0].desc, "No calendars are added yet. Add one by its private link.");
-        assert.equal(tab.getSettingDefinitions().length, 5, "no account groups");
+        assert.equal(tab.getSettingDefinitions()[4].items[2].visible(), false);
     } finally {
         plugin.onunload();
     }
@@ -607,7 +615,7 @@ async function calendarPanel(stored, secrets = new Map()) {
     window.plainday.CalendarFeed.check = (link) => new Promise((resolve) => { checks.push({ link, resolve }); });
     const answer = async (result) => { checks.at(-1).resolve(result); await new Promise((r) => setTimeout(r, 0)); };
     const row = (group, name) => {
-        const item = tab.getSettingDefinitions().find((g) => g.heading === group).items.find((i) => i.name === name);
+        const item = groupsOf(tab.getSettingDefinitions()).find((g) => g.heading === group).items.find((i) => i.name === name);
         const setting = new FakeSetting(new FakeEl());
         item.render(setting);
         return setting;
@@ -620,6 +628,13 @@ const GOOGLE_LINK = "https://calendar.google.com/calendar/ical/studio-owner%40ex
 test("Add calendar: the link checked once, then its name, account and your address filled in; a link that fails, or that another calendar has, isn't added (OBS-282)", async () => {
     const p = await calendarPanel({ invoices: { name: "Juniper Hale" } });
     try {
+        // Its description: "Add using private calendar links", the link opening How to get the links
+        const addRow = p.row("Calendars", "Add calendar");
+        const linkEl = addRow.descEl.children.find((e) => e.tag === "a");
+        assert.deepEqual([addRow.descEl.text, linkEl.text, linkEl.hasClass("plainday-link")], ["Add using ", "private calendar links", true]);
+        linkEl.fire("click");
+        assert.equal(fake.modals.at(-1).title, "How to get the links");
+        fake.modals.at(-1).close();
         await p.click(p.row("Calendars", "Add calendar").button("Add calendar").buttonEl);
         const dialog = fake.modals.at(-1);
         assert.equal(dialog.title, "Add calendar");
@@ -640,7 +655,7 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.deepEqual([note.children[0].tag, note.children[0].text, note.text], ["strong", "NOTE:",
             " Treat calendar links like a password. If one leaks, reset at the source and get a new link. To sync a calendar that was shared with you, you'll need to ask the owner for the link."]);
         assert.deepEqual(list.children.map((li) => li.children[0].text), ["Google Calendar", "iCloud", "Outlook", "A subscribed calendar"]);
-        assert.equal(limits.text, "At work or school, a Google Workspace or Microsoft 365 admin can turn private links off; then the option isn't there.");
+        assert.equal(limits.text, "Also note that a Google Workspace or Microsoft 365 admin can disable private links.");
         help.close();
         const details = dialog.field("Name").inputEl;
         const go = () => dialog.buttons().find((b) => b.classes.size === 0 && b.text !== "Cancel");
@@ -790,7 +805,7 @@ test("Edit: a name typed while a new link is checked is the one saved; repeated 
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs.slice(5).map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs[4].items[2].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");
