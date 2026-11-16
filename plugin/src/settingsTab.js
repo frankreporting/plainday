@@ -89,6 +89,7 @@ class FolderSuggest extends AbstractInputSuggest {
 
     /** @param {string} folder @param {HTMLElement} el */
     renderSuggestion(folder, el) {
+        el.addClass("plainday-folder-suggestion");
         el.setText(folder);
     }
 }
