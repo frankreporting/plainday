@@ -65,7 +65,8 @@ const field = (name, desc, draw) => ({
 
 /**
  * Folders to choose an invoice folder from: the vault's own that the field would take, with `Invoices`
- * first while there's none
+ * first while there's none. The folder typed exactly comes first, then those that start with it, then
+ * those that hold it. Leaving the field while the list is open takes the folder it highlights.
  * @extends {AbstractInputSuggest<string>}
  */
 class FolderSuggest extends AbstractInputSuggest {
@@ -77,6 +78,9 @@ class FolderSuggest extends AbstractInputSuggest {
         super(app, inputEl);
         this.suggested = suggested;
         this.takes = takes;
+        // Each folder the list shows, by its row
+        /** @type {Map<HTMLElement, string>} */
+        this.drawn = new Map();
     }
 
     /** @param {string} query @returns {string[]} */
@@ -84,13 +88,23 @@ class FolderSuggest extends AbstractInputSuggest {
         const q = query.trim().toLowerCase();
         const folders = this.app.vault.getAllFolders(false).map((f) => f.path).filter((f) => this.takes(f)).sort((a, b) => a.localeCompare(b));
         const all = folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
-        return all.filter((f) => f.toLowerCase().includes(q));
+        /** @param {string} f */
+        const rank = (f) => { const l = f.toLowerCase(); return l === q ? 0 : l.startsWith(q) ? 1 : 2; };
+        this.drawn = new Map();
+        return all.filter((f) => f.toLowerCase().includes(q)).sort((a, b) => rank(a) - rank(b));
     }
 
     /** @param {string} folder @param {HTMLElement} el */
     renderSuggestion(folder, el) {
         el.addClass("plainday-folder-suggestion");
-        el.setText(folder);
+        el.createSpan({ cls: "plainday-folder-path", text: folder });
+        this.drawn.set(el, folder);
+    }
+
+    /** The folder the open list highlights, or null when it's closed @returns {string | null} */
+    highlighted() {
+        for (const [el, folder] of this.drawn) if (el.isConnected && el.hasClass("is-selected")) return folder;
+        return null;
     }
 }
 
@@ -194,16 +208,21 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     sections() {
         const settings = plainday.Settings;
         const now = () => settings.get();
-        // A line under a setting saying what's wrong with what's typed, or nothing
+        // A line under a setting saying what's wrong with what's typed, or a note when `warn` is false, or
+        // nothing
         /** @type {WeakMap<Setting, HTMLElement>} */
         const lines = new WeakMap();
-        /** @param {Setting} setting @param {string} text */
-        const problem = (setting, text) => {
+        // The settings whose line says a save failed, which the next save that works clears
+        /** @type {WeakSet<Setting>} */
+        const failed = new WeakSet();
+        /** @param {Setting} setting @param {string} text @param {boolean} [warn] */
+        const problem = (setting, text, warn = true) => {
             let line = lines.get(setting);
             if (!line) {
-                line = setting.descEl.createDiv({ cls: "mod-warning" });
+                line = setting.descEl.createDiv();
                 lines.set(setting, line);
             }
+            line.toggleClass("mod-warning", warn);
             line.setText(text);
         };
         /**
@@ -213,8 +232,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
          * @returns {Promise<void>}
          */
         const store = (setting, section, values) => settings.set(section, values).then(
-            () => problem(setting, ""),
-            (e) => problem(setting, `Couldn't save: ${messageOf(e)}`),
+            () => { if (failed.delete(setting)) problem(setting, ""); },
+            (e) => { failed.add(setting); problem(setting, `Couldn't save: ${messageOf(e)}`); },
         );
         const counts = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [String(i), String(i)]));
         // Whether the two freezes show: the switch above them, on while either is more than 0
@@ -263,12 +282,25 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         let waiting = null;
                         /** @type {import("obsidian").TextComponent | null} */
                         let input = null;
-                        // Leaving the field: a folder that reads is saved, and one that doesn't goes back to
-                        // the saved folder at once, its line still saying why
+                        /** @type {FolderSuggest | null} */
+                        let suggest = null;
+                        // A folder that isn't in the vault yet: Invoice makes it, as it finds it
+                        /** @param {string} folder */
+                        const missing = (folder) => !!folder && !this.app.vault.getFolderByPath(String(plainday.Invoice.realFolder(folder)));
+                        // Leaving the field: with something typed and the list open, the folder it highlights;
+                        // else what's typed when it reads, and the saved folder at once when it doesn't, its
+                        // line still saying why. Clearing the field leaves no folder chosen.
                         const save = () => {
+                            const typed = input !== null ? input.getValue().trim() : "";
+                            const pick = typed !== "" && suggest !== null ? suggest.highlighted() : null;
+                            if (pick && input !== null) {
+                                input.setValue(pick);
+                                check(pick);
+                            }
                             const folder = waiting;
                             waiting = null;
                             if (folder !== null && folder !== now().invoices.folder) void store(s, "invoices", { folder });
+                            if (folder !== null) problem(s, missing(folder) ? `“${folder}” doesn't exist yet. Invoice will create it.` : "", false);
                             input?.setValue(folder ?? now().invoices.folder);
                         };
                         /** @param {string} v */
@@ -282,15 +314,19 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         s.addText((t) => {
                             input = t;
                             t.setPlaceholder("Invoices").setValue(now().invoices.folder).onChange(check);
+                            // Tab leaves before the list closes; a click elsewhere, by the change it makes
+                            t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Tab") save(); });
                             t.inputEl.addEventListener("change", save);
-                            const suggest = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f).error);
-                            suggest.onSelect((folder) => {
+                            const list = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f).error);
+                            suggest = list;
+                            list.onSelect((folder) => {
                                 t.setValue(folder);
                                 check(folder);
                                 save();
-                                suggest.close();
+                                list.close();
                             });
                         });
+                        if (missing(now().invoices.folder)) problem(s, `“${now().invoices.folder}” doesn't exist yet. Invoice will create it.`, false);
                         return save;
                     }),
                     // The number the panel shows; Invoice also goes past the last number given, which typing

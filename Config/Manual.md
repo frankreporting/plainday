@@ -837,7 +837,7 @@ A settings file that doesn't read (a write cut off, a sync conflict) is left as 
 ### Invoices
 
 - **Your name or company name, Address, Terms, Note:** they head and close each new invoice (see *Making one*). The address takes one line per item. A project's own `terms` wins over yours.
-- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders. It can't be inside `Config` or `Archive`, which Plainday already uses: an Invoices base there would list nothing in a vault that excludes them in *Files and links*. Changing it moves nothing already made.
+- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders: leaving the field (Tab, or a click elsewhere) while the list is open takes the folder it highlights, and with no folder to suggest it keeps what you typed. A folder that isn't there yet says so under the field, and *Invoice* creates it. It can't be inside `Config` or `Archive`, which Plainday already uses: an Invoices base there would list nothing in a vault that excludes them in *Files and links*. Changing it moves nothing already made.
 - **First invoice number:** where numbering starts, 1001 as it comes (see *Making one*). *Invoice* goes on from the highest invoice in the vault, and never gives a deleted invoice's number again.
 
 ### Tables

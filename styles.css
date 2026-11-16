@@ -12,11 +12,10 @@
 }
 
 /* Settings → Plainday → Invoice folder: the list of folders, each apart from the next when a long one
-   wraps, its later lines indented */
-.suggestion-item.plainday-folder-suggestion {
-    font-size: var(--font-ui-small);
+   wraps, its later lines indented inside the theme's own padding */
+.plainday-folder-path {
+    display: block;
     line-height: var(--line-height-tight);
-    padding-block: var(--size-4-2);
-    padding-inline-start: calc(var(--size-4-3) + 1em);
+    padding-inline-start: 1em;
     text-indent: -1em;
 }

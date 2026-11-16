@@ -234,10 +234,11 @@ function standInSetting() {
             },
             createSpan({ text }) { links[`span ${text}`] = null; },
         },
-        descEl: { createDiv: () => ({ setText: (t) => warnings.push(t) }) },
+        descEl: { createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }) },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
         addToggle(cb) { cb(control); return this; }, addButton(cb) { cb(control); return this; },
         type(v) { input.value = v; control.handlers.change(v); }, leave() { for (const fn of listeners.change ?? []) fn(); },
+        tab() { for (const fn of listeners.keydown ?? []) fn({ key: "Tab" }); },
         warning: () => warnings.at(-1) ?? "",
     };
     return setting;
@@ -247,6 +248,9 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
     const { plugin, suggests, notices } = load(BUNDLE, { stored });
     plugin.app.vault.getAllFolders = () => [{ path: "Archive" }, { path: "Archive/Old" }, { path: "Business/Invoices" }, { path: "Config" }];
+    const folders = new Set(["Reference/Invoices", "Business/Invoices"]);
+    plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
+    plugin.app.vault.getRoot = () => ({ children: [] });
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
@@ -319,6 +323,32 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.equal(saved()?.folder, "Business/Invoices", "a pick saves at once");
         assert.equal(suggest.closed, 1);
         assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
+        // Tab with the list open takes the folder it highlights; with it closed, what's typed, and a line
+        // says a folder that isn't there yet will be made
+        const row = (folder) => {
+            const classes = new Set();
+            const el = { isConnected: true, addClass: (c) => classes.add(c), hasClass: (c) => classes.has(c), createSpan: () => {} };
+            suggest.renderSuggestion(folder, el);
+            return { el, classes };
+        };
+        assert.deepEqual(suggest.getSuggestions("inv"), ["Invoices", "Business/Invoices"], "those that start with it first");
+        const [rowA, rowB] = suggest.getSuggestions("inv").map(row);
+        rowB.classes.add("is-selected");
+        folder.s.type("inv");
+        folder.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Business/Invoices", "Tab takes the highlighted folder, not what's typed");
+        assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
+        rowA.el.isConnected = rowB.el.isConnected = false;
+        folder.s.type("Clients");
+        folder.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "Clients", "the list closed: what's typed");
+        assert.equal(folder.s.warning(), "“Clients” doesn't exist yet. Invoice will create it.");
+        folder.s.type("");
+        folder.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(saved()?.folder, "", "clearing the field leaves no folder chosen");
 
         const first = draw("First invoice number");
         assert.equal(first.s.control.inputEl.value, "1001");
