@@ -13,15 +13,15 @@
 // the vault or in Archive, a number that isn't one) is refused with a line under the field, and the old
 // value stays.
 //
-// The sections, in order: Invoices, Tables, Editor, and Another device, with Copy settings and
-// Paste settings. OBS-282 adds Calendars and OBS-283 Folders.
+// The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
+// Invoices, Tables and Editor. OBS-282 adds Calendars and OBS-283 Folders.
 import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, SettingGroup, TextAreaComponent } from "obsidian";
 import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {import("obsidian").Setting} Setting */
 /** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void) }} Row */
-/** @typedef {{ heading: string, rows: Row[] }} Section */
+/** @typedef {{ heading: string | null, rows: Row[] }} Section */
 
 /** @param {unknown} e */
 const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string" ? e : "something went wrong");
@@ -32,6 +32,19 @@ const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string"
  * @returns {Row}
  */
 const row = (name, desc, draw) => ({ name, desc, render: (s) => { draw(s); } });
+
+/**
+ * A link among a row's controls, as Style Settings draws Import and Export
+ * @param {Setting} setting @param {string} text @param {() => void} act
+ */
+const link = (setting, text, act) => {
+    setting.controlEl.createEl("a", { text, href: "#" }, (a) => {
+        a.addEventListener("click", (e) => {
+            e.preventDefault();
+            act();
+        });
+    });
+};
 
 /**
  * A row whose value is saved when you leave the field: `draw` returns what saves a value still waiting.
@@ -79,8 +92,8 @@ class FolderSuggest extends AbstractInputSuggest {
     }
 }
 
-// Paste settings: a box to paste a copy into, what it holds, then Cancel or Replace. A phone doesn't
-// always let a plugin read the clipboard, so the copy is pasted by hand.
+// Paste: a box to paste a copy into, as wide as the window (styles.css), what it holds, then Cancel or
+// Replace. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
 class PasteModal extends Modal {
     /** @param {import("obsidian").App} app @param {(copy: Values) => Promise<void>} onReplace */
     constructor(app, onReplace) {
@@ -91,7 +104,7 @@ class PasteModal extends Modal {
     onOpen() {
         const settings = plainday.Settings;
         this.setTitle("Paste settings");
-        this.contentEl.createEl("p", { text: "Paste what Copy settings copied on your other device. Replace makes this device's settings the same as that device's." });
+        this.modalEl.addClass("plainday-paste");
         const box = new TextAreaComponent(this.contentEl).setPlaceholder("Paste here");
         box.inputEl.rows = 6;
         const said = this.contentEl.createEl("p", { cls: "setting-item-description" });
@@ -128,7 +141,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     getSettingDefinitions() {
         return this.sections().map(({ heading, rows }) => ({
             type: /** @type {const} */ ("group"),
-            heading,
+            ...(heading ? { heading } : {}),
             items: rows.map(({ name, desc, render }) => ({ name, desc, render })),
         }));
     }
@@ -141,7 +154,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const waiting = [];
         this.waiting = waiting;
         for (const { heading, rows } of this.sections()) {
-            const group = new SettingGroup(this.containerEl).setHeading(heading);
+            const group = new SettingGroup(this.containerEl);
+            if (heading) group.setHeading(heading);
             for (const { name, desc, render } of rows) {
                 group.addSetting((s) => {
                     s.setName(name).setDesc(desc);
@@ -191,6 +205,25 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const counts = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [String(i), String(i)]));
 
         return [
+            {
+                heading: null,
+                rows: [
+                    row("Backup and transfer", "Copy settings for backup and to transfer from one device to another when you're not syncing your installed plugin settings. Paste will replace all settings with the contents of your clipboard.", (s) => {
+                        link(s, "Copy", () => {
+                            navigator.clipboard.writeText(settings.copyText()).then(
+                                () => new Notice("Copied. It holds your invoice details, so keep it somewhere private. A clipboard manager may keep a copy.", 8000),
+                                (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
+                            );
+                        });
+                        link(s, "Paste", () => {
+                            new PasteModal(this.app, async (copy) => {
+                                await settings.replaceWith(copy);
+                                this.redraw();
+                            }).open();
+                        });
+                    }),
+                ],
+            },
             {
                 heading: "Invoices",
                 rows: [
@@ -273,24 +306,6 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     row("Keep the cursor after a list line's bullet or checkbox", "In Live Preview, the cursor rests after a list line's bullet, number or checkbox, never in front of them, so a checkbox stays drawn. Off, it can rest anywhere on the line.",
                         (s) => s.addToggle((t) => t.setValue(now().editor.listCursor).onChange((v) => {
                             void store(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
-                        }))),
-                ],
-            },
-            {
-                heading: "Another device",
-                rows: [
-                    row("Copy settings", "Plainday's settings stay on this device, unless Obsidian Sync carries installed community plugins, which it doesn't by default. To set up another device, copy every setting above here, as one block of text, and paste it there. After changing a setting, paste again, so both devices file and freeze the same way.", (s) => s.addButton((b) => b.setButtonText("Copy settings").onClick(() => {
-                        navigator.clipboard.writeText(settings.copyText()).then(
-                            () => new Notice("Copied. It holds your invoice details: paste it only into Plainday's settings on your other device. A clipboard manager may keep a copy.", 8000),
-                            (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
-                        );
-                    }))),
-                    row("Paste settings", "Replaces this device's settings with a copy from your other device. This device's last invoice number stays when it's higher.",
-                        (s) => s.addButton((b) => b.setButtonText("Paste settings").onClick(() => {
-                            new PasteModal(this.app, async (copy) => {
-                                await settings.replaceWith(copy);
-                                this.redraw();
-                            }).open();
                         }))),
                 ],
             },

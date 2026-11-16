@@ -221,8 +221,18 @@ function standInSetting() {
         onChange(fn) { this.handlers.change = fn; return this; }, setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.handlers.click = fn; return this; },
     };
     const warnings = [];
+    const links = {};
     const setting = {
-        settingEl: { isConnected: true }, control,
+        settingEl: { isConnected: true }, control, links,
+        controlEl: {
+            createEl(tag, { text }, cb) {
+                const listeners = {};
+                const el = { tag, text, addEventListener: (type, fn) => { listeners[type] = fn; } };
+                cb?.(el);
+                links[text] = () => { let stopped = false; listeners.click({ preventDefault: () => { stopped = true; } }); return stopped; };
+                return el;
+            },
+        },
         descEl: { createDiv: () => ({ setText: (t) => warnings.push(t) }) },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
         addToggle(cb) { cb(control); return this; }, addButton(cb) { cb(control); return this; },
@@ -234,18 +244,19 @@ function standInSetting() {
 
 test("Settings → Plainday: its sections and rows, and the two checked fields save only when you leave them (OBS-281)", async () => {
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
-    const { plugin, suggests } = load(BUNDLE, { stored });
+    const { plugin, suggests, notices } = load(BUNDLE, { stored });
     plugin.app.vault.getAllFolders = () => [{ path: "Archive" }, { path: "Archive/Old" }, { path: "Business/Invoices" }, { path: "Config" }];
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
         const defs = tab.getSettingDefinitions();
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
+            ["group", undefined, ["Backup and transfer"]],
             ["group", "Invoices", ["Your name", "Address", "Terms", "Payment note", "Invoice folder", "Last invoice number"]],
             ["group", "Tables", ["Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Another device", ["Copy settings", "Paste settings"]],
         ]);
+        assert.ok(!("heading" in defs[0]), "the top group has no heading");
         for (const g of defs) for (const i of g.items) {
             assert.ok(i.name && i.desc, `${i.name} has a name and a description, or Obsidian 1.13 drops it`);
             assert.equal(typeof i.render, "function");
@@ -253,6 +264,21 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
+
+        // Copy and Paste: two links at the top, as Style Settings draws Import and Export
+        const top = draw("Backup and transfer");
+        assert.deepEqual(Object.keys(top.s.links), ["Copy", "Paste"]);
+        const copied = [];
+        Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
+        try {
+            assert.equal(top.s.links.Copy(), true, "the link doesn't follow its href");
+            await new Promise((r) => setTimeout(r, 0));
+            assert.equal(copied.length, 1);
+            assert.equal(JSON.parse(copied[0]).invoices.name, "Juniper Hale");
+            assert.match(notices.at(-1), /^Copied\. It holds your invoice details/);
+        } finally {
+            delete globalThis.navigator.clipboard;
+        }
 
         const folder = draw("Invoice folder");
         assert.equal(folder.s.control.inputEl.value, "Reference/Invoices");

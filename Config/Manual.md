@@ -848,14 +848,14 @@ A settings file that doesn't read (a write cut off, a sync conflict) is left as 
 
 **Keep the cursor after a list line's bullet or checkbox:** *ListCursor* (see *Startup scripts*), on as it comes. Off, none of it runs, and the cursor can rest anywhere on a list line. The switch takes effect at once, in every open note.
 
-### Another device
+### Backup and another device
 
-Plugin settings stay on the device unless Obsidian Sync carries installed community plugins (*Settings → Sync → Installed community plugins*), which it doesn't by default. So another device starts from the defaults. To give it yours:
+Plugin settings stay on the device unless Obsidian Sync carries installed community plugins (*Settings → Sync → Installed community plugins*), which it doesn't by default. So another device starts from the defaults. *Copy* and *Paste*, the two links at the top of *Settings → Plainday*, carry them over, and make a backup:
 
-1. On the device with your settings: *Settings → Plainday → Copy settings*. It puts one block of text on the clipboard, with every setting. It holds your invoice details, so paste it only into Plainday's settings; a clipboard manager may keep a copy.
-2. On the other device: *Paste settings*, paste into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. The box says what the copy holds first, and *Cancel* changes nothing.
+1. **Copy** puts one block of text on the clipboard, with every setting. It holds your invoice details, so keep it somewhere private; a clipboard manager may keep a copy.
+2. **Paste**, on the other device or later on this one: paste the block into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. *Cancel* changes nothing.
 
-The box says what the copy holds, with its name, invoice folder and last invoice number, so you can tell whose it is. *Replace* makes that device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again. Until you do, each device uses its own:
+Before you choose, the box says what the copy holds, with its name, invoice folder and last invoice number, so you can tell whose it is. *Replace* makes this device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
 
 - **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
 - **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.
@@ -868,7 +868,7 @@ Before *Settings → Plainday*, your invoice details were in `Config/Invoice Set
 - **Each device does this once,** so a phone that Sync carried the notes to reads the same notes.
 - **A value that doesn't read** (a `folder` of `../x`, a `last_number` of `abc`) starts from its default, and the notice names it. A freeze over 9 is 9, and the notice says so.
 - **A blank `folder`,** which filed each invoice in its project's `invoices/` folder, leaves the invoice folder unchosen: *Invoice* asks you to choose one before the next invoice. The invoices already in a project's folder still count.
-- **A device with neither note** writes nothing and starts from the defaults, so a note Sync brings later is still read at the next start. Once you've deleted the notes, *Paste settings* brings the rest.
+- **A device with neither note** writes nothing and starts from the defaults, so a note Sync brings later is still read at the next start. Once you've deleted the notes, *Paste* brings the rest.
 - *Update Obsidian PM* never installs, changes or removes either note.
 
 ## Templates

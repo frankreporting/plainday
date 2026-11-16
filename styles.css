@@ -1,0 +1,7 @@
+/* Plainday's styles, beside main.js */
+
+/* Settings → Plainday → Paste: the box as wide as the window */
+.plainday-paste textarea {
+    display: block;
+    width: 100%;
+}

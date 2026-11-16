@@ -143,7 +143,7 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     for (const t of ["{}", '{"invoices":{}}', "[1]", "not json", "null", '"plainday-settings"']) {
         assert.match(settings.readCopy(t, billing).error, /^That isn't a copy of Plainday's settings/, t);
     }
-    assert.equal(settings.readCopy("  ", billing).error, "Paste the copy from your other device here.");
+    assert.equal(settings.readCopy("  ", billing).error, "Paste a copy of Plainday's settings here.");
     // a copy is read as any settings are: a bad value becomes its default
     const odd = settings.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J", folder: "../x" } }), billing);
     assert.deepEqual(plain([odd.settings.invoices.name, odd.settings.invoices.folder]), ["J", ""]);

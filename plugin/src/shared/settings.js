@@ -22,9 +22,9 @@ export default class Settings {
     // there but doesn't read (a write cut off, a sync conflict) isn't "no settings": Plainday says so,
     // uses the defaults, and leaves the file alone until you change a setting or paste your settings.
     //
-    // Another device: plugin settings don't sync unless Obsidian Sync carries community plugins, so
-    // copyText() is every setting as one block for the clipboard, and readCopy() and replaceWith() take
-    // it on the other device. A paste replaces this device's settings but keeps the higher last invoice
+    // A backup, or another device: plugin settings don't sync unless Obsidian Sync carries community
+    // plugins, so copyText() is every setting as one block for the clipboard, and readCopy() and
+    // replaceWith() take it back, on this device or another. A paste replaces this device's settings but keeps the higher last invoice
     // number, so no number is given twice.
     static INVOICE_NOTE = "Config/Invoice Settings.md";
     static TABLE_NOTE = "Config/Table Settings.md";
@@ -209,7 +209,7 @@ export default class Settings {
     }
 
     /**
-     * Every setting as one block of text, for Copy settings
+     * Every setting as one block of text, for Copy
      * @param {ReturnType<Settings["defaults"]>} [settings]
      * @returns {string}
      */
@@ -225,9 +225,9 @@ export default class Settings {
      * @returns {{ settings: ReturnType<Settings["defaults"]>, holds: string, error?: undefined } | { error: string, settings?: undefined, holds?: undefined }}
      */
     readCopy(text, billing = plainday.Billing) {
-        const not = { error: "That isn't a copy of Plainday's settings. On your other device, use Copy settings, then paste here what it copied." };
+        const not = { error: "That isn't a copy of Plainday's settings. Use Copy at the top of Settings → Plainday, then paste here what it copied." };
         const t = String(text ?? "").trim();
-        if (!t) return { error: "Paste the copy from your other device here." };
+        if (!t) return { error: "Paste a copy of Plainday's settings here." };
         let raw;
         try { raw = JSON.parse(t); } catch { return not; }
         if (typeof raw !== "object" || raw === null || !(Settings.COPY_MARK in raw)) return not;
@@ -236,7 +236,7 @@ export default class Settings {
     }
 
     /**
-     * What a copy holds, as Paste settings says it before you choose: enough of its invoice details to
+     * What a copy holds, as Paste says it before you choose: enough of its invoice details to
      * tell whose copy it is
      * @param {ReturnType<Settings["defaults"]>} settings
      * @returns {string}
