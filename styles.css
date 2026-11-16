@@ -31,3 +31,13 @@
 .plainday-masked {
     -webkit-text-security: disc;
 }
+
+/* Settings → Plainday → Add calendar and Edit: "Where to find it", in the link color, so it reads as a link
+   in a setting's muted description */
+.plainday-link {
+    color: var(--link-color);
+    text-decoration: underline;
+}
+.plainday-link:hover {
+    color: var(--link-color-hover);
+}

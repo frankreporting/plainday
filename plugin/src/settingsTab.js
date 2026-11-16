@@ -174,20 +174,24 @@ const PROBLEMS = {
 /** @param {string} problem */
 const problemText = (problem) => PROBLEMS[/** @type {keyof typeof PROBLEMS} */ (problem)] ?? "Couldn't read that link.";
 
-// The help: where each provider keeps a calendar's private link, and what to do if one leaks
+// How to get the links (Add calendar's and Edit's "Where to find it"): that a link works like a
+// password, where each provider keeps a calendar's link, and what doesn't work
+const LINK_NOTE = "Treat calendar links like a password. If one leaks, reset at the source and get a new link. To sync a calendar that was shared with you, you'll need to ask the owner for the link.";
 const HELP = [
     ["Google Calendar", "On the web: Settings, then the calendar under Settings for my calendars, then Integrate calendar. Copy the Secret address in iCal format."],
     ["iCloud", "In Calendar, share the calendar and turn on Public Calendar, then copy its link (it starts with webcal://)."],
     ["Outlook", "On the web: Settings, Calendar, Shared calendars, then Publish a calendar. Choose the calendar and Can view all details, then copy the ICS link."],
-    ["A calendar someone shares with you", "has no secret address of yours: only its owner can publish one."],
     ["A subscribed calendar", "(holidays, a team's schedule) uses the address you subscribed from. Apple publishes its holiday calendars at a public address."],
-    ["At work or school", "a Google Workspace or Microsoft 365 admin can turn private links off; then the option isn't there."],
 ];
-const LEAKS = "Each link works like a password: anyone who has it can read that calendar until you reset it. If one leaks, reset it: in Google, Reset beside the secret address; in iCloud, turn Public Calendar off and on again; in Outlook, Reset links under Publish a calendar. Then Edit the calendar here and paste its new link, and do the same on your other devices, or Copy and Paste.";
+const HELP_LIMITS = "At work or school, a Google Workspace or Microsoft 365 admin can turn private links off; then the option isn't there.";
 
 class CalendarHelpModal extends Modal {
     onOpen() {
-        this.setTitle("Calendar links");
+        this.setTitle("How to get the links");
+        this.contentEl.createEl("p", {}, (p) => {
+            p.createEl("strong", { text: "NOTE:" });
+            p.appendText(` ${LINK_NOTE}`);
+        });
         const list = this.contentEl.createEl("ul");
         for (const [what, how] of HELP) {
             list.createEl("li", {}, (li) => {
@@ -195,7 +199,7 @@ class CalendarHelpModal extends Modal {
                 li.appendText(` ${how}`);
             });
         }
-        this.contentEl.createEl("p", { text: LEAKS });
+        this.contentEl.createEl("p", { text: HELP_LIMITS });
     }
 
     onClose() {
@@ -246,9 +250,9 @@ class CalendarModal extends Modal {
 
         const linkSetting = new Setting(this.contentEl).setName(editing ? "New link" : "Private link");
         linkSetting.descEl.appendText(!editing ? "Paste the calendar's private link. "
-            : settings.link(editing.id) !== null ? "This device has its link. Paste a new one to replace it, or leave this blank. "
+            : settings.link(editing.id) !== null ? "This calendar is already linked. Leave blank or paste a new link to replace it. "
                 : "This device has no link for it yet. ");
-        linkSetting.descEl.createEl("a", { text: "Where to find it", href: "#" }, (a) => a.addEventListener("click", (e) => {
+        linkSetting.descEl.createEl("a", { text: "Where to find it", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
             e.preventDefault();
             new CalendarHelpModal(this.app).open();
         }));
@@ -271,15 +275,15 @@ class CalendarModal extends Modal {
             accountInput.setValue(name);
             accounts.close();
         });
-        const addressSetting = new Setting(details).setName("Your address on this calendar")
-            .setDesc("The email address you're invited at on this calendar, so the sync leaves out invitations you declined. Separate more than one with commas. Blank shows every invitation.");
+        // The email address you're invited at on this calendar: the sync leaves out invitations it declined
+        const addressSetting = new Setting(details).setName("Email address for this calendar");
         const addressInput = new TextComponent(addressSetting.controlEl);
         addressInput.inputEl.autocomplete = "off";
         const addressLine = addressSetting.descEl.createDiv({ cls: "mod-warning" });
         if (editing) {
             nameInput.setValue(editing.name);
             accountInput.setValue(editing.account);
-            addressInput.setValue(editing.addresses.join(", "));
+            addressInput.setValue(editing.address);
         } else {
             details.hide();
         }
@@ -293,13 +297,12 @@ class CalendarModal extends Modal {
         let checked = null;
         let busy = false;
         const link = () => linkInput.getValue().trim();
-        const addresses = () => settings.addressesOf(addressInput.getValue());
-        // A line under the address when part of it isn't one; a link is never shown back
+        const address = () => settings.addressOf(addressInput.getValue());
+        // A line under the address when it isn't one
         const showAddresses = () => {
-            const { bad } = addresses();
-            const shown = bad.map((b) => (settings.linkFree(b) ? b : "a link"));
-            addressLine.setText(bad.length ? `Not an email address: ${shown.join(", ")}` : "");
-            return !bad.length;
+            const { bad } = address();
+            addressLine.setText(bad ? "That isn't an email address." : "");
+            return !bad;
         };
         addressInput.onChange(showAddresses);
 
@@ -354,7 +357,7 @@ class CalendarModal extends Modal {
                 return null;
             }
             if (!linkFree() || !showAddresses()) return null;
-            return { name, account: accountInput.getValue(), addresses: addresses().addresses };
+            return { name, account: accountInput.getValue(), address: address().address };
         };
         // Adds the calendar, or saves the edit, after checking a new link. What's typed is read again after
         // the check, so a change made while it ran is kept.
@@ -378,7 +381,7 @@ class CalendarModal extends Modal {
             } else {
                 // A Google link to a person's calendar names them: your address, when you haven't given one
                 const own = newLink ? feed.address(newLink) : null;
-                if (!given.addresses.length && own) given.addresses = [own];
+                if (!given.address && own) given.address = own;
                 await settings.editCalendar(editing.id, given, newLink);
             }
             this.close();
@@ -721,13 +724,11 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         (s) => s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)))),
                     row("Sync range", "How far ahead Sync calendars writes events into daily notes. Days beyond it are left as they are.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
-                    row("Private links", "Each calendar's link works like a password. It stays in this device's secret storage, never in a note or in Plainday's settings file.",
-                        (s) => link(s, "Where to find them, and if one leaks", () => new CalendarHelpModal(this.app).open())),
                 ],
             },
             ...[...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
                 heading: account,
-                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "Link on this device" : "Add link on this device: Edit, then paste it", (s) => {
+                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
                     // Put back when its save fails, which runs onChange again: that turn is ignored
                     let reverting = false;
                     s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {

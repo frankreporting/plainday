@@ -386,7 +386,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Calendars", ["Add calendar", "Sync range", "Private links"]],
+            ["group", "Calendars", ["Add calendar", "Sync range"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
         for (const g of defs) for (const i of g.items) {
@@ -520,7 +520,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
     // Every link here is invented
     const STUDIO = "https://calendar.google.com/calendar/ical/studio-owner%40example.com/private-0000invented/basic.ics";
     const stored = { invoices: { name: "Juniper Hale" }, calendars: { range: "3 weeks", list: [
-        { id: "studio0001", name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true },
+        { id: "studio0001", name: "Studio", account: "Work", address: "studio-owner@example.com", on: true },
         { id: "home000001", name: "Home", account: "Work", on: false },
         { id: "library001", name: "Library", account: "", on: true },
     ] } };
@@ -537,10 +537,9 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Calendars", [
                 ["Add calendar", "Add another calendar by its private link."],
                 ["Sync range", "How far ahead Sync calendars writes events into daily notes. Days beyond it are left as they are."],
-                ["Private links", "Each calendar's link works like a password. It stays in this device's secret storage, never in a note or in Plainday's settings file."],
             ]],
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
-            ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", "Link on this device"]]],
+            ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", undefined]]],
         ], "accounts and calendars in alphabetical order, each saying whether this device has its link");
         const item = (group, name) => defs.find((g) => g.heading === group).items.find((i) => i.name === name);
 
@@ -630,6 +629,19 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.equal(link.inputEl.attrs["data-1p-ignore"], "true");
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(fake.focused, link.inputEl, "the cursor in the link field");
+        // "Where to find it", in the link color, opens the help: the note on links first, then each
+        // provider, then what doesn't work
+        const where = dialog.contentEl.all().find((e) => e.tag === "a");
+        assert.deepEqual([where.text, where.hasClass("plainday-link")], ["Where to find it", true]);
+        where.fire("click");
+        const help = fake.modals.at(-1);
+        assert.equal(help.title, "How to get the links");
+        const [note, list, limits] = help.contentEl.children;
+        assert.deepEqual([note.children[0].tag, note.children[0].text, note.text], ["strong", "NOTE:",
+            " Treat calendar links like a password. If one leaks, reset at the source and get a new link. To sync a calendar that was shared with you, you'll need to ask the owner for the link."]);
+        assert.deepEqual(list.children.map((li) => li.children[0].text), ["Google Calendar", "iCloud", "Outlook", "A subscribed calendar"]);
+        assert.equal(limits.text, "At work or school, a Google Workspace or Microsoft 365 admin can turn private links off; then the option isn't there.");
+        help.close();
         const details = dialog.field("Name").inputEl;
         const go = () => dialog.buttons().find((b) => b.classes.size === 0 && b.text !== "Cancel");
         const shown = () => !dialog.settings().find((s) => s.name === "Name").settingEl.hidden && !dialog.contentEl.all().some((e) => e.hidden && e.all().includes(details));
@@ -653,7 +665,7 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.equal(link.inputEl.disabled, false);
         assert.equal(dialog.said(), "");
         assert.equal(shown(), true);
-        assert.deepEqual([dialog.field("Name").getValue(), dialog.field("Account").getValue(), dialog.field("Your address on this calendar").getValue()],
+        assert.deepEqual([dialog.field("Name").getValue(), dialog.field("Account").getValue(), dialog.field("Email address for this calendar").getValue()],
             ["Studio", "Google", "studio-owner@example.com"]);
         assert.equal(go().text, "Add calendar");
 
@@ -662,16 +674,16 @@ test("Add calendar: the link checked once, then its name, account and your addre
         await p.click(go());
         assert.match(dialog.said(), /^That's a link: paste it into the link field/);
         dialog.field("Name").type("Studio");
-        dialog.field("Your address on this calendar").type(GOOGLE_LINK.replace("%40", "@"));
+        dialog.field("Email address for this calendar").type(GOOGLE_LINK.replace("%40", "@"));
         await p.click(go());
-        assert.equal(dialog.settings().find((s) => s.name === "Your address on this calendar").descEl.all().find((e) => e.hasClass("mod-warning")).text, "Not an email address: a link", "never shown back");
+        assert.equal(dialog.settings().find((s) => s.name === "Email address for this calendar").descEl.all().find((e) => e.hasClass("mod-warning")).text, "That isn't an email address.", "a link never shown back");
         assert.deepEqual(p.plugin.saved, []);
-        dialog.field("Your address on this calendar").type("studio-owner@example.com");
+        dialog.field("Email address for this calendar").type("studio-owner@example.com");
         dialog.field("Account").type("Work");
         await p.click(go());
         assert.equal(dialog.isOpen, false);
         const saved = p.plugin.saved.at(-1).calendars.list;
-        assert.deepEqual(saved.map(({ name, account, addresses, on }) => ({ name, account, addresses, on })), [{ name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true }]);
+        assert.deepEqual(saved.map(({ name, account, address, on }) => ({ name, account, address, on })), [{ name: "Studio", account: "Work", address: "studio-owner@example.com", on: true }]);
         assert.equal(p.secrets.get(`plainday-calendar-vault001-${saved[0].id}`), GOOGLE_LINK);
         assert.equal(p.redrawn(), 1, "the panel drawn again with it");
         for (const s of p.plugin.saved) assert.ok(!JSON.stringify(s).includes("private-0000"), "no link in the settings file");
@@ -697,7 +709,7 @@ test("Add calendar: the link checked once, then its name, account and your addre
         await p.click(again.buttons().find((b) => b.text === "Check link"));
         await p.answer({ name: "" });
         assert.equal(again.field("Account").getValue(), "", "any other server suggests no account");
-        assert.equal(again.field("Your address on this calendar").getValue(), "");
+        assert.equal(again.field("Email address for this calendar").getValue(), "");
         again.field("Private link").type("https://example.org/other.ics");
         assert.ok(again.buttons().some((b) => b.text === "Check link"), "to be checked again");
         // Closed while a check runs: nothing is added
@@ -720,10 +732,13 @@ test("Edit: name, account and address saved; a new link checked, then kept on th
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(fake.focused, dialog.field("New link").inputEl, "no link here: the cursor in the link field");
         assert.match(dialog.settings().find((s) => s.name === "New link").descEl.text, /^This device has no link for it yet\./);
-        dialog.field("Your address on this calendar").type("Home@Example.com, desk@example.org");
+        dialog.field("Email address for this calendar").type("Home@Example.com, desk@example.org");
+        await p.click(dialog.buttons().find((b) => b.text === "Save"));
+        assert.equal(dialog.isOpen, true, "one address only");
+        dialog.field("Email address for this calendar").type("Home@Example.com");
         await p.click(dialog.buttons().find((b) => b.text === "Save"));
         assert.equal(dialog.isOpen, false);
-        assert.deepEqual(p.plugin.saved.at(-1).calendars.list[0].addresses, ["home@example.com", "desk@example.org"]);
+        assert.equal(p.plugin.saved.at(-1).calendars.list[0].address, "home@example.com");
         assert.equal(p.secrets.get("plainday-calendar-vault001-home000001"), undefined, "a blank link field leaves the link as it is");
 
         // A new Google link: checked, kept, and your address filled in from it while blank
@@ -731,6 +746,8 @@ test("Edit: name, account and address saved; a new link checked, then kept on th
         const studio = fake.modals.at(-1);
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(fake.focused, studio.field("Name").inputEl, "a link here: the cursor in the name");
+        assert.match(studio.settings().find((s) => s.name === "New link").descEl.text, /^This calendar is already linked\. Leave blank or paste a new link to replace it\. $/);
+        assert.equal(studio.settings().find((s) => s.name === "Email address for this calendar").descEl.text, "", "no description");
         studio.field("New link").type(GOOGLE_LINK);
         await p.click(studio.buttons().find((b) => b.text === "Save"));
         assert.equal(studio.said(), "Checking the link…");
@@ -739,7 +756,7 @@ test("Edit: name, account and address saved; a new link checked, then kept on th
         assert.equal(studio.isOpen, false);
         assert.equal(p.secrets.get("plainday-calendar-vault001-studio0001"), GOOGLE_LINK);
         const after = p.plugin.saved.at(-1).calendars.list.find((c) => c.id === "studio0001");
-        assert.deepEqual([after.name, after.addresses], ["Studio", ["studio-owner@example.com"]], "the name stays yours");
+        assert.deepEqual([after.name, after.address], ["Studio", "studio-owner@example.com"], "the name stays yours");
         for (const s of p.plugin.saved) assert.ok(!JSON.stringify(s).includes("private-0000"));
     } finally {
         p.plugin.onunload();
@@ -796,7 +813,7 @@ test("Settings → Plainday on an Obsidian before 1.13: display() draws the Cale
     try {
         plugin.tabs[0].display();
         assert.deepEqual(fake.groups.slice(-2).map((g) => [g.heading, g.rows.map((r) => r.name)]),
-            [["Calendars", ["Add calendar", "Sync range", "Private links"]], ["Work", ["Studio"]]]);
+            [["Calendars", ["Add calendar", "Sync range"]], ["Work", ["Studio"]]]);
         assert.equal(fake.groups.at(-1).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
     } finally {
         plugin.onunload();

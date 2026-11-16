@@ -368,18 +368,18 @@ test("calendars: the range and the list, as they read; anything else is left out
     const n = settings.normalize({ calendars: {
         range: " 3  Weeks ",
         list: [
-            { id: "abc123", name: " Studio ", account: "Work", addresses: "Me@Example.com, mailto:also@example.com; not-an-address", on: false, link: STUDIO_LINK, extra: 1 },
+            { id: "abc123", name: " Studio ", account: "Work", address: " mailto:Me@Example.com ", on: false, link: STUDIO_LINK, extra: 1 },
             { id: "abc123", name: "Twice" },
             { id: "Has-Caps", name: "Bad ID" },
             { id: "", name: "No ID" },
             { name: "No ID either" },
             "not a calendar",
-            { id: "home99", name: "Home", addresses: ["home@example.com", 7] },
+            { id: "home99", name: "Home", address: "home@example.com, desk@example.org" },
         ],
     } }, billing);
     assert.deepEqual(plain(n.calendars), { range: "3 weeks", list: [
-        { id: "abc123", name: "Studio", account: "Work", addresses: ["me@example.com", "also@example.com"], on: false },
-        { id: "home99", name: "Home", account: "", addresses: ["home@example.com"], on: true },
+        { id: "abc123", name: "Studio", account: "Work", address: "me@example.com", on: false },
+        { id: "home99", name: "Home", account: "", address: "", on: true },
     ] });
     assert.doesNotMatch(JSON.stringify(n), NO_LINK, "no link from what came in");
     for (const range of ["5 weeks", 14, null, "", "2 Months!"]) {
@@ -390,12 +390,14 @@ test("calendars: the range and the list, as they read; anything else is left out
     assert.equal(settings.rangeDays("nonsense"), 62);
 });
 
-test("addressesOf: your address on a calendar, one or more, in lower case; what isn't one is named", () => {
-    assert.deepEqual(plain(settings.addressesOf("")), { addresses: [], bad: [] });
-    assert.deepEqual(plain(settings.addressesOf(" Desk@Example.org ")), { addresses: ["desk@example.org"], bad: [] });
-    assert.deepEqual(plain(settings.addressesOf("a@example.com,b@example.com  a@example.com")), { addresses: ["a@example.com", "b@example.com"], bad: [] });
-    assert.deepEqual(plain(settings.addressesOf("a@example.com, desk, x@")), { addresses: ["a@example.com"], bad: ["desk", "x@"] });
-    assert.deepEqual(plain(settings.addressesOf(["mailto:A@example.com"])), { addresses: ["a@example.com"], bad: [] });
+test("addressOf: your email address on a calendar, one, in lower case; anything else isn't one", () => {
+    assert.deepEqual(plain(settings.addressOf("")), { address: "", bad: false });
+    assert.deepEqual(plain(settings.addressOf(" Desk@Example.org ")), { address: "desk@example.org", bad: false });
+    assert.deepEqual(plain(settings.addressOf("mailto:A@example.com")), { address: "a@example.com", bad: false });
+    for (const v of ["a@example.com, b@example.com", "a@example.com b@example.com", "desk", "x@", "a@b@c"]) {
+        assert.deepEqual(plain(settings.addressOf(v)), { address: "", bad: true }, v);
+    }
+    assert.deepEqual(plain(settings.addressOf(["a@example.com"])), { address: "", bad: false }, "not text: nothing");
 });
 
 test("rangeFromNote and rangeNotice: the Calendar Sync note's line, read once", () => {
@@ -414,9 +416,9 @@ test("rangeFromNote and rangeNotice: the Calendar Sync note's line, read once", 
 test("addCalendar, editCalendar, removeCalendar: the link only in secret storage, never in the data file", async () => {
     const f = withPlugin({ stored: JUNIPER });
     await f.s.load();
-    const studio = await f.s.addCalendar({ name: " Studio ", account: "Work", addresses: ["studio-owner@example.com"], link: ` ${STUDIO_LINK} ` });
+    const studio = await f.s.addCalendar({ name: " Studio ", account: "Work", address: "studio-owner@example.com", link: ` ${STUDIO_LINK} ` });
     assert.match(studio.id, /^[a-z0-9]{10}$/, "a random ID secret storage takes");
-    assert.deepEqual(plain(f.s.get().calendars.list), [{ id: studio.id, name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true }]);
+    assert.deepEqual(plain(f.s.get().calendars.list), [{ id: studio.id, name: "Studio", account: "Work", address: "studio-owner@example.com", on: true }]);
     assert.equal(f.secrets.get(`plainday-calendar-vault001-${studio.id}`), STUDIO_LINK, "under plainday-calendar-, the vault's key and its ID, trimmed");
     assert.equal(f.s.link(studio.id), STUDIO_LINK);
     const home = await f.s.addCalendar({ name: "Home", account: "iCloud", link: HOME_LINK });
@@ -426,8 +428,8 @@ test("addCalendar, editCalendar, removeCalendar: the link only in secret storage
     assert.equal(f.s.calendarWithLink(STUDIO_LINK, studio.id), null, "not the calendar being edited");
     assert.equal(f.s.calendarWithLink("https://example.org/other.ics"), null);
 
-    await f.s.editCalendar(home.id, { name: "Home", account: "iCloud", addresses: "home@example.com" }, `${HOME_LINK}x`);
-    assert.deepEqual(plain(f.s.calendar(home.id)?.addresses), ["home@example.com"]);
+    await f.s.editCalendar(home.id, { name: "Home", account: "iCloud", address: "Home@Example.com" }, `${HOME_LINK}x`);
+    assert.equal(f.s.calendar(home.id)?.address, "home@example.com");
     assert.equal(f.s.link(home.id), `${HOME_LINK}x`, "a new link replaces this device's");
     await f.s.editCalendar(home.id, { on: false });
     assert.equal(f.s.calendar(home.id)?.on, false);
@@ -466,7 +468,7 @@ test("a calendar that can't be saved isn't added, and leaves no link; an edit th
 test("Copy carries each calendar's link beside the settings; Paste stores them, and blanks the links of calendars it drops", async () => {
     const mac = withPlugin({ stored: JUNIPER });
     await mac.s.load();
-    const studio = await mac.s.addCalendar({ name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], link: STUDIO_LINK });
+    const studio = await mac.s.addCalendar({ name: "Studio", account: "Work", address: "studio-owner@example.com", link: STUDIO_LINK });
     const home = await mac.s.addCalendar({ name: "Home", account: "Work", link: HOME_LINK });
     const text = mac.s.copyText();
     assert.ok(!text.includes("\n"));
@@ -482,7 +484,7 @@ test("Copy carries each calendar's link beside the settings; Paste stores them, 
     assert.deepEqual(plain(Object.keys(read.links ?? {}).sort()), [studio.id, home.id].sort());
     await phone.s.replaceWith(read.settings, read.links);
     assert.deepEqual(plain(phone.s.get().calendars.list.map((c) => [c.id, c.name, c.account])), [[studio.id, "Studio", "Work"], [home.id, "Home", "Work"]], "calendars keep their IDs");
-    assert.deepEqual(plain(phone.s.get().calendars.list[0].addresses), ["studio-owner@example.com"]);
+    assert.equal(phone.s.get().calendars.list[0].address, "studio-owner@example.com");
     assert.equal(phone.s.get().calendars.range, "2 months");
     assert.equal(phone.s.link(studio.id), STUDIO_LINK);
     assert.equal(phone.s.link(home.id), HOME_LINK);
@@ -568,10 +570,9 @@ test("the demo's data file holds no calendar, and no link", () => {
 
 test("a link pasted into a calendar's name, account or address is never kept, from the panel, a paste or a file", async () => {
     const outlookish = "https://outlook.office365.com/owa/calendar/0000aaaa@example.com/1111bbbb/calendar.ics";
-    assert.deepEqual(plain(settings.addressesOf(`${outlookish}, me@example.com`)), { addresses: ["me@example.com"], bad: [outlookish] }, "no / or : in an address");
-    assert.deepEqual(plain(settings.addressesOf("mailto:me@example.com")), { addresses: ["me@example.com"], bad: [] });
-    const n = settings.normalize({ calendars: { list: [{ id: "abc", name: STUDIO_LINK, account: "webcal://x", addresses: [outlookish] }] } }, billing);
-    assert.deepEqual(plain(n.calendars.list), [{ id: "abc", name: "", account: "", addresses: [], on: true }]);
+    assert.deepEqual(plain(settings.addressOf(outlookish)), { address: "", bad: true }, "no / or : in an address");
+    const n = settings.normalize({ calendars: { list: [{ id: "abc", name: STUDIO_LINK, account: "webcal://x", address: outlookish }] } }, billing);
+    assert.deepEqual(plain(n.calendars.list), [{ id: "abc", name: "", account: "", address: "", on: true }]);
     assert.equal(settings.linkFree("Team: planning"), "Team: planning", "a colon alone is fine");
     const f = withPlugin({ stored: JUNIPER });
     await f.s.load();
@@ -581,7 +582,7 @@ test("a link pasted into a calendar's name, account or address is never kept, fr
     f.s.get().calendars.list[0].link = STUDIO_LINK;
     await f.s.set("calendars", { range: "1 week" });
     for (const saved of f.saves) assert.doesNotMatch(JSON.stringify(saved), NO_LINK);
-    assert.deepEqual(Object.keys(f.saves.at(-1).calendars.list[0]).sort(), ["account", "addresses", "id", "name", "on"]);
+    assert.deepEqual(Object.keys(f.saves.at(-1).calendars.list[0]).sort(), ["account", "address", "id", "name", "on"]);
 });
 
 test("Paste blanks every calendar link this device keeps but the copy's, a removed calendar's too; an older copy leaves the calendars alone; a failed save changes nothing", async () => {
@@ -694,7 +695,7 @@ test("reload: a file with no calendars from an older device keeps this device's,
     await f.s.load();
     f.plugin.loadData = async () => ({ ...JUNIPER_BEFORE, invoices: { ...JUNIPER.invoices, lastNumber: 1007 } });
     await f.s.reload();
-    assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", addresses: [], on: true }] });
+    assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", address: "", on: true }] });
     assert.equal(f.saves.at(-1).invoices.lastNumber, 1007, "the rest is the other device's");
     // The next start reads what was written back, and nothing from the old note
     f.plugin.loadData = async () => f.saves.at(-1);

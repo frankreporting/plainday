@@ -9,7 +9,7 @@ export default class CalendarFeed {
     // Add calendar checks a link with it (check()); OBS-275 wires it into Sync calendars.
     //
     //   const window = feed.window(62);
-    //   const got = await feed.load(link, { calendar: { id, name, account, addresses }, window });
+    //   const got = await feed.load(link, { calendar: { id, name, account, address }, window });
     //   got.problem   why the calendar couldn't be synced: "dead" (the link stopped working),
     //                 "unreachable", "unreadable" (not a calendar, or cut off), or "slow" (its read
     //                 ran past READ_LIMIT_MS)
@@ -174,20 +174,18 @@ export default class CalendarFeed {
         }
     }
 
-    // Whose declined invitations are left out: your address (or addresses) on the calendar, from
-    // Plainday's settings, when you've given one; else the calendar's own, when its link says it
-    // (owner()); else none, and every invitation is read (OBS-282)
+    // Whose declined invitations are left out: your email address on the calendar, from Plainday's
+    // settings, when you've given one; else the calendar's own, when its link says it (owner()); else
+    // none, and every invitation is read (OBS-282)
     owners(calendar = {}, link = null) {
-        const given = Array.isArray(calendar?.addresses)
-            ? calendar.addresses.map((a) => String(a ?? "").trim().replace(/^mailto:/i, "").toLowerCase()).filter(Boolean)
-            : [];
-        if (given.length) return given;
+        const given = typeof calendar?.address === "string" ? calendar.address.trim().replace(/^mailto:/i, "").toLowerCase() : "";
+        if (given) return [given];
         const own = this.owner(link);
         return own ? [own] : null;
     }
 
     // Reads a feed's text in a background worker: { name, events, failed, stats }, or a problem.
-    // `calendar` is the calendar's { id, name, account, addresses } in Plainday's settings, `window`
+    // `calendar` is the calendar's { id, name, account, address } in Plainday's settings, `window`
     // from window(), and `link` the link it came from, which says whose calendar it is when it's
     // Google's and the calendar has no address of yours (owners()).
     async read(text, { calendar = {}, window: range, link = null }) {

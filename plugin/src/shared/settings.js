@@ -14,9 +14,8 @@ export default class Settings {
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221).
     //   - calendars (OBS-282): how far ahead Sync calendars writes events (`range`), and the calendars
-    //     added by their private links, each { id, name, account, addresses, on }: `addresses` is your
-    //     address (or addresses) on that calendar, by which the calendar reader leaves out an invitation
-    //     you declined. A calendar's link is never here: it's in this device's secret storage, under
+    //     added by their private links, each { id, name, account, address, on }: `address` is your email
+    //     address on that calendar, by which the calendar reader leaves out an invitation you declined. A calendar's link is never here: it's in this device's secret storage, under
     //     `plainday-calendar-<this vault's key>-<its id>` (link(), storeLink()), so it's never in a note,
     //     Plainday's data file, the console or a notice. The vault's key, random and kept in this vault's
     //     own local storage (vaultKey()), keeps two vaults apart on a phone, where Obsidian keeps one
@@ -93,7 +92,7 @@ export default class Settings {
      *   editor: { listCursor: boolean },
      *   calendars: { range: string, list: Calendar[] },
      * }}
-     * @typedef {{ id: string, name: string, account: string, addresses: string[], on: boolean }} Calendar
+     * @typedef {{ id: string, name: string, account: string, address: string, on: boolean }} Calendar
      */
     defaults() {
         return {
@@ -204,7 +203,7 @@ export default class Settings {
             if (!Settings.ID.test(id) || ids.has(id)) continue;
             ids.add(id);
             out.calendars.list.push({ id, name: this.linkFree(cal.name), account: this.linkFree(cal.account),
-                addresses: this.addressesOf(cal.addresses).addresses, on: typeof cal.on === "boolean" ? cal.on : true });
+                address: this.addressOf(cal.address).address, on: typeof cal.on === "boolean" ? cal.on : true });
         }
         return out;
     }
@@ -247,23 +246,15 @@ export default class Settings {
     }
 
     /**
-     * Your address (or addresses) on a calendar, from a list or from text with them separated by commas,
-     * semicolons or spaces: { addresses, bad }, each address in lower case without `mailto:`, once
+     * Your email address on a calendar: { address }, in lower case without `mailto:`, "" when blank, or
+     * { address: "", bad: true } when it isn't one (a link never is: it has a / or :)
      * @param {unknown} raw
-     * @returns {{ addresses: string[], bad: string[] }}
+     * @returns {{ address: string, bad: boolean }}
      */
-    addressesOf(raw) {
-        const addresses = [], bad = [];
-        for (const v of [].concat(raw ?? [])) {
-            if (typeof v !== "string") continue;
-            for (const part of v.split(/[\s,;]+/)) {
-                const a = part.trim().replace(/^mailto:/i, "").toLowerCase();
-                if (!a) continue;
-                if (!Settings.ADDRESS.test(a)) bad.push(part.trim());
-                else if (!addresses.includes(a)) addresses.push(a);
-            }
-        }
-        return { addresses, bad };
+    addressOf(raw) {
+        const a = typeof raw === "string" ? raw.trim().replace(/^mailto:/i, "").toLowerCase() : "";
+        if (!a) return { address: "", bad: false };
+        return Settings.ADDRESS.test(a) ? { address: a, bad: false } : { address: "", bad: true };
     }
 
     /**
@@ -389,14 +380,14 @@ export default class Settings {
 
     /**
      * Adds a calendar, switched on, with its link in this device's secret storage, and saves
-     * @param {{ name: string, account?: string, addresses?: string[], link: string }} calendar
+     * @param {{ name: string, account?: string, address?: string, link: string }} calendar
      * @returns {Promise<Calendar>}
      */
-    async addCalendar({ name, account = "", addresses = [], link }) {
+    async addCalendar({ name, account = "", address = "", link }) {
         const id = this.newId();
         this.storeLink(id, link);
         /** @type {Calendar} */
-        const calendar = { id, name: this.linkFree(name), account: this.linkFree(account), addresses: this.addressesOf(addresses).addresses, on: true };
+        const calendar = { id, name: this.linkFree(name), account: this.linkFree(account), address: this.addressOf(address).address, on: true };
         this.data.calendars.list.push(calendar);
         try {
             await this.save();
@@ -409,7 +400,7 @@ export default class Settings {
     }
 
     /**
-     * Changes a calendar's name, account, addresses or switch, and saves; with `link`, keeps that as its
+     * Changes a calendar's name, account, address or switch, and saves; with `link`, keeps that as its
      * link on this device once saved
      * @param {string} id
      * @param {Partial<Omit<Calendar, "id">>} values
@@ -421,7 +412,7 @@ export default class Settings {
         const before = { ...calendar };
         if (values.name !== undefined) calendar.name = this.linkFree(values.name);
         if (values.account !== undefined) calendar.account = this.linkFree(values.account);
-        if (values.addresses !== undefined) calendar.addresses = this.addressesOf(values.addresses).addresses;
+        if (values.address !== undefined) calendar.address = this.addressOf(values.address).address;
         if (typeof values.on === "boolean") calendar.on = values.on;
         try {
             await this.save();

@@ -298,31 +298,28 @@ test("your address on a calendar, from Plainday's settings, leaves out the invit
     const { feed } = reader();
     const window = feed.window(14, at(day));
     const all = feeds(day);
-    const read = (name, addresses) => feed.read(all[name].text, { calendar: { ...CALENDARS[name], addresses }, window, link: all[name].link });
+    const read = (name, address) => feed.read(all[name].text, { calendar: { ...CALENDARS[name], address }, window, link: all[name].link });
     // iCloud (by its EMAIL parameter) and Outlook: left out with your address, read without it
     for (const [name, title] of [["home", "Book swap"], ["library", "Shelf audit"]]) {
-        const given = await read(name, [OWNERS[name]]);
+        const given = await read(name, OWNERS[name].toUpperCase());
         assert.equal(given.events.some((e) => e.title === title), false, name);
         assert.equal(given.stats.declined, 1, name);
-        const blank = await read(name, []);
+        const blank = await read(name, "");
         assert.equal(blank.events.some((e) => e.title === title), true, `${name}, blank`);
         assert.equal(blank.stats.declined, 0);
     }
-    // More than one address: either one's decline counts
-    const two = await read("home", ["someone@example.com", OWNERS.home.toUpperCase()]);
-    assert.equal(two.stats.declined, 1);
     // Google: blank, the link's own address; given, yours instead
-    assert.equal((await read("studio", [])).stats.declined, 1, "the link's address");
-    const other = await read("studio", ["lead@example.com"]);
+    assert.equal((await read("studio", "")).stats.declined, 1, "the link's address");
+    const other = await read("studio", "lead@example.com");
     assert.equal(other.events.some((e) => e.title === "Vendor demo"), true, "the link's owner declined it, but that isn't your address here");
 });
 
-test("owners: your addresses, else the Google link's, else none; the account a link suggests; what's a link", () => {
+test("owners: your address, else the Google link's, else none; the account a link suggests; what's a link", () => {
     const { feed } = reader();
-    assert.deepEqual(plain(feed.owners({ addresses: [" Me@Example.com ", "", "mailto:also@example.com"] }, LINKS.studio)), ["me@example.com", "also@example.com"]);
-    assert.deepEqual(plain(feed.owners({ addresses: [] }, LINKS.studio)), ["studio-owner@example.com"]);
+    assert.deepEqual(plain(feed.owners({ address: " mailto:Me@Example.com " }, LINKS.studio)), ["me@example.com"]);
+    assert.deepEqual(plain(feed.owners({ address: "" }, LINKS.studio)), ["studio-owner@example.com"]);
     assert.deepEqual(plain(feed.owners({}, LINKS.studio)), ["studio-owner@example.com"]);
-    assert.equal(feed.owners({ addresses: [] }, LINKS.home), null);
+    assert.equal(feed.owners({ address: "" }, LINKS.home), null);
     assert.equal(feed.owners(undefined, null), null);
     assert.deepEqual([LINKS.studio, LINKS.home, LINKS.library, "https://outlook.live.com/owa/calendar/x/reachcalendar.ics",
         "http://127.0.0.1:8765/studio.ics", "https://example.org/cal.ics", "not a link"].map((l) => feed.account(l)),
