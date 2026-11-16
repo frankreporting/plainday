@@ -346,33 +346,40 @@ class CalendarModal extends Modal {
             go.setButtonText("Add calendar");
             nameInput.inputEl.focus();
         };
-        // Adds the calendar, or saves the edit, after checking a new link
-        const save = async () => {
+        // The name, account and address as typed, when they'll do; else null, with the line that says why
+        const values = () => {
             const name = nameInput.getValue().trim();
             if (!name) {
                 said.setText("Give the calendar a name.");
-                return;
+                return null;
             }
-            if (!linkFree() || !showAddresses()) return;
-            let given = addresses().addresses;
-            if (!editing) {
-                await settings.addCalendar({ name, account: accountInput.getValue(), addresses: given, link: checked ?? "" });
-            } else {
-                /** @type {string | null} */
-                let newLink = null;
-                if (link()) {
-                    const got = await check();
-                    if (this.closed) return;
-                    if (got.problem !== undefined) {
-                        said.setText(got.problem);
-                        return;
-                    }
-                    newLink = got.link;
-                    // A Google link names the calendar's owner: your address, when you haven't given one
-                    const own = feed.address(newLink);
-                    if (!given.length && own) given = [own];
+            if (!linkFree() || !showAddresses()) return null;
+            return { name, account: accountInput.getValue(), addresses: addresses().addresses };
+        };
+        // Adds the calendar, or saves the edit, after checking a new link. What's typed is read again after
+        // the check, so a change made while it ran is kept.
+        const save = async () => {
+            if (!values()) return;
+            /** @type {string | null} */
+            let newLink = null;
+            if (editing && link()) {
+                const got = await check();
+                if (this.closed) return;
+                if (got.problem !== undefined) {
+                    said.setText(got.problem);
+                    return;
                 }
-                await settings.editCalendar(editing.id, { name, account: accountInput.getValue(), addresses: given }, newLink);
+                newLink = got.link;
+            }
+            const given = values();
+            if (!given) return;
+            if (!editing) {
+                await settings.addCalendar({ ...given, link: checked ?? "" });
+            } else {
+                // A Google link to a person's calendar names them: your address, when you haven't given one
+                const own = newLink ? feed.address(newLink) : null;
+                if (!given.addresses.length && own) given.addresses = [own];
+                await settings.editCalendar(editing.id, given, newLink);
             }
             this.close();
             this.done();
@@ -680,12 +687,28 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const ranges = Object.fromEntries(settings.rangeLabels().map((label) => [label, label]));
         /** @param {Calendar | null} calendar */
         const dialog = (calendar) => new CalendarModal(this.app, calendar, () => this.redraw()).open();
+        // Each account's calendars, in alphabetical order. Obsidian 1.13+ tells rows apart by their names and
+        // groups by their headings, so none repeats: a second calendar named alike in an account is
+        // "Calendar (2)", and an account named like one of the panel's own sections is "… calendars".
         /** @type {Map<string, Calendar[]>} */
         const accounts = new Map();
+        const taken = new Set(["", "invoices", "tables", "editor", "calendars"]);
         for (const c of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
-            const account = c.account || "No account";
+            const name = c.account || "No account";
+            const account = taken.has(name.toLowerCase()) ? `${name} calendars` : name;
             accounts.set(account, [...(accounts.get(account) ?? []), c]);
         }
+        /** @param {Calendar[]} calendars @returns {[Calendar, string][]} */
+        const named = (calendars) => {
+            /** @type {Map<string, number>} */
+            const seen = new Map();
+            return calendars.map((c) => {
+                const base = c.name || "Untitled calendar";
+                const n = (seen.get(base) ?? 0) + 1;
+                seen.set(base, n);
+                return [c, n === 1 ? base : `${base} (${n})`];
+            });
+        };
         return [
             {
                 heading: "Calendars",
@@ -700,11 +723,18 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             },
             ...[...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
                 heading: account,
-                rows: calendars.map((c) => row(c.name || "Untitled calendar", settings.link(c.id) ? "Link on this device" : "Add link on this device: Edit, then paste it", (s) => {
+                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "Link on this device" : "Add link on this device: Edit, then paste it", (s) => {
+                    // Put back when its save fails, which runs onChange again: that turn is ignored
+                    let reverting = false;
                     s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {
+                        if (reverting) return;
                         settings.editCalendar(c.id, { on }).catch((e) => {
+                            reverting = true;
                             t.setValue(!on);
+                            reverting = false;
                             new Notice(`Couldn't save: ${messageOf(e)}`);
+                            // Gone from the list (Sync brought another device's): draw the panel again
+                            if (!settings.calendar(c.id)) this.redraw();
                         });
                     }));
                     s.addButton((b) => b.setButtonText("Edit").onClick(() => dialog(c)));

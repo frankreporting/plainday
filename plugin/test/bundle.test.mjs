@@ -99,9 +99,15 @@ class FakeButton {
     onClick(fn) { this.buttonEl.addEventListener("click", fn); return this; }
     setDisabled(d) { this.buttonEl.disabled = d; return this; }
 }
+// As Obsidian's: setValue runs the change callback when the value changes
 class FakeToggle {
     constructor(el) { this.toggleEl = el.createEl("toggle"); }
-    setValue(v) { this.value = v; return this; }
+    setValue(v) {
+        const changed = this.value !== undefined && this.value !== v;
+        this.value = v;
+        if (changed) this.changed?.(v);
+        return this;
+    }
     setTooltip() { return this; }
     onChange(fn) { this.changed = fn; return this; }
 }
@@ -193,7 +199,10 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     globalThis.window = globalThis;
     new Function("module", "exports", "require", fs.readFileSync(file, "utf8"))(module, module.exports, req);
     const layout = [];
-    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null } };
+    // This vault's local storage holds its key for its calendar links' names: "vault001"
+    const local = new Map([["plainday-calendar-key", "vault001"]]);
+    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null },
+        loadLocalStorage: (k) => local.get(k) ?? null, saveLocalStorage: (k, v) => { local.set(k, v); } };
     const plugin = new module.exports.default(app, { id: "plainday" });
     return { plugin, layout, notices, suggests };
 }
@@ -516,7 +525,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         { id: "library001", name: "Library", account: "", on: true },
     ] } };
     const { plugin, notices } = load(BUNDLE, { stored });
-    const secrets = new Map([["plainday-calendar-studio0001", STUDIO]]);
+    const secrets = new Map([["plainday-calendar-vault001-studio0001", STUDIO]]);
     plugin.app.secretStorage = { getSecret: (id) => secrets.get(id) ?? null, setSecret: (id, v) => { secrets.set(id, v); }, listSecrets: () => [...secrets.keys()] };
     await plugin.onload();
     try {
@@ -572,7 +581,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         studio.buttons.Remove.click();
         await new Promise((r) => setTimeout(r, 0));
         assert.deepEqual(plugin.saved.at(-1).calendars.list.map((c) => c.name), ["Home", "Library"]);
-        assert.equal(secrets.get("plainday-calendar-studio0001"), "");
+        assert.equal(secrets.get("plainday-calendar-vault001-studio0001"), "");
         assert.equal(redrawn, 1, "the panel drawn again without it");
         for (const saved of plugin.saved) assert.ok(!JSON.stringify(saved).includes("private-0000"), "no link in the settings file");
 
@@ -663,7 +672,7 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.equal(dialog.isOpen, false);
         const saved = p.plugin.saved.at(-1).calendars.list;
         assert.deepEqual(saved.map(({ name, account, addresses, on }) => ({ name, account, addresses, on })), [{ name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true }]);
-        assert.equal(p.secrets.get(`plainday-calendar-${saved[0].id}`), GOOGLE_LINK);
+        assert.equal(p.secrets.get(`plainday-calendar-vault001-${saved[0].id}`), GOOGLE_LINK);
         assert.equal(p.redrawn(), 1, "the panel drawn again with it");
         for (const s of p.plugin.saved) assert.ok(!JSON.stringify(s).includes("private-0000"), "no link in the settings file");
 
@@ -703,7 +712,7 @@ test("Add calendar: the link checked once, then its name, account and your addre
 
 test("Edit: name, account and address saved; a new link checked, then kept on this device; a calendar with no link here starts in the link field (OBS-282)", async () => {
     const stored = { calendars: { list: [{ id: "home000001", name: "Home", account: "iCloud" }, { id: "studio0001", name: "Studio", account: "Work" }] } };
-    const p = await calendarPanel(stored, new Map([["plainday-calendar-studio0001", "https://example.org/studio.ics"]]));
+    const p = await calendarPanel(stored, new Map([["plainday-calendar-vault001-studio0001", "https://example.org/studio.ics"]]));
     try {
         await p.click(p.row("iCloud", "Home").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
@@ -715,7 +724,7 @@ test("Edit: name, account and address saved; a new link checked, then kept on th
         await p.click(dialog.buttons().find((b) => b.text === "Save"));
         assert.equal(dialog.isOpen, false);
         assert.deepEqual(p.plugin.saved.at(-1).calendars.list[0].addresses, ["home@example.com", "desk@example.org"]);
-        assert.equal(p.secrets.get("plainday-calendar-home000001"), undefined, "a blank link field leaves the link as it is");
+        assert.equal(p.secrets.get("plainday-calendar-vault001-home000001"), undefined, "a blank link field leaves the link as it is");
 
         // A new Google link: checked, kept, and your address filled in from it while blank
         await p.click(p.row("Work", "Studio").button("Edit").buttonEl);
@@ -728,10 +737,51 @@ test("Edit: name, account and address saved; a new link checked, then kept on th
         assert.equal(studio.field("New link").inputEl.disabled, true);
         await p.answer({ name: "Something else" });
         assert.equal(studio.isOpen, false);
-        assert.equal(p.secrets.get("plainday-calendar-studio0001"), GOOGLE_LINK);
+        assert.equal(p.secrets.get("plainday-calendar-vault001-studio0001"), GOOGLE_LINK);
         const after = p.plugin.saved.at(-1).calendars.list.find((c) => c.id === "studio0001");
         assert.deepEqual([after.name, after.addresses], ["Studio", ["studio-owner@example.com"]], "the name stays yours");
         for (const s of p.plugin.saved) assert.ok(!JSON.stringify(s).includes("private-0000"));
+    } finally {
+        p.plugin.onunload();
+    }
+});
+
+test("a calendar's switch that can't be saved goes back once, and a calendar gone from the list draws the panel again (OBS-282)", async () => {
+    const stored = { calendars: { list: [{ id: "studio0001", name: "Studio", account: "Work", on: true }] } };
+    const p = await calendarPanel(stored);
+    try {
+        const row = p.row("Work", "Studio");
+        const toggle = row.components.find((c) => c instanceof FakeToggle);
+        // Sync brought another device's settings, without this calendar, while the panel was open
+        window.plainday.Settings.get().calendars.list = [];
+        toggle.setValue(false);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(toggle.value, true, "back as it was");
+        assert.equal(p.notices.filter((n) => n.startsWith("Couldn't save")).length, 1, "once, not over and over");
+        assert.equal(p.redrawn(), 1);
+    } finally {
+        p.plugin.onunload();
+    }
+});
+
+test("Edit: a name typed while a new link is checked is the one saved; repeated names and an account named like a section are told apart (OBS-282)", async () => {
+    const stored = { calendars: { list: [
+        { id: "cal0000001", name: "Calendar", account: "iCloud" }, { id: "cal0000002", name: "Calendar", account: "iCloud" },
+        { id: "inv0000001", name: "Billing", account: "Invoices" },
+    ] } };
+    const p = await calendarPanel(stored);
+    try {
+        const defs = p.tab.getSettingDefinitions();
+        assert.deepEqual(defs.slice(5).map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)"]], ["Invoices calendars", ["Billing"]]]);
+        await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
+        const dialog = fake.modals.at(-1);
+        dialog.field("New link").type("https://example.org/new.ics");
+        await p.click(dialog.buttons().find((b) => b.text === "Save"));
+        dialog.field("Name").type("Family");
+        await p.answer({ name: "Ignored" });
+        assert.equal(dialog.isOpen, false);
+        assert.equal(window.plainday.Settings.calendar("cal0000002").name, "Family");
+        assert.equal(window.plainday.Settings.link("cal0000002"), "https://example.org/new.ics");
     } finally {
         p.plugin.onunload();
     }

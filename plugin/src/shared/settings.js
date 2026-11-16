@@ -17,8 +17,10 @@ export default class Settings {
     //     added by their private links, each { id, name, account, addresses, on }: `addresses` is your
     //     address (or addresses) on that calendar, by which the calendar reader leaves out an invitation
     //     you declined. A calendar's link is never here: it's in this device's secret storage, under
-    //     `plainday-calendar-<its id>` (link(), storeLink()), so it's never in a note, Plainday's data
-    //     file, the console or a notice. Until OBS-275, nothing syncs from the list; Sync calendars reads
+    //     `plainday-calendar-<this vault's key>-<its id>` (link(), storeLink()), so it's never in a note,
+    //     Plainday's data file, the console or a notice. The vault's key, random and kept in this vault's
+    //     own local storage (vaultKey()), keeps two vaults apart on a phone, where Obsidian keeps one
+    //     secret storage for every vault. Until OBS-275, nothing syncs from the list; Sync calendars reads
     //     only the range from here.
     //
     // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
@@ -62,10 +64,15 @@ export default class Settings {
     // An email address, as much as the reader needs: something@something, with no spaces, and no / or
     // : so no link is ever taken for one
     static ADDRESS = /^[^\s@,;<>()"/:]+@[^\s@,;<>()"/:]+$/;
-    // Text that holds a link: a calendar's link pasted into its name or account is never kept there
-    static LINKISH = /:\/\/|^\s*(?:https?|webcals?):/i;
-    // What a pasted copy's link may be: https://, http:// or webcal://, and no spaces
-    static LINK = /^(?:https?|webcals?):\/\/\S+$/i;
+    // Text that holds a link, with its scheme or without (a server's name, then a path): a calendar's
+    // link pasted into its name or account is never kept there
+    static LINKISH = /:\/\/|^\s*(?:https?|webcals?):|[a-z0-9-]+(?:\.[a-z0-9-]+)+\/\S/i;
+    // What a pasted copy's link may be, as Add calendar takes one: https:// or webcal://, or http:// from
+    // this device itself, with no spaces
+    static LINK = /^(?:(?:https|webcals?):\/\/|http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?:[:/]|$))\S*$/i;
+    // Where this vault keeps its key for the names of its secrets (app.saveLocalStorage: this vault's,
+    // on this device)
+    static VAULT_KEY = "plainday-calendar-key";
 
     constructor() {
         this.data = this.defaults();
@@ -270,9 +277,22 @@ export default class Settings {
         return this.data.calendars.list.find((c) => c.id === id) ?? null;
     }
 
-    // What names a calendar's link in this device's secret storage
+    /**
+     * This vault's key in the names of its calendar links: random, made the first time it's needed, and
+     * kept in this vault's own local storage on this device
+     * @returns {string}
+     */
+    vaultKey() {
+        const kept = app.loadLocalStorage(Settings.VAULT_KEY);
+        if (typeof kept === "string" && /^[a-z0-9]{8}$/.test(kept)) return kept;
+        const key = this.randomId(8);
+        app.saveLocalStorage(Settings.VAULT_KEY, key);
+        return key;
+    }
+
+    // What names a calendar's link in this device's secret storage: this vault's, by its ID
     secretId(id) {
-        return `${Settings.SECRET_PREFIX}${id}`;
+        return `${Settings.SECRET_PREFIX}${this.vaultKey()}-${id}`;
     }
 
     /**
@@ -303,14 +323,16 @@ export default class Settings {
     }
 
     /**
-     * The IDs of every calendar link this device keeps, whether or not a calendar in the list has it
-     * (one removed on another device, which Sync took out of the list, keeps its link here)
+     * The IDs of every calendar link this vault keeps on this device, whether or not a calendar in the
+     * list has it (one removed on another device, which Sync took out of the list, keeps its link here).
+     * Another vault's are never among them.
      * @returns {string[]}
      */
     storedIds() {
+        const mine = `${Settings.SECRET_PREFIX}${this.vaultKey()}-`;
         return (app.secretStorage?.listSecrets() ?? [])
-            .filter((name) => name.startsWith(Settings.SECRET_PREFIX))
-            .map((name) => name.slice(Settings.SECRET_PREFIX.length));
+            .filter((name) => name.startsWith(mine))
+            .map((name) => name.slice(mine.length));
     }
 
     // A link as two links to one calendar compare: trimmed, a webcal:// link as the https:// one it is
@@ -333,11 +355,20 @@ export default class Settings {
      * @returns {string}
      */
     newId() {
-        const letters = "abcdefghijklmnopqrstuvwxyz0123456789";
         for (;;) {
-            const id = Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => letters[b % letters.length]).join("");
+            const id = this.randomId(10);
             if (!this.calendar(id) && this.link(id) === null) return id;
         }
+    }
+
+    /**
+     * Random lowercase letters and digits, as many as `n`
+     * @param {number} n
+     * @returns {string}
+     */
+    randomId(n) {
+        const letters = "abcdefghijklmnopqrstuvwxyz0123456789";
+        return Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => letters[b % letters.length]).join("");
     }
 
     /**
@@ -642,7 +673,8 @@ export default class Settings {
 
     // Sync changed the data file: read it again, and apply the editor switch. A file caught mid-write (or
     // not downloaded yet) reads as undefined: the settings in memory stay until it reads. The last invoice
-    // number stays the higher of the two.
+    // number stays the higher of the two. A file with no calendars, from a device on a release before
+    // them, keeps this device's, and is written again with them, so they're there at the next start.
     async reload() {
         const plugin = plainday.plugin;
         if (!plugin) return;
@@ -650,12 +682,14 @@ export default class Settings {
         if (raw === undefined) return;
         this.unreadable = false;
         this.saved = raw !== null;
+        const hadCalendars = this.calendarsSaved;
         this.calendarsSaved = this.hasCalendars(raw);
         // As a paste does: an older file from another device never lowers the number given here
         const next = this.pasted(this.normalize(raw ?? {}));
-        // A file from a device on a release before calendars leaves this device's as they are
-        if (raw !== null && !this.calendarsSaved) next.calendars = this.data.calendars;
+        const keep = raw !== null && !this.calendarsSaved && hadCalendars;
+        if (keep) next.calendars = this.data.calendars;
         this.data = next;
+        if (keep) await this.save();
         await plainday.ListCursor?.invoke();
     }
 

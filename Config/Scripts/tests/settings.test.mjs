@@ -176,7 +176,7 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
 // undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
 // vault holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false } = {}) {
+function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001" } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0;
     const plugin = {
@@ -188,7 +188,11 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
         },
         failSave,
     };
+    // This vault's local storage, where its key for its secrets' names is kept: "vault001" unless given
+    const local = new Map(vaultKey ? [["plainday-calendar-key", vaultKey]] : []);
     const app = {
+        loadLocalStorage: (k) => local.get(k) ?? null,
+        saveLocalStorage: (k, v) => { local.set(k, v); },
         // As Obsidian's: names in lowercase letters, digits and dashes, one string each
         secretStorage: {
             setSecret: (id, v) => { if (!/^[a-z0-9-]+$/.test(id)) throw new Error(`bad id ${id}`); secrets.set(id, v); },
@@ -412,7 +416,7 @@ test("addCalendar, editCalendar, removeCalendar: the link only in secret storage
     const studio = await f.s.addCalendar({ name: " Studio ", account: "Work", addresses: ["studio-owner@example.com"], link: ` ${STUDIO_LINK} ` });
     assert.match(studio.id, /^[a-z0-9]{10}$/, "a random ID secret storage takes");
     assert.deepEqual(plain(f.s.get().calendars.list), [{ id: studio.id, name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true }]);
-    assert.equal(f.secrets.get(`plainday-calendar-${studio.id}`), STUDIO_LINK, "under plainday-calendar- and its ID, trimmed");
+    assert.equal(f.secrets.get(`plainday-calendar-vault001-${studio.id}`), STUDIO_LINK, "under plainday-calendar-, the vault's key and its ID, trimmed");
     assert.equal(f.s.link(studio.id), STUDIO_LINK);
     const home = await f.s.addCalendar({ name: "Home", account: "iCloud", link: HOME_LINK });
     assert.notEqual(home.id, studio.id);
@@ -435,7 +439,7 @@ test("addCalendar, editCalendar, removeCalendar: the link only in secret storage
     await f.s.removeCalendar(home.id);
     assert.deepEqual(plain(f.s.get().calendars.list.map((c) => c.name)), ["Studio"]);
     assert.equal(f.s.link(home.id), null, "its link blanked on this device");
-    assert.equal(f.secrets.get(`plainday-calendar-${home.id}`), "", "secret storage can't delete, so it's blank");
+    assert.equal(f.secrets.get(`plainday-calendar-vault001-${home.id}`), "", "secret storage can't delete, so it's blank");
     await f.s.removeCalendar("nosuch");
 
     assert.ok(f.saves.length >= 6);
@@ -470,7 +474,7 @@ test("Copy carries each calendar's link beside the settings; Paste stores them, 
     assert.doesNotMatch(JSON.stringify(raw.calendars), NO_LINK, "the links sit beside the calendars, not in them");
 
     // The phone: one calendar of its own the copy doesn't have, and none of the Mac's links
-    const secrets = new Map([["plainday-calendar-oldcal", "https://example.org/old.ics"]]);
+    const secrets = new Map([["plainday-calendar-vault001-oldcal", "https://example.org/old.ics"]]);
     const phone = withPlugin({ stored: { ...JUNIPER, calendars: { range: "1 week", list: [{ id: "oldcal", name: "Old" }] } }, secrets });
     await phone.s.load();
     const read = phone.s.readCopy(text, billing);
@@ -581,7 +585,7 @@ test("a link pasted into a calendar's name, account or address is never kept, fr
 
 test("Paste blanks every calendar link this device keeps but the copy's, a removed calendar's too; an older copy leaves the calendars alone; a failed save changes nothing", async () => {
     // A link left from a calendar another device removed, which Sync took out of this device's list
-    const secrets = new Map([["plainday-calendar-gone01", "https://example.org/gone.ics"], ["other-plugin-key", "theirs"]]);
+    const secrets = new Map([["plainday-calendar-vault001-gone01", "https://example.org/gone.ics"], ["other-plugin-key", "theirs"]]);
     const f = withPlugin({ stored: JUNIPER, secrets });
     await f.s.load();
     const kept = await f.s.addCalendar({ name: "Studio", link: STUDIO_LINK });
@@ -635,4 +639,81 @@ test("readOldNotes: a new device with only the Calendar Sync note uses its range
     await f.s.readOldNotes();
     assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [] } }]);
     assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice"], bad: [] })}\n\n${settings.rangeNotice({ range: "3 weeks" })}`);
+});
+
+// ------------------------------------------------------------------ calendars: the second review (OBS-282)
+
+test("each vault names its links with a key of its own, so two vaults on one phone never touch each other's", async () => {
+    // One secret storage for two vaults, as on a phone; each vault its own local storage
+    const secrets = new Map();
+    const a = withPlugin({ stored: JUNIPER, secrets });
+    // b has no key yet: one is made, kept, and used from then on
+    const b = withPlugin({ stored: JUNIPER, secrets, vaultKey: null });
+    await a.s.load();
+    await b.s.load();
+    const kept = [];
+    const original = b.s.vaultKey.bind(b.s);
+    b.s.vaultKey = () => { const k = original(); kept.push(k); return k; };
+    const own = await a.s.addCalendar({ name: "Studio", link: STUDIO_LINK });
+    // The same copy pasted into both vaults: the same IDs
+    const copy = a.s.readCopy(a.s.copyText(), billing);
+    await b.s.replaceWith(copy.settings, copy.links, copy.withCalendars);
+    assert.equal(b.s.link(own.id), STUDIO_LINK);
+    assert.ok(kept.length && kept.every((k) => k === kept[0] && k !== "vault001"), "one key for the vault, not a's");
+    // Remove in one, and a paste of nothing in the other: the other vault's link stays
+    await b.s.removeCalendar(own.id);
+    assert.equal(b.s.link(own.id), null);
+    assert.equal(a.s.link(own.id), STUDIO_LINK, "vault a's link is its own");
+    const empty = b.s.readCopy(JSON.stringify({ "plainday-settings": 1, calendars: { list: [] } }), billing);
+    await b.s.replaceWith(empty.settings, empty.links, empty.withCalendars);
+    assert.equal(a.s.link(own.id), STUDIO_LINK, "b's paste sweeps only b's links");
+    assert.deepEqual(plain([...secrets.keys()].filter((k) => k.startsWith("plainday-calendar-vault001-"))), [`plainday-calendar-vault001-${own.id}`]);
+});
+
+test("a vault with no key makes one, keeps it, and names its links with it", () => {
+    const local = new Map();
+    const context = vm.createContext({
+        crypto: globalThis.crypto,
+        app: { loadLocalStorage: (k) => local.get(k) ?? null, saveLocalStorage: (k, v) => { local.set(k, v); } },
+        plainday: {},
+    });
+    const s = new (load("settings.js", "Settings", context))();
+    const key = s.vaultKey();
+    assert.match(key, /^[a-z0-9]{8}$/);
+    assert.equal(local.get("plainday-calendar-key"), key);
+    assert.equal(s.vaultKey(), key);
+    assert.equal(s.secretId("abc"), `plainday-calendar-${key}-abc`);
+    assert.ok(s.secretId("a".repeat(32)).length <= 64, "within secret storage's 64 characters");
+    local.set("plainday-calendar-key", "Not A Key!");
+    assert.notEqual(s.vaultKey(), "Not A Key!", "one that isn't a key is replaced");
+});
+
+test("reload: a file with no calendars from an older device keeps this device's, written back, so they're there at the next start", async () => {
+    const f = withPlugin({ stored: { ...JUNIPER, calendars: { range: "1 week", list: [{ id: "abc", name: "Studio" }] } } });
+    await f.s.load();
+    f.plugin.loadData = async () => ({ ...JUNIPER_BEFORE, invoices: { ...JUNIPER.invoices, lastNumber: 1007 } });
+    await f.s.reload();
+    assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", addresses: [], on: true }] });
+    assert.equal(f.saves.at(-1).invoices.lastNumber, 1007, "the rest is the other device's");
+    // The next start reads what was written back, and nothing from the old note
+    f.plugin.loadData = async () => f.saves.at(-1);
+    await f.s.load();
+    await f.s.readOldNotes();
+    assert.deepEqual(plain([f.s.get().calendars.range, f.s.get().calendars.list.map((c) => c.name), f.notices]), ["1 week", ["Studio"], []]);
+    // A device that never had calendars takes such a file as it is, and writes nothing
+    const g = withPlugin({ stored: JUNIPER_BEFORE });
+    await g.s.load();
+    g.plugin.loadData = async () => JUNIPER_BEFORE;
+    await g.s.reload();
+    assert.deepEqual(g.saves, []);
+});
+
+test("a link without its scheme is a link too; a pasted http:// link is taken only from this device", () => {
+    for (const t of ["calendar.google.com/calendar/ical/x/basic.ics", "p00-caldav.icloud.com/published/2/abc", "outlook.office365.com/owa/calendar/x"]) {
+        assert.equal(settings.linkFree(t), "", t);
+    }
+    for (const t of ["Team A/B", "Home", "Q3: planning", "v2.1 release"]) assert.equal(settings.linkFree(t), t, t);
+    const text = JSON.stringify({ "plainday-settings": 1, calendars: { list: ["a", "b", "c", "d"].map((id) => ({ id, name: id })) },
+        links: { a: "http://example.org/x.ics", b: "http://127.0.0.1:8765/x.ics", c: "https://example.org/x.ics", d: "webcal://example.org/x" } });
+    assert.deepEqual(Object.keys(settings.readCopy(text, billing).links ?? {}).sort(), ["b", "c", "d"]);
 });
