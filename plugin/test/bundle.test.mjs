@@ -217,7 +217,7 @@ function standInSetting() {
     const control = {
         inputEl: input, handlers: {},
         setValue(v) { input.value = v; return this; }, getValue() { return input.value; },
-        setPlaceholder(p) { input.placeholder = p; return this; }, addOptions(o) { this.options = o; return this; },
+        setPlaceholder(p) { input.placeholder = p; return this; }, addOptions(o) { this.options = o; return this; }, setTooltip() { return this; },
         onChange(fn) { this.handlers.change = fn; return this; }, setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.handlers.click = fn; return this; },
     };
     const warnings = [];
@@ -236,7 +236,16 @@ function standInSetting() {
         },
         descEl: { createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }) },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
-        addToggle(cb) { cb(control); return this; }, addButton(cb) { cb(control); return this; },
+        addToggle(cb) { cb(control); return this; },
+        // Each button its own, by its text: { text, click, warning }
+        buttons: {},
+        addButton(cb) {
+            const button = { setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.click = fn; return this; },
+                setWarning() { this.warning = true; return this; }, setCta() { return this; }, setTooltip() { return this; } };
+            cb(button);
+            setting.buttons[button.text] = button;
+            return this;
+        },
         type(v) { input.value = v; control.handlers.change(v); }, leave() { for (const fn of listeners.change ?? []) fn(); },
         tab() { for (const fn of listeners.keydown ?? []) fn({ key: "Tab" }); },
         warning: () => warnings.at(-1) ?? "",
@@ -260,6 +269,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
+            ["group", "Calendars", ["Add calendar", "Sync range", "Private links"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
         for (const g of defs) for (const i of g.items) {
@@ -384,6 +394,84 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.ok(!shown[1].visible());
         assert.equal(refreshed, 2, "Obsidian shows and hides them");
         assert.deepEqual(visible(), ["Freeze rows and columns"], "drawn again, the switch reads the saved freeze");
+    } finally {
+        plugin.onunload();
+    }
+});
+
+test("Settings → Plainday → Calendars: Add calendar, the range, the help, then each account's calendars; Copy carries their links (OBS-282)", async () => {
+    // Every link here is invented
+    const STUDIO = "https://calendar.google.com/calendar/ical/studio-owner%40example.com/private-0000invented/basic.ics";
+    const stored = { invoices: { name: "Juniper Hale" }, calendars: { range: "3 weeks", list: [
+        { id: "studio0001", name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true },
+        { id: "home000001", name: "Home", account: "Work", on: false },
+        { id: "library001", name: "Library", account: "", on: true },
+    ] } };
+    const { plugin, notices } = load(BUNDLE, { stored });
+    const secrets = new Map([["plainday-calendar-studio0001", STUDIO]]);
+    plugin.app.secretStorage = { getSecret: (id) => secrets.get(id) ?? null, setSecret: (id, v) => { secrets.set(id, v); }, listSecrets: () => [...secrets.keys()] };
+    await plugin.onload();
+    try {
+        const tab = plugin.tabs[0];
+        let redrawn = 0;
+        tab.update = () => { redrawn++; };
+        const defs = tab.getSettingDefinitions();
+        assert.deepEqual(defs.slice(4).map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
+            ["Calendars", [
+                ["Add calendar", "Add another calendar by its private link."],
+                ["Sync range", "How far ahead Sync calendars writes events into daily notes. Days beyond it are left as they are."],
+                ["Private links", "Each calendar's link works like a password. It stays in this device's secret storage, never in a note or in Plainday's settings file."],
+            ]],
+            ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
+            ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", "Link on this device"]]],
+        ], "accounts and calendars in alphabetical order, each saying whether this device has its link");
+        const item = (group, name) => defs.find((g) => g.heading === group).items.find((i) => i.name === name);
+
+        // The range: the seven choices, saved as chosen
+        const range = standInSetting();
+        item("Calendars", "Sync range").render(range);
+        assert.deepEqual(Object.keys(range.control.options), ["1 week", "2 weeks", "3 weeks", "1 month", "2 months", "3 months", "6 months"]);
+        assert.equal(range.control.inputEl.value, "3 weeks");
+        range.control.handlers.change("1 week");
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(plugin.saved.at(-1).calendars.range, "1 week");
+        assert.equal(window.plainday.Settings.rangeDays(), 7);
+
+        // A calendar's switch, and Remove, which blanks its link on this device
+        const studio = standInSetting();
+        item("Work", "Studio").render(studio);
+        assert.equal(studio.control.inputEl.value, true, "on");
+        assert.deepEqual(Object.keys(studio.buttons), ["Edit", "Remove"]);
+        assert.ok(studio.buttons.Remove.warning);
+        studio.control.handlers.change(false);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(plugin.saved.at(-1).calendars.list.find((c) => c.id === "studio0001").on, false);
+
+        // Copy: the links beside the settings, and a notice that says so
+        const copied = [];
+        Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
+        try {
+            const top = standInSetting();
+            defs[0].items[0].render(top);
+            top.links.Copy();
+            await new Promise((r) => setTimeout(r, 0));
+            assert.deepEqual(JSON.parse(copied[0]).links, { studio0001: STUDIO });
+            assert.match(notices.at(-1), /^Copied\. It holds your calendar links, which work like passwords, and your invoice details/);
+        } finally {
+            delete globalThis.navigator.clipboard;
+        }
+
+        studio.buttons.Remove.click();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(plugin.saved.at(-1).calendars.list.map((c) => c.name), ["Home", "Library"]);
+        assert.equal(secrets.get("plainday-calendar-studio0001"), "");
+        assert.equal(redrawn, 1, "the panel drawn again without it");
+        for (const saved of plugin.saved) assert.ok(!JSON.stringify(saved).includes("private-0000"), "no link in the settings file");
+
+        // With none left: the panel says so
+        for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
+        assert.equal(tab.getSettingDefinitions()[4].items[0].desc, "No calendars are added yet. Add one by its private link.");
+        assert.equal(tab.getSettingDefinitions().length, 5, "no account groups");
     } finally {
         plugin.onunload();
     }

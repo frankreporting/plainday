@@ -13,6 +13,13 @@ export default class Settings {
     //     invoice's number is never given again, and typing a first number sets it to one less.
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221).
+    //   - calendars (OBS-282): how far ahead Sync calendars writes events (`range`), and the calendars
+    //     added by their private links, each { id, name, account, addresses, on }: `addresses` is your
+    //     address (or addresses) on that calendar, by which the calendar reader leaves out an invitation
+    //     you declined. A calendar's link is never here: it's in this device's secret storage, under
+    //     `plainday-calendar-<its id>` (link(), storeLink()), so it's never in a note, Plainday's data
+    //     file, the console or a notice. Until OBS-275, nothing syncs from the list; Sync calendars reads
+    //     only the range from here.
     //
     // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
     // through normalize(), so a value that doesn't read becomes its default and the rest can trust what
@@ -20,14 +27,18 @@ export default class Settings {
     //
     // Vaults from before: on a device with no settings saved, the first load reads Config/Invoice
     // Settings.md and Config/Table Settings.md once (readOldNotes), saves what they held, and says so.
-    // From then on the notes are never read again; they're left for you to delete. A data file that's
+    // From then on the notes are never read again; they're left for you to delete. Likewise the
+    // `Sync range:` line of Config/Calendar Sync.md, on a device whose settings have no calendars yet
+    // (saved before OBS-282); the note itself stays in use for the calendars until OBS-275. A data file that's
     // there but doesn't read (a write cut off, a sync conflict) isn't "no settings": Plainday says so,
     // uses the defaults, and leaves the file alone until you change a setting or paste your settings.
     //
     // A backup, or another device: plugin settings don't sync unless Obsidian Sync carries community
     // plugins, so copyText() is every setting as one block for the clipboard, and readCopy() and
     // replaceWith() take it back, on this device or another. A paste replaces this device's settings
-    // but keeps the higher last number given, so no number is given twice.
+    // but keeps the higher last number given, so no number is given twice. The copy carries each
+    // calendar's link from this device's secret storage, beside the settings, and a paste stores them in
+    // the other device's.
     static INVOICE_NOTE = "Config/Invoice Settings.md";
     static TABLE_NOTE = "Config/Table Settings.md";
     // Invoice numbers have at most six digits
@@ -40,6 +51,16 @@ export default class Settings {
     // What a copy is marked with, and its format's version
     static COPY_MARK = "plainday-settings";
     static COPY_VERSION = 1;
+    // How far ahead Sync calendars writes events: the choices, and the days each means (OBS-282)
+    static RANGES = [["1 week", 7], ["2 weeks", 14], ["3 weeks", 21], ["1 month", 31], ["2 months", 62], ["3 months", 92], ["6 months", 183]];
+    static DEFAULT_RANGE = "2 months";
+    static CALENDAR_NOTE = "Config/Calendar Sync.md";
+    // A calendar's ID, which also names its link in secret storage: lowercase letters and digits, as
+    // secret storage's names must be
+    static ID = /^[a-z0-9]{1,32}$/;
+    static SECRET_PREFIX = "plainday-calendar-";
+    // An email address, as much as the reader needs: something@something, no spaces
+    static ADDRESS = /^[^\s@,;<>()"]+@[^\s@,;<>()"]+$/;
 
     constructor() {
         this.data = this.defaults();
@@ -47,6 +68,9 @@ export default class Settings {
         this.saved = false;
         // Whether the data file is there but doesn't read
         this.unreadable = false;
+        // Whether the saved settings have calendars: until they have, the first load reads the range
+        // from the Calendar Sync note (settings saved before OBS-282 have none)
+        this.calendarsSaved = false;
     }
 
     // ---------------------------------------------------------------- pure
@@ -57,13 +81,16 @@ export default class Settings {
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean },
+     *   calendars: { range: string, list: Calendar[] },
      * }}
+     * @typedef {{ id: string, name: string, account: string, addresses: string[], on: boolean }} Calendar
      */
     defaults() {
         return {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true },
+            calendars: { range: Settings.DEFAULT_RANGE, list: [] },
         };
     }
 
@@ -157,7 +184,237 @@ export default class Settings {
         out.tables.freezeRows = this.frozenOf(tables.freezeRows).number;
         out.tables.freezeColumns = this.frozenOf(tables.freezeColumns).number;
         if (typeof editor.listCursor === "boolean") out.editor.listCursor = editor.listCursor;
+        const calendars = obj(r.calendars);
+        out.calendars.range = this.rangeOf(calendars.range) ?? Settings.DEFAULT_RANGE;
+        // Each calendar with an ID that can name its link, once; only the keys a calendar has, so no
+        // link in a copy or a hand-edited file ever reaches the data file
+        const ids = new Set();
+        for (const c of Array.isArray(calendars.list) ? calendars.list : []) {
+            const cal = obj(c), id = typeof cal.id === "string" ? cal.id : "";
+            if (!Settings.ID.test(id) || ids.has(id)) continue;
+            ids.add(id);
+            out.calendars.list.push({ id, name: this.text(cal.name), account: this.text(cal.account),
+                addresses: this.addressesOf(cal.addresses).addresses, on: typeof cal.on === "boolean" ? cal.on : true });
+        }
         return out;
+    }
+
+    // ---------------------------------------------------------------- calendars (OBS-282)
+
+    /**
+     * A sync range as the panel and the Calendar Sync note write it ("2 months", in any case), or null
+     * @param {unknown} raw
+     * @returns {string | null}
+     */
+    rangeOf(raw) {
+        const said = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ").toLowerCase() : "";
+        return Settings.RANGES.find(([label]) => label === said)?.[0] ?? null;
+    }
+
+    // The ranges the panel offers, shortest first
+    rangeLabels() {
+        return Settings.RANGES.map(([label]) => label);
+    }
+
+    /**
+     * How many days ahead a range reaches: the setting's, unless another is given
+     * @param {string} [range]
+     * @returns {number}
+     */
+    rangeDays(range = this.data.calendars.range) {
+        const label = this.rangeOf(range) ?? Settings.DEFAULT_RANGE;
+        return /** @type {[string, number]} */ (Settings.RANGES.find(([l]) => l === label))[1];
+    }
+
+    /**
+     * Your address (or addresses) on a calendar, from a list or from text with them separated by commas,
+     * semicolons or spaces: { addresses, bad }, each address in lower case without `mailto:`, once
+     * @param {unknown} raw
+     * @returns {{ addresses: string[], bad: string[] }}
+     */
+    addressesOf(raw) {
+        const addresses = [], bad = [];
+        for (const v of [].concat(raw ?? [])) {
+            if (typeof v !== "string") continue;
+            for (const part of v.split(/[\s,;]+/)) {
+                const a = part.trim().replace(/^mailto:/i, "").toLowerCase();
+                if (!a) continue;
+                if (!Settings.ADDRESS.test(a)) bad.push(part.trim());
+                else if (!addresses.includes(a)) addresses.push(a);
+            }
+        }
+        return { addresses, bad };
+    }
+
+    /**
+     * A calendar in the list, by its ID
+     * @param {string} id
+     * @returns {Calendar | null}
+     */
+    calendar(id) {
+        return this.data.calendars.list.find((c) => c.id === id) ?? null;
+    }
+
+    // What names a calendar's link in this device's secret storage
+    secretId(id) {
+        return `${Settings.SECRET_PREFIX}${id}`;
+    }
+
+    /**
+     * A calendar's link on this device, or null when this device has none
+     * @param {string} id
+     * @returns {string | null}
+     */
+    link(id) {
+        const secret = app.secretStorage?.getSecret(this.secretId(id));
+        return typeof secret === "string" && secret.trim() ? secret.trim() : null;
+    }
+
+    /**
+     * Keeps a calendar's link in this device's secret storage
+     * @param {string} id @param {string} link
+     */
+    storeLink(id, link) {
+        if (!app.secretStorage) throw new Error("This version of Obsidian has no secret storage");
+        app.secretStorage.setSecret(this.secretId(id), String(link).trim());
+    }
+
+    /**
+     * Blanks a calendar's link in this device's secret storage (it can't delete one)
+     * @param {string} id
+     */
+    forgetLink(id) {
+        if (this.link(id) !== null) app.secretStorage.setSecret(this.secretId(id), "");
+    }
+
+    // A link as two links to one calendar compare: trimmed, a webcal:// link as the https:// one it is
+    sameLink(a, b) {
+        const key = (l) => String(l ?? "").trim().replace(/^webcals?:\/\//i, "https://");
+        return !!key(a) && key(a) === key(b);
+    }
+
+    /**
+     * The calendar whose link on this device is `link`, other than `except`, or null
+     * @param {string} link @param {string | null} [except]
+     * @returns {Calendar | null}
+     */
+    calendarWithLink(link, except = null) {
+        return this.data.calendars.list.find((c) => c.id !== except && this.sameLink(this.link(c.id), link)) ?? null;
+    }
+
+    /**
+     * A new calendar's ID: random, and naming no calendar and no link on this device
+     * @returns {string}
+     */
+    newId() {
+        const letters = "abcdefghijklmnopqrstuvwxyz0123456789";
+        for (;;) {
+            const id = Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => letters[b % letters.length]).join("");
+            if (!this.calendar(id) && this.link(id) === null) return id;
+        }
+    }
+
+    /**
+     * Adds a calendar, switched on, with its link in this device's secret storage, and saves
+     * @param {{ name: string, account?: string, addresses?: string[], link: string }} calendar
+     * @returns {Promise<Calendar>}
+     */
+    async addCalendar({ name, account = "", addresses = [], link }) {
+        const id = this.newId();
+        this.storeLink(id, link);
+        /** @type {Calendar} */
+        const calendar = { id, name: this.text(name), account: this.text(account), addresses: this.addressesOf(addresses).addresses, on: true };
+        this.data.calendars.list.push(calendar);
+        try {
+            await this.save();
+        } catch (e) {
+            this.data.calendars.list = this.data.calendars.list.filter((c) => c.id !== id);
+            this.forgetLink(id);
+            throw e;
+        }
+        return calendar;
+    }
+
+    /**
+     * Changes a calendar's name, account, addresses or switch, and saves; with `link`, keeps that as its
+     * link on this device once saved
+     * @param {string} id
+     * @param {Partial<Omit<Calendar, "id">>} values
+     * @param {string | null} [link]
+     */
+    async editCalendar(id, values, link = null) {
+        const calendar = this.calendar(id);
+        if (!calendar) throw new Error("That calendar isn't in the list any more");
+        const before = { ...calendar };
+        if (values.name !== undefined) calendar.name = this.text(values.name);
+        if (values.account !== undefined) calendar.account = this.text(values.account);
+        if (values.addresses !== undefined) calendar.addresses = this.addressesOf(values.addresses).addresses;
+        if (typeof values.on === "boolean") calendar.on = values.on;
+        try {
+            await this.save();
+        } catch (e) {
+            Object.assign(calendar, before);
+            throw e;
+        }
+        if (link) this.storeLink(id, link);
+    }
+
+    /**
+     * Takes a calendar out of the list, saves, and blanks its link on this device. Another device keeps
+     * its own until a paste.
+     * @param {string} id
+     */
+    async removeCalendar(id) {
+        const list = this.data.calendars.list;
+        const i = list.findIndex((c) => c.id === id);
+        if (i < 0) return;
+        const [gone] = list.splice(i, 1);
+        try {
+            await this.save();
+        } catch (e) {
+            list.splice(i, 0, gone);
+            throw e;
+        }
+        this.forgetLink(id);
+    }
+
+    /**
+     * The links this device has for a list of calendars, by ID: what a copy carries
+     * @param {ReturnType<Settings["defaults"]>} [settings]
+     * @returns {Record<string, string>}
+     */
+    links(settings = this.data) {
+        /** @type {Record<string, string>} */
+        const out = {};
+        for (const { id } of settings.calendars?.list ?? []) {
+            const link = this.link(id);
+            if (link) out[id] = link;
+        }
+        return out;
+    }
+
+    /**
+     * The range from the Calendar Sync note's `Sync range:` line: { range }, or { bad } when the line
+     * isn't one of the ranges; null when the note has no such line
+     * @param {string} text
+     * @returns {{ range: string, bad?: undefined } | { bad: string, range?: undefined } | null}
+     */
+    rangeFromNote(text) {
+        const said = /^Sync range:[ \t]*(.*?)[ \t]*$/m.exec(String(text ?? ""))?.[1];
+        if (said === undefined) return null;
+        const range = this.rangeOf(said);
+        return range ? { range } : { bad: `\`Sync range\` in Calendar Sync (${said})` };
+    }
+
+    /**
+     * What the first load says after reading the range from the Calendar Sync note
+     * @param {{ range?: string, bad?: string }} result
+     * @returns {string}
+     */
+    rangeNotice({ range, bad }) {
+        const lines = [`Plainday moved your calendar sync range${range ? `, ${range},` : ""} into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.`];
+        if (bad) lines.push(`This didn't read, so it starts from the default, ${Settings.DEFAULT_RANGE}: ${bad}.`);
+        return lines.join("\n\n");
     }
 
     /**
@@ -226,19 +483,21 @@ export default class Settings {
     }
 
     /**
-     * Every setting as one block of text, for Copy
+     * Every setting as one block of text, for Copy, with each calendar's link this device has
      * @param {ReturnType<Settings["defaults"]>} [settings]
+     * @param {Record<string, string>} [links]
      * @returns {string}
      */
-    copyText(settings = this.data) {
-        return JSON.stringify({ [Settings.COPY_MARK]: Settings.COPY_VERSION, ...settings });
+    copyText(settings = this.data, links = this.links(settings)) {
+        return JSON.stringify({ [Settings.COPY_MARK]: Settings.COPY_VERSION, ...settings, ...(Object.keys(links).length ? { links } : {}) });
     }
 
     /**
-     * A pasted block: { settings }, or { error } when it isn't a copy of Plainday's settings
+     * A pasted block: { settings, links }, or { error } when it isn't a copy of Plainday's settings.
+     * `links` holds the copy's link for each of its calendars that had one, by the calendar's ID.
      * @param {string} text
      * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
-     * @returns {{ settings: ReturnType<Settings["defaults"]>, error?: undefined } | { error: string, settings?: undefined }}
+     * @returns {{ settings: ReturnType<Settings["defaults"]>, links: Record<string, string>, error?: undefined } | { error: string, settings?: undefined, links?: undefined }}
      */
     readCopy(text, billing = plainday.Billing) {
         const not = { error: "That isn't a copy of Plainday's settings. Use Copy at the top of Settings → Plainday, then paste here what it copied." };
@@ -248,7 +507,14 @@ export default class Settings {
         try { raw = JSON.parse(t); } catch { return not; }
         if (typeof raw !== "object" || raw === null || !(Settings.COPY_MARK in raw)) return not;
         const settings = this.normalize(raw, billing);
-        return { settings };
+        /** @type {Record<string, string>} */
+        const links = {};
+        const given = typeof raw.links === "object" && raw.links !== null ? raw.links : {};
+        for (const { id } of settings.calendars.list) {
+            const link = given[id];
+            if (typeof link === "string" && link.trim()) links[id] = link.trim();
+        }
+        return { settings, links };
     }
 
     /**
@@ -274,10 +540,16 @@ export default class Settings {
         const raw = await plugin.loadData();
         this.unreadable = raw === undefined;
         this.saved = raw !== null;
+        this.calendarsSaved = this.hasCalendars(raw);
         this.data = this.normalize(raw ?? {});
         if (this.unreadable) {
             new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
         }
+    }
+
+    // Whether a data file as loaded has calendars, or doesn't read (then nothing is read over it)
+    hasCalendars(raw) {
+        return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
 
     // Writes the settings as they are now
@@ -286,6 +558,7 @@ export default class Settings {
         if (!plugin) throw new Error("Plainday isn't loaded");
         await plugin.saveData(this.data);
         this.saved = true;
+        this.calendarsSaved = true;
         this.unreadable = false;
     }
 
@@ -310,13 +583,20 @@ export default class Settings {
     }
 
     /**
-     * Makes this device's settings the copy's (pasted() keeps the higher invoice number), saves, and
-     * applies the editor switch
+     * Makes this device's settings the copy's (pasted() keeps the higher invoice number), saves, keeps
+     * the copy's links in this device's secret storage, blanks the links of the calendars the copy
+     * doesn't have, and applies the editor switch. A calendar the copy has without a link keeps the one
+     * this device has, if any.
      * @param {ReturnType<Settings["defaults"]>} copy
+     * @param {Record<string, string>} [links]
      */
-    async replaceWith(copy) {
+    async replaceWith(copy, links = {}) {
+        const before = this.data.calendars.list.map((c) => c.id);
         this.data = this.pasted(copy);
         await this.save();
+        const kept = new Set(this.data.calendars.list.map((c) => c.id));
+        for (const [id, link] of Object.entries(links)) if (kept.has(id)) this.storeLink(id, link);
+        for (const id of before) if (!kept.has(id)) this.forgetLink(id);
         await plainday.ListCursor?.invoke();
     }
 
@@ -330,6 +610,7 @@ export default class Settings {
         if (raw === undefined) return;
         this.unreadable = false;
         this.saved = raw !== null;
+        this.calendarsSaved = this.hasCalendars(raw);
         // As a paste does: an older file from another device never lowers the number given here
         this.data = this.pasted(this.normalize(raw ?? {}));
         await plainday.ListCursor?.invoke();
@@ -338,13 +619,20 @@ export default class Settings {
     // On a device with no settings saved: reads the old settings notes, and when there are any, saves
     // what they held, so they're never read again, and says what moved. The notes are left as they are.
     // With none, nothing is written: a device whose notes Sync hasn't brought yet reads them at a later
-    // load, and one whose data file Sync is still bringing doesn't write defaults over it.
+    // load, and one whose data file Sync is still bringing doesn't write defaults over it. The same for
+    // the range on a device whose settings have no calendars yet: the Calendar Sync note's `Sync range:`
+    // line, read once (OBS-282).
     async readOldNotes() {
-        if (this.saved) return;
-        const props = async (path) => {
+        if (this.saved && this.calendarsSaved) return;
+        const wasSaved = this.saved, hadCalendars = this.calendarsSaved;
+        const text = async (path) => {
             const file = app.vault.getFileByPath(path);
-            if (!file) return null;
-            const info = getFrontMatterInfo(await app.vault.read(file));
+            return file ? app.vault.read(file) : null;
+        };
+        const props = async (path) => {
+            const note = await text(path);
+            if (note === null) return null;
+            const info = getFrontMatterInfo(note);
             if (!info.exists) return { props: {} };
             try {
                 const fm = parseYaml(info.frontmatter);
@@ -353,12 +641,23 @@ export default class Settings {
                 return { error: String(e?.message ?? e) };
             }
         };
-        const result = this.fromOldNotes({ invoice: await props(Settings.INVOICE_NOTE), table: await props(Settings.TABLE_NOTE) });
+        const notes = wasSaved ? null : this.fromOldNotes({ invoice: await props(Settings.INVOICE_NOTE), table: await props(Settings.TABLE_NOTE) });
+        const calendarNote = hadCalendars ? null : await text(Settings.CALENDAR_NOTE);
+        const range = calendarNote === null ? null : this.rangeFromNote(calendarNote);
         // Sync brought a data file while the notes were read: it wins
-        if (this.saved || !result.read.length) return;
-        this.data = result.settings;
+        if (this.saved !== wasSaved || this.calendarsSaved !== hadCalendars) return;
+        if (!notes?.read.length && !range) return;
+        /** @type {string[]} */
+        const notices = [];
+        if (notes?.read.length) {
+            this.data = { ...notes.settings, calendars: this.data.calendars };
+            notices.push(/** @type {string} */ (this.movedNotice(notes)));
+        }
+        if (range) {
+            this.data.calendars.range = range.range ?? Settings.DEFAULT_RANGE;
+            notices.push(this.rangeNotice(range));
+        }
         await this.save();
-        const notice = this.movedNotice(result);
-        if (notice) new Notice(notice, 0);
+        new Notice(notices.join("\n\n"), 0);
     }
 }

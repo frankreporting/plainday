@@ -17,5 +17,9 @@
   },
   "editor": {
     "listCursor": true
+  },
+  "calendars": {
+    "range": "2 months",
+    "list": []
   }
 }

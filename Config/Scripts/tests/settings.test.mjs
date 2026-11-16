@@ -18,12 +18,14 @@ const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
+    calendars: { range: "2 months", list: [] },
 };
 const JUNIPER = {
     invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 30",
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
+    calendars: { range: "2 months", list: [] },
 };
 
 // ------------------------------------------------------------------ defaults and what reads
@@ -50,6 +52,7 @@ test("normalize: each value that reads, else its default", () => {
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false },
+        calendars: { range: "2 months", list: [] },
     });
     for (const folder of ["../x", "Config/Invoices", "Archive", ".hidden", "a\nb", 7, ["Invoices"]]) {
         assert.equal(settings.normalize({ invoices: { folder } }, billing).invoices.folder, "", String(folder));
@@ -173,15 +176,25 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
 // undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
 // vault holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {}, unreadable = false } = {}) {
+function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0;
     const plugin = {
         manifest: { dir: ".obsidian/plugins/plainday" },
         loadData: async () => (unreadable ? undefined : stored === null ? null : JSON.parse(JSON.stringify(stored))),
-        saveData: async (d) => { saves.push(plain(d)); },
+        saveData: async (d) => {
+            if (plugin.failSave) throw new Error("disk full");
+            saves.push(plain(d));
+        },
+        failSave,
     };
     const app = {
+        // As Obsidian's: names in lowercase letters, digits and dashes, one string each
+        secretStorage: {
+            setSecret: (id, v) => { if (!/^[a-z0-9-]+$/.test(id)) throw new Error(`bad id ${id}`); secrets.set(id, v); },
+            getSecret: (id) => secrets.get(id) ?? null,
+            listSecrets: () => [...secrets.keys()],
+        },
         vault: {
             getFileByPath: (p) => (p in notes ? { path: p } : null),
             read: async (f) => { reads.push(f.path); return notes[f.path]; },
@@ -189,6 +202,7 @@ function withPlugin({ stored = null, notes = {}, unreadable = false } = {}) {
     };
     const context = vm.createContext({
         app,
+        crypto: globalThis.crypto,
         Notice: class { constructor(text) { notices.push(text); } },
         // As Obsidian's: the frontmatter between the first two ---, and YAML enough for these notes
         getFrontMatterInfo: (text) => { const m = String(text).match(/^---\n([\s\S]*?)\n---/); return { exists: !!m, frontmatter: m ? m[1] : "" }; },
@@ -209,8 +223,10 @@ function withPlugin({ stored = null, notes = {}, unreadable = false } = {}) {
         plainday: { plugin, Billing: billing, ListCursor: { invoke: async () => { listCursorRuns++; } } },
     });
     const s = new (load("settings.js", "Settings", context))();
-    return { s, plugin, saves, notices, reads, runs: () => listCursorRuns };
+    return { s, plugin, saves, notices, reads, secrets, runs: () => listCursorRuns };
 }
+// What a device saved before OBS-282: no calendars
+const JUNIPER_BEFORE = { invoices: JUNIPER.invoices, tables: JUNIPER.tables, editor: JUNIPER.editor };
 const INVOICE_TEXT = "---\nid: 2026091210000000\ntags:\nname: Juniper Hale\naddress:\n  - 418 Larkspur Lane\n  - Maple Falls, ST 00000\nterms: Net 30\n"
     + "payment_note: Please pay by bank transfer within 30 days.\nfolder: Reference/Invoices\nlast_number: 1001\n---\nYour details for invoices.\n";
 const TABLE_TEXT = "---\nid: 2026110312000000\ntags:\nfreeze_rows: 1\nfreeze_columns: 1\n---\nHow the tables come out.\n";
@@ -332,4 +348,213 @@ test("raiseLastNumber never lowers the number; set saves one section; replaceWit
     assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor.listCursor]), ["From the phone", 1002, false]);
     assert.deepEqual(f.saves.at(-1), plain(f.s.get()));
     assert.equal(f.runs(), 1, "ListCursor follows the pasted switch");
+});
+
+// ------------------------------------------------------------------ calendars (OBS-282)
+
+// Every link here is invented
+const STUDIO_LINK = "https://calendar.google.com/calendar/ical/studio-owner%40example.com/private-0000invented/basic.ics";
+const HOME_LINK = "webcal://p00-caldav.icloud.com/published/2/INVENTEDinvented";
+// Nothing that looks like a link: what a saved settings file may never hold
+const NO_LINK = /https?:|webcals?:|calendar\.google|caldav|private-0000|invented/i;
+
+test("calendars: the range and the list, as they read; anything else is left out, a link above all", () => {
+    assert.deepEqual(plain(settings.defaults().calendars), { range: "2 months", list: [] }, "2 months for a new vault");
+    const n = settings.normalize({ calendars: {
+        range: " 3  Weeks ",
+        list: [
+            { id: "abc123", name: " Studio ", account: "Work", addresses: "Me@Example.com, mailto:also@example.com; not-an-address", on: false, link: STUDIO_LINK, extra: 1 },
+            { id: "abc123", name: "Twice" },
+            { id: "Has-Caps", name: "Bad ID" },
+            { id: "", name: "No ID" },
+            { name: "No ID either" },
+            "not a calendar",
+            { id: "home99", name: "Home", addresses: ["home@example.com", 7] },
+        ],
+    } }, billing);
+    assert.deepEqual(plain(n.calendars), { range: "3 weeks", list: [
+        { id: "abc123", name: "Studio", account: "Work", addresses: ["me@example.com", "also@example.com"], on: false },
+        { id: "home99", name: "Home", account: "", addresses: ["home@example.com"], on: true },
+    ] });
+    assert.doesNotMatch(JSON.stringify(n), NO_LINK, "no link from what came in");
+    for (const range of ["5 weeks", 14, null, "", "2 Months!"]) {
+        assert.equal(settings.normalize({ calendars: { range } }, billing).calendars.range, "2 months", String(range));
+    }
+    assert.deepEqual(plain(settings.rangeLabels()), ["1 week", "2 weeks", "3 weeks", "1 month", "2 months", "3 months", "6 months"]);
+    assert.deepEqual(["1 week", "2 weeks", "3 weeks", "1 month", "2 months", "3 months", "6 months"].map((r) => settings.rangeDays(r)), [7, 14, 21, 31, 62, 92, 183]);
+    assert.equal(settings.rangeDays("nonsense"), 62);
+});
+
+test("addressesOf: your address on a calendar, one or more, in lower case; what isn't one is named", () => {
+    assert.deepEqual(plain(settings.addressesOf("")), { addresses: [], bad: [] });
+    assert.deepEqual(plain(settings.addressesOf(" Desk@Example.org ")), { addresses: ["desk@example.org"], bad: [] });
+    assert.deepEqual(plain(settings.addressesOf("a@example.com,b@example.com  a@example.com")), { addresses: ["a@example.com", "b@example.com"], bad: [] });
+    assert.deepEqual(plain(settings.addressesOf("a@example.com, desk, x@")), { addresses: ["a@example.com"], bad: ["desk", "x@"] });
+    assert.deepEqual(plain(settings.addressesOf(["mailto:A@example.com"])), { addresses: ["a@example.com"], bad: [] });
+});
+
+test("rangeFromNote and rangeNotice: the Calendar Sync note's line, read once", () => {
+    const note = "---\nid: 1\n---\n\n## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync…\n\n## Calendars\n";
+    assert.deepEqual(plain(settings.rangeFromNote(note)), { range: "3 weeks" });
+    assert.deepEqual(plain(settings.rangeFromNote("Sync range:  1 Month  ")), { range: "1 month" });
+    assert.deepEqual(plain(settings.rangeFromNote("Sync range: 5 weeks")), { bad: "`Sync range` in Calendar Sync (5 weeks)" });
+    assert.equal(settings.rangeFromNote("## Calendars\n- [x] Home\n"), null, "no line, nothing to move");
+    assert.equal(settings.rangeNotice({ range: "3 weeks" }),
+        "Plainday moved your calendar sync range, 3 weeks, into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.");
+    assert.equal(settings.rangeNotice({ bad: "`Sync range` in Calendar Sync (5 weeks)" }),
+        "Plainday moved your calendar sync range into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.\n\n"
+        + "This didn't read, so it starts from the default, 2 months: `Sync range` in Calendar Sync (5 weeks).");
+});
+
+test("addCalendar, editCalendar, removeCalendar: the link only in secret storage, never in the data file", async () => {
+    const f = withPlugin({ stored: JUNIPER });
+    await f.s.load();
+    const studio = await f.s.addCalendar({ name: " Studio ", account: "Work", addresses: ["studio-owner@example.com"], link: ` ${STUDIO_LINK} ` });
+    assert.match(studio.id, /^[a-z0-9]{10}$/, "a random ID secret storage takes");
+    assert.deepEqual(plain(f.s.get().calendars.list), [{ id: studio.id, name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], on: true }]);
+    assert.equal(f.secrets.get(`plainday-calendar-${studio.id}`), STUDIO_LINK, "under plainday-calendar- and its ID, trimmed");
+    assert.equal(f.s.link(studio.id), STUDIO_LINK);
+    const home = await f.s.addCalendar({ name: "Home", account: "iCloud", link: HOME_LINK });
+    assert.notEqual(home.id, studio.id);
+    // Which calendar has a link: a webcal:// link is its https:// one
+    assert.equal(f.s.calendarWithLink(HOME_LINK.replace("webcal://", "https://"))?.name, "Home");
+    assert.equal(f.s.calendarWithLink(STUDIO_LINK, studio.id), null, "not the calendar being edited");
+    assert.equal(f.s.calendarWithLink("https://example.org/other.ics"), null);
+
+    await f.s.editCalendar(home.id, { name: "Home", account: "iCloud", addresses: "home@example.com" }, `${HOME_LINK}x`);
+    assert.deepEqual(plain(f.s.calendar(home.id)?.addresses), ["home@example.com"]);
+    assert.equal(f.s.link(home.id), `${HOME_LINK}x`, "a new link replaces this device's");
+    await f.s.editCalendar(home.id, { on: false });
+    assert.equal(f.s.calendar(home.id)?.on, false);
+    assert.equal(f.s.link(home.id), `${HOME_LINK}x`, "no new link keeps the old");
+    // A long link reads back whole
+    const long = `https://calendar.example.org/ical/${"a".repeat(200)}/basic.ics`;
+    await f.s.editCalendar(studio.id, {}, long);
+    assert.equal(f.s.link(studio.id), long);
+
+    await f.s.removeCalendar(home.id);
+    assert.deepEqual(plain(f.s.get().calendars.list.map((c) => c.name)), ["Studio"]);
+    assert.equal(f.s.link(home.id), null, "its link blanked on this device");
+    assert.equal(f.secrets.get(`plainday-calendar-${home.id}`), "", "secret storage can't delete, so it's blank");
+    await f.s.removeCalendar("nosuch");
+
+    assert.ok(f.saves.length >= 6);
+    for (const saved of f.saves) assert.doesNotMatch(JSON.stringify(saved), NO_LINK, "no saved settings file holds a link");
+});
+
+test("a calendar that can't be saved isn't added, and leaves no link; an edit that can't be saved changes nothing", async () => {
+    const f = withPlugin({ stored: JUNIPER });
+    await f.s.load();
+    const kept = await f.s.addCalendar({ name: "Studio", link: STUDIO_LINK });
+    f.plugin.failSave = true;
+    await assert.rejects(f.s.addCalendar({ name: "Home", link: HOME_LINK }), /disk full/);
+    assert.deepEqual(plain(f.s.get().calendars.list.map((c) => c.name)), ["Studio"]);
+    assert.deepEqual([...f.secrets.values()].filter(Boolean), [STUDIO_LINK], "the new link blanked again");
+    await assert.rejects(f.s.editCalendar(kept.id, { name: "Renamed" }, HOME_LINK), /disk full/);
+    assert.equal(f.s.calendar(kept.id)?.name, "Studio");
+    assert.equal(f.s.link(kept.id), STUDIO_LINK, "the link only changes once the settings are saved");
+    await assert.rejects(f.s.removeCalendar(kept.id), /disk full/);
+    assert.equal(f.s.calendar(kept.id)?.name, "Studio");
+    assert.equal(f.s.link(kept.id), STUDIO_LINK);
+});
+
+test("Copy carries each calendar's link beside the settings; Paste stores them, and blanks the links of calendars it drops", async () => {
+    const mac = withPlugin({ stored: JUNIPER });
+    await mac.s.load();
+    const studio = await mac.s.addCalendar({ name: "Studio", account: "Work", addresses: ["studio-owner@example.com"], link: STUDIO_LINK });
+    const home = await mac.s.addCalendar({ name: "Home", account: "Work", link: HOME_LINK });
+    const text = mac.s.copyText();
+    assert.ok(!text.includes("\n"));
+    const raw = JSON.parse(text);
+    assert.deepEqual(plain(raw.links), { [studio.id]: STUDIO_LINK, [home.id]: HOME_LINK });
+    assert.doesNotMatch(JSON.stringify(raw.calendars), NO_LINK, "the links sit beside the calendars, not in them");
+
+    // The phone: one calendar of its own the copy doesn't have, and none of the Mac's links
+    const secrets = new Map([["plainday-calendar-oldcal", "https://example.org/old.ics"]]);
+    const phone = withPlugin({ stored: { ...JUNIPER, calendars: { range: "1 week", list: [{ id: "oldcal", name: "Old" }] } }, secrets });
+    await phone.s.load();
+    const read = phone.s.readCopy(text, billing);
+    assert.deepEqual(plain(Object.keys(read.links ?? {}).sort()), [studio.id, home.id].sort());
+    await phone.s.replaceWith(read.settings, read.links);
+    assert.deepEqual(plain(phone.s.get().calendars.list.map((c) => [c.id, c.name, c.account])), [[studio.id, "Studio", "Work"], [home.id, "Home", "Work"]], "calendars keep their IDs");
+    assert.deepEqual(plain(phone.s.get().calendars.list[0].addresses), ["studio-owner@example.com"]);
+    assert.equal(phone.s.get().calendars.range, "2 months");
+    assert.equal(phone.s.link(studio.id), STUDIO_LINK);
+    assert.equal(phone.s.link(home.id), HOME_LINK);
+    assert.equal(phone.s.link("oldcal"), null, "a calendar the paste drops loses its link here");
+    for (const saved of phone.saves) assert.doesNotMatch(JSON.stringify(saved), NO_LINK);
+
+    // A copy without a link for a calendar keeps this device's; links for calendars not in the copy are ignored
+    const bare = JSON.parse(text);
+    delete bare.links[home.id];
+    bare.links.nosuch = "https://example.org/stray.ics";
+    bare.links[studio.id] = 7;
+    const r = phone.s.readCopy(JSON.stringify(bare), billing);
+    assert.deepEqual(plain(r.links), {}, "not a string, or not a calendar in the copy");
+    await phone.s.replaceWith(r.settings, r.links);
+    assert.equal(phone.s.link(home.id), HOME_LINK);
+    assert.equal(phone.s.link("nosuch"), null);
+    // A copy from before OBS-282: no calendars, and the defaults
+    const old = phone.s.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J" } }), billing);
+    assert.deepEqual(plain([old.settings?.calendars, old.links]), [{ range: "2 months", list: [] }, {}]);
+});
+
+test("readOldNotes: settings saved before OBS-282 read the Calendar Sync note's range once, and say so", async () => {
+    const notes = { "Config/Calendar Sync.md": "---\nid: 1\n---\n\n## Range\n\nSync range: 3 weeks\n\n## Calendars\n" };
+    const f = withPlugin({ stored: JUNIPER_BEFORE, notes });
+    await f.s.load();
+    assert.equal(f.s.get().calendars.range, "2 months", "until the note is read");
+    await f.s.readOldNotes();
+    assert.equal(f.s.get().calendars.range, "3 weeks");
+    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [] } }], "the rest as it was");
+    assert.deepEqual(f.notices, [settings.rangeNotice({ range: "3 weeks" })]);
+    assert.deepEqual(f.reads, ["Config/Calendar Sync.md"], "Invoice Settings and Table Settings aren't read again");
+    await f.s.readOldNotes();
+    assert.deepEqual([f.saves.length, f.notices.length, f.reads.length], [1, 1, 1], "once");
+    // A later load finds calendars saved: the note's line, changed, changes nothing
+    notes["Config/Calendar Sync.md"] = notes["Config/Calendar Sync.md"].replace("3 weeks", "1 week");
+    f.plugin.loadData = async () => f.saves[0];
+    await f.s.load();
+    await f.s.readOldNotes();
+    assert.deepEqual([f.s.get().calendars.range, f.reads.length], ["3 weeks", 1]);
+});
+
+test("readOldNotes: a new device reads all three notes at once, with one notice; a bad range is named", async () => {
+    const f = withPlugin({ notes: {
+        "Config/Invoice Settings.md": INVOICE_TEXT, "Config/Table Settings.md": TABLE_TEXT,
+        "Config/Calendar Sync.md": "## Range\n\nSync range: 5 weeks\n",
+    } });
+    await f.s.load();
+    await f.s.readOldNotes();
+    assert.deepEqual(f.saves, [{ ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }], "the default range");
+    assert.equal(f.notices.length, 1);
+    assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice", "table"], bad: [] })}\n\n${settings.rangeNotice({ bad: "`Sync range` in Calendar Sync (5 weeks)" })}`);
+});
+
+test("readOldNotes: no range line, calendars already saved, or a data file that doesn't read: the note isn't read over them", async () => {
+    const none = withPlugin({ stored: JUNIPER_BEFORE, notes: { "Config/Calendar Sync.md": "## Calendars\n" } });
+    await none.s.load();
+    await none.s.readOldNotes();
+    assert.deepEqual([none.saves, none.notices], [[], []], "no line: nothing to move, and nothing written");
+    const saved = withPlugin({ stored: JUNIPER, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
+    await saved.s.load();
+    await saved.s.readOldNotes();
+    assert.deepEqual([saved.saves, saved.reads, saved.s.get().calendars.range], [[], [], "2 months"]);
+    const broken = withPlugin({ unreadable: true, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
+    await broken.s.load();
+    await broken.s.readOldNotes();
+    assert.deepEqual([broken.saves, broken.reads], [[], []]);
+    // Sync brings a data file while the note is read: it wins
+    const raced = withPlugin({ stored: JUNIPER_BEFORE, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
+    await raced.s.load();
+    const original = raced.s.rangeFromNote.bind(raced.s);
+    raced.s.rangeFromNote = (t) => { raced.s.calendarsSaved = true; return original(t); };
+    await raced.s.readOldNotes();
+    assert.deepEqual([raced.saves, raced.notices], [[], []]);
+});
+
+test("the demo's data file holds no calendar, and no link", () => {
+    const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
+    assert.deepEqual(JSON.parse(text).calendars, { range: "2 months", list: [] });
+    assert.doesNotMatch(text, NO_LINK);
 });

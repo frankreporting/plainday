@@ -49,7 +49,8 @@ function reader(requestUrl = () => { throw new Error("no download in this test")
     const context = vm.createContext({
         requestUrl, performance, window: { setTimeout, clearTimeout }, calendarWorkerSource: "",
         Worker: Worker ?? inProcess(inner), Blob: class { constructor(parts) { this.parts = parts; } },
-        URL: { createObjectURL: () => "blob:calendar-worker", revokeObjectURL: () => {} },
+        // The browser's URL, which also reads links, with a stand-in for the worker's script
+        URL: class extends URL { static createObjectURL() { return "blob:calendar-worker"; } static revokeObjectURL() {} },
     });
     const CalendarFeed = loadClass("calendarFeed.js", context);
     const feed = new CalendarFeed();
@@ -292,6 +293,63 @@ test("a Google link's path names the calendar's own address, in every form Googl
     }
 });
 
+test("your address on a calendar, from Plainday's settings, leaves out the invitations you declined there, over what the link says (OBS-282)", async () => {
+    const day = "2026-11-12";
+    const { feed } = reader();
+    const window = feed.window(14, at(day));
+    const all = feeds(day);
+    const read = (name, addresses) => feed.read(all[name].text, { calendar: { ...CALENDARS[name], addresses }, window, link: all[name].link });
+    // iCloud (by its EMAIL parameter) and Outlook: left out with your address, read without it
+    for (const [name, title] of [["home", "Book swap"], ["library", "Shelf audit"]]) {
+        const given = await read(name, [OWNERS[name]]);
+        assert.equal(given.events.some((e) => e.title === title), false, name);
+        assert.equal(given.stats.declined, 1, name);
+        const blank = await read(name, []);
+        assert.equal(blank.events.some((e) => e.title === title), true, `${name}, blank`);
+        assert.equal(blank.stats.declined, 0);
+    }
+    // More than one address: either one's decline counts
+    const two = await read("home", ["someone@example.com", OWNERS.home.toUpperCase()]);
+    assert.equal(two.stats.declined, 1);
+    // Google: blank, the link's own address; given, yours instead
+    assert.equal((await read("studio", [])).stats.declined, 1, "the link's address");
+    const other = await read("studio", ["lead@example.com"]);
+    assert.equal(other.events.some((e) => e.title === "Vendor demo"), true, "the link's owner declined it, but that isn't your address here");
+});
+
+test("owners: your addresses, else the Google link's, else none; the account a link suggests; what's a link", () => {
+    const { feed } = reader();
+    assert.deepEqual(plain(feed.owners({ addresses: [" Me@Example.com ", "", "mailto:also@example.com"] }, LINKS.studio)), ["me@example.com", "also@example.com"]);
+    assert.deepEqual(plain(feed.owners({ addresses: [] }, LINKS.studio)), ["studio-owner@example.com"]);
+    assert.deepEqual(plain(feed.owners({}, LINKS.studio)), ["studio-owner@example.com"]);
+    assert.equal(feed.owners({ addresses: [] }, LINKS.home), null);
+    assert.equal(feed.owners(undefined, null), null);
+    assert.deepEqual([LINKS.studio, LINKS.home, LINKS.library, "https://outlook.live.com/owa/calendar/x/reachcalendar.ics",
+        "http://127.0.0.1:8765/studio.ics", "https://example.org/cal.ics", "not a link"].map((l) => feed.account(l)),
+    ["Google", "iCloud", "Outlook", "Outlook", "", "", ""]);
+    for (const link of [LINKS.studio, LINKS.home, " https://example.org/cal.ics ", "http://127.0.0.1:8765/gone.ics", "webcals://example.org/x"]) assert.equal(feed.isLink(link), true, link);
+    for (const link of ["", "example.org/cal.ics", "ftp://example.org/cal.ics", "https://", "https://exa mple.org/x", "javascript:alert(1)", null]) assert.equal(feed.isLink(link), false, String(link));
+});
+
+test("check: a link Add calendar is given, downloaded once, gives the feed's name or why not, never the link (OBS-282)", async () => {
+    const day = "2026-11-12";
+    const asked = [];
+    const answers = { ok: { status: 200, text: feeds(day).studio.text }, gone: { status: 404, text: "" }, page: { status: 200, text: "<html></html>" } };
+    let answer = "ok";
+    const { feed } = reader(async (req) => { asked.push(req.url); return answers[answer]; });
+    assert.deepEqual(plain(await feed.check(LINKS.studio)), { name: "Studio" });
+    answer = "gone";
+    assert.deepEqual(plain(await feed.check(LINKS.studio)), { problem: "dead" });
+    answer = "page";
+    assert.deepEqual(plain(await feed.check(LINKS.studio)), { problem: "unreadable" });
+    assert.equal(asked.length, 3);
+    assert.deepEqual(plain(await feed.check("Studio's calendar")), { problem: "notLink" });
+    assert.equal(asked.length, 3, "text that isn't a link isn't downloaded");
+    answer = "ok";
+    answers.ok = { status: 200, text: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n" };
+    assert.deepEqual(plain(await feed.check(LINKS.home)), { name: "" }, "a feed with no name");
+});
+
 test("a webcal:// link is fetched as https://, and a feed with no name comes back with none (1.7)", async () => {
     const asked = [];
     const text = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
@@ -447,7 +505,7 @@ test("the worker as the build makes it reads a feed on a thread of its own, neve
     assert.deepEqual(plain(got.events), plain(reads.studio.events));
     assert.equal(await ThreadWorker.last.exited, 1, "stopped once it answered");
     assert.ok(!JSON.stringify(posted).includes("private-"), "the link stays on the main thread");
-    assert.equal(posted.at(-1).options.owner, "studio-owner@example.com", "only the address its path holds");
+    assert.deepEqual(plain(posted.at(-1).options.owner), ["studio-owner@example.com"], "only the address its path holds");
     // A rule ical.js never finishes: every 2 years on the fifth Friday, from a February no leap year
     // comes round to
     const text = calendar(vevent("UID:stuck@example.org", "SUMMARY:Stuck", "DTSTART;TZID=America/New_York:20250228T100000",
