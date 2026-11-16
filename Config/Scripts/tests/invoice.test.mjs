@@ -223,9 +223,19 @@ test("missing: a new invoice needs your name and the invoice folder; a rebuild o
     assert.equal(inv.missing({ name: "", folder: "" }, { folder: false }), `Add your name ${where}`);
 });
 
+test("the next invoice number: from the first invoice number, past the last given and past the highest invoice (OBS-281)", () => {
+    const next = (settings, numbers = []) => billing.nextNumber(numbers.map((n) => ({ number: `${n}-HBR` })), inv.numberedFrom(settings));
+    assert.equal(next({ firstNumber: 1001, lastNumber: 1000 }), 1001, "a new vault");
+    assert.equal(next({ firstNumber: 2001, lastNumber: 1000 }), 2001, "a first number typed higher");
+    assert.equal(next({ firstNumber: 1001, lastNumber: 1005 }, [1003]), 1006, "a deleted invoice's number isn't given again");
+    assert.equal(next({ firstNumber: 1001, lastNumber: 1000 }, [1040]), 1041, "a series already in the vault");
+    assert.equal(next({ firstNumber: 1, lastNumber: 0 }), 1);
+    assert.equal(next({ lastNumber: 1004 }), 1005, "settings from before the first invoice number");
+});
+
 test("Invoice without your name or the invoice folder says so before asking anything, and makes nothing (OBS-281)", async () => {
     const notices = [], made = [], asked = [];
-    let invoices = { name: "", address: [], terms: "", paymentNote: "", folder: "", lastNumber: 1000 };
+    let invoices = { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 };
     const app = { vault: { create: async (p) => { made.push(p); }, createFolder: async (p) => { made.push(p); } } };
     const context = vm.createContext({ app, setTimeout, Notice: class { constructor(t) { notices.push(t); } },
         plainday: { Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } } });

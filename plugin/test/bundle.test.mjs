@@ -78,7 +78,7 @@ function load(file = BUNDLE, { stored = null } = {}) {
     class Modal {}
     const module = { exports: {} };
     const req = (id) => {
-        if (id === "obsidian") return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal };
+        if (id === "obsidian") return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal, requireApiVersion: () => true };
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
     };
@@ -232,6 +232,7 @@ function standInSetting() {
                 links[text] = () => { let stopped = false; listeners.click({ preventDefault: () => { stopped = true; } }); return stopped; };
                 return el;
             },
+            createSpan({ text }) { links[`span ${text}`] = null; },
         },
         descEl: { createDiv: () => ({ setText: (t) => warnings.push(t) }) },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
@@ -252,22 +253,25 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const defs = tab.getSettingDefinitions();
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
-            ["group", "Invoices", ["Your name", "Address", "Terms", "Payment note", "Invoice folder", "Last invoice number"]],
-            ["group", "Tables", ["Freeze rows", "Freeze columns"]],
+            ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
+            ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
         for (const g of defs) for (const i of g.items) {
-            assert.ok(i.name && i.desc, `${i.name} has a name and a description, or Obsidian 1.13 drops it`);
+            assert.ok(i.name, "every row has a name");
+            assert.ok(!("desc" in i) || i.desc, `${i.name}: a description, or none at all`);
             assert.equal(typeof i.render, "function");
         }
+        const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
+        assert.deepEqual(descs, ["Your name or company name", "Address", "Freeze rows", "Freeze columns"]);
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
 
         // Copy and Paste: two links at the top, as Style Settings draws Import and Export
         const top = draw("Backup and transfer");
-        assert.deepEqual(Object.keys(top.s.links), ["Copy", "Paste"]);
+        assert.deepEqual(Object.keys(top.s.links), ["Copy", "span |", "Paste"]);
         const copied = [];
         Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
         try {
@@ -285,9 +289,12 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         folder.s.type("Archiv");
         assert.deepEqual(plugin.saved, [], "typing saves nothing");
         folder.s.type("Archive/Invoices");
-        assert.match(folder.s.warning(), /^Not used: it is inside Archive/);
+        assert.equal(folder.s.warning(), "Archive is already used by Plainday. Please choose another location.");
         folder.s.leave();
         assert.deepEqual(plugin.saved, [], "a refused value is never saved, nor the one before it");
+        assert.equal(folder.s.control.inputEl.value, "Reference/Invoices", "and the field goes back to the saved folder on leaving it");
+        folder.s.type("../x");
+        assert.match(folder.s.warning(), /^Not used: it isn't a folder in the vault/);
         folder.s.type("Business/Invoices");
         folder.s.leave();
         await new Promise((r) => setTimeout(r, 0));
@@ -313,16 +320,40 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.equal(suggest.closed, 1);
         assert.equal(folder.s.control.inputEl.value, "Business/Invoices");
 
-        const last = draw("Last invoice number");
-        last.s.type("2");
-        last.s.type("");
-        last.s.leave();
-        assert.equal(window.plainday.Settings.get().invoices.lastNumber, 1001, "a blank or half-typed number is never kept");
-        assert.match(last.s.warning(), /^Not used: it isn't a whole number/);
-        last.s.type("1005");
-        last.s.leave();
+        const first = draw("First invoice number");
+        assert.equal(first.s.control.inputEl.value, "1001");
+        first.s.type("2");
+        first.s.type("");
+        first.s.leave();
+        assert.equal(window.plainday.Settings.get().invoices.firstNumber, 1001, "a blank or half-typed number is never kept");
+        assert.match(first.s.warning(), /^Not used: it isn't a whole number from 1/);
+        assert.equal(first.s.control.inputEl.value, "1001", "the field goes back to the saved number on leaving it");
+        first.s.type("2001");
+        first.s.leave();
         await new Promise((r) => setTimeout(r, 0));
-        assert.equal(saved()?.lastNumber, 1005);
+        assert.deepEqual([saved()?.firstNumber, saved()?.lastNumber], [2001, 2000], "typing a first number numbers from it");
+
+        // Tables: the freezes show only while the switch is on, which freezes 1 and 1, and off unfreezes
+        const visible = () => tab.getSettingDefinitions()[2].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
+        const shown = tab.getSettingDefinitions()[2].items;
+        assert.deepEqual(shown.filter((i) => !i.visible || i.visible()).map((i) => i.name), ["Freeze rows and columns"]);
+        const sw = standInSetting();
+        shown[0].render(sw);
+        const rows = standInSetting();
+        shown[1].render(rows);
+        let refreshed = 0;
+        tab.refreshDomState = () => { refreshed++; };
+        sw.control.handlers.change(true);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(plugin.saved.at(-1).tables, { freezeRows: 1, freezeColumns: 1 });
+        assert.equal(rows.control.inputEl.value, "1", "the shown freeze follows");
+        assert.ok(shown[1].visible() && shown[2].visible());
+        sw.control.handlers.change(false);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(plugin.saved.at(-1).tables, { freezeRows: 0, freezeColumns: 0 });
+        assert.ok(!shown[1].visible());
+        assert.equal(refreshed, 2, "Obsidian shows and hides them");
+        assert.deepEqual(visible(), ["Freeze rows and columns"], "drawn again, the switch reads the saved freeze");
     } finally {
         plugin.onunload();
     }

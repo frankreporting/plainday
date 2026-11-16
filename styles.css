@@ -5,3 +5,8 @@
     display: block;
     width: 100%;
 }
+
+/* Settings → Plainday: the bar between Copy and Paste */
+.plainday-separator {
+    color: var(--text-faint);
+}

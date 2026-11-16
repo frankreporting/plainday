@@ -8,7 +8,9 @@ export default class Settings {
     // from memory: `plainday.Settings.get().invoices.folder`.
     //
     //   - invoices: your name, address, terms and payment note, which head and close each invoice; the
-    //     folder new invoices go in (blank until you choose one); the last invoice number given.
+    //     folder new invoices go in (blank until you choose one); the first invoice number, which the
+    //     panel shows; and the last number given, which it doesn't: Invoice raises it, so a deleted
+    //     invoice's number is never given again, and typing a first number sets it to one less.
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221).
     //
@@ -24,12 +26,14 @@ export default class Settings {
     //
     // A backup, or another device: plugin settings don't sync unless Obsidian Sync carries community
     // plugins, so copyText() is every setting as one block for the clipboard, and readCopy() and
-    // replaceWith() take it back, on this device or another. A paste replaces this device's settings but keeps the higher last invoice
-    // number, so no number is given twice.
+    // replaceWith() take it back, on this device or another. A paste replaces this device's settings
+    // but keeps the higher last number given, so no number is given twice.
     static INVOICE_NOTE = "Config/Invoice Settings.md";
     static TABLE_NOTE = "Config/Table Settings.md";
     // Invoice numbers have at most six digits
     static MAX_NUMBER = 999999;
+    // A new vault's first invoice is 1001, and none has been given yet
+    static FIRST_NUMBER = 1001;
     static FIRST_LAST_NUMBER = 1000;
     // Selectable Tables freezes at most 9 columns; more than 9 frozen rows would fill the screen
     static MAX_FROZEN = 9;
@@ -50,14 +54,14 @@ export default class Settings {
     /**
      * Every setting at its default: what a new vault starts with
      * @returns {{
-     *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, lastNumber: number },
+     *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean },
      * }}
      */
     defaults() {
         return {
-            invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", lastNumber: Settings.FIRST_LAST_NUMBER },
+            invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true },
         };
@@ -101,6 +105,18 @@ export default class Settings {
     }
 
     /**
+     * A first invoice number, as the panel takes it: a whole number from 1 to 999999. { number, error },
+     * with both null when blank.
+     * @param {unknown} raw
+     * @returns {{ number: number | null, error: string | null }}
+     */
+    firstNumberOf(raw) {
+        const n = this.lastNumberOf(raw);
+        if (n.number === 0) return { number: null, error: `isn't a whole number from 1 to ${Settings.MAX_NUMBER}` };
+        return n.error ? { number: null, error: `isn't a whole number from 1 to ${Settings.MAX_NUMBER}` } : n;
+    }
+
+    /**
      * How many rows or columns to freeze: a whole number from 0 to 9, as a number or as digits. { number,
      * error, capped }, with 0 when blank; more than 9 is 9, and `capped` says so.
      * @param {unknown} raw
@@ -136,6 +152,7 @@ export default class Settings {
         out.invoices.terms = this.text(inv.terms);
         out.invoices.paymentNote = this.multiline(inv.paymentNote);
         out.invoices.folder = billing.folderOf(typeof inv.folder === "string" ? inv.folder : null).folder;
+        out.invoices.firstNumber = this.firstNumberOf(inv.firstNumber).number ?? Settings.FIRST_NUMBER;
         out.invoices.lastNumber = this.lastNumberOf(inv.lastNumber).number ?? Settings.FIRST_LAST_NUMBER;
         out.tables.freezeRows = this.frozenOf(tables.freezeRows).number;
         out.tables.freezeColumns = this.frozenOf(tables.freezeColumns).number;
@@ -243,12 +260,12 @@ export default class Settings {
      */
     holds(settings) {
         const inv = settings.invoices;
-        const details = [inv.name || "no name", inv.folder ? `invoices in ${inv.folder}` : "no invoice folder", `last invoice number ${inv.lastNumber}`];
+        const details = [inv.name || "no name", inv.folder ? `invoices in ${inv.folder}` : "no invoice folder", `first invoice number ${inv.firstNumber}`];
         return `invoices (${details.join(", ")}), tables (freeze ${settings.tables.freezeRows} rows and ${settings.tables.freezeColumns} columns) and the editor switch (${settings.editor.listCursor ? "on" : "off"})`;
     }
 
     /**
-     * The settings a paste leaves: the copy's, with the higher of the two last invoice numbers
+     * The settings a paste leaves: the copy's, with the higher of the two last invoice numbers given
      * @param {ReturnType<Settings["defaults"]>} copy
      * @param {ReturnType<Settings["defaults"]>} [now]
      * @returns {ReturnType<Settings["defaults"]>}

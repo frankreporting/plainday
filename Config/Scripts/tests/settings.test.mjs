@@ -15,13 +15,13 @@ const Settings = load("settings.js", "Settings");
 const settings = new Settings();
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const DEFAULTS = {
-    invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", lastNumber: 1000 },
+    invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
 };
 const JUNIPER = {
     invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 30",
-        paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", lastNumber: 1001 },
+        paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
 };
@@ -41,13 +41,13 @@ test("normalize: each value that reads, else its default", () => {
     assert.deepEqual(plain(settings.normalize(JUNIPER, billing)), JUNIPER);
     const n = settings.normalize({
         invoices: { name: "  Juniper Hale ", address: "418 Larkspur Lane\n\n Maple Falls, ST 00000 ", terms: 30, paymentNote: "\nLine one  \nLine two\n",
-            folder: " /Business//Invoices/ ", lastNumber: "1033" },
+            folder: " /Business//Invoices/ ", firstNumber: "1020", lastNumber: "1033" },
         tables: { freezeRows: "2", freezeColumns: 12 },
         editor: { listCursor: false },
     }, billing);
     assert.deepEqual(plain(n), {
         invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "30", paymentNote: "Line one\nLine two",
-            folder: "Business/Invoices", lastNumber: 1033 },
+            folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false },
     });
@@ -59,6 +59,13 @@ test("normalize: each value that reads, else its default", () => {
     }
     assert.equal(settings.normalize({ invoices: { lastNumber: 0 } }, billing).invoices.lastNumber, 0);
     assert.equal(settings.normalize({ invoices: { lastNumber: 999999 } }, billing).invoices.lastNumber, 999999);
+    // The first invoice number runs from 1: 0 would leave the last number given at -1
+    for (const firstNumber of [0, -1, 1.5, "abc", 1000000, true, null, ""]) {
+        assert.equal(settings.normalize({ invoices: { firstNumber } }, billing).invoices.firstNumber, 1001, String(firstNumber));
+    }
+    assert.equal(settings.normalize({ invoices: { firstNumber: "1" } }, billing).invoices.firstNumber, 1);
+    assert.deepEqual(plain(settings.firstNumberOf("0")), { number: null, error: "isn't a whole number from 1 to 999999" });
+    assert.deepEqual(plain(settings.firstNumberOf("")), { number: null, error: null }, "blank isn't a number, and isn't an error either");
     for (const v of [-1, 1.5, "a lot", true]) assert.equal(settings.normalize({ tables: { freezeRows: v } }, billing).tables.freezeRows, 0, String(v));
     for (const v of ["no", 0, null]) assert.equal(settings.normalize({ editor: { listCursor: v } }, billing).editor.listCursor, true, String(v));
 });
@@ -137,8 +144,8 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     assert.ok(!text.includes("\n"), "one line, so nothing on the way breaks it");
     const read = settings.readCopy(text, billing);
     assert.deepEqual(plain(read.settings), JUNIPER);
-    assert.equal(read.holds, "invoices (Juniper Hale, invoices in Reference/Invoices, last invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
-    assert.equal(settings.holds(DEFAULTS), "invoices (no name, no invoice folder, last invoice number 1000), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
+    assert.equal(read.holds, "invoices (Juniper Hale, invoices in Reference/Invoices, first invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
+    assert.equal(settings.holds(DEFAULTS), "invoices (no name, no invoice folder, first invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
     assert.deepEqual(plain(settings.readCopy(`  ${text}\n`, billing).settings), JUNIPER, "spaces around it are fine");
     for (const t of ["{}", '{"invoices":{}}', "[1]", "not json", "null", '"plainday-settings"']) {
         assert.match(settings.readCopy(t, billing).error, /^That isn't a copy of Plainday's settings/, t);
@@ -156,6 +163,11 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
     assert.equal(after.invoices.lastNumber, 1004, "this device's higher number stays");
     assert.equal(settings.pasted({ ...JUNIPER, invoices: { ...JUNIPER.invoices, lastNumber: 1010 } }, here).invoices.lastNumber, 1010, "the copy's higher number wins");
     assert.equal(JUNIPER.invoices.lastNumber, 1001, "the copy itself isn't changed");
+    const first = settings.pasted({ ...JUNIPER, invoices: { ...JUNIPER.invoices, firstNumber: 2001, lastNumber: 2000 } }, here).invoices;
+    assert.deepEqual(plain([first.firstNumber, first.lastNumber]), [2001, 2000], "the copy's first number, and its last number given when higher");
+    // A copy from before the first invoice number: the default, and this device's numbering goes on
+    const old = settings.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J", lastNumber: 1003 } }), billing).settings;
+    assert.deepEqual(plain([old.invoices.firstNumber, settings.pasted(old, here).invoices.lastNumber]), [1001, 1004]);
 });
 
 // ------------------------------------------------------------------ the data file and the first load

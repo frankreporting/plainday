@@ -8,6 +8,7 @@
     "terms": "Net 30",
     "paymentNote": "Please pay by bank transfer within 30 days.",
     "folder": "Reference/Invoices",
+    "firstNumber": 1001,
     "lastNumber": 1001
   },
   "tables": {

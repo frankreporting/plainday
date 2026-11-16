@@ -323,7 +323,7 @@ Updated 9/16 9:00pm · 3 open
 
 With the [Selectable Tables](https://github.com/frankreporting/selectable-tables) plugin, a long table can keep its first rows and columns in view as you scroll it in Live Preview, like a spreadsheet. The plugin keeps a freeze as a comment in the table's header row: `%%freeze 2 1%%` keeps 2 rows and 1 column in view. A comment draws as nothing, so you see only the cell's text.
 
-- **A default for every table the system writes:** set *Freeze rows* and *Freeze columns* in *Settings → Plainday → Tables*, from 0 to 9. 0 is off, as it comes. With both at 1, every table keeps its header row and first column in view: the time report's tables in weekly, monthly, yearly, project and area notes, every timesheet, and an invoice's *Billable hours* and *Billed entries*. A short table gets it too, which changes nothing you'd see. The next run, or *Rebuild* on a draft, writes it.
+- **A default for every table the system writes:** turn on *Freeze rows and columns* in *Settings → Plainday → Tables*, which freezes 1 row and 1 column, then set *Freeze rows* and *Freeze columns* from 0 to 9 if you want more. Off, as it comes, freezes nothing. With both at 1, every table keeps its header row and first column in view: the time report's tables in weekly, monthly, yearly, project and area notes, every timesheet, and an invoice's *Billable hours* and *Billed entries*. A short table gets it too, which changes nothing you'd see. The next run, or *Rebuild* on a draft, writes it.
 - **Freeze columns counts from the first named column:** a timesheet's unnamed status column, and the one in a project's *Invoices*, comes along without counting. So with 1, a timesheet keeps its status column and its Date / Time in view, and its header starts `%%freeze 1 2%%`. Selectable Tables freezes at most 9 columns, a status column included.
 - **The label beside it:** the report writes a second comment saying whose freeze it is, `%%default 1 2%%` for its own default, `%%custom%%` for yours. It's hidden like the mark, and you never type it. Both start the header row's first cell, so in Source mode that column is wider.
 - **Your freezes are kept:** freeze or unfreeze a table with Selectable Tables' commands, or type a mark yourself, and that table keeps it through every rewrite. The next run labels it `%%custom%%`. An unfrozen table gets `%%freeze 0 0%% %%custom%%`, so it stays unfrozen.
@@ -572,9 +572,9 @@ Run *Invoice* on a project note (anywhere else, it asks which project has time t
 
 **A flat fee** can't be invoiced yet. Run on a flat-fee project, *Invoice* asks the day the fee was earned instead, in words like *Bill through*, and sets `earned` on the project's note; the time report then counts the fee in that week's, month's and year's Earnings (see *Earnings in weekly and monthly notes*). Run again, it changes the day. A day still to come is fine, for a fee invoiced ahead: it counts at once, in its period, and the project's summary shows the date, so a year read wrong (`2/1` typed in October is next year's) is easy to spot. On a sub-project that's part of a flat fee set above it, it names that project and writes nothing; on a flat project that invoices its sub-projects' time (`include_subprojects`), it asks which you mean.
 
-It needs your details first, from *Settings → Plainday → Invoices* (see *Settings*): your name, address, terms and payment note, the invoice folder and the last invoice number. Before the first invoice it needs your name and the invoice folder: without them it says "Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again", and makes nothing. *Rebuild* needs only your name, since its draft is already filed. The demo's details are in its own settings, invented.
+It needs your details first, from *Settings → Plainday → Invoices* (see *Settings*): your name or company name, address, terms and note, the invoice folder and the first invoice number. Before the first invoice it needs your name and the invoice folder: without them it says "Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again", and makes nothing. *Rebuild* needs only your name, since its draft is already filed. The demo's details are in its own settings, invented.
 
-- **Last invoice number:** the highest invoice number given so far, up to 999999. A new invoice takes one more than it, or than the highest invoice note's number if that's higher, and raises it to its own number once the note is made. A new vault starts at 1000, so the first invoice is 1001; set it once to continue the numbers you used before.
+- **First invoice number:** where numbering starts, from 1 to 999999, 1001 as it comes. A new invoice takes the next number past the highest invoice note in the vault and past the last number given, or this one if that's higher, so set it once to continue the numbers you used before, or to start a new series. Plainday remembers the last number it gave, so a deleted invoice's number isn't given again; typing a first number numbers from it, past the invoices still in the vault.
 - **Invoice folder:** where every new invoice goes, like `Invoices` or `Business/Invoices`. You choose it; the field suggests `Invoices`. It can't be inside `Config` or `Archive`. Invoices already in a project's own `invoices/` folder, where a blank `folder` used to file them, still count.
 
 **Who it bills:** one note, whose details head the invoice under *Bill to*.
@@ -830,23 +830,23 @@ These run on their own when Obsidian starts, one after the other once the vault'
 
 ## Settings
 
-Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; the invoice folder and the last invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (an invoice folder outside the vault or in `Archive`, a number that isn't one) is refused with a line under the field, and the old value stays.
+Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; the invoice folder and the first invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (an invoice folder outside the vault or in `Archive`, a number that isn't one) is refused with a line under the field, and when you leave the field it goes back to the saved value.
 
 A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again, and meanwhile the time report leaves every table's freeze as it is.
 
 ### Invoices
 
-- **Your name, Address, Terms, Payment note:** they head and close each new invoice (see *Making one*). The address takes one line per item. A project's own `terms` wins over yours.
-- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders. It can't be inside `Config` or `Archive`. Changing it moves nothing already made.
-- **Last invoice number:** the highest number given so far, from 0 to 999999. A new vault starts at 1000, so the first invoice is 1001. *Invoice* raises it each time.
+- **Your name or company name, Address, Terms, Note:** they head and close each new invoice (see *Making one*). The address takes one line per item. A project's own `terms` wins over yours.
+- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders. It can't be inside `Config` or `Archive`, which Plainday already uses: an Invoices base there would list nothing in a vault that excludes them in *Files and links*. Changing it moves nothing already made.
+- **First invoice number:** where numbering starts, 1001 as it comes (see *Making one*). *Invoice* goes on from the highest invoice in the vault, and never gives a deleted invoice's number again.
 
 ### Tables
 
-**Freeze rows** and **Freeze columns,** from 0 to 9: the default freeze for every table the system writes, 0 for off (see *Freezing tables*).
+**Freeze rows and columns**, which needs the Selectable Tables plugin: on, it freezes 1 row and 1 column, and shows **Freeze rows** and **Freeze columns**, from 0 to 9, to change them; off, nothing is frozen. It's the default freeze for every table the system writes (see *Freezing tables*).
 
 ### Editor
 
-**Keep the cursor after a list line's bullet or checkbox:** *ListCursor* (see *Startup scripts*), on as it comes. Off, none of it runs, and the cursor can rest anywhere on a list line. The switch takes effect at once, in every open note.
+**Keep the cursor after a list line's bullet or checkbox:** *ListCursor* (see *Startup scripts*), on as it comes: in Live Preview, the cursor doesn't rest inside a task's or list item's markdown, so it stays rendered. You can still edit the markdown in Source mode, or select it to copy or delete. Off, none of it runs, and the cursor can rest anywhere on a list line. The switch takes effect at once, in every open note.
 
 ### Backup and another device
 
@@ -855,11 +855,11 @@ Plugin settings stay on the device unless Obsidian Sync carries installed commun
 1. **Copy** puts one block of text on the clipboard, with every setting. It holds your invoice details, so keep it somewhere private; a clipboard manager may keep a copy.
 2. **Paste**, on the other device or later on this one: paste the block into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. *Cancel* changes nothing.
 
-Before you choose, the box says what the copy holds, with its name, invoice folder and last invoice number, so you can tell whose it is. *Replace* makes this device's settings the copy's, except the last invoice number, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
+Before you choose, the box says what the copy holds, with its name, invoice folder and first invoice number, so you can tell whose it is. *Replace* makes this device's settings the copy's, except the last number given, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
 
 - **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
 - **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.
-- **Numbers:** each device raises its own last invoice number, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
+- **Numbers:** each device remembers the last number it gave, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
 
 ### Vaults from before
 

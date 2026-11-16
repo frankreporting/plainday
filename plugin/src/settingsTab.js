@@ -7,20 +7,21 @@
 // (getSettingDefinitions); an older Obsidian, down to the manifest's 1.11.4, calls display(), which
 // draws the same list itself with Setting and SettingGroup. Each row draws its own control (`render`).
 //
-// Each change is saved as it's made. The invoice folder and the last invoice number are checked as you
+// Each change is saved as it's made. The invoice folder and the first invoice number are checked as you
 // type and saved when you leave the field (or the panel closes), so a value on its way to another one
-// (`Archiv` on the way to `Archive/Invoices`) is never kept. A value that doesn't read (a folder outside
-// the vault or in Archive, a number that isn't one) is refused with a line under the field, and the old
-// value stays.
+// (`Ref` on the way to `Reference/Invoices`) is never kept. A value that doesn't read (a folder outside
+// the vault or in Archive, a number that isn't one) is refused with a line under the field, and on
+// leaving it the field goes back to the saved value.
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
-// Invoices, Tables and Editor. OBS-282 adds Calendars and OBS-283 Folders.
+// Invoices, Tables (a switch, then the two freezes while it's on) and Editor. OBS-282 adds Calendars and
+// OBS-283 Folders.
 import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, SettingGroup, TextAreaComponent } from "obsidian";
 import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {import("obsidian").Setting} Setting */
-/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void) }} Row */
+/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
 
 /** @param {unknown} e */
@@ -125,7 +126,7 @@ class PasteModal extends Modal {
         box.onChange((text) => {
             const read = settings.readCopy(text);
             copy = read.settings ?? null;
-            said.setText(read.settings ? `It holds ${read.holds}. This device's last invoice number stays if it's higher.` : read.error ?? "");
+            said.setText(read.settings ? `It holds ${read.holds}. Invoice numbers this device has given aren't given again.` : read.error ?? "");
             replace.setDisabled(!copy);
         });
         window.setTimeout(() => box.inputEl.focus(), 0);
@@ -142,7 +143,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         return this.sections().map(({ heading, rows }) => ({
             type: /** @type {const} */ ("group"),
             ...(heading ? { heading } : {}),
-            items: rows.map(({ name, desc, render }) => ({ name, desc, render })),
+            items: rows.map(({ name, desc, render, visible }) => ({ name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
         }));
     }
 
@@ -153,17 +154,29 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /** @type {(() => void)[]} */
         const waiting = [];
         this.waiting = waiting;
+        /** @type {{ el: HTMLElement, visible: () => boolean }[]} */
+        const shown = [];
+        this.shown = shown;
         for (const { heading, rows } of this.sections()) {
             const group = new SettingGroup(this.containerEl);
             if (heading) group.setHeading(heading);
-            for (const { name, desc, render } of rows) {
+            for (const { name, desc, render, visible } of rows) {
                 group.addSetting((s) => {
-                    s.setName(name).setDesc(desc);
+                    s.setName(name);
+                    if (desc) s.setDesc(desc);
                     const cleanup = render(s);
                     if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
+                    if (visible) shown.push({ el: s.settingEl, visible });
                 });
             }
         }
+        this.refreshShown();
+    }
+
+    // Shows or hides each row by its `visible`, after a switch changed it
+    refreshShown() {
+        if (requireApiVersion("1.13.0")) this.refreshDomState();
+        else for (const { el, visible } of this.shown ?? []) el.toggle(visible());
     }
 
     hide() {
@@ -203,6 +216,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             (e) => problem(setting, `Couldn't save: ${messageOf(e)}`),
         );
         const counts = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [String(i), String(i)]));
+        // Whether the two freezes show: the switch above them, on while either is more than 0
+        let freezing = now().tables.freezeRows > 0 || now().tables.freezeColumns > 0;
+        /** @type {import("obsidian").DropdownComponent[]} */
+        const freezes = [];
 
         return [
             {
@@ -215,6 +232,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                                 (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
                             );
                         });
+                        s.controlEl.createSpan({ text: "|", cls: "plainday-separator" });
                         link(s, "Paste", () => {
                             new PasteModal(this.app, async (copy) => {
                                 await settings.replaceWith(copy);
@@ -227,35 +245,41 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Invoices",
                 rows: [
-                    row("Your name", "Heads each new invoice, above your address. Invoice asks for it before your first invoice.",
+                    row("Your name or company name", "",
                         (s) => s.addText((t) => t.setValue(now().invoices.name).onChange((v) => { void store(s, "invoices", { name: v.trim() }); }))),
-                    row("Address", "Under your name, one line per item.", (s) => s.addTextArea((t) => {
+                    row("Address", "", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.address.join("\n")).onChange((v) => { void store(s, "invoices", { address: settings.lines(v) }); });
                     })),
-                    row("Terms", "Printed on each invoice, such as Net 30. A project's own terms win over these.",
+                    row("Terms", "e.g. Net 30",
                         (s) => s.addText((t) => t.setPlaceholder("Net 30").setValue(now().invoices.terms).onChange((v) => { void store(s, "invoices", { terms: v.trim() }); }))),
-                    row("Payment note", "Closes each invoice, such as how to pay you.", (s) => s.addTextArea((t) => {
+                    row("Note", "Closes each invoice, such as how to pay you.", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
-                    field("Invoice folder", "Where new invoices go, with the Invoices base beside them. Invoice asks you to choose one before your first invoice. Changing it doesn't move the invoices already made, and invoices in a project's own invoices folder still count.", (s) => {
+                    field("Invoice folder", "Note that changing it will not move past invoices.", (s) => {
                         /** @type {string | null} */
                         let waiting = null;
+                        /** @type {import("obsidian").TextComponent | null} */
+                        let input = null;
+                        // Leaving the field: a folder that reads is saved, and one that doesn't goes back to
+                        // the saved folder at once, its line still saying why
                         const save = () => {
-                            if (waiting === null) return;
                             const folder = waiting;
                             waiting = null;
-                            if (folder !== now().invoices.folder) void store(s, "invoices", { folder });
+                            if (folder !== null && folder !== now().invoices.folder) void store(s, "invoices", { folder });
+                            input?.setValue(folder ?? now().invoices.folder);
                         };
                         /** @param {string} v */
                         const check = (v) => {
-                            const { folder, error } = plainday.Billing.folderOf(v);
+                            const { folder, error, taken } = plainday.Billing.folderOf(v);
                             const was = now().invoices.folder;
                             waiting = error ? null : folder;
-                            problem(s, error ? `Not used: it ${error}. The invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.` : "");
+                            problem(s, taken ? `${taken} is already used by Plainday. Please choose another location.`
+                                : error ? `Not used: it ${error}. The invoice folder stays ${was ? `\`${was}\`` : "unchosen"}.` : "");
                         };
                         s.addText((t) => {
+                            input = t;
                             t.setPlaceholder("Invoices").setValue(now().invoices.folder).onChange(check);
                             t.inputEl.addEventListener("change", save);
                             const suggest = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f).error);
@@ -268,20 +292,25 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         });
                         return save;
                     }),
-                    field("Last invoice number", "The highest invoice number given so far. The next invoice gets one more than this, or than the highest invoice note's number if that's higher, and Invoice raises it each time, so a deleted invoice's number is never given again.", (s) => {
+                    // The number the panel shows; Invoice also goes past the last number given, which typing
+                    // a first number sets to one less, and past the highest invoice in the vault
+                    field("First invoice number", "Plainday will increment up from here, or from the next highest number if you already have a series of invoices in your vault.", (s) => {
                         /** @type {number | null} */
                         let waiting = null;
+                        /** @type {import("obsidian").TextComponent | null} */
+                        let input = null;
                         const save = () => {
-                            if (waiting === null) return;
-                            const lastNumber = waiting;
+                            const first = waiting;
                             waiting = null;
-                            if (lastNumber !== now().invoices.lastNumber) void store(s, "invoices", { lastNumber });
+                            if (first !== null && first !== now().invoices.firstNumber) void store(s, "invoices", { firstNumber: first, lastNumber: first - 1 });
+                            input?.setValue(String(first ?? now().invoices.firstNumber));
                         };
                         s.addText((t) => {
+                            input = t;
                             t.inputEl.inputMode = "numeric";
-                            t.setValue(String(now().invoices.lastNumber)).onChange((v) => {
-                                waiting = settings.lastNumberOf(v).number;
-                                problem(s, waiting === null ? `Not used: it isn't a whole number from 0 to 999999. The last invoice number stays ${now().invoices.lastNumber}.` : "");
+                            t.setValue(String(now().invoices.firstNumber)).onChange((v) => {
+                                waiting = settings.firstNumberOf(v).number;
+                                problem(s, waiting === null ? `Not used: it isn't a whole number from 1 to 999999. The first invoice number stays ${now().invoices.firstNumber}.` : "");
                             });
                             t.inputEl.addEventListener("change", save);
                         });
@@ -292,18 +321,34 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Tables",
                 rows: [
-                    row("Freeze rows", "Keeps a table's first rows in view as you scroll it, with the Selectable Tables plugin: the time report's tables, timesheets and invoices. 0 is off. The next time report writes every table with it, and a table you froze or unfroze yourself keeps your choice.",
-                        (s) => s.addDropdown((d) => d.addOptions(counts).setValue(String(now().tables.freezeRows))
-                            .onChange((v) => { void store(s, "tables", { freezeRows: Number(v) }); }))),
-                    row("Freeze columns", "Keeps a table's first columns in view, counted from its first named column, so a timesheet's status column comes along with its date. 0 is off.",
-                        (s) => s.addDropdown((d) => d.addOptions(counts).setValue(String(now().tables.freezeColumns))
-                            .onChange((v) => { void store(s, "tables", { freezeColumns: Number(v) }); }))),
+                    row("Freeze rows and columns", "Requires Selectable Tables plugin", (s) => s.addToggle((t) => t.setValue(freezing).onChange((on) => {
+                        // On freezes the header row and the first column, off unfreezes both
+                        freezing = on;
+                        const n = on ? 1 : 0;
+                        for (const d of freezes) d.setValue(String(n));
+                        void store(s, "tables", { freezeRows: n, freezeColumns: n });
+                        this.refreshShown();
+                    }))),
+                    {
+                        ...row("Freeze rows", "", (s) => s.addDropdown((d) => {
+                            freezes.push(d);
+                            d.addOptions(counts).setValue(String(now().tables.freezeRows)).onChange((v) => { void store(s, "tables", { freezeRows: Number(v) }); });
+                        })),
+                        visible: () => freezing,
+                    },
+                    {
+                        ...row("Freeze columns", "", (s) => s.addDropdown((d) => {
+                            freezes.push(d);
+                            d.addOptions(counts).setValue(String(now().tables.freezeColumns)).onChange((v) => { void store(s, "tables", { freezeColumns: Number(v) }); });
+                        })),
+                        visible: () => freezing,
+                    },
                 ],
             },
             {
                 heading: "Editor",
                 rows: [
-                    row("Keep the cursor after a list line's bullet or checkbox", "In Live Preview, the cursor rests after a list line's bullet, number or checkbox, never in front of them, so a checkbox stays drawn. Off, it can rest anywhere on the line.",
+                    row("Keep the cursor after a list line's bullet or checkbox", "In Live Preview, prevent the cursor from resting inside the raw markdown for tasks and list items, so they stay rendered. You can still edit the markdown in Source mode or select to copy or delete.",
                         (s) => s.addToggle((t) => t.setValue(now().editor.listCursor).onChange((v) => {
                             void store(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
                         }))),

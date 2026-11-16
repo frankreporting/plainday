@@ -6,8 +6,8 @@ export default class Invoice {
     // one along once it's made. Run on a project note (or pick a project), it asks "Bill through" a
     // date, shows what it would bill and what needs fixing first, and writes a draft into the invoice
     // folder (Settings → Plainday → Invoices, OBS-281). Its number is one past the highest ever given
-    // (the last invoice number there, or the highest invoice note's number), so a deleted invoice's
-    // number is never used again. Run on an invoice note, it offers what fits
+    // (the last number given, kept in the settings, or the highest invoice note's number), so a deleted
+    // invoice's number is never used again, or the first invoice number there when that's higher (numberedFrom). Run on an invoice note, it offers what fits
     // the invoice's status: Rebuild or Mark sent for a draft, Check for changes, Mark paid or Cancel
     // invoice once it's sent.
     //
@@ -57,6 +57,12 @@ export default class Invoice {
     // A list property, or a string with one item per line: trimmed, blanks dropped
     list(value) {
         return [].concat(value ?? []).flatMap((v) => String(v ?? "").split(/\r?\n/)).map((v) => v.trim()).filter(Boolean);
+    }
+
+    // What the next invoice number goes one past, besides the highest invoice in the vault: the last
+    // number given, or one less than the first invoice number when that's higher (Settings → Plainday)
+    numberedFrom(invoices) {
+        return Math.max(invoices.lastNumber, (invoices.firstNumber ?? 0) - 1);
     }
 
     // What a new invoice still needs from Settings → Plainday → Invoices, as the notice that says so,
@@ -516,7 +522,7 @@ export default class Invoice {
         // run may have raised the number
         const now = plainday.Settings.get().invoices;
         if (!now.folder) { new Notice(this.missing(now), 0); return; }
-        const next = billing.nextNumber(model.billing.invoices, now.lastNumber);
+        const next = billing.nextNumber(model.billing.invoices, this.numberedFrom(now));
         const name = this.nameFor(next, code);
         const folder = this.realFolder(now.folder);
         const path = `${folder}/${name}.md`;
