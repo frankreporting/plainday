@@ -855,7 +855,7 @@ Plugin settings stay on the device unless Obsidian Sync carries installed commun
 1. **Copy** puts one block of text on the clipboard, with every setting. It holds your invoice details, so keep it somewhere private; a clipboard manager may keep a copy.
 2. **Paste**, on the other device or later on this one: paste the block into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. *Cancel* changes nothing.
 
-Before you choose, the box says what the copy holds, with its name, invoice folder and first invoice number, so you can tell whose it is. *Replace* makes this device's settings the copy's, except the last number given, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
+*Replace* stays off until the box holds a copy, and text that isn't one says so. It makes this device's settings the copy's, except the last number given, which stays the higher of the two, so a paste never lets a number be given twice. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
 
 - **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
 - **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.

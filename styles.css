@@ -19,3 +19,9 @@
     padding-inline-start: 1em;
     text-indent: -1em;
 }
+
+/* Settings → Plainday: a line under a setting with something to know, such as a folder Invoice will
+   create, in the alert color */
+.plainday-caution {
+    color: var(--text-warning);
+}

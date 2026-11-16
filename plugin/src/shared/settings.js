@@ -235,11 +235,10 @@ export default class Settings {
     }
 
     /**
-     * A pasted block: { settings, holds } where `holds` says what it holds, or { error } when it isn't a
-     * copy of Plainday's settings
+     * A pasted block: { settings }, or { error } when it isn't a copy of Plainday's settings
      * @param {string} text
      * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
-     * @returns {{ settings: ReturnType<Settings["defaults"]>, holds: string, error?: undefined } | { error: string, settings?: undefined, holds?: undefined }}
+     * @returns {{ settings: ReturnType<Settings["defaults"]>, error?: undefined } | { error: string, settings?: undefined }}
      */
     readCopy(text, billing = plainday.Billing) {
         const not = { error: "That isn't a copy of Plainday's settings. Use Copy at the top of Settings → Plainday, then paste here what it copied." };
@@ -249,19 +248,7 @@ export default class Settings {
         try { raw = JSON.parse(t); } catch { return not; }
         if (typeof raw !== "object" || raw === null || !(Settings.COPY_MARK in raw)) return not;
         const settings = this.normalize(raw, billing);
-        return { settings, holds: this.holds(settings) };
-    }
-
-    /**
-     * What a copy holds, as Paste says it before you choose: enough of its invoice details to
-     * tell whose copy it is
-     * @param {ReturnType<Settings["defaults"]>} settings
-     * @returns {string}
-     */
-    holds(settings) {
-        const inv = settings.invoices;
-        const details = [inv.name || "no name", inv.folder ? `invoices in ${inv.folder}` : "no invoice folder", `first invoice number ${inv.firstNumber}`];
-        return `invoices (${details.join(", ")}), tables (freeze ${settings.tables.freezeRows} rows and ${settings.tables.freezeColumns} columns) and the editor switch (${settings.editor.listCursor ? "on" : "off"})`;
+        return { settings };
     }
 
     /**

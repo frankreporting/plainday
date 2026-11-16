@@ -108,8 +108,8 @@ class FolderSuggest extends AbstractInputSuggest {
     }
 }
 
-// Paste: a box to paste a copy into, as wide as the window (styles.css), what it holds, then Cancel or
-// Replace. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
+// Paste: a box to paste a copy into, as wide as the window (styles.css), then Cancel or Replace, which
+// stays off until the box holds a copy; text that isn't one says so. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
 class PasteModal extends Modal {
     /** @param {import("obsidian").App} app @param {(copy: Values) => Promise<void>} onReplace */
     constructor(app, onReplace) {
@@ -141,7 +141,7 @@ class PasteModal extends Modal {
         box.onChange((text) => {
             const read = settings.readCopy(text);
             copy = read.settings ?? null;
-            said.setText(read.settings ? `It holds ${read.holds}. Invoice numbers this device has given aren't given again.` : read.error ?? "");
+            said.setText(read.error ?? "");
             replace.setDisabled(!copy);
         });
         window.setTimeout(() => box.inputEl.focus(), 0);
@@ -208,8 +208,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     sections() {
         const settings = plainday.Settings;
         const now = () => settings.get();
-        // A line under a setting saying what's wrong with what's typed, or a note when `warn` is false, or
-        // nothing
+        // A line under a setting saying what's wrong with what's typed (red), or something to know when
+        // `warn` is false (orange), or nothing
         /** @type {WeakMap<Setting, HTMLElement>} */
         const lines = new WeakMap();
         // The settings whose line says a save failed, which the next save that works clears
@@ -223,6 +223,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 lines.set(setting, line);
             }
             line.toggleClass("mod-warning", warn);
+            line.toggleClass("plainday-caution", !warn);
             line.setText(text);
         };
         /**

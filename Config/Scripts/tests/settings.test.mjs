@@ -144,8 +144,6 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     assert.ok(!text.includes("\n"), "one line, so nothing on the way breaks it");
     const read = settings.readCopy(text, billing);
     assert.deepEqual(plain(read.settings), JUNIPER);
-    assert.equal(read.holds, "invoices (Juniper Hale, invoices in Reference/Invoices, first invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
-    assert.equal(settings.holds(DEFAULTS), "invoices (no name, no invoice folder, first invoice number 1001), tables (freeze 0 rows and 0 columns) and the editor switch (on)");
     assert.deepEqual(plain(settings.readCopy(`  ${text}\n`, billing).settings), JUNIPER, "spaces around it are fine");
     for (const t of ["{}", '{"invoices":{}}', "[1]", "not json", "null", '"plainday-settings"']) {
         assert.match(settings.readCopy(t, billing).error, /^That isn't a copy of Plainday's settings/, t);
