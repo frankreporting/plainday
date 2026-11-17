@@ -574,7 +574,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     })),
                     row("Terms", "e.g. Net 30",
                         (s) => s.addText((t) => t.setPlaceholder("Net 30").setValue(now().invoices.terms).onChange((v) => { void store(s, "invoices", { terms: v.trim() }); }))),
-                    row("Note", "Closes each invoice, such as how to pay you.", (s) => s.addTextArea((t) => {
+                    row("Note", "An optional message to include at the end of each invoice.", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
