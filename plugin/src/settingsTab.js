@@ -773,7 +773,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 else problem(s, how.note(got.value), false);
             };
             // Leaving the field: with something typed and the list open, what it highlights; else what's
-            // typed when it reads, and the saved value at once when it doesn't
+            // typed when it reads, and the saved value at once when it doesn't, its line still saying why
             const leave = () => {
                 const typed = input !== null ? input.getValue().trim() : "";
                 const pick = typed !== "" && suggest !== null ? suggest.highlighted() : null;
@@ -784,7 +784,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 const value = waiting;
                 waiting = null;
                 if (value !== null && value !== how.saved()) void how.save(s, value);
-                problem(s, how.note(value ?? how.saved()), false);
+                if (value !== null) problem(s, how.note(value), false);
                 input?.setValue(value ?? how.saved());
             };
             s.addText((t) => {

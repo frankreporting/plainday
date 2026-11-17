@@ -554,6 +554,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         inbox.s.leave();
         assert.deepEqual(plugin.saved, [], "refused, so nothing is saved");
         assert.equal(inbox.s.control.inputEl.value, "Inbox", "and the field goes back to the saved folder");
+        assert.equal(inbox.s.warning(), "Not used: it's inside Projects. Inbox stays `Inbox`.", "its line still saying why");
         inbox.s.type("");
         assert.equal(inbox.s.warning(), "Not used: a folder is needed: notes can't go at the top of the vault. Inbox stays `Inbox`.");
         inbox.s.type("Config/Inbox");
