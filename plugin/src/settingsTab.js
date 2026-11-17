@@ -6,6 +6,8 @@
 // draw it from that list, as setting definitions, and find each row in the settings search
 // (getSettingDefinitions); an older Obsidian, down to the manifest's 1.11.4, calls display(), which
 // draws the same list itself with Setting and SettingGroup. Each row draws its own control (`render`).
+// A row can instead be a page of its own sections (`page`, the calendar list): Obsidian 1.13+ shows it
+// as an entry you click through; display(), with no pages to draw, puts its sections after the row's.
 //
 // Each change is saved as it's made. The invoice folder and the first invoice number are checked as you
 // type and saved when you leave the field (or the panel closes), so a value on its way to another one
@@ -14,15 +16,22 @@
 // leaving it the field goes back to the saved value.
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
-// Invoices, Tables (a switch, then the two freezes while it's on) and Editor. OBS-282 adds Calendars and
-// OBS-283 Folders.
-import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, SettingGroup, TextAreaComponent } from "obsidian";
+// Invoices, Tables (a switch, then the two freezes while it's on), Editor, and Calendars (OBS-282): Add
+// calendar, the sync range and the help, then a group for each account with its calendars. OBS-283 adds
+// Folders.
+//
+// A calendar's link is typed into a masked field, checked by downloading it once (CalendarFeed.check),
+// and kept only in this device's secret storage (Settings.storeLink): never in a setting, a notice or
+// the console. A link that fails isn't added, and the dialog says why, by the problem alone.
+import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, Setting, SettingGroup, TextAreaComponent, TextComponent } from "obsidian";
 import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
+/** @typedef {Values["calendars"]["list"][number]} Calendar */
 /** @typedef {import("obsidian").Setting} Setting */
-/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean }} Row */
+/** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean, page?: Page }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
+/** @typedef {{ displayValue: string, sections: Section[] }} Page */
 
 /** @param {unknown} e */
 const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string" ? e : "something went wrong");
@@ -111,7 +120,7 @@ class FolderSuggest extends AbstractInputSuggest {
 // Paste: a box to paste a copy into, as wide as the window (styles.css), then Cancel or Replace, which
 // stays off until the box holds a copy; text that isn't one says so. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
 class PasteModal extends Modal {
-    /** @param {import("obsidian").App} app @param {(copy: Values) => Promise<void>} onReplace */
+    /** @param {import("obsidian").App} app @param {(copy: Values, links: Record<string, string>, withCalendars: boolean) => Promise<void>} onReplace */
     constructor(app, onReplace) {
         super(app);
         this.onReplace = onReplace;
@@ -126,6 +135,9 @@ class PasteModal extends Modal {
         const said = this.contentEl.createEl("p", { cls: "setting-item-description" });
         /** @type {Values | null} */
         let copy = null;
+        /** @type {Record<string, string>} */
+        let links = {};
+        let withCalendars = true;
         const row = this.contentEl.createDiv({ cls: "modal-button-container" });
         new ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
         const replace = new ButtonComponent(row).setButtonText("Replace").setCta().setDisabled(true);
@@ -133,7 +145,7 @@ class PasteModal extends Modal {
             if (!copy) return;
             const chosen = copy;
             replace.setDisabled(true);
-            this.onReplace(chosen).then(() => this.close(), (e) => {
+            this.onReplace(chosen, links, withCalendars).then(() => this.close(), (e) => {
                 said.setText(`Couldn't save the settings: ${messageOf(e)}`);
                 replace.setDisabled(false);
             });
@@ -141,6 +153,8 @@ class PasteModal extends Modal {
         box.onChange((text) => {
             const read = settings.readCopy(text);
             copy = read.settings ?? null;
+            links = read.links ?? {};
+            withCalendars = read.withCalendars ?? true;
             said.setText(read.error ?? "");
             replace.setDisabled(!copy);
         });
@@ -152,14 +166,286 @@ class PasteModal extends Modal {
     }
 }
 
+// What Add calendar and Edit say when a link fails, by the problem CalendarFeed gives; never the link
+const PROBLEMS = {
+    notLink: "That isn't a link. A calendar's private link starts with https:// or webcal://.",
+    dead: "That link stopped working: it was reset or unpublished. Copy the calendar's link again.",
+    unreachable: "Couldn't reach that link. Check that you're online and that the link is whole, then try again.",
+    unreadable: "That link isn't a calendar.",
+    slow: "That calendar took too long to read.",
+};
+/** @param {string} problem */
+const problemText = (problem) => PROBLEMS[/** @type {keyof typeof PROBLEMS} */ (problem)] ?? "Couldn't read that link.";
+
+// How to get the links (Add calendar's and Edit's "Where to find it"): that a link works like a
+// password, where each provider keeps a calendar's link, and what doesn't work
+const LINK_NOTE = "Treat calendar links like a password. If one leaks, reset at the source and get a new link. To sync a calendar that was shared with you, you'll need to ask the owner for the link.";
+const HELP = [
+    ["Google Calendar", "On the web: Settings, then the calendar under Settings for my calendars, then Integrate calendar. Copy the Secret address in iCal format."],
+    ["iCloud", "In Calendar, share the calendar and turn on Public Calendar, then copy its link (it starts with webcal://)."],
+    ["Outlook", "On the web: Settings, Calendar, Shared calendars, then Publish a calendar. Choose the calendar and Can view all details, then copy the ICS link."],
+    ["A subscribed calendar", "(holidays, a team's schedule) uses the address you subscribed from. Apple publishes its holiday calendars at a public address."],
+];
+const HELP_LIMITS = "Also note that a Google Workspace or Microsoft 365 admin can disable private links.";
+
+class CalendarHelpModal extends Modal {
+    onOpen() {
+        this.setTitle("How to get the links");
+        this.contentEl.createEl("p", {}, (p) => {
+            p.createEl("strong", { text: "NOTE:" });
+            p.appendText(` ${LINK_NOTE}`);
+        });
+        const list = this.contentEl.createEl("ul");
+        for (const [what, how] of HELP) {
+            list.createEl("li", {}, (li) => {
+                li.createEl("strong", { text: what });
+                li.appendText(` ${how}`);
+            });
+        }
+        this.contentEl.createEl("p", { text: HELP_LIMITS });
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
+/**
+ * Account names to choose from: those the list already has, and the three providers
+ * @extends {AbstractInputSuggest<string>}
+ */
+class AccountSuggest extends AbstractInputSuggest {
+    /** @param {string} query @returns {string[]} */
+    getSuggestions(query) {
+        const q = query.trim().toLowerCase();
+        const names = [...new Set([...plainday.Settings.get().calendars.list.map((c) => c.account).filter(Boolean), "Google", "iCloud", "Outlook"])];
+        return names.filter((n) => n.toLowerCase().includes(q) && n !== query.trim());
+    }
+
+    /** @param {string} name @param {HTMLElement} el */
+    renderSuggestion(name, el) {
+        el.setText(name);
+    }
+}
+
+// Add calendar, or Edit one: its link in a masked field, checked by downloading it once; its name,
+// account and your address on it. Adding shows the name, account and address once the link reads,
+// filled in from it. Editing shows them at once, with the link blank: a link typed there is checked
+// and replaces this device's on Save.
+class CalendarModal extends Modal {
+    /**
+     * @param {import("obsidian").App} app
+     * @param {Calendar | null} calendar the one to edit, or null to add
+     * @param {() => void} done
+     */
+    constructor(app, calendar, done) {
+        super(app);
+        this.calendar = calendar;
+        this.done = done;
+        this.closed = false;
+    }
+
+    onOpen() {
+        const settings = plainday.Settings, feed = plainday.CalendarFeed;
+        const editing = this.calendar;
+        this.setTitle(editing ? `Edit ${editing.name || "calendar"}` : "Add calendar");
+        this.modalEl.addClass("plainday-calendar");
+
+        const linkSetting = new Setting(this.contentEl).setName(editing ? "New link" : "Private link");
+        linkSetting.descEl.appendText(!editing ? "Paste the calendar's private link. "
+            : settings.link(editing.id) !== null ? "This calendar is already linked. Leave blank or paste a new link to replace it. "
+                : "This device has no link for it yet. ");
+        linkSetting.descEl.createEl("a", { text: "Where to find it", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
+            e.preventDefault();
+            new CalendarHelpModal(this.app).open();
+        }));
+        // Masked by styles.css rather than as a password, so a phone's password manager doesn't offer to
+        // keep it
+        const linkInput = new TextComponent(linkSetting.controlEl).setPlaceholder("https://… or webcal://…");
+        linkInput.inputEl.addClass("plainday-masked");
+        linkInput.inputEl.autocomplete = "off";
+        linkInput.inputEl.spellcheck = false;
+        linkInput.inputEl.setAttribute("autocapitalize", "off");
+        for (const ignore of ["data-1p-ignore", "data-lpignore", "data-bwignore"]) linkInput.inputEl.setAttribute(ignore, "true");
+        // What the check says: "Checking the link…", or why the link fails
+        const said = this.contentEl.createEl("p", { cls: "setting-item-description plainday-calendar-said" });
+
+        const details = this.contentEl.createDiv();
+        const nameInput = new TextComponent(new Setting(details).setName("Name").controlEl);
+        const accountInput = new TextComponent(new Setting(details).setName("Account").setDesc("Calendars are grouped under it.").controlEl);
+        const accounts = new AccountSuggest(this.app, accountInput.inputEl);
+        accounts.onSelect((name) => {
+            accountInput.setValue(name);
+            accounts.close();
+        });
+        // The email address you're invited at on this calendar: the sync leaves out invitations it declined
+        const addressSetting = new Setting(details).setName("Email address for this calendar");
+        const addressInput = new TextComponent(addressSetting.controlEl);
+        addressInput.inputEl.autocomplete = "off";
+        const addressLine = addressSetting.descEl.createDiv({ cls: "mod-warning" });
+        if (editing) {
+            nameInput.setValue(editing.name);
+            accountInput.setValue(editing.account);
+            addressInput.setValue(editing.address);
+        } else {
+            details.hide();
+        }
+
+        const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+        new ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
+        const go = new ButtonComponent(buttons).setCta().setButtonText(editing ? "Save" : "Check link");
+
+        // Adding: the link that read, so a link changed afterwards has to be checked again
+        /** @type {string | null} */
+        let checked = null;
+        let busy = false;
+        const link = () => linkInput.getValue().trim();
+        const address = () => settings.addressOf(addressInput.getValue());
+        // A line under the address when it isn't one
+        const showAddresses = () => {
+            const { bad } = address();
+            addressLine.setText(bad ? "That isn't an email address." : "");
+            return !bad;
+        };
+        addressInput.onChange(showAddresses);
+
+        // The link typed: its feed's name and the link it checked when it reads, or why not: not a link,
+        // another calendar already has it, or the check's problem. The field takes no typing meanwhile.
+        /** @returns {Promise<{ problem: string, name?: undefined, link?: undefined } | { name: string, link: string, problem?: undefined }>} */
+        const check = async () => {
+            const typed = link();
+            if (!feed.isLink(typed)) return { problem: problemText("notLink") };
+            const other = settings.calendarWithLink(typed, editing ? editing.id : null);
+            if (other) return { problem: `${other.name || "Another calendar"} already has that link.` };
+            said.setText("Checking the link…");
+            linkInput.setDisabled(true);
+            try {
+                const got = await feed.check(typed);
+                if (got.problem !== undefined) return { problem: problemText(got.problem) };
+                if (link() !== typed) return { problem: "The link changed while it was checked. Check it again." };
+                return { name: got.name, link: typed };
+            } finally {
+                linkInput.setDisabled(false);
+            }
+        };
+        // A link pasted into the name or the account is never kept there
+        const linkFree = () => {
+            if (settings.linkFree(nameInput.getValue()) === nameInput.getValue().trim() && settings.linkFree(accountInput.getValue()) === accountInput.getValue().trim()) return true;
+            said.setText("That's a link: paste it into the link field, not the name or the account.");
+            return false;
+        };
+        // Adding, before the link has read: checks it, and shows its name, account and your address
+        const checkNew = async () => {
+            const got = await check();
+            if (this.closed) return;
+            if (got.problem !== undefined) {
+                said.setText(got.problem);
+                return;
+            }
+            checked = got.link;
+            said.setText("");
+            nameInput.setValue(got.name);
+            accountInput.setValue(feed.account(got.link));
+            addressInput.setValue(feed.address(got.link) ?? "");
+            showAddresses();
+            details.show();
+            go.setButtonText("Add calendar");
+            nameInput.inputEl.focus();
+        };
+        // The name, account and address as typed, when they'll do; else null, with the line that says why
+        const values = () => {
+            const name = nameInput.getValue().trim();
+            if (!name) {
+                said.setText("Give the calendar a name.");
+                return null;
+            }
+            if (!linkFree() || !showAddresses()) return null;
+            return { name, account: accountInput.getValue(), address: address().address };
+        };
+        // Adds the calendar, or saves the edit, after checking a new link. What's typed is read again after
+        // the check, so a change made while it ran is kept.
+        const save = async () => {
+            if (!values()) return;
+            /** @type {string | null} */
+            let newLink = null;
+            if (editing && link()) {
+                const got = await check();
+                if (this.closed) return;
+                if (got.problem !== undefined) {
+                    said.setText(got.problem);
+                    return;
+                }
+                newLink = got.link;
+            }
+            const given = values();
+            if (!given) return;
+            if (!editing) {
+                await settings.addCalendar({ ...given, link: checked ?? "" });
+            } else {
+                // A Google link to a person's calendar names them: your address, when you haven't given one
+                const own = newLink ? feed.address(newLink) : null;
+                if (!given.address && own) given.address = own;
+                await settings.editCalendar(editing.id, given, newLink);
+            }
+            this.close();
+            this.done();
+        };
+        const run = async () => {
+            if (busy) return;
+            busy = true;
+            go.setDisabled(true);
+            try {
+                if (!editing && checked === null) await checkNew();
+                else await save();
+            } catch (e) {
+                if (!this.closed) said.setText(`Couldn't save the calendar: ${messageOf(e)}`);
+            } finally {
+                busy = false;
+                go.setDisabled(false);
+            }
+        };
+        go.onClick(() => { void run(); });
+        linkInput.inputEl.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            void run();
+        });
+        // Adding: a link changed after it read has to be checked again
+        linkInput.onChange(() => {
+            if (editing || checked === null || link() === checked) return;
+            checked = null;
+            details.hide();
+            go.setButtonText("Check link");
+        });
+        // Adding: a pasted link is checked at once
+        if (!editing) {
+            linkInput.inputEl.addEventListener("paste", () => window.setTimeout(() => {
+                if (checked === null && link()) void run();
+            }, 0));
+        }
+        // Editing a calendar this device has the link for: its name; otherwise the link, which the list
+        // says to paste
+        window.setTimeout(() => (editing && settings.link(editing.id) !== null ? nameInput : linkInput).inputEl.focus(), 0);
+    }
+
+    onClose() {
+        this.closed = true;
+        this.contentEl.empty();
+    }
+}
+
 export default class PlaindaySettingTab extends PluginSettingTab {
     // Obsidian 1.13 and later: the sections as setting definitions, drawn and searched by Obsidian
     getSettingDefinitions() {
-        return this.sections().map(({ heading, rows }) => ({
-            type: /** @type {const} */ ("group"),
+        /** @param {Section} section @returns {import("obsidian").SettingDefinitionGroup} */
+        const group = ({ heading, rows }) => ({
+            type: "group",
             ...(heading ? { heading } : {}),
-            items: rows.map(({ name, desc, render, visible }) => ({ name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
-        }));
+            items: rows.map(({ name, desc, render, visible, page }) => (page
+                ? { type: /** @type {const} */ ("page"), name, ...(desc ? { desc } : {}), displayValue: page.displayValue, items: page.sections.map(group), ...(visible ? { visible } : {}) }
+                : { name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
+        });
+        return this.sections().map(group);
     }
 
     // An Obsidian before 1.13: the same sections, drawn here. What a row returns saves a value still
@@ -172,19 +458,30 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /** @type {{ el: HTMLElement, visible: () => boolean }[]} */
         const shown = [];
         this.shown = shown;
-        for (const { heading, rows } of this.sections()) {
-            const group = new SettingGroup(this.containerEl);
-            if (heading) group.setHeading(heading);
-            for (const { name, desc, render, visible } of rows) {
-                group.addSetting((s) => {
-                    s.setName(name);
-                    if (desc) s.setDesc(desc);
-                    const cleanup = render(s);
-                    if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
-                    if (visible) shown.push({ el: s.settingEl, visible });
-                });
+        /** @param {Section[]} sections */
+        const draw = (sections) => {
+            for (const { heading, rows } of sections) {
+                const group = new SettingGroup(this.containerEl);
+                if (heading) group.setHeading(heading);
+                /** @type {Page[]} */
+                const pages = [];
+                for (const { name, desc, render, visible, page } of rows) {
+                    if (page) {
+                        if (!visible || visible()) pages.push(page);
+                        continue;
+                    }
+                    group.addSetting((s) => {
+                        s.setName(name);
+                        if (desc) s.setDesc(desc);
+                        const cleanup = render(s);
+                        if (cleanup) waiting.push(/** @type {{ save?: () => void }} */ (cleanup).save ?? cleanup);
+                        if (visible) shown.push({ el: s.settingEl, visible });
+                    });
+                }
+                for (const page of pages) draw(page.sections);
             }
-        }
+        };
+        draw(this.sections());
         this.refreshShown();
     }
 
@@ -246,17 +543,20 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: null,
                 rows: [
-                    row("Backup and transfer", "Copy settings for backup and to transfer from one device to another when you're not syncing your installed plugin settings. Paste will replace all settings with the contents of your clipboard.", (s) => {
+                    row("Backup and transfer", "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.", (s) => {
                         link(s, "Copy", () => {
-                            navigator.clipboard.writeText(settings.copyText()).then(
-                                () => new Notice("Copied. It holds your invoice details, so keep it somewhere private. A clipboard manager may keep a copy.", 8000),
+                            const links = settings.links();
+                            navigator.clipboard.writeText(settings.copyText(settings.get(), links)).then(
+                                () => new Notice(Object.keys(links).length
+                                    ? "Copied. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private. A clipboard manager may keep a copy."
+                                    : "Copied. It holds your invoice details, so keep it somewhere private. A clipboard manager may keep a copy.", 8000),
                                 (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
                             );
                         });
                         s.controlEl.createSpan({ text: "|", cls: "plainday-separator" });
                         link(s, "Paste", () => {
-                            new PasteModal(this.app, async (copy) => {
-                                await settings.replaceWith(copy);
+                            new PasteModal(this.app, async (copy, links, withCalendars) => {
+                                await settings.replaceWith(copy, links, withCalendars);
                                 this.redraw();
                             }).open();
                         });
@@ -274,7 +574,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     })),
                     row("Terms", "e.g. Net 30",
                         (s) => s.addText((t) => t.setPlaceholder("Net 30").setValue(now().invoices.terms).onChange((v) => { void store(s, "invoices", { terms: v.trim() }); }))),
-                    row("Note", "Closes each invoice, such as how to pay you.", (s) => s.addTextArea((t) => {
+                    row("Note", "An optional message to include at the end of each invoice.", (s) => s.addTextArea((t) => {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
@@ -390,6 +690,99 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         (s) => s.addToggle((t) => t.setValue(now().editor.listCursor).onChange((v) => {
                             void store(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
                         }))),
+                ],
+            },
+            ...this.calendarSections(store),
+        ];
+    }
+
+    /**
+     * Calendars (OBS-282): Add calendar, whose description links to How to get the links, the sync range,
+     * and the calendar list, a page of each account's calendars, accounts and calendars in alphabetical
+     * order
+     * @param {(setting: Setting, section: "calendars", values: Partial<Values["calendars"]>) => Promise<void>} store
+     * @returns {Section[]}
+     */
+    calendarSections(store) {
+        const settings = plainday.Settings;
+        const list = settings.get().calendars.list;
+        const ranges = Object.fromEntries(settings.rangeLabels().map((label) => [label, label]));
+        /** @param {Calendar | null} calendar */
+        const dialog = (calendar) => new CalendarModal(this.app, calendar, () => this.redraw()).open();
+        // Each account's calendars, in alphabetical order. Obsidian 1.13+ tells rows apart by their names and
+        // groups by their headings, so none repeats: a second calendar named alike in an account is
+        // "Calendar (2)", and an account named like one of the panel's own sections is "… calendars".
+        /** @type {Map<string, Calendar[]>} */
+        const accounts = new Map();
+        const taken = new Set(["", "invoices", "tables", "editor", "calendars"]);
+        for (const c of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
+            const name = c.account || "No account";
+            const account = taken.has(name.toLowerCase()) ? `${name} calendars` : name;
+            accounts.set(account, [...(accounts.get(account) ?? []), c]);
+        }
+        /** @param {Calendar[]} calendars @returns {[Calendar, string][]} */
+        const named = (calendars) => {
+            /** @type {Set<string>} */
+            const used = new Set();
+            /** @type {[Calendar, string][]} */
+            const out = [];
+            for (const c of calendars) {
+                const base = c.name || "Untitled calendar";
+                let name = base;
+                for (let n = 2; used.has(name); n++) name = `${base} (${n})`;
+                used.add(name);
+                out.push([c, name]);
+            }
+            return out;
+        };
+        const help = () => new CalendarHelpModal(this.app).open();
+        return [
+            {
+                heading: "Calendars",
+                rows: [
+                    // Its description links to How to get the links, drawn with the row, so the link is a
+                    // new one each time Obsidian draws it
+                    row("Add calendar", "", (s) => {
+                        s.descEl.empty();
+                        s.descEl.appendText("Add using ");
+                        s.descEl.createEl("a", { text: "private calendar links", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
+                            e.preventDefault();
+                            help();
+                        }));
+                        s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)));
+                    }),
+                    row("Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are.",
+                        (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
+                    // The calendars, each account's, on a page of their own
+                    {
+                        ...row("Calendar list", "", () => {}),
+                        visible: () => list.length > 0,
+                        page: {
+                            displayValue: `${list.length} calendar${list.length === 1 ? "" : "s"}`,
+                            sections: [...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
+                                heading: account,
+                                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
+                                    // Put back when its save fails, which runs onChange again: that turn is ignored
+                                    let reverting = false;
+                                    s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {
+                                        if (reverting) return;
+                                        settings.editCalendar(c.id, { on }).catch((e) => {
+                                            reverting = true;
+                                            t.setValue(!on);
+                                            reverting = false;
+                                            new Notice(`Couldn't save: ${messageOf(e)}`);
+                                            // Gone from the list (Sync brought another device's): draw the panel again
+                                            if (!settings.calendar(c.id)) this.redraw();
+                                        });
+                                    }));
+                                    s.addButton((b) => b.setButtonText("Edit").onClick(() => dialog(c)));
+                                    s.addButton((b) => b.setButtonText("Remove").setWarning().onClick(() => {
+                                        settings.removeCalendar(c.id).then(() => this.redraw(), (e) => new Notice(`Couldn't remove ${c.name}: ${messageOf(e)}`));
+                                    }));
+                                })),
+                            })),
+                        },
+                    },
                 ],
             },
         ];

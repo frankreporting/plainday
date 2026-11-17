@@ -8,9 +8,10 @@
 //   new CalendarReader().read(text, { calendar: { id, name, account }, window: { start, end }, owner })
 //   → { name, events, failed: [{ uid, title }], stats } or { problem: "unreadable" }
 //
-// `window` holds the instants (or ms) an event's start must fall between; `owner` is the calendar's
-// own address, when it's known: a Google link's path holds it (CalendarFeed.owner()). Without one,
-// no invitation is left out as declined.
+// `window` holds the instants (or ms) an event's start must fall between; `owner` is the address (or a
+// list of addresses) whose declined invitations are left out: your address on the calendar, from
+// Plainday's settings, or the calendar's own when a Google link's path holds it (CalendarFeed.owners()).
+// Without one, no invitation is left out as declined.
 //
 // How it reads a feed, from what OBS-227's spike found on real feeds:
 // - One-off events that ended more than a day before the window are dropped from the text before
@@ -163,8 +164,8 @@ export class CalendarReader {
 
     // Reads a feed's text: { name, events, failed, stats }, or { problem: "unreadable" }.
     // `calendar` is the calendar's { id, name, account } in Plainday's settings, `window` the
-    // instants (or ms) an event's start must fall between, and `owner` the calendar's own address,
-    // when it's known.
+    // instants (or ms) an event's start must fall between, and `owner` the address, or addresses, whose
+    // declined invitations are left out, when one is known.
     read(text, { calendar = {}, window, owner = null }) {
         const started = performance.now();
         try {
@@ -224,14 +225,14 @@ export class CalendarReader {
             }
             stats.series = series.size;
 
-            const address = owner ? this.address(owner) : null;
+            const owners = this.owners(owner);
             const events = [];
             for (const [uid, { master, exceptions, title }] of series) {
                 if (failed.has(uid)) continue;
                 const found = [];
                 const keys = new Set();
                 const emit = (item, startTime, endTime, recurrenceId) => {
-                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, range, owner: address, stats });
+                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats });
                     if (!event) return;
                     // Two events with one key: an override that matched no occurrence of its own,
                     // or a series that repeats twice in a day. The sync would keep just one.
@@ -575,10 +576,10 @@ export class CalendarReader {
 
     // One occurrence as the events file holds it, or null when it doesn't start in the window or
     // the calendar's own address declined it. `recurrenceId` is its original start, for an occurrence of a series.
-    event(item, startTime, endTime, recurrenceId, { calendar, range, owner, stats }) {
+    event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats }) {
         const start = startTime.toJSDate();
         if (start < range.start || start >= range.end) return null;
-        if (this.declined(item, owner)) { stats.declined++; return null; }
+        if (this.declined(item, owners)) { stats.declined++; return null; }
         const allDay = startTime.isDate;
         const end = (endTime ?? startTime).toJSDate();
         // EventKit ends an all-day event 1 second before midnight on its last day; the feed's
@@ -619,10 +620,17 @@ export class CalendarReader {
         return String(value ?? "").trim().replace(/^mailto:/i, "").toLowerCase();
     }
 
-    // Whether the calendar's own address, when it's known, declined this invitation
-    declined(item, owner) {
-        if (!owner) return false;
-        return item.getAllProperties("attendee").some((a) => this.attendee(a) === owner && String(a.getParameter("partstat") ?? "").toUpperCase() === "DECLINED");
+    // The addresses whose declined invitations are left out, as a set, from one address or a list;
+    // null for none
+    owners(owner) {
+        const list = [].concat(owner ?? []).map((o) => this.address(o)).filter(Boolean);
+        return list.length ? new Set(list) : null;
+    }
+
+    // Whether one of those addresses, when there are any, declined this invitation
+    declined(item, owners) {
+        if (!owners) return false;
+        return item.getAllProperties("attendee").some((a) => owners.has(this.attendee(a)) && String(a.getParameter("partstat") ?? "").toUpperCase() === "DECLINED");
     }
 
     // By start, then title, as the Mac's fetcher sorted them

@@ -37,9 +37,6 @@ export default class CalendarSync {
     static MAX_REMOVALS = 10;   // a run that would remove or forward more than this does neither
     static FETCHER = "Config/Scripts/Calendar/fetchCalendar.swift";
     static FETCH_TIMEOUT_MS = 120000;
-    // How far ahead to sync. The Calendar Sync note holds the choice, on its `Sync range:` line.
-    static RANGES = [["1 week", 7], ["2 weeks", 14], ["3 weeks", 21], ["1 month", 31], ["2 months", 62], ["3 months", 92], ["6 months", 183]];
-    static DEFAULT_RANGE = "6 months";
     // A time entry under an event, the way TimeReport reads one: `4:00pm - 4:30pm: note`, or a
     // running `4:00pm - `
     static ENTRY = /^\d{1,2}:\d{2}\s?[ap]m\s*[-–—]\s*(?:\d{1,2}:\d{2}\s?[ap]m)?\s*(?::.*)?$/i;
@@ -132,7 +129,7 @@ export default class CalendarSync {
         }
         const root = app.vault.adapter.getBasePath?.() ?? app.vault.adapter.basePath;
         if (!root) return "couldn't work out where the vault is";
-        const args = [`${root}/${CalendarSync.FETCHER}`, "--days", String(await this.rangeDays()), "--out", `${root}/${CalendarSync.EVENTS}`];
+        const args = [`${root}/${CalendarSync.FETCHER}`, "--days", String(this.rangeDays()), "--out", `${root}/${CalendarSync.EVENTS}`];
         return new Promise((resolve) => {
             execFile("/usr/bin/swift", args, { timeout: CalendarSync.FETCH_TIMEOUT_MS }, (err, stdout, stderr) => {
                 if (!err) return resolve(null);
@@ -143,27 +140,10 @@ export default class CalendarSync {
         });
     }
 
-    // The range written in the note, or the default when it says nothing sensible
-    async rangeLabel() {
-        const file = app.vault.getFileByPath(CalendarSync.NOTE);
-        const text = file ? await app.vault.read(file) : "";
-        const said = text.match(/^Sync range:\s*(.+?)\s*$/m)?.[1]?.toLowerCase();
-        return CalendarSync.RANGES.find(([label]) => label === said)?.[0] ?? CalendarSync.DEFAULT_RANGE;
-    }
-
-    async rangeDays() {
-        const label = await this.rangeLabel();
-        return CalendarSync.RANGES.find(([l]) => l === label)[1];
-    }
-
-    rangeSection(label) {
-        return [
-            "## Range",
-            "",
-            `Sync range: ${label}`,
-            "",
-            `How far ahead to sync: ${CalendarSync.RANGES.map(([l]) => l).join(", ")}. Edit this line to change it.`,
-        ].join("\n") + "\n";
+    // How far ahead to sync: Settings → Plainday → Calendars → Sync range (OBS-282). The Calendar Sync
+    // note's `Sync range:` line was read into it once, and isn't read or written any more.
+    rangeDays() {
+        return plainday.Settings.rangeDays();
     }
 
     // MARK: the calendars you've ticked
@@ -173,21 +153,19 @@ export default class CalendarSync {
     async selection(calendars) {
         const file = app.vault.getFileByPath(CalendarSync.NOTE);
         const before = file ? await app.vault.read(file) : null;
-        const rangeNow = await this.rangeLabel();
         const ticked = this.tickedTitles(before ?? "");
 
         const body = this.calendarSection(calendars, ticked);
-        const withRange = (text) => (/^## Range$/m.test(text) ? text : this.replaceSection(text, "## Range", this.rangeSection(rangeNow)));
         const expected = before === null
-            ? withRange(this.newNote(body))
-            : withRange(this.replaceSection(before, "## Calendars", body));
+            ? this.newNote(body)
+            : this.replaceSection(before, "## Calendars", body);
         let current = ticked;
         if (expected !== before) {
             // Re-read the ticks inside the write, so a tick you make while this runs isn't lost
             await this.updateNote(CalendarSync.NOTE, (text) => {
-                if (text === null) return withRange(this.newNote(body));
+                if (text === null) return this.newNote(body);
                 current = this.tickedTitles(text);
-                return withRange(this.replaceSection(text, "## Calendars", this.calendarSection(calendars, current)));
+                return this.replaceSection(text, "## Calendars", this.calendarSection(calendars, current));
             });
         }
         if (before === null) return null;

@@ -5,11 +5,11 @@ export default class CalendarFeed {
     // Downloads a calendar's private link (Google's secret address, iCloud's public calendar link,
     // Outlook's published calendar) and has it read into the events the calendar sync writes into
     // daily notes, in the shape the Mac's fetcher wrote to calendar-events.json, so the sync's
-    // apply() takes them as they are (OBS-274; part 1 of OBS-231's plan). Nothing calls it yet:
-    // OBS-275 wires it into Sync calendars.
+    // apply() takes them as they are (OBS-274; part 1 of OBS-231's plan). Settings → Plainday's
+    // Add calendar checks a link with it (check()); OBS-275 wires it into Sync calendars.
     //
     //   const window = feed.window(62);
-    //   const got = await feed.load(link, { calendar: { id, name, account }, window });
+    //   const got = await feed.load(link, { calendar: { id, name, account, address }, window });
     //   got.problem   why the calendar couldn't be synced: "dead" (the link stopped working),
     //                 "unreachable", "unreadable" (not a calendar, or cut off), or "slow" (its read
     //                 ran past READ_LIMIT_MS)
@@ -36,6 +36,12 @@ export default class CalendarFeed {
     // Anything else that fails means the calendar couldn't be reached this time.
     static DEAD = [401, 403, 404, 410];
     static GOOGLE = /^https?:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
+    // The account Add calendar suggests for a link, by the server it's on; blank for any other
+    static ACCOUNTS = [
+        [/(?:^|\.)google\.com$/i, "Google"],
+        [/(?:^|\.)icloud\.com$/i, "iCloud"],
+        [/(?:^|\.)(?:outlook\.com|office365\.com|office\.com|live\.com)$/i, "Outlook"],
+    ];
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
     async load(link, { calendar, window }) {
@@ -76,9 +82,73 @@ export default class CalendarFeed {
         return { text, status };
     }
 
-    // A webcal:// link is fetched as https://
+    /**
+     * A webcal:// link is fetched as https://
+     * @param {unknown} link
+     * @returns {string}
+     */
     url(link) {
         return String(link ?? "").trim().replace(/^webcals?:\/\//i, "https://");
+    }
+
+    /**
+     * Whether text is a link a calendar can be added by: https:// or webcal://, with a server, and
+     * nothing else around it. http:// would send the link, which works like a password, unencrypted, so
+     * it's taken only from this device itself (a feed served for a test).
+     * @param {unknown} link
+     * @returns {boolean}
+     */
+    isLink(link) {
+        const text = String(link ?? "").trim();
+        if (!/^(?:https?|webcals?):\/\//i.test(text) || /\s/.test(text)) return false;
+        try {
+            const url = new URL(this.url(text));
+            if (!url.hostname) return false;
+            return url.protocol === "https:" || ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * The address Add calendar fills in as yours on a calendar: a Google link's calendar ID when it's a
+     * person's address, not a shared, holiday or birthday calendar's own ID (…@group.calendar.google.com,
+     * …@group.v.calendar.google.com, …@import.calendar.google.com); else null
+     * @param {unknown} link
+     * @returns {string | null}
+     */
+    address(link) {
+        const own = this.owner(link);
+        return own && !/@(?:group(?:\.v)?|import)\.calendar\.google\.com$/i.test(own) ? own : null;
+    }
+
+    /**
+     * The account Add calendar suggests for a link: Google, iCloud or Outlook, by its server; else ""
+     * @param {unknown} link
+     * @returns {string}
+     */
+    account(link) {
+        let host = "";
+        try {
+            host = new URL(this.url(link)).hostname;
+        } catch {
+            return "";
+        }
+        return CalendarFeed.ACCOUNTS.find(([server]) => server.test(host))?.[1] ?? "";
+    }
+
+    /**
+     * Checks a link for Add calendar, or for a new link in Edit: downloads it once and reads it.
+     * { name }, the feed's own name ("" when it gives none), or { problem }: "notLink" for text that
+     * isn't a link, or load()'s problem. Never the link.
+     * @param {string} link
+     * @returns {Promise<{ name: string, problem?: undefined } | { problem: string, name?: undefined }>}
+     */
+    async check(link) {
+        if (!this.isLink(link)) return { problem: "notLink" };
+        const got = await this.load(link, { calendar: {}, window: this.window(0) });
+        if (got.problem) return { problem: String(got.problem) };
+        return { name: typeof got.name === "string" ? got.name.trim() : "" };
     }
 
     // Whether text starts as a calendar does (after any byte-order mark, which trimStart takes)
@@ -87,8 +157,13 @@ export default class CalendarFeed {
     }
 
     // The calendar's own address, when its link says it: a Google link's path holds the calendar
-    // ID. Otherwise null, and no invitation is left out as declined: an iCloud or Outlook feed
-    // doesn't say whose calendar it is, so the reader doesn't guess (OBS-274, 11/15).
+    // ID. Otherwise null: an iCloud or Outlook feed doesn't say whose calendar it is, so the reader
+    // doesn't guess (OBS-274, 11/15). Add calendar fills in your address on a Google calendar from
+    // it (OBS-282).
+    /**
+     * @param {unknown} link
+     * @returns {string | null}
+     */
     owner(link) {
         const m = CalendarFeed.GOOGLE.exec(this.url(link));
         if (!m) return null;
@@ -99,10 +174,20 @@ export default class CalendarFeed {
         }
     }
 
+    // Whose declined invitations are left out: your email address on the calendar, from Plainday's
+    // settings, when you've given one; else the calendar's own, when its link says it (owner()); else
+    // none, and every invitation is read (OBS-282)
+    owners(calendar = {}, link = null) {
+        const given = typeof calendar?.address === "string" ? calendar.address.trim().replace(/^mailto:/i, "").toLowerCase() : "";
+        if (given) return [given];
+        const own = this.owner(link);
+        return own ? [own] : null;
+    }
+
     // Reads a feed's text in a background worker: { name, events, failed, stats }, or a problem.
-    // `calendar` is the calendar's { id, name, account } in Plainday's settings, `window` from
-    // window(), and `link` the link it came from, which only says whose calendar it is, when it's
-    // Google's.
+    // `calendar` is the calendar's { id, name, account, address } in Plainday's settings, `window`
+    // from window(), and `link` the link it came from, which says whose calendar it is when it's
+    // Google's and the calendar has no address of yours (owners()).
     async read(text, { calendar = {}, window: range, link = null }) {
         if (!this.isCalendar(text)) return { problem: "unreadable" };
         const started = performance.now();
@@ -136,7 +221,7 @@ export default class CalendarFeed {
                     options: {
                         calendar: this.calendarOf(calendar),
                         window: { start: range.start.getTime(), end: range.end.getTime() },
-                        owner: this.owner(link),
+                        owner: this.owners(calendar, link),
                     },
                 });
             } catch {
