@@ -373,6 +373,7 @@ function standInSetting() {
         },
         type(v) { input.value = v; control.handlers.change(v); }, leave() { for (const fn of listeners.change ?? []) fn(); },
         tab() { for (const fn of listeners.keydown ?? []) fn({ key: "Tab" }); },
+        key(k) { for (const fn of listeners.keydown ?? []) fn({ key: k }); },
         warning: () => warnings.at(-1) ?? "",
     };
     return setting;
@@ -530,12 +531,16 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
 
 test("Settings → Plainday → Folders and Note templates: the folders as set, checked as you type and saved when you leave them (OBS-283)", async () => {
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" } };
-    const { plugin } = load(BUNDLE, { stored });
-    const folders = new Set(["Projects", "Inbox", "Archive", "Reference/Invoices", "Reference/Planner/weeks", "Config"]);
+    const { plugin, suggests } = load(BUNDLE, { stored });
+    const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference/Invoices", "Reference/Done lists", "Reference/Planner/weeks", "Config"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
+    plugin.app.vault.getAllFolders = () => [...folders].map((path) => ({ path }));
     const template = { path: "Templates/Plain week.md" };
-    plugin.app.vault.getFileByPath = (p) => (p === template.path ? template : null);
-    plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : null);
+    // A note of yours, which the error log mustn't write over, and an error log already made
+    const mine = { path: "Reference/Notes.md", stat: { size: 120 } }, oldLog = { path: "Logs/Old log.md", stat: { size: 80 } };
+    const files = new Map([[template.path, template], [mine.path, mine], [oldLog.path, oldLog]]);
+    plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+    plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : f === oldLog ? { headings: [{ heading: "Time report" }] } : f === mine ? { headings: [{ heading: "Ideas" }] } : null);
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
@@ -570,12 +575,53 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.equal(projects.s.warning(), "Not used: it's inside Inbox (Waiting). Projects stays `Projects`.");
         const archive = draw("Archive");
         archive.s.type("Reference");
+        assert.equal(archive.s.warning(), "Not used: the daily notes' folder, Reference/Planner/days, is inside it. Archive stays `Archive`.", "the Planner can't be archived");
+        archive.s.type("Reference/Planner/weeks/Old");
+        assert.equal(archive.s.warning(), "Not used: it's inside the weekly notes' folder, Reference/Planner/weeks. Archive stays `Archive`.");
+        archive.s.type("Reference/Invoices");
         assert.equal(archive.s.warning(), "Not used: the invoice folder, Reference/Invoices, is inside it. Archive stays `Archive`.");
         archive.s.type("Old");
         archive.s.leave();
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(folders()?.archive, "Old");
         assert.equal(plugin.saved.at(-1).invoices.folder, "Reference/Invoices", "the invoice folder is kept");
+
+        // A folder spelled in another case is the vault's own
+        const projects2 = draw("Projects");
+        projects2.s.type("projects");
+        assert.equal(projects2.s.warning(), "", "Projects as the vault spells it, so no line");
+        projects2.s.leave();
+        assert.equal(projects2.s.control.inputEl.value, "Projects");
+
+        // The list offers only what the field takes, and leaving it takes a row only when you chose it
+        const done = draw("Archive");
+        const list = suggests.at(-1);
+        assert.ok(!list.getSuggestions("").includes("Projects/Waiting room"), "a folder inside Projects isn't offered for the archive");
+        assert.ok(!list.getSuggestions("").includes("Reference/Invoices"), "nor the invoice folder");
+        const row = (folder, selected) => {
+            const classes = new Set(selected ? ["is-selected"] : []);
+            const el = { isConnected: true, addClass: (c) => classes.add(c), hasClass: (c) => classes.has(c), createSpan: () => {} };
+            list.renderSuggestion(folder, el);
+        };
+        assert.deepEqual(list.getSuggestions("done"), ["Reference/Done lists"]);
+        row("Reference/Done lists", true);
+        done.s.type("Done");
+        done.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.archive, "Done", "what you typed, not the row Obsidian highlighted first");
+        done.s.type("Don");
+        list.getSuggestions("don");
+        row("Reference/Done lists", true);
+        done.s.key("ArrowDown");
+        done.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.archive, "Reference/Done lists", "the row you moved to");
+        done.s.type("Old");
+        done.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.archive, "Old");
+        const inboxList = (draw("Inbox"), suggests.at(-1));
+        assert.ok(!inboxList.getSuggestions("wait").includes("Projects/Waiting room"), "nor one inside Projects for the Inbox");
 
         // The daily notes: shown from the Daily notes plugin, not asked
         assert.equal(draw("Daily notes").s.descEl.text, "`Reference/Planner/days`, named `YYYY-MM-DD`. Set in Settings → Daily notes.");
@@ -591,10 +637,18 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.equal(folders()?.week, "Planner/Weeks");
         assert.equal(window.plainday.TimeReport.periodFolders().week, "Planner/Weeks", "the weekly notes' folder as set");
         assert.equal(window.plainday.TimeReport.periodFolders({ asBefore: true }).week, "Reference/Planner/weeks");
+        week.s.type("Old/Weeks");
+        assert.equal(week.s.warning(), "Not used: it's inside Archive (Old). Weekly notes stay `Planner/Weeks`.");
+        week.s.type("Config");
+        assert.equal(week.s.warning(), "Not used: it's the Config folder. Weekly notes stay `Planner/Weeks`.");
 
         // The error log note: blank is Config/Error Log.md, in a vault with a Config folder
         const log = draw("Error log note");
         assert.equal(log.s.control.inputEl.placeholder, "Config/Error Log.md");
+        log.s.type("Reference/Notes");
+        assert.equal(log.s.warning(), "Not used: it's a note of yours, and the error log would write over its sections. The error log stays `Config/Error Log.md`.");
+        log.s.type("Logs/Old log");
+        assert.equal(log.s.warning(), "", "an error log already made is fine");
         log.s.type("Logs/Problems");
         log.s.leave();
         await new Promise((r) => setTimeout(r, 0));

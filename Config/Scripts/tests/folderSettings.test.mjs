@@ -68,3 +68,26 @@ test("SyncArea leaves a note moved into the archive as set alone, as it leaves o
     assert.equal(sync.ignored(file("Archive/Other.md")), false, "Archive is only a folder now");
     assert.equal(sync.ignored({ path: "Config/Templates/Task.md" }), true, "Config stays out by name");
 });
+
+test("the time report, with the folders moved: a line whose note waits in Waiting is listed, by that name, and a project in Work counts", () => {
+    const DAY = day("2026-09-17");
+    const v = standIn({
+        notes: {
+            [KES]: PROJECT,
+            "Waiting/Desk lamp.md": "---\ntags: [task]\n---\n",
+            "Old/Marlowe/Marlowe.md": PROJECT,
+            [DAY]: "- [x] Price a lamp [[Kestrel|⭕]] [[Desk lamp|⋯]]\n\t- 9:00am - 9:20am\n",
+        },
+        folders: ELSEWHERE,
+    });
+    const tr = v.plainday.TimeReport, index = tr.appIndex();
+    assert.equal(index.inInbox("Waiting/Desk lamp.md"), true);
+    assert.equal(index.inSystem("Work/Freelance/Kestrel/Kestrel.md"), true);
+    assert.equal(index.inSystem("Projects/Elsewhere.md"), false);
+    const model = tr.build([{ date: "2026-09-17", path: DAY, text: v.notes()[DAY] }], index);
+    const conflicts = model.projectProblems.filter((p) => p.conflict);
+    assert.deepEqual(JSON.parse(JSON.stringify(conflicts.map((p) => [p.project, p.conflict.inbox]))), [[KES, true]], "listed as waiting in the Inbox as set");
+    const line = tr.conflictLine(conflicts[0].conflict, (p) => `[[${tr.basename(p)}]]`, (t) => t);
+    assert.match(line, /waits in Waiting; run AddProjectLink on the line, or MoveToProject on the note$/);
+    assert.equal(tr.isArchived("Old/Marlowe/Marlowe.md"), true);
+});

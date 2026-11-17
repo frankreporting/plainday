@@ -104,7 +104,7 @@ class FolderSuggest extends AbstractInputSuggest {
     getSuggestions(query) {
         const q = query.trim().toLowerCase();
         const folders = this.app.vault.getAllFolders(false).map((f) => f.path).filter((f) => this.takes(f)).sort((a, b) => a.localeCompare(b));
-        const all = !this.suggested || folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
+        const all = !this.suggested || !this.takes(this.suggested) || folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
         /** @param {string} f */
         const rank = (f) => { const l = f.toLowerCase(); return l === q ? 0 : l.startsWith(q) ? 1 : 2; };
         this.drawn = new Map();
@@ -753,9 +753,11 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /**
          * A folder or note field: `read(typed)` gives { value } or { error }; `saved()` the saved value;
          * `note(value)` the orange line for a value that reads ("" for none); `list(input)` the list to
-         * choose from
+         * choose from, which offers only what `read` takes (none for the error log). Leaving the field
+         * with the list open takes the row it highlights only when you moved the highlight (↑ ↓) or the
+         * row starts with what you typed, so a folder you didn't choose never replaces what you typed.
          * @param {string} name @param {string} desc
-         * @param {{ saved: () => string, read: (v: string) => { value: string, error?: undefined } | { error: string, value?: undefined }, save: (s: Setting, value: string) => Promise<void>, placeholder: () => string, note: (value: string) => string, list: (input: HTMLInputElement) => FolderSuggest, was: (value: string) => string }} how
+         * @param {{ saved: () => string, read: (v: string) => { value: string, error?: undefined } | { error: string, value?: undefined }, save: (s: Setting, value: string) => Promise<void>, placeholder: () => string, note: (value: string) => string, list: ((input: HTMLInputElement) => FolderSuggest) | null, was: (value: string) => string }} how
          * @returns {Row}
          */
         const pathField = (name, desc, how) => field(name, desc, (s) => {
@@ -765,6 +767,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             let input = null;
             /** @type {FolderSuggest | null} */
             let suggest = null;
+            // Whether the highlight was moved with ↑ or ↓ since you last typed
+            let moved = false;
             /** @param {string} v */
             const check = (v) => {
                 const got = how.read(v);
@@ -776,11 +780,13 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             // typed when it reads, and the saved value at once when it doesn't, its line still saying why
             const leave = () => {
                 const typed = input !== null ? input.getValue().trim() : "";
-                const pick = typed !== "" && suggest !== null ? suggest.highlighted() : null;
+                const lit = typed !== "" && suggest !== null ? suggest.highlighted() : null;
+                const pick = lit && (moved || lit.toLowerCase().startsWith(typed.toLowerCase())) ? lit : null;
                 if (pick && input !== null) {
                     input.setValue(pick);
                     check(pick);
                 }
+                moved = false;
                 const value = waiting;
                 waiting = null;
                 if (value !== null && value !== how.saved()) void how.save(s, value);
@@ -789,9 +795,16 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             };
             s.addText((t) => {
                 input = t;
-                t.setPlaceholder(how.placeholder()).setValue(how.saved()).onChange(check);
-                t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Tab") leave(); });
+                t.setPlaceholder(how.placeholder()).setValue(how.saved()).onChange((v) => {
+                    moved = false;
+                    check(v);
+                });
+                t.inputEl.addEventListener("keydown", (e) => {
+                    if (e.key === "ArrowDown" || e.key === "ArrowUp") moved = true;
+                    if (e.key === "Tab") leave();
+                });
                 t.inputEl.addEventListener("change", leave);
+                if (!how.list) return;
                 const list = how.list(t.inputEl);
                 suggest = list;
                 list.onSelect((v) => {
@@ -812,40 +825,78 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             inbox: ["Inbox", "Where Plainday puts a note it makes before the note has a project."],
             archive: ["Archive", "Finished projects, which the reports and commands leave out."],
         };
+        // A folder as the vault spells it, when one is there in another case: `projects` is `Projects`
+        /** @param {string} folder */
+        const spelled = (folder) => this.app.vault.getAllFolders(false).find((f) => f.path.toLowerCase() === folder.toLowerCase())?.path ?? folder;
+        // The daily notes' folder and the weekly, monthly and yearly notes' folders in use: none of
+        // Projects, the Inbox and the archive may be one of them, hold one, or sit inside one
+        /** @returns {[string, string][]} */
+        const planner = () => {
+            const p = plainday.TimeReport.periodFolders();
+            return /** @type {[string, string][]} */ ([["the daily notes' folder", daily().folder], ["the weekly notes' folder", p.week], ["the monthly notes' folder", p.month], ["the yearly notes' folder", p.year]]).filter(([, f]) => !!f);
+        };
+        /** @param {string} folder @returns {string | null} */
+        const meetsPlanner = (folder) => {
+            const a = folder.toLowerCase();
+            for (const [name, f] of planner()) {
+                const b = f.toLowerCase();
+                if (a === b) return `it's ${name}`;
+                if (a.startsWith(`${b}/`)) return `it's inside ${name}, ${f}`;
+                if (b.startsWith(`${a}/`)) return `${name}, ${f}, is inside it`;
+            }
+            return null;
+        };
+        // What Projects, the Inbox or the archive takes: { value } as the vault spells it, or { error }
+        /** @param {"projects" | "inbox" | "archive"} key @param {string} v @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
+        const systemRead = (key, v) => {
+            const got = billing.pathOf(v);
+            if (got.error) return { error: `it ${got.error}` };
+            const folder = got.folder && spelled(got.folder);
+            const next = { ...settings.folders(), [key]: folder };
+            const wrong = settings.foldersProblem(next, billing, key);
+            if (wrong) return { error: wrong.problem };
+            const planned = meetsPlanner(folder);
+            if (planned) return { error: planned };
+            // The invoice folder can't be in the archive
+            const invoices = now().invoices.folder;
+            if (key === "archive" && invoices && billing.folderOf(invoices, folder).taken) return { error: `the invoice folder, ${invoices}, is inside it` };
+            return { value: folder };
+        };
         /** @param {"projects" | "inbox" | "archive"} key */
         const systemField = (key) => pathField(system[key][0], `${system[key][1]} ${moves}`, {
             saved: () => now().folders[key],
-            read: (v) => {
-                const got = billing.pathOf(v);
-                if (got.error) return { error: `it ${got.error}` };
-                const next = { ...settings.folders(), [key]: got.folder };
-                const wrong = settings.foldersProblem(next, billing, key);
-                if (wrong) return { error: wrong.problem };
-                // The invoice folder can't be in the archive
-                const invoices = now().invoices.folder;
-                if (key === "archive" && invoices && billing.folderOf(invoices, got.folder).taken) return { error: `the invoice folder, ${invoices}, is inside it` };
-                return { value: got.folder };
-            },
+            read: (v) => systemRead(key, v),
             save: (s, value) => store(s, "folders", { [key]: value }),
             placeholder: () => Settings.FOLDERS[key],
             note: (value) => (missingFolder(value) ? `“${value}” doesn't exist yet. Plainday will create it when it first files a note there.` : ""),
-            list: (input) => new FolderSuggest(this.app, input, Settings.FOLDERS[key], (f) => !billing.pathOf(f).error),
+            list: (input) => new FolderSuggest(this.app, input, Settings.FOLDERS[key], (f) => systemRead(key, f).error === undefined),
             was: (value) => `${system[key][0]} stays ${code(value)}.`,
         });
         /** @type {Record<"week" | "month" | "year", string>} */
         const periods = { week: "Weekly", month: "Monthly", year: "Yearly" };
         const asBefore = () => plainday.TimeReport.periodFolders({ asBefore: true });
+        // What a weekly, monthly or yearly folder takes: blank (as before), or a folder as the vault spells
+        // it that isn't Config, Projects, the Inbox or the archive, holds one, or sits inside one
+        /** @param {string} v @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
+        const periodRead = (v) => {
+            const got = billing.pathOf(v);
+            if (got.error) return { error: `it ${got.error}` };
+            const folder = got.folder && spelled(got.folder);
+            const meets = folder ? settings.overlap(folder) : null;
+            if (meets) {
+                const named = meets.name === meets.folder ? meets.name : `${meets.name} (${meets.folder})`;
+                return { error: meets.how === "is" ? `it's the ${meets.name} folder` : meets.how === "in" ? `it's inside ${named}` : `${named} is inside it` };
+            }
+            return { value: folder };
+        };
         /** @param {"week" | "month" | "year"} unit */
         const periodField = (unit) => pathField(`${periods[unit]} notes`, `Blank uses Notebook Navigator's calendar folder, or a folder beside the daily notes. ${moves}`, {
             saved: () => now().folders[unit],
-            read: (v) => {
-                const got = billing.pathOf(v);
-                return got.error ? { error: `it ${got.error}` } : { value: got.folder };
-            },
+            read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
             placeholder: () => asBefore()[unit],
             note: (value) => (missingFolder(value) ? `“${value}” doesn't exist yet. Plainday will create it with the first ${periods[unit].toLowerCase()} note.` : ""),
-            list: (input) => new FolderSuggest(this.app, input, "", (f) => !billing.pathOf(f).error),
+            list: (input) => new FolderSuggest(this.app, input, "", (f) => periodRead(f).error === undefined),
             was: (value) => `${periods[unit]} notes stay ${value ? code(value) : "as before"}.`,
         });
         /** @param {"week" | "month" | "year"} unit */
@@ -856,7 +907,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             /** @param {string} value */
             const note = (value) => {
                 if (missingNote(value)) return `“${value}” isn't in the vault, so the template Plainday used before is used until it is.`;
-                const file = value ? this.app.vault.getFileByPath(value) : jump.templateFor(unit);
+                const file = value ? this.app.vault.getFileByPath(value) : jump.templateFor(unit, { asBefore: true });
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[unit]);
             };
@@ -894,12 +945,17 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         saved: () => now().folders.errorLog,
                         read: (v) => {
                             const got = settings.notePathOf(v);
-                            return got.error ? { error: `it ${got.error}` } : { value: got.path };
+                            if (got.error) return { error: `it ${got.error}` };
+                            // A note of yours that isn't an error log: the log would rewrite its sections
+                            const there = got.path ? this.app.vault.getFileByPath(got.path) : null;
+                            const heads = (there && this.app.metadataCache.getFileCache(there)?.headings?.map((h) => h.heading)) ?? [];
+                            if (there && there.stat.size > 0 && !heads.some((h) => ["Time report", "Calendar sync"].includes(h))) return { error: "it's a note of yours, and the error log would write over its sections" };
+                            return { value: got.path };
                         },
                         save: (s, value) => store(s, "folders", { errorLog: value }),
                         placeholder: () => settings.defaultErrorLogPath(),
                         note: () => "",
-                        list: (input) => new NoteSuggest(this.app, input, "", () => true),
+                        list: null,
                         was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
                     }),
                 ],

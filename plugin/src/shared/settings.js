@@ -102,6 +102,10 @@ export default class Settings {
     /** @type {Record<"week" | "month" | "year", string[]>} */
     static WRITES = { week: [], month: [], year: [] };
     static COMBINED = ["tags", "aliases"];
+    // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
+    // Sync brings such a file
+    static DROPPED = "Plainday's Projects, Inbox and Archive folders in its settings file don't hold together (one is inside another, or isn't a folder), so it's using Projects, Inbox and Archive. Set them in Settings → Plainday → Folders.";
+    static DROPPED_SYNC = "Plainday's settings file, changed by Sync, has Projects, Inbox and Archive folders that don't hold together (one is inside another, or isn't a folder), so it keeps the ones it had. Check them in Settings → Plainday → Folders.";
 
     constructor() {
         this.data = this.defaults();
@@ -231,7 +235,10 @@ export default class Settings {
         }
         if (this.foldersProblem(out.folders, billing)) Object.assign(out.folders, Settings.FOLDERS);
         for (const unit of Settings.PERIODS) {
-            out.folders[unit] = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
+            const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
+            // A weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding
+            // one, is as before
+            out.folders[unit] = folder && this.overlap(folder, out.folders) ? "" : folder;
             out.templates[unit] = this.notePathOf(templates[unit], billing).path;
         }
         out.folders.errorLog = this.notePathOf(folders.errorLog, billing).path;
@@ -303,6 +310,27 @@ export default class Settings {
     }
 
     /**
+     * Where `folder` meets the system's own folders: the first of Config, Projects, the Inbox and the
+     * archive that it's inside, holds, or is, as { name, folder, how: "in" | "holds" | "is" }; else null
+     * @param {string} folder
+     * @param {{ projects: string, inbox: string, archive: string }} [folders]
+     * @returns {{ name: string, folder: string, how: "in" | "holds" | "is" } | null}
+     */
+    overlap(folder, folders = this.data.folders) {
+        const a = String(folder).toLowerCase();
+        /** @type {[string, string][]} */
+        const named = [[Settings.SYSTEM_FOLDER, Settings.SYSTEM_FOLDER], ...(/** @type {const} */ (["projects", "inbox", "archive"])).map((k) => /** @type {[string, string]} */ ([Settings.FOLDER_NAMES[k], folders[k]]))];
+        for (const [name, f] of named) {
+            const b = String(f).toLowerCase();
+            if (!b) continue;
+            if (a === b) return { name, folder: f, how: "is" };
+            if (a.startsWith(`${b}/`)) return { name, folder: f, how: "in" };
+            if (b.startsWith(`${a}/`)) return { name, folder: f, how: "holds" };
+        }
+        return null;
+    }
+
+    /**
      * A note's path in a setting (the error log note, a template): { path, error }, with ".md" added when
      * it's left off and "" for none; it reads as a folder does
      * @param {unknown} raw
@@ -313,22 +341,25 @@ export default class Settings {
         const read = billing.pathOf(typeof raw === "string" ? raw : raw === undefined || raw === null ? null : raw);
         if (read.error) return { path: "", error: read.error.replace("isn't a folder in the vault", "isn't a note in the vault") };
         if (!read.folder) return { path: "", error: null };
-        return { path: /\.md$/i.test(read.folder) ? read.folder : `${read.folder}.md`, error: null };
+        return { path: /\.md$/i.test(read.folder) ? `${read.folder.slice(0, -3)}.md` : `${read.folder}.md`, error: null };
     }
 
     /**
-     * The error log note: the setting's, else Config/Error Log.md in a vault from before (that note, or
-     * the Config folder, is there), else Plainday error log.md at the top of the vault
+     * The error log note: the setting's, else the log already made (Config/Error Log.md, then Plainday
+     * error log.md), else Config/Error Log.md in a vault from before (the Config folder is there), else
+     * Plainday error log.md at the top of the vault
      * @returns {string}
      */
     errorLogPath() {
         return this.data.folders.errorLog || this.defaultErrorLogPath();
     }
 
-    // The error log note a blank setting means, which the panel shows
+    // The error log note a blank setting means, which the panel shows: a log already made stays where it
+    // is (the old one first), so a Config folder that turns up later doesn't start a second log
     defaultErrorLogPath() {
-        const before = app.vault.getFileByPath(Settings.OLD_ERROR_LOG) || app.vault.getFolderByPath(Settings.SYSTEM_FOLDER);
-        return before ? Settings.OLD_ERROR_LOG : Settings.NEW_ERROR_LOG;
+        if (app.vault.getFileByPath(Settings.OLD_ERROR_LOG)) return Settings.OLD_ERROR_LOG;
+        if (app.vault.getFileByPath(Settings.NEW_ERROR_LOG)) return Settings.NEW_ERROR_LOG;
+        return app.vault.getFolderByPath(Settings.SYSTEM_FOLDER) ? Settings.OLD_ERROR_LOG : Settings.NEW_ERROR_LOG;
     }
 
     /**
@@ -720,8 +751,10 @@ export default class Settings {
             const link = given[id];
             if (typeof link === "string" && this.isLink(link)) links[id] = link.trim();
         }
-        if (!this.hasFolders(raw)) Object.assign(settings, { folders: { ...this.data.folders }, templates: { ...this.data.templates } });
-        return { settings, links, withCalendars: this.hasCalendars(raw) };
+        // A copy from before folders: read with this device's, so its invoice folder is checked against
+        // this device's archive
+        const read = this.hasFolders(raw) ? settings : this.normalize({ ...raw, folders: this.data.folders, templates: this.data.templates }, billing);
+        return { settings: read, links, withCalendars: this.hasCalendars(raw) };
     }
 
     /**
@@ -750,6 +783,7 @@ export default class Settings {
         this.calendarsSaved = this.hasCalendars(raw);
         this.foldersSaved = this.hasFolders(raw);
         this.data = this.normalize(raw ?? {});
+        if (this.foldersDropped(raw, this.data)) new Notice(Settings.DROPPED, 0);
         if (this.unreadable) {
             new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
         }
@@ -758,6 +792,14 @@ export default class Settings {
     // Whether a data file as loaded has calendars, or doesn't read (then nothing is read over it)
     hasCalendars(raw) {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
+    }
+
+    // Whether Projects, the Inbox or the archive a data file names didn't survive normalize(): one that
+    // doesn't read, or three that don't hold together, which went back to the defaults
+    foldersDropped(raw, settings) {
+        const f = typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null ? raw.folders : null;
+        if (!f) return false;
+        return /** @type {const} */ (["projects", "inbox", "archive"]).some((k) => typeof f[k] === "string" && f[k].trim() !== "" && plainday.Billing.pathOf(f[k]).folder !== settings.folders[k]);
     }
 
     // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read
@@ -841,14 +883,20 @@ export default class Settings {
         const hadCalendars = this.calendarsSaved, hadFolders = this.foldersSaved;
         this.calendarsSaved = this.hasCalendars(raw);
         this.foldersSaved = this.hasFolders(raw);
+        // The same for folders and templates, from a device on a release before them (OBS-283): read with
+        // this device's, so its invoice folder is checked against this device's archive
+        const keepFolders = raw !== null && !this.foldersSaved && hadFolders;
+        const given = keepFolders ? { ...raw, folders: this.data.folders, templates: this.data.templates } : raw ?? {};
         // As a paste does: an older file from another device never lowers the number given here
-        const next = this.pasted(this.normalize(raw ?? {}));
+        const next = this.pasted(this.normalize(given));
         const keep = raw !== null && !this.calendarsSaved && hadCalendars;
         if (keep) next.calendars = this.data.calendars;
-        // The same for folders and templates, from a device on a release before them (OBS-283)
-        const keepFolders = raw !== null && !this.foldersSaved && hadFolders;
-        if (keepFolders) Object.assign(next, { folders: this.data.folders, templates: this.data.templates });
+        // Projects, the Inbox and the archive that don't hold together (a file edited by hand, two devices'
+        // changes merged) keep this device's, with a notice, rather than going back to the defaults
+        const dropped = this.foldersDropped(given, next);
+        if (dropped) Object.assign(next.folders, this.folders());
         this.data = next;
+        if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
         if (keep || keepFolders) await this.save();
         await plainday.ListCursor?.invoke();
     }

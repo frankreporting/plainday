@@ -4,7 +4,7 @@
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readVault, loadTimeReport, loadBilling, planReports, vaultSettings, checkedNotes, vaultFolders } from "./demo/renderReports.mjs";
+import { readVault, loadTimeReport, loadBilling, planReports, vaultSettings, checkedNotes } from "./demo/renderReports.mjs";
 
 const MOVES = [["Projects", "Work"], ["Inbox", "Waiting"], ["Archive", "Old"]];
 // A path in the second layout, and a report's text with its paths moved the same way
@@ -57,7 +57,7 @@ test("with the settings to match, the time report writes the same hours and Prob
 test("with the folders left as the demo has them, the report's checks read none of the moved notes: the folders are what they read", () => {
     // The reports find projects by their tags, so their hours don't move with a folder; the task checks
     // read only the notes in the system (Projects, the Inbox and the periodic notes) and the archive
-    const notes = (vault, s) => checkedNotes(loadTimeReport(), vault, vaultFolders(s)).filter((n) => n.kind !== "day").map((n) => n.path);
+    const notes = (vault, s) => checkedNotes(loadTimeReport(), vault, s).filter((n) => n.kind !== "day").map((n) => n.path);
     const inDemo = notes(demo, settings);
     assert.ok(inDemo.some((p) => p.startsWith("Projects/")) && inDemo.some((p) => p.startsWith("Archive/")));
     assert.deepEqual(notes(layout, theirs), inDemo.map(moved), "with the settings to match, the same notes, moved");

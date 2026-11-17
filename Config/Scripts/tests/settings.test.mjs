@@ -776,7 +776,7 @@ test("foldersProblem: the one you change, said plainly; the vault's top and Conf
 
 test("notePathOf: a note's path, with .md added; blank is none; anything else isn't a note", () => {
     assert.deepEqual(plain(settings.notePathOf(" Logs//Problems ", billing)), { path: "Logs/Problems.md", error: null });
-    assert.deepEqual(plain(settings.notePathOf("Plainday error log.MD", billing)), { path: "Plainday error log.MD", error: null });
+    assert.deepEqual(plain(settings.notePathOf("Plainday error log.MD", billing)), { path: "Plainday error log.md", error: null }, "the extension as Obsidian reads a note's");
     assert.deepEqual(plain(settings.notePathOf("", billing)), { path: "", error: null });
     assert.deepEqual(plain(settings.notePathOf(undefined, billing)), { path: "", error: null });
     assert.match(settings.notePathOf("../x", billing).error, /^isn't a note in the vault/);
@@ -789,6 +789,11 @@ test("errorLogPath: the setting's; else Config/Error Log.md in a vault from befo
     assert.equal(config.s.errorLogPath(), "Config/Error Log.md", "a vault from before whose log isn't made yet");
     const fresh = withPlugin({ notes: { "Welcome.md": "" } });
     assert.equal(fresh.s.errorLogPath(), "Plainday error log.md");
+    // A log made at the top stays there when a Config folder turns up later
+    const later = withPlugin({ notes: { "Plainday error log.md": "", "Config/My notes.md": "" } });
+    assert.equal(later.s.errorLogPath(), "Plainday error log.md");
+    const both = withPlugin({ notes: { "Plainday error log.md": "", "Config/Error Log.md": "" } });
+    assert.equal(both.s.errorLogPath(), "Config/Error Log.md", "the older log first");
     const chosen = withPlugin({ stored: { folders: { errorLog: "Logs/Problems.md" } }, notes: { "Config/Error Log.md": "" } });
     await chosen.s.load();
     assert.equal(chosen.s.errorLogPath(), "Logs/Problems.md");
@@ -836,4 +841,51 @@ test("folders: the Inbox is Plainday's own, whatever Obsidian's Default location
     assert.equal(f.s.folders().inbox, "Inbox");
     assert.equal(asked, 0);
     assert.doesNotMatch(fs.readFileSync(new URL("../../../plugin/src/shared/settings.js", import.meta.url), "utf8"), /newFileFolderPath|newFileLocation/);
+});
+
+test("normalize: a weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding one, is as before", () => {
+    const n = (folders) => plain(settings.normalize({ folders }, billing).folders);
+    assert.equal(n({ week: "Archive/Weeks" }).week, "");
+    assert.equal(n({ month: "Config/Months" }).month, "");
+    assert.equal(n({ year: "Projects" }).year, "");
+    assert.equal(n({ week: "Planner", projects: "Planner/Projects" }).week, "", "one that holds Projects");
+    assert.equal(n({ week: "Old/Weeks", archive: "Old" }).week, "", "the archive as it's set");
+    assert.equal(n({ week: "Archive/Weeks", archive: "Old" }).week, "Archive/Weeks", "Archive is only a folder once the archive is elsewhere");
+    assert.deepEqual(plain(settings.overlap("Reference/Planner/weeks")), null);
+    assert.deepEqual(plain(settings.overlap("Inbox/Weeks")), { name: "Inbox", folder: "Inbox", how: "in" });
+});
+
+test("a copy or a Sync file from before folders is read with this device's folders, so its invoice folder is checked against this device's archive", async () => {
+    const mine = { ...JUNIPER, folders: { ...FOLDERS, archive: "Billing" } };
+    const f = withPlugin({ stored: mine });
+    await f.s.load();
+    const { folders, templates, ...older } = { ...mine, invoices: { ...mine.invoices, folder: "Billing/2026" } };
+    const read = f.s.readCopy(JSON.stringify({ "plainday-settings": 1, ...older }), billing);
+    assert.equal(read.settings.folders.archive, "Billing");
+    assert.equal(read.settings.invoices.folder, "", "inside this device's archive, so not kept, and Paste shows it");
+    f.plugin.loadData = async () => JSON.parse(JSON.stringify(older));
+    await f.s.reload();
+    assert.equal(f.s.get().folders.archive, "Billing");
+    assert.equal(f.s.get().invoices.folder, "");
+});
+
+test("Projects, the Inbox and the archive that don't hold together: at the start the defaults, with a notice; from Sync, this device's, with a notice", async () => {
+    const f = withPlugin({ stored: { ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "Work/Waiting" } } });
+    await f.s.load();
+    assert.deepEqual(plain(f.s.folders()), plain(Settings.FOLDERS));
+    assert.equal(f.notices.length, 1);
+    assert.match(f.notices[0], /don't hold together .* so it's using Projects, Inbox and Archive\. Set them in Settings → Plainday → Folders\.$/);
+    const g = withPlugin({ stored: { ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "Waiting", archive: "Old" } } });
+    await g.s.load();
+    assert.deepEqual(g.notices, [], "three that hold together say nothing");
+    g.plugin.loadData = async () => ({ ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "Work/Waiting", archive: "Old" } });
+    await g.s.reload();
+    assert.deepEqual(plain(g.s.folders()), { projects: "Work", inbox: "Waiting", archive: "Old" }, "this device's, not the defaults");
+    assert.equal(g.notices.length, 1);
+    assert.match(g.notices[0], /changed by Sync, .* so it keeps the ones it had/);
+    // Folders that read, from Sync, are taken
+    g.plugin.loadData = async () => ({ ...JUNIPER, folders: { ...FOLDERS, projects: "Clients", inbox: "Waiting", archive: "Old" } });
+    await g.s.reload();
+    assert.equal(g.s.folders().projects, "Clients");
+    assert.equal(g.notices.length, 1);
 });
