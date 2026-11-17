@@ -30,8 +30,8 @@ export default class Settings {
     //     into a command. Changing one moves no notes. The daily notes' folder, name and template are
     //     the Daily notes plugin's, never asked again here.
     //   - folders.periodic (OBS-283): who owns the daily, weekly, monthly and yearly notes, which is one
-    //     choice rather than a rule per note type: "daily-notes" (the Daily notes plugin keeps the daily
-    //     notes; Plainday keeps the weekly, monthly and yearly folders and templates) or
+    //     choice rather than a rule per note type: "daily-notes" (Plainday + the Daily Notes plugin: the
+    //     plugin keeps the daily notes, Plainday the weekly, monthly and yearly folders and templates) or
     //     "notebook-navigator" (Notebook Navigator's calendar keeps all four, folders and templates, and
     //     Plainday asks for none of them). "" means neither has been chosen, and periodicSource() reads
     //     the one in use, so a vault whose calendar is Notebook Navigator's starts there.
@@ -101,7 +101,7 @@ export default class Settings {
     // Who owns the periodic notes (folders.periodic): the Daily notes plugin with Plainday, or Notebook
     // Navigator's calendar. "" is neither chosen, which periodicSource() reads from the vault.
     static SOURCES = ["daily-notes", "notebook-navigator"];
-    static SOURCE_NAMES = { "daily-notes": "Daily notes plugin + Plainday", "notebook-navigator": "Notebook Navigator" };
+    static SOURCE_NAMES = { "daily-notes": "Plainday + Daily Notes plugin", "notebook-navigator": "Notebook Navigator" };
     // The templates a new vault starts with: the ones AddTaskNote has always run (OBS-283)
     static TEMPLATES = { task: "Config/Templates/Task.md", log: "Config/Templates/Log.md" };
     // The system's own folder in a vault from before: never a place for the three, or for invoices

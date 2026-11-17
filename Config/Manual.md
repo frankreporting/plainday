@@ -834,7 +834,7 @@ Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keep
 
 ### Folders
 
-Where Plainday finds and files notes. Every command reads them from here. Changing one moves no notes: to move them, move the folder in Obsidian, which keeps every link, then change the setting. Four folders, then *Periodic notes*, which opens a page of its own.
+Where Plainday finds and files notes. Every command reads them from here. **Changing a folder moves no notes:** to move them, move the folder in Obsidian, which keeps every link, then change the setting. That holds for every folder on this page and the Periodic notes page, so the fields don't each repeat it. Four folders, then *Periodic notes*, which opens a page of its own.
 
 - **Projects:** every project and area, `Projects` as it comes.
 - **Inbox:** where Plainday puts a note it makes before the note has a project, `Inbox` as it comes: *Add note* on a line with no ⭕ or 🗃️ makes its task note or log there, and it waits there, still counted, until *Move to project* or *Add project link* files it (*Convert to project* starts its note there for a moment too). It's Plainday's own: notes you make yourself go where Obsidian's *Default location for new notes* says, which Plainday doesn't read or change.
@@ -845,10 +845,10 @@ Where Plainday finds and files notes. Every command reads them from here. Changi
 
 #### Periodic notes
 
-One choice decides who owns the daily, weekly, monthly and yearly notes, rather than a rule per note type. *Periodic notes come from*:
+One choice decides who owns the daily, weekly, monthly and yearly notes, rather than a rule per note type. *Define periodic notes using*:
 
-- **Daily notes plugin + Plainday:** the Daily notes plugin keeps the daily notes — their folder, name and template, shown here and set there. Plainday keeps the weekly, monthly and yearly notes: a folder each, blank meaning `weeks`, `months` and `years` beside the daily notes (`Reference/Planner/weeks` in the demo), and a template each, blank meaning *Weekly Note*, *Monthly Note* or *Yearly Note* in Templater's template folder. A folder can't be `Config`, Projects, the Inbox or the archive, hold one, or sit inside one, and a template that isn't in the vault says so.
-- **Notebook Navigator:** its calendar keeps all four, folders and templates alike, by its own patterns. Plainday reads them from it and asks for nothing: each row says where the notes are and that they're set in Notebook Navigator. A pattern Plainday can't follow — one with no folder of its own, or whose folder part holds date tokens, which would mean a folder per date — reads as none, and that note type sits beside the daily notes instead; the row says so rather than crediting Notebook Navigator.
+- **Plainday + Daily Notes plugin:** the Daily notes plugin keeps the daily notes — their folder, name and template, shown here and set there. Plainday keeps the weekly, monthly and yearly notes: a folder each, which blank leaves in `weeks`, `months` and `years` beside the daily notes (`Reference/Planner/weeks` in the demo), and a template each, which blank leaves as *Weekly Note*, *Monthly Note* or *Yearly Note* in Templater's template folder. Each field says its default. A folder can't be `Config`, Projects, the Inbox or the archive, hold one, or sit inside one, and a template that isn't in the vault says so.
+- **Notebook Navigator:** its calendar keeps all four, folders and templates alike — its patterns under *Calendar*, and its own template per calendar (`calendarCustomWeekTemplate` and the rest, under a template folder of its own). Plainday reads them from it and asks for nothing: each row says where the notes are and that they're set in Notebook Navigator. Plainday still needs the template, because it makes a missing periodic note itself when *Jump to date*, *Schedule* or the time report reaches one. A pattern Plainday can't follow — one with no folder of its own, or whose folder part holds date tokens, which would mean a folder per date — reads as none, and that note type sits beside the daily notes instead; the row says so rather than crediting Notebook Navigator.
 - **Which one it starts on:** Notebook Navigator when its calendar is what makes your periodic notes (its own integration mode), else the Daily notes plugin. The choice is always shown, so nothing is guessed at from behind.
 - Changing the choice moves no notes, and *Jump to date*, *Schedule* and the time report all read whichever one is chosen, the daily notes included.
 

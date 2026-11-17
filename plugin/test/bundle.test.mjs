@@ -561,9 +561,11 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         for (const name of ["Projects", "Inbox", "Archive"]) {
             assert.ok(!items.find((i) => i.name === name).desc, name);
         }
-        for (const name of ["Weekly notes", "Monthly notes", "Yearly notes"]) {
-            assert.match(items.find((i) => i.name === name).desc, /Changing it doesn't move the notes already there\.$/, name);
-        }
+        // The periodic folders say their default in Brian's form (11/16), and nothing says "changing it
+        // doesn't move the notes" any more
+        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` subfolder in same folder as daily notes.");
+        assert.equal(items.find((i) => i.name === "Weekly note").desc, "Default: `Weekly Note` in Templater's template folder.");
+        for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
 
         // Projects, the Inbox and the archive: as a new vault has them
         const inbox = draw("Inbox");
@@ -750,9 +752,9 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         const page = () => tab.getSettingDefinitions()[1].items.find((i) => i.name === "Periodic notes");
         const rowsOf = (groups) => groups.flatMap((g) => (g.items ?? []).map((i) => [g.heading, i.name, i.type ?? "row"]));
         // The Daily notes plugin with Plainday: Plainday asks for the three folders and three templates
-        assert.equal(page().displayValue, "Daily notes plugin + Plainday");
+        assert.equal(page().displayValue, "Plainday + Daily Notes plugin");
         assert.deepEqual(rowsOf(page().items), [
-            [undefined, "Periodic notes come from", "row"],
+            [undefined, "Define periodic notes using", "row"],
             ["Folders", "Daily notes", "row"], ["Folders", "Weekly notes", "row"], ["Folders", "Monthly notes", "row"], ["Folders", "Yearly notes", "row"],
             ["Templates", "Daily note", "row"], ["Templates", "Weekly note", "row"], ["Templates", "Monthly note", "row"], ["Templates", "Yearly note", "row"],
         ]);
@@ -762,7 +764,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.equal(window.plainday.Schedule.dailyOpts().folder, "Reference/Planner/days", "the Daily notes plugin's");
 
         // Switch the source: Navigator owns all four, so no field is drawn and each row says where it's set
-        const choice = draw("Periodic notes come from");
+        const choice = draw("Define periodic notes using");
         choice.control.handlers.change("notebook-navigator");
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(plugin.saved.at(-1).folders.periodic, "notebook-navigator");

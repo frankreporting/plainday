@@ -828,7 +828,6 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             return leave;
         });
 
-        const moves = "Changing it doesn't move the notes already there.";
         // Projects, the Inbox and the archive carry no description: their names say what they hold, and
         // the manual has the detail (Brian, 2026-11-16)
         /** @type {Record<"projects" | "inbox" | "archive", string>} */
@@ -903,6 +902,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         });
         /** @type {Record<"week" | "month" | "year", string>} */
         const periods = { week: "Weekly", month: "Monthly", year: "Yearly" };
+        // The folder each one sits in when its field is blank, beside the daily notes
+        /** @type {Record<"week" | "month" | "year", string>} */
+        const beside = { week: "weeks", month: "months", year: "years" };
         const asBefore = () => plainday.TimeReport.periodFolders({ asBefore: true });
         // What a weekly, monthly or yearly folder takes: blank (as before), or a folder as the vault spells
         // it that isn't Config, Projects, the Inbox or the archive, holds one, or sits inside one
@@ -919,7 +921,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             return { value: folder };
         };
         /** @param {"week" | "month" | "year"} unit */
-        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Blank is a folder beside the daily notes. ${moves}`, {
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Default: \`${beside[unit]}\` subfolder in same folder as daily notes.`, {
             saved: () => now().folders[unit],
             read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
@@ -940,7 +942,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[unit] ?? []);
             };
-            return pathField(`${periods[unit]} note`, `Blank uses ${/** @type {{ TEMPLATE: Record<string, string> }} */ (jump.constructor).TEMPLATE[unit]} in Templater's template folder.`, {
+            return pathField(`${periods[unit]} note`, `Default: \`${/** @type {{ TEMPLATE: Record<string, string> }} */ (jump.constructor).TEMPLATE[unit]}\` in Templater's template folder.`, {
                 saved: () => now().templates[unit],
                 read: (v) => {
                     const got = settings.notePathOf(v);
@@ -1009,7 +1011,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: null,
                 rows: [
-                    row("Periodic notes come from", "Which one makes your daily, weekly, monthly and yearly notes and says where they go. Plainday reads them from it, and never moves notes you already have.",
+                    row("Define periodic notes using", "",
                         (s) => s.addDropdown((d) => d.addOptions(Object.fromEntries(Settings.SOURCES.map((v) => [v, Settings.SOURCE_NAMES[v]])))
                             .setValue(source()).onChange((v) => {
                                 void store(s, "folders", { periodic: v }).then(() => this.redraw());
