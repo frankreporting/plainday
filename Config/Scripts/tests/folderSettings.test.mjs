@@ -25,6 +25,7 @@ test("the system is where the folders are set: a note in Work or Waiting is in i
     assert.equal(AddTaskNote.isLiveHome(file("Projects/Kestrel/Kestrel.md")), false);
     assert.equal(AddTaskNote.stagingFolder(), "Waiting");
     assert.equal(TaskIds.outside(file("Projects/Kestrel/Kestrel.md")), "Kestrel isn't in the Planner, Work or Waiting, where the system works, so nothing changed");
+    assert.equal(TaskIds.outside(file("Old/Marlowe/Marlowe.md")), "Marlowe is in Old, where no command works, so nothing changed", "a note in the archive, by its name");
 });
 
 test("the folders as a new vault has them: the messages say Projects, the Inbox and Archive, as before", () => {

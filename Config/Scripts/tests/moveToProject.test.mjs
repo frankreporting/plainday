@@ -302,7 +302,7 @@ test("move: Esc in the menu changes nothing, and nothing movable means no menu a
     kept.answer({ pick: "Projects/Household/Household.md" });
     await kept.mover.move([kept.file("Reference/Planner/days/2026-09-18.md"), kept.file("Archive/Freelance/Marlowe/Marlowe.md")]);
     assert.deepEqual(kept.asked.picker, []);
-    assert.deepEqual(notices, ["2026-09-18 stays where it is: run AddProjectLink on a line in it\nMarlowe isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed"]);
+    assert.deepEqual(notices, ["2026-09-18 stays where it is: run AddProjectLink on a line in it\nMarlowe is in Archive, where no command works, so nothing changed"]);
 });
 
 test("invoke: the note you're on, or Notebook Navigator's selection while it has the focus", () => {

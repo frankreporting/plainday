@@ -213,9 +213,10 @@ export default class TaskIds {
     }
 
     // What a command that works on a line says when its note is outside the system, and does nothing
-    // (rule 12), naming the folders as they're set
+    // (rule 12), naming the folders as they're set: a note in the archive is in it (OBS-283)
     outside(file) {
-        const { projects } = this.folders();
+        const { projects, archive } = this.folders();
+        if (this.inArchive(file.path)) return `${file.basename} is in ${archive}, where no command works, so nothing changed`;
         return `${file.basename} isn't in the Planner, ${projects} or ${plainday.TimeReport.inboxWords()}, where the system works, so nothing changed`;
     }
 
