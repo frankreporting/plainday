@@ -112,6 +112,7 @@ class FakeToggle {
         return this;
     }
     setTooltip() { return this; }
+    setDisabled(d) { this.disabled = d; return this; }
     onChange(fn) { this.changed = fn; return this; }
 }
 class FakeDropdown {
@@ -343,6 +344,7 @@ function standInSetting() {
         inputEl: input, handlers: {},
         setValue(v) { input.value = v; return this; }, getValue() { return input.value; },
         setPlaceholder(p) { input.placeholder = p; return this; }, addOptions(o) { this.options = o; return this; }, setTooltip() { return this; },
+        setDisabled(d) { input.disabled = d; return this; },
         onChange(fn) { this.handlers.change = fn; return this; }, setButtonText(t) { this.text = t; return this; }, onClick(fn) { this.handlers.click = fn; return this; },
     };
     const warnings = [];
@@ -392,12 +394,13 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const defs = tab.getSettingDefinitions();
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
-            ["group", "Folders", ["Projects", "Inbox", "Archive", "Error log note", "Periodic notes"]],
+            ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
             ["group", "Note templates", ["Task note", "Log"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
             ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
+            ["group", "Other", ["Error log note"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
         assert.equal(defs[3].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
@@ -408,8 +411,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Your name or company name", "Address", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"],
-            "Projects, Inbox and Archive say what they hold in their names (Brian, 11/16)");
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Task note", "Log", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"],
+            "a row whose name says what it is carries no description (Brian, 11/16 and 11/17)");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
@@ -563,7 +566,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         }
         // The periodic folders say their default in Brian's form (11/16), and nothing says "changing it
         // doesn't move the notes" any more
-        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` subfolder in same folder as daily notes.");
+        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` in same folder as daily notes.");
         assert.equal(items.find((i) => i.name === "Weekly note").desc, "Default: `Weekly Note` in Templater's template folder.");
         for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
 
@@ -728,6 +731,26 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
     }
 });
 
+test("Settings → Plainday → Tables: the freeze switch is off-limits without Selectable Tables, and says so (OBS-283)", async () => {
+    for (const installed of [true, false]) {
+        const { plugin } = load(BUNDLE, { stored: { tables: { freezeRows: 1, freezeColumns: 1 } } });
+        plugin.app.plugins = { plugins: {}, getPlugin: (id) => (installed && id === "selectable-tables" ? {} : null) };
+        plugin.app.vault.getAllFolders = () => [];
+        plugin.app.vault.getMarkdownFiles = () => [];
+        await plugin.onload();
+        try {
+            const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Tables").items;
+            const s = standInSetting();
+            items.find((i) => i.name === "Freeze rows and columns").render(s);
+            assert.equal(s.control.inputEl.disabled, !installed, `installed: ${installed}`);
+            assert.equal(s.warning(), installed ? "" : "The Selectable Tables plugin isn't installed, so a freeze would do nothing.");
+            assert.equal(items.find((i) => i.name === "Freeze rows and columns").desc, "Applies only to tables created by Plainday.");
+        } finally {
+            plugin.onunload();
+        }
+    }
+});
+
 test("Settings → Plainday → Folders → Periodic notes: the source decides who owns them, and hides Plainday's fields when it isn't Plainday (OBS-283)", async () => {
     const { plugin } = load(BUNDLE, { stored: { folders: { periodic: "daily-notes" } } });
     const NAVIGATOR = {
@@ -842,9 +865,10 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         assert.deepEqual(defs.slice(6).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
             ["Calendars", [
                 ["row", "Add calendar", undefined],
-                ["row", "Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are."],
+                ["row", "Sync range", "How far ahead to write events into daily notes."],
                 ["page", "Calendar list", undefined],
             ]],
+            ["Other", [["row", "Error log note", "Where the time report and the calendar sync list the Problems they find."]]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
         const page = defs[6].items[2];
@@ -931,10 +955,10 @@ const GOOGLE_LINK = "https://calendar.google.com/calendar/ical/studio-owner%40ex
 test("Add calendar: the link checked once, then its name, account and your address filled in; a link that fails, or that another calendar has, isn't added (OBS-282)", async () => {
     const p = await calendarPanel({ invoices: { name: "Juniper Hale" } });
     try {
-        // Its description: "Add using private calendar links", the link opening How to get the links
+        // Its description: "You'll need to copy its private link", the link opening How to get the links
         const addRow = p.row("Calendars", "Add calendar");
         const linkEl = addRow.descEl.children.find((e) => e.tag === "a");
-        assert.deepEqual([addRow.descEl.text, linkEl.text, linkEl.hasClass("plainday-link")], ["Add using ", "private calendar links", true]);
+        assert.deepEqual([addRow.descEl.text, linkEl.text, linkEl.hasClass("plainday-link")], ["You'll need to copy its ", "private link", true]);
         linkEl.fire("click");
         assert.equal(fake.modals.at(-1).title, "How to get the links");
         fake.modals.at(-1).close();
@@ -1130,9 +1154,10 @@ test("Settings → Plainday on an Obsidian before 1.13: display() draws the Cale
     await plugin.onload();
     try {
         plugin.tabs[0].display();
-        assert.deepEqual(fake.groups.slice(-2).map((g) => [g.heading, g.rows.map((r) => r.name)]),
-            [["Calendars", ["Add calendar", "Sync range"]], ["Work", ["Studio"]]]);
-        assert.equal(fake.groups.at(-1).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
+        // display() has no pages, so the calendar list's own sections follow its row, and Other comes last
+        assert.deepEqual(fake.groups.slice(-3).map((g) => [g.heading, g.rows.map((r) => r.name)]),
+            [["Calendars", ["Add calendar", "Sync range"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
+        assert.equal(fake.groups.at(-2).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
     } finally {
         plugin.onunload();
     }

@@ -483,6 +483,21 @@ class CalendarModal extends Modal {
 }
 
 export default class PlaindaySettingTab extends PluginSettingTab {
+    // The plugin a frozen table needs: without it the marks Plainday writes do nothing (OBS-283)
+    static TABLES_PLUGIN = "selectable-tables";
+    static TABLES_PLUGIN_NAME = "Selectable Tables";
+
+    /**
+     * Whether a community plugin is installed and on. `app.plugins` isn't in Obsidian's public types,
+     * so it's read through one cast here rather than at each use.
+     * @param {import("obsidian").App} app @param {string} id
+     * @returns {boolean}
+     */
+    static hasPlugin(app, id) {
+        const plugins = /** @type {{ plugins?: { getPlugin?: (id: string) => unknown } }} */ (/** @type {unknown} */ (app)).plugins;
+        return !!plugins?.getPlugin?.(id);
+    }
+
     // Obsidian 1.13 and later: the sections as setting definitions, drawn and searched by Obsidian
     getSettingDefinitions() {
         /** @param {Section} section @returns {import("obsidian").SettingDefinitionGroup} */
@@ -586,6 +601,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         let freezing = now().tables.freezeRows > 0 || now().tables.freezeColumns > 0;
         /** @type {import("obsidian").DropdownComponent[]} */
         const freezes = [];
+        // Folders and Note templates sit near the top; Other, which the same helper builds, goes last
+        const [folders, templates, other] = this.folderSections(store, problem);
 
         return [
             {
@@ -611,7 +628,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     }),
                 ],
             },
-            ...this.folderSections(store, problem),
+            folders, templates,
             {
                 heading: "Invoices",
                 rows: [
@@ -627,7 +644,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
-                    field("Invoice folder", "Note that changing it will not move past invoices.", (s) => {
+                    field("Invoice folder", "", (s) => {
                         const archive = () => settings.folders().archive;
                         /** @type {string | null} */
                         let waiting = null;
@@ -709,14 +726,22 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Tables",
                 rows: [
-                    row("Freeze rows and columns", "Applies only to tables created by Plainday and requires Selectable Tables plugin.", (s) => s.addToggle((t) => t.setValue(freezing).onChange((on) => {
-                        // On freezes the header row and the first column, off unfreezes both
-                        freezing = on;
-                        const n = on ? 1 : 0;
-                        for (const d of freezes) d.setValue(String(n));
-                        void store(s, "tables", { freezeRows: n, freezeColumns: n });
-                        this.refreshShown();
-                    }))),
+                    // Without Selectable Tables a freeze does nothing, so the switch can't be turned on:
+                    // it's disabled and says what's missing (Brian, 2026-11-17)
+                    row("Freeze rows and columns", "Applies only to tables created by Plainday.", (s) => {
+                        const installed = !!PlaindaySettingTab.hasPlugin(this.app, PlaindaySettingTab.TABLES_PLUGIN);
+                        s.addToggle((t) => {
+                            t.setValue(freezing).setDisabled(!installed).onChange((on) => {
+                                // On freezes the header row and the first column, off unfreezes both
+                                freezing = on;
+                                const n = on ? 1 : 0;
+                                for (const d of freezes) d.setValue(String(n));
+                                void store(s, "tables", { freezeRows: n, freezeColumns: n });
+                                this.refreshShown();
+                            });
+                        });
+                        if (!installed) problem(s, `The ${PlaindaySettingTab.TABLES_PLUGIN_NAME} plugin isn't installed, so a freeze would do nothing.`, false);
+                    }),
                     {
                         ...row("Freeze rows", "", (s) => s.addDropdown((d) => {
                             freezes.push(d);
@@ -743,6 +768,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 ],
             },
             ...this.calendarSections(store),
+            // Other comes last, after the calendars (Brian, 2026-11-17)
+            other,
         ];
     }
 
@@ -921,7 +948,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             return { value: folder };
         };
         /** @param {"week" | "month" | "year"} unit */
-        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Default: \`${beside[unit]}\` subfolder in same folder as daily notes.`, {
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Default: \`${beside[unit]}\` in same folder as daily notes.`, {
             saved: () => now().folders[unit],
             read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
@@ -961,7 +988,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /** @type {Record<"task" | "log", string>} */
         const made = { task: "Task note", log: "Log" };
         /** @param {"task" | "log"} kind */
-        const madeField = (kind) => pathField(made[kind], `What Add note makes a ${kind === "task" ? "task note" : "meeting log"} from.`, {
+        const madeField = (kind) => pathField(made[kind], "", {
             saved: () => now().templates[kind],
             read: (v) => {
                 const got = settings.notePathOf(v);
@@ -1038,13 +1065,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             },
         ];
 
-        return [
-            {
-                heading: "Folders",
-                rows: [
-                    systemField("projects"),
-                    systemField("inbox"),
-                    systemField("archive"),
+        // The error log note: a note Plainday writes rather than a folder it files into, so it sits in
+        // Other at the end rather than among the folders (Brian, 2026-11-17)
+        const errorLogField = () =>
                     pathField("Error log note", "Where the time report and the calendar sync list the Problems they find.", {
                         saved: () => now().folders.errorLog,
                         read: (v) => {
@@ -1066,7 +1089,15 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         note: (value) => (missingNote(value) ? `“${value}” isn't in the vault yet. The next run that finds a Problem makes it.` : ""),
                         list: null,
                         was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
-                    }),
+                    })
+;
+        return [
+            {
+                heading: "Folders",
+                rows: [
+                    systemField("projects"),
+                    systemField("inbox"),
+                    systemField("archive"),
                     {
                         ...row("Periodic notes", "", () => {}),
                         page: { displayValue: Settings.SOURCE_NAMES[source()], sections: periodicSections() },
@@ -1076,6 +1107,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Note templates",
                 rows: [madeField("task"), madeField("log")],
+            },
+            {
+                heading: "Other",
+                rows: [errorLogField()],
             },
         ];
     }
@@ -1128,14 +1163,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     // new one each time Obsidian draws it
                     row("Add calendar", "", (s) => {
                         s.descEl.empty();
-                        s.descEl.appendText("Add using ");
-                        s.descEl.createEl("a", { text: "private calendar links", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
+                        s.descEl.appendText("You'll need to copy its ");
+                        s.descEl.createEl("a", { text: "private link", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
                             e.preventDefault();
                             help();
                         }));
                         s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)));
                     }),
-                    row("Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are.",
+                    row("Sync range", "How far ahead to write events into daily notes.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
                     // The calendars, each account's, on a page of their own
                     {
