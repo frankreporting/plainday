@@ -38,7 +38,8 @@ export default class ConvertToProject {
 
         // Resolves once the template has finished; the note has been moved by then, so link to
         // wherever it ended up.
-        const file = await templater.create_new_note_from_template(template, "Inbox", title, false);
+        // It starts in the Inbox, as Settings → Plainday → Folders has it (OBS-283), until OBS-123 makes it in place
+        const file = await templater.create_new_note_from_template(template, plainday.Settings.folders().inbox, title, false);
         if (!file) return;
 
         const link = `[[${file.basename}]]`;

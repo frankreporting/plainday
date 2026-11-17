@@ -137,7 +137,8 @@ export default class JumpToDate {
     }
 
     // A new daily note goes through Plan, which runs the Daily Note template; a weekly, monthly or
-    // yearly note gets the template Notebook Navigator's calendar uses, or the one named after it.
+    // yearly note gets its template from Settings → Plainday → Note templates, else the one Notebook
+    // Navigator's calendar uses, or the one named after it (templateFor).
     // Templater's own trigger then leaves it alone (Plan.holdOffTemplater). With no template to run, the
     // trigger fills it as it would any new note.
     async create(target) {
@@ -155,17 +156,24 @@ export default class JumpToDate {
             new Notice("Templater unavailable — created a blank note");
         }
         // A template that files the note itself (the Weekly Note template moves it into its folder)
-        // can disagree with Notebook Navigator's pattern; then the next jump wouldn't find it
+        // can disagree with the folder set for it, or with Notebook Navigator's pattern; then the next
+        // jump wouldn't find it
         if (file.path !== target.path) {
-            new Notice(`The ${target.kind} note's template moved it to ${file.parent?.path ?? "/"}, but Notebook Navigator's pattern puts it in ${folder}. Make them agree, or the next jump won't find it.`, 0);
+            const where = plainday.Settings?.get().folders[unit] ? `Settings → Plainday → Folders puts ${target.kind} notes` : "Notebook Navigator's pattern puts it";
+            new Notice(`The ${target.kind} note's template moved it to ${file.parent?.path ?? "/"}, but ${where} in ${folder}. Make them agree, or the next jump won't find it.`, 0);
         }
         return file;
     }
 
-    templateFor(unit) {
+    // A weekly, monthly or yearly note's template: the one Settings → Plainday → Note templates names
+    // (OBS-283), else Notebook Navigator's for that calendar, else Weekly Note, Monthly Note or Yearly
+    // Note in Templater's template folder; null when none is there. `asBefore` leaves the setting out,
+    // for the panel to show what blank means.
+    templateFor(unit, { asBefore = false } = {}) {
         const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
         const folder = String(app.plugins.getPlugin("templater-obsidian")?.settings?.templates_folder ?? "").replace(/\/$/, "");
-        const candidates = [nn?.[JumpToDate.NN_TEMPLATE[unit]], folder && `${folder}/${JumpToDate.TEMPLATE[unit]}`];
+        const set = asBefore ? "" : plainday.Settings?.get().templates[unit] ?? "";
+        const candidates = [set, nn?.[JumpToDate.NN_TEMPLATE[unit]], folder && `${folder}/${JumpToDate.TEMPLATE[unit]}`];
         for (const c of candidates) {
             if (!c) continue;
             const file = app.vault.getFileByPath(c.endsWith(".md") ? c : `${c}.md`);

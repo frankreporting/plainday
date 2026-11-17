@@ -51,7 +51,7 @@ Reference/
     days/ weeks/ months/ years/  the periodic notes
 ```
 
-Area and project names are yours; the top-level folders and `Planner` are what the scripts expect. The invoice folder is yours to choose, in *Settings → Plainday* (see *Settings*).
+Area and project names are yours. The folders above are the ones a new vault starts with, and the names this manual uses for them: `Projects`, `Inbox` and `Archive`, the weekly, monthly and yearly notes' folders, the error log note and the invoice folder are settings, in *Settings → Plainday* (see *Settings → Folders*), and the daily notes' folder is the Daily notes plugin's. Every command reads them from there. The templates in `Config/Templates/` still name these folders until notes are made in code, so in a vault that uses them, keep the folders as they are for now (see *Settings → Folders*).
 
 ## Naming conventions
 
@@ -103,7 +103,7 @@ This section is the spec for how daily notes are written, for you and for any ag
 | Frontmatter | `aliases: M/D/YY dddd` (`9/16/26 Wednesday`) | `aliases: Week of M/D/YY` | `aliases:` with one entry, e.g. `September 2026` | none |
 | Holds | That day's events, then its tasks | Tasks for the week with no day yet; its time report | Tasks for the month with no day yet; its time report | Tasks for the year with no day yet; its time report |
 
-- The folder patterns match Notebook Navigator's calendar (`[days]/YYYY-MM-DD`, `[weeks]/gggg[w]ww`, `[months]/YYYY-MM`, `[years]/YYYY`). Attachments stay at the `Planner` root. A note named like a periodic note anywhere else isn't one.
+- The folder patterns match Notebook Navigator's calendar (`[days]/YYYY-MM-DD`, `[weeks]/gggg[w]ww`, `[months]/YYYY-MM`, `[years]/YYYY`). The daily notes' folder is the Daily notes plugin's; a weekly, monthly or yearly folder set in *Settings → Plainday → Folders* comes before the pattern's. Attachments stay at the `Planner` root. A note named like a periodic note anywhere else isn't one.
 - A daily note has no headings above its list. It opens with one checklist, its **top list**: events first, then tasks. Anything that isn't a task goes under `## Notes` below it.
 - The top list is the checklist a note opens with: the first thing after the properties (blank lines aside), starting with a task or an event at the left edge, and ending at the first blank line or heading. A second group can follow under a plain label (`After lunch:`), but Schedule and the calendar sync only ever write into the top list. A checklist under `## Notes`, or one that starts with a plain bullet, isn't it.
 - A note with no top list gets one when a task or an event first arrives: right under the properties, above anything written there, with a blank line between. So a day you've only written notes in (the demo's 9/19) takes a scheduled task at the top, not below the notes.
@@ -180,7 +180,7 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 - **An ended event counts, and is checked for overlaps.** With the sync's end line under it and no ranges of its own, its start-to-end span is an entry: its hours count (Unassigned when nothing on the line names a project, so busy personal events add to Total and never to Billable), and work logged during a busy meeting shows under Problems. Free (ℹ️), all-day, `[-]` and `[>]` events never count and never overlap anything, and an event that hasn't ended yet counts for nothing.
 - *Toggle time entry* (`⌘T`) types the times for you.
 
-**Where the system works: three folders.** The daily, weekly, monthly and yearly notes in the Planner, and every note in `Projects` and the `Inbox`, are the system's. On a line anywhere else (a person note in `Reference`, a note at the top of the vault), *Schedule*, *Due date*, *Add note* and *Add project link* change nothing and say so: "Rafe Oakes isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed". A checklist there is a plain checklist, and a task ID on its lines joins no task. The time report also reads `Archive`, for finished projects' time (see *Archived projects*). To bring a note in, drag it into `Projects` or the `Inbox`.
+**Where the system works: three folders.** The daily, weekly, monthly and yearly notes in the Planner, and every note in `Projects` and the `Inbox` (as *Settings → Plainday → Folders* names them), are the system's. On a line anywhere else (a person note in `Reference`, a note at the top of the vault), *Schedule*, *Due date*, *Add note* and *Add project link* change nothing and say so: "Rafe Oakes isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed". A checklist there is a plain checklist, and a task ID on its lines joins no task. The time report also reads `Archive`, for finished projects' time (see *Archived projects*). To bring a note in, drag it into `Projects` or the `Inbox`.
 
 **Billable or 🆓.** Time counts as **billable** only when it's someone's to bill: the entry belongs to a project, that project isn't `non-billable`, and there's no 🆓 on it. Everything else goes in the **🆓** column. Billable is what you could invoice; Total is still every hour worked.
 
@@ -267,7 +267,7 @@ A project's own note also lists what's wrong with its invoices (see *Invoices*),
 
 #### The error log
 
-Every Problem the time report finds, and the calendar sync's own (changes it held back, lines it couldn't write), is also listed in one note, `Config/Error Log.md`: one line per kind of Problem per note, with a count when a note has more than one, linking the note to start from: a billing Problem links the invoice's project, whose Problems callout names the invoice and links the daily note. The detail is in the reports' Problems callouts (the project's note, its timesheet, the weekly, monthly and yearly notes), or for the calendar sync in the Calendar Sync note's *Last run*. An invoice's own problem shows when you run *Invoice* on it, and every missing billed row in *Invoice*'s *Fix first?*. Open it with *View Error Logs*, and open the notes it names beside it. The demo's log:
+Every Problem the time report finds, and the calendar sync's own (changes it held back, lines it couldn't write), is also listed in one note, the error log (*Settings → Plainday → Folders → Error log note*: `Config/Error Log.md` in a vault from before, `Plainday error log.md` at the top of a new one): one line per kind of Problem per note, with a count when a note has more than one, linking the note to start from: a billing Problem links the invoice's project, whose Problems callout names the invoice and links the daily note. The detail is in the reports' Problems callouts (the project's note, its timesheet, the weekly, monthly and yearly notes), or for the calendar sync in the Calendar Sync note's *Last run*. An invoice's own problem shows when you run *Invoice* on it, and every missing billed row in *Invoice*'s *Fix first?*. Open it with *View Error Logs*, and open the notes it names beside it. The demo's log:
 
 ```
 ## Time report
@@ -781,7 +781,7 @@ Asks for a date (see *Typing a date*) and opens its note in the pane you're in; 
 - **A quarter** (`Q4`, `next quarter`) opens the daily note of its first day: there are no quarterly notes.
 - **A month and day without a year** (`9/16`, `sep 16`) is whichever is closer, this year's or next year's, since jumping goes back as often as forward. Schedule and *Due date* take the next one.
 - **With the original Natural Language Dates**, words always mean a day, so `next week` opens a daily note; a note's own name still works.
-- **A note that doesn't exist yet** is created from its template after asking: the Daily Note template, or for a period the template Notebook Navigator's calendar uses (else *Weekly Note*, *Monthly Note* or *Yearly Note*). Tick **Don't ask again on this device** to skip the question from then on; while it's skipped, the prompt says so and offers **Ask again**. If a template files the note somewhere other than the pattern's folder (the Weekly Note template moves its note into `Planner/weeks`), *Jump to date* says so: make the two agree, or the next jump won't find the note.
+- **A note that doesn't exist yet** is created from its template after asking: the Daily Note template, or for a period the one *Settings → Plainday → Note templates* names, else the template Notebook Navigator's calendar uses, else *Weekly Note*, *Monthly Note* or *Yearly Note*. It goes in the folder *Settings → Plainday → Folders* names for it, else the pattern's. Tick **Don't ask again on this device** to skip the question from then on; while it's skipped, the prompt says so and offers **Ask again**. If a template files the note somewhere other than the pattern's folder (the Weekly Note template moves its note into `Planner/weeks`), *Jump to date* says so: make the two agree, or the next jump won't find the note.
 - It replaces the *Natural Language Date* command of the Jump-to-Date plugin, which only works with the original Natural Language Dates plugin. If `⌘J` runs that command, move the hotkey to *Plainday: Jump to date*.
 
 ### Convert to project
@@ -798,7 +798,7 @@ Refreshes every time report where the numbers changed, in the note you're on too
 
 ### View error logs
 
-Opens the error log, `Config/Error Log.md`, in the pane you're in: every Problem the time report and the calendar sync found, one line per kind per note (see *The error log*). Before the first time report on the desktop there's none yet, and it says so.
+Opens the error log (the note *Settings → Plainday → Folders* names: `Config/Error Log.md` in a vault from before) in the pane you're in: every Problem the time report and the calendar sync found, one line per kind per note (see *The error log*). Before the first time report on the desktop there's none yet, and it says so.
 
 ### Invoice
 
@@ -830,14 +830,34 @@ These run on their own when Obsidian starts, one after the other once the vault'
 
 ## Settings
 
-Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; the invoice folder and the first invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (an invoice folder outside the vault or in `Archive`, a number that isn't one) is refused with a line under the field, and when you leave the field it goes back to the saved value.
+Plainday's settings are in *Settings → Plainday*, not in a note: Plainday keeps them in its own data file, in the vault's `.obsidian/plugins/plainday/`. On Obsidian 1.13 and later they show up in the settings search. Each change is saved as you make it; a folder, a note and the first invoice number when you leave the field, so a half-typed one is never kept. A value that can't work (a folder outside the vault, an Inbox inside `Projects`, an invoice folder in the archive, a number that isn't one) is refused with a line under the field, and when you leave the field it goes back to the saved value.
+
+### Folders
+
+Where Plainday finds and files notes. Every command reads them from here. Changing one moves no notes: to move them, move the folder in Obsidian, which keeps every link, then change the setting.
+
+- **Projects:** every project and area, `Projects` as it comes.
+- **Inbox:** where Plainday puts a note it makes before the note has a project, `Inbox` as it comes: *Add note* on a line with no ⭕ or 🗃️ makes its task note or log there, and it waits there, still counted, until *Move to project* or *Add project link* files it (*Convert to project* starts its note there for a moment too). It's Plainday's own: notes you make yourself go where Obsidian's *Default location for new notes* says, which Plainday doesn't read or change.
+- **Archive:** finished projects, which no command works on, `Archive` as it comes.
+- Each of the three is a folder, not the top of the vault, outside `Config`, and none is inside another: one that breaks this is refused, with a line under the field that says why ("it's inside Projects"). The archive can't hold the invoice folder either. Messages name the folders as you've set them: with Projects set to `Work` and the Inbox to `Waiting`, *Due date* says a note "isn't in Work or Waiting".
+- **Daily notes:** their folder and name, shown from *Settings → Daily notes*, where they're set. Plainday never asks for them again.
+- **Weekly notes, Monthly notes, Yearly notes:** a folder each. Blank, as they come, is what Plainday did before: Notebook Navigator's calendar folder, else `weeks`, `months` and `years` beside the daily notes (`Reference/Planner/weeks` in the demo), which the field shows. *Jump to date*, *Schedule* and the time report use them.
+- **Error log note:** where the time report and the calendar sync list their Problems (see *The error log*). Blank, as it comes, is `Config/Error Log.md` in a vault from before (that note, or the `Config` folder, is there), and `Plainday error log.md` at the top of a new vault. A note's name without `.md` gets it.
+- **Not yet:** the templates in `Config/Templates/` still name the folders as they come (the Task, Log and Project templates file into `Projects/` and the `Inbox`, the Weekly Note template into `Reference/Planner/weeks`), until notes are made in code. In a vault that uses them, changing a folder before then splits new notes between the two.
+
+### Note templates
+
+- **Daily note:** shown from *Settings → Daily notes*, where it's set.
+- **Weekly note, Monthly note, Yearly note:** the template *Jump to date* and *Schedule* make a new weekly, monthly or yearly note from. Blank, as they come, is what Plainday did before: Notebook Navigator's template for that calendar, else *Weekly Note*, *Monthly Note* or *Yearly Note* in Templater's template folder, which the field shows. A template that isn't in the vault says so, and the one Plainday used before is used until it is.
+- **A property Plainday writes itself:** when a template sets one that Plainday's own command writes into that kind of note, a line under it says so: "Your template also sets `date`; Plainday writes its own." Plainday's value wins when the note is made, and a list property (`tags`, `aliases`) is combined with the template's, not replaced. No note type has such a list until weekly, monthly and yearly notes are made in code, so for now no row warns.
+- Task notes, logs, projects and areas get their template rows with the commands that make them in code.
 
 A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again, and meanwhile the time report leaves every table's freeze as it is.
 
 ### Invoices
 
 - **Your name or company name, Address, Terms, Note:** they head and close each new invoice (see *Making one*). The address takes one line per item. A project's own `terms` wins over yours.
-- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders: leaving the field (Tab, or a click elsewhere) while the list is open takes the folder it highlights, and with no folder to suggest it keeps what you typed. A folder that isn't there yet says so under the field, and *Invoice* creates it. It can't be inside `Config` or `Archive`, which Plainday already uses: an Invoices base there would list nothing in a vault that excludes them in *Files and links*. Changing it moves nothing already made.
+- **Invoice folder:** where new invoices go, with the Invoices base beside them (see *Where invoices live*). You choose it, and the field suggests `Invoices` and the vault's folders: leaving the field (Tab, or a click elsewhere) while the list is open takes the folder it highlights, and with no folder to suggest it keeps what you typed. A folder that isn't there yet says so under the field, and *Invoice* creates it. It can't be inside `Config` or the archive (*Folders*), which Plainday already uses: an Invoices base there would list nothing in a vault that excludes them in *Files and links*. Changing it moves nothing already made.
 - **First invoice number:** where numbering starts, 1001 as it comes (see *Making one*). *Invoice* goes on from the highest invoice in the vault, and never gives a deleted invoice's number again.
 
 ### Tables
@@ -867,8 +887,9 @@ Plugin settings stay on the device unless Obsidian Sync carries installed commun
 1. **Copy** puts one block of text on the clipboard, with every setting and each calendar's link this device has. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private; a clipboard manager may keep a copy.
 2. **Paste**, on the other device or later on this one: paste the block into the box (between Apple devices, Universal Clipboard carries it), then *Replace*. *Cancel* changes nothing.
 
-*Replace* stays off until the box holds a copy, and text that isn't one says so. It makes this device's settings the copy's, except the last number given, which stays the higher of the two, so a paste never lets a number be given twice. The copy's calendars keep their IDs, and their links go into this device's secret storage; a calendar the copy has without a link keeps the one this device has, and every other calendar link this device keeps is blanked, including those of calendars removed on another device. A copy made before Plainday had calendars leaves this device's calendars and links as they are. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
+*Replace* stays off until the box holds a copy, and text that isn't one says so. It makes this device's settings the copy's, except the last number given, which stays the higher of the two, so a paste never lets a number be given twice. The copy's calendars keep their IDs, and their links go into this device's secret storage; a calendar the copy has without a link keeps the one this device has, and every other calendar link this device keeps is blanked, including those of calendars removed on another device. A copy made before Plainday had calendars leaves this device's calendars and links as they are, and one made before it had folders leaves this device's folders and templates as they are. It's a copy, not a sync: after changing a setting, paste again on your other devices. Until you do, each device uses its own:
 
+- **Folders:** each device files notes in its own folders, so two with different *Folders* split new notes between them, and each one's commands and reports leave out what's in the other's. Paste again after changing a folder.
 - **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
 - **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.
 - **Numbers:** each device remembers the last number it gave, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
@@ -885,6 +906,8 @@ Before *Settings → Plainday*, your invoice details were in `Config/Invoice Set
 - *Update Obsidian PM* never installs, changes or removes either note.
 
 The calendar sync's range was the `Sync range:` line of `Config/Calendar Sync.md`. On a device whose settings have no calendars yet (a new one, or one whose settings were saved before the Calendars section came), the first load reads that line once and says so: "Plainday moved your calendar sync range, 3 weeks, into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars." A line that doesn't read starts from 2 months, and the notice names it. On a device with no settings saved at all, the range is used but saved only with the invoice and table settings, with the notice, or with your first change, without it, so a data file Sync is still bringing isn't written over. A settings file Sync brings from a device on the release before, which has no calendars, keeps this device's calendars and range, and is written again with them. The note stays in use for the calendars you tick, and the sync no longer writes its `## Range` section; editing that line changes nothing.
+
+The folders as they come are the ones the system always used, so a vault from before needs nothing read: its notes stay where they are, and the error log stays `Config/Error Log.md` while the setting is blank. A settings file Sync brings from a device on the release before, which has no folders, keeps this device's folders and templates, and is written again with them.
 
 ## Templates
 

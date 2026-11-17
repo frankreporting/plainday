@@ -6,10 +6,6 @@ export default class AddTaskNote {
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\] ?/;
     static TASK_TEMPLATE = "Config/Templates/Task.md";
     static LOG_TEMPLATE = "Config/Templates/Log.md";
-    // Where a new task note is made before the Task template files it. A note still here afterwards
-    // is unfiled: its line named no project, so it waits here until AddProjectLink or MoveToProject
-    // files it (OBS-55).
-    static STAGING_FOLDER = "Inbox";
     static DATE = /\d{4}-\d{2}-\d{2}/g;
     // An event line's time, which comes before its title: "1:00pm\t", "all day\t", or a time with
     // nothing after it (a line with no title)
@@ -226,7 +222,7 @@ export default class AddTaskNote {
             const newName = named ? this.freshName(noteName, home) : noteName;
             const title = [newName, ...(name.match(AddTaskNote.DATE) ? [] : text.match(AddTaskNote.DATE) ?? [])].join(" ");
             // With no project the note waits in the Inbox, which a line naming a project is warned about
-            const adds = home ? null : { path: `${plainday.TaskIds.constructor.INBOX}/${newName}.md`, basename: newName };
+            const adds = home ? null : { path: `${this.stagingFolder()}/${newName}.md`, basename: newName };
             const make = async () => {
                 note = await this.createTaskNote(title, home);
                 if (!note) return false;
@@ -337,7 +333,7 @@ export default class AddTaskNote {
     // with only a number after the name is another task's (Phase 2). The one in `home`, or in the Inbox when
     // there's no `home`, else the only one; null when there's none, or no telling which.
     freshNote(name, home) {
-        const inbox = `${plainday.TaskIds.constructor.INBOX}/`, files = app.vault.getMarkdownFiles();
+        const inbox = `${this.stagingFolder()}/`, files = app.vault.getMarkdownFiles();
         const made = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (?:\\((.+)\\)(?: \\d+)?|\\d+)$`, "i");
         const isHome = (p) => files.some((f) => f.basename.toLowerCase() === p.toLowerCase() && this.isHomeNote(f));
         const found = files.filter((f) => {
@@ -349,9 +345,21 @@ export default class AddTaskNote {
         return found.length === 1 ? found[0] : null;
     }
 
-    // Whether `note` is in Archive
+    // Whether `note` is in the archive, as Settings → Plainday → Folders has it (OBS-283)
     inArchive(note) {
-        return note.path.startsWith(plainday.TaskIds.constructor.ARCHIVE);
+        return note.path.startsWith(`${plainday.Settings.folders().archive}/`);
+    }
+
+    // Where a new task note or log is made before its template files it: the Inbox, as Settings →
+    // Plainday → Folders has it (OBS-283). A note still there afterwards is unfiled: its line named no
+    // project, so it waits there until AddProjectLink or MoveToProject files it (OBS-55).
+    stagingFolder() {
+        return plainday.Settings.folders().inbox;
+    }
+
+    // Whether `file` is under Projects, as it's set
+    inProjects(file) {
+        return !!file && file.path.startsWith(`${plainday.Settings.folders().projects}/`);
     }
 
     // The note a line's ⋯ links, or null
@@ -502,7 +510,7 @@ export default class AddTaskNote {
     }
 
     isLiveHome(file) {
-        return file.path.startsWith("Projects/") && this.isHome(file);
+        return this.inProjects(file) && this.isHome(file);
     }
 
     // Whether a home note is an area (tagged #area) rather than a project
@@ -533,14 +541,14 @@ export default class AddTaskNote {
             .map((t) => String(t).replace(/^#/, "").toLowerCase());
     }
 
-    // Asks which area or project `name` belongs to, from every live area and project under Projects/. Resolves
+    // Asks which area or project `name` belongs to, from every live area and project under Projects. Resolves
     // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject use it,
     // leaving out the ones they can't file into (`exclude(file)` true); MoveToProject asks its own question
     // (`placeholder`).
     pickHome(name, { exclude = () => false, placeholder = null } = {}) {
         const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
         const items = app.vault.getMarkdownFiles()
-            .filter((f) => f.parent?.path.startsWith("Projects/") && this.isHome(f) && !exclude(f))
+            .filter((f) => this.inProjects(f.parent) && this.isHome(f) && !exclude(f))
             .sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
         return new Promise((resolve) => {
             let picked = null;
@@ -684,11 +692,11 @@ export default class AddTaskNote {
             return null;
         }
         // Templater names the note with this same call, so the path matches the note it creates
-        const path = app.vault.getAvailablePath(normalizePath(`${AddTaskNote.STAGING_FOLDER}/${name}`), "md");
+        const path = app.vault.getAvailablePath(normalizePath(`${this.stagingFolder()}/${name}`), "md");
         AddTaskNote.preset = parent ? { path, parent } : null;
         let note;
         try {
-            note = await templater.create_new_note_from_template(template, AddTaskNote.STAGING_FOLDER, name, false);
+            note = await templater.create_new_note_from_template(template, this.stagingFolder(), name, false);
         } finally {
             AddTaskNote.preset = null;
         }
@@ -849,7 +857,7 @@ export default class AddTaskNote {
         }
         try {
             await app.workspace.activeLeaf?.view?.save?.();
-            await templater.create_new_note_from_template(template, AddTaskNote.STAGING_FOLDER, name, false);
+            await templater.create_new_note_from_template(template, this.stagingFolder(), name, false);
         } catch (e) {
             console.error("AddTaskNote: couldn't make the log", e);
             new Notice(`Couldn't make the log "${name}": click its link to make it`);

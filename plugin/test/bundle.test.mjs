@@ -204,7 +204,12 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const layout = [];
     // This vault's local storage holds its key for its calendar links' names: "vault001"
     const local = new Map([["plainday-calendar-key", "vault001"]]);
-    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) }, vault: { getFileByPath: () => null },
+    // The vault the panel's Folders and Note templates rows read (OBS-283): none of their folders or notes, and
+    // no Notebook Navigator or Templater, so a blank folder means one beside the daily notes
+    const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) },
+        vault: { getFileByPath: () => null, getFolderByPath: () => null, getMarkdownFiles: () => [], getAllFolders: () => [] },
+        metadataCache: { getFileCache: () => null }, plugins: { plugins: {}, getPlugin: () => null },
+        internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: "Reference/Planner/days", format: "YYYY-MM-DD", template: "Config/Templates/Daily Note" } } } } },
         loadLocalStorage: (k) => local.get(k) ?? null, saveLocalStorage: (k, v) => { local.set(k, v); } };
     const plugin = new module.exports.default(app, { id: "plainday" });
     return { plugin, layout, notices, suggests };
@@ -354,7 +359,7 @@ function standInSetting() {
             },
             createSpan({ text }) { links[`span ${text}`] = null; },
         },
-        descEl: { createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }) },
+        descEl: { text: "", createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }), empty() { this.text = ""; }, appendText(t) { this.text += t; } },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
         addToggle(cb) { cb(control); return this; },
         // Each button its own, by its text: { text, click, warning }
@@ -386,13 +391,15 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const defs = tab.getSettingDefinitions();
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
+            ["group", "Folders", ["Projects", "Inbox", "Archive", "Daily notes", "Weekly notes", "Monthly notes", "Yearly notes", "Error log note"]],
+            ["group", "Note templates", ["Daily note", "Weekly note", "Monthly note", "Yearly note"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
             ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
-        assert.equal(defs[1].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
+        assert.equal(defs[3].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
         assert.equal(defs[0].items[0].desc, "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.");
         for (const g of defs) for (const i of g.items) {
             assert.ok(i.name, "every row has a name");
@@ -496,8 +503,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual([saved()?.firstNumber, saved()?.lastNumber], [2001, 2000], "typing a first number numbers from it");
 
         // Tables: the freezes show only while the switch is on, which freezes 1 and 1, and off unfreezes
-        const visible = () => tab.getSettingDefinitions()[2].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
-        const shown = tab.getSettingDefinitions()[2].items;
+        const visible = () => tab.getSettingDefinitions()[4].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
+        const shown = tab.getSettingDefinitions()[4].items;
         assert.deepEqual(shown.filter((i) => !i.visible || i.visible()).map((i) => i.name), ["Freeze rows and columns"]);
         const sw = standInSetting();
         shown[0].render(sw);
@@ -521,6 +528,101 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
     }
 });
 
+test("Settings → Plainday → Folders and Note templates: the folders as set, checked as you type and saved when you leave them (OBS-283)", async () => {
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" } };
+    const { plugin } = load(BUNDLE, { stored });
+    const folders = new Set(["Projects", "Inbox", "Archive", "Reference/Invoices", "Reference/Planner/weeks", "Config"]);
+    plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
+    const template = { path: "Templates/Plain week.md" };
+    plugin.app.vault.getFileByPath = (p) => (p === template.path ? template : null);
+    plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : null);
+    await plugin.onload();
+    try {
+        const tab = plugin.tabs[0];
+        const items = tab.getSettingDefinitions().flatMap((g) => g.items);
+        const draw = (name) => { const s = standInSetting(); const cleanup = items.find((i) => i.name === name).render(s); return { s, cleanup }; };
+        const folders = () => plugin.saved.at(-1)?.folders;
+        for (const name of ["Projects", "Inbox", "Archive", "Weekly notes"]) {
+            assert.match(items.find((i) => i.name === name).desc, /Changing it doesn't move the notes already there\.$/, name);
+        }
+
+        // Projects, the Inbox and the archive: as a new vault has them
+        const inbox = draw("Inbox");
+        assert.equal(inbox.s.control.inputEl.value, "Inbox");
+        inbox.s.type("Projects/Freelance");
+        assert.equal(inbox.s.warning(), "Not used: it's inside Projects. Inbox stays `Inbox`.");
+        inbox.s.leave();
+        assert.deepEqual(plugin.saved, [], "refused, so nothing is saved");
+        assert.equal(inbox.s.control.inputEl.value, "Inbox", "and the field goes back to the saved folder");
+        inbox.s.type("");
+        assert.equal(inbox.s.warning(), "Not used: a folder is needed: notes can't go at the top of the vault. Inbox stays `Inbox`.");
+        inbox.s.type("Config/Inbox");
+        assert.match(inbox.s.warning(), /^Not used: it's inside Config, the system's own folder/);
+        inbox.s.type("Waiting");
+        inbox.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.inbox, "Waiting", "saved on leaving the field");
+        assert.equal(inbox.s.warning(), "“Waiting” doesn't exist yet. Plainday will create it when it first files a note there.");
+        assert.equal(window.plainday.Settings.folders().inbox, "Waiting", "and every command reads it from there");
+        const projects = draw("Projects");
+        projects.s.type("Waiting/Clients");
+        assert.equal(projects.s.warning(), "Not used: it's inside Inbox (Waiting). Projects stays `Projects`.");
+        const archive = draw("Archive");
+        archive.s.type("Reference");
+        assert.equal(archive.s.warning(), "Not used: the invoice folder, Reference/Invoices, is inside it. Archive stays `Archive`.");
+        archive.s.type("Old");
+        archive.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.archive, "Old");
+        assert.equal(plugin.saved.at(-1).invoices.folder, "Reference/Invoices", "the invoice folder is kept");
+
+        // The daily notes: shown from the Daily notes plugin, not asked
+        assert.equal(draw("Daily notes").s.descEl.text, "`Reference/Planner/days`, named `YYYY-MM-DD`. Set in Settings → Daily notes.");
+        assert.equal(draw("Daily note").s.descEl.text, "`Config/Templates/Daily Note.md`. Set in Settings → Daily notes.");
+
+        // A weekly, monthly or yearly folder: blank is as before, which the placeholder shows
+        const week = draw("Weekly notes");
+        assert.equal(week.s.control.inputEl.value, "");
+        assert.equal(week.s.control.inputEl.placeholder, "Reference/Planner/weeks");
+        week.s.type("Planner/Weeks");
+        week.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.week, "Planner/Weeks");
+        assert.equal(window.plainday.TimeReport.periodFolders().week, "Planner/Weeks", "the weekly notes' folder as set");
+        assert.equal(window.plainday.TimeReport.periodFolders({ asBefore: true }).week, "Reference/Planner/weeks");
+
+        // The error log note: blank is Config/Error Log.md, in a vault with a Config folder
+        const log = draw("Error log note");
+        assert.equal(log.s.control.inputEl.placeholder, "Config/Error Log.md");
+        log.s.type("Logs/Problems");
+        log.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.errorLog, "Logs/Problems.md", "a note, .md added");
+        assert.equal(window.plainday.ErrorLog.path(), "Logs/Problems.md");
+
+        // A template: none in this vault until one is chosen; one that sets a property Plainday writes
+        // itself says so (the list comes with OBS-120: here, a stand-in)
+        const tpl = draw("Weekly note");
+        assert.equal(tpl.s.control.inputEl.placeholder, "None");
+        tpl.s.type("Templates/Missing");
+        assert.equal(tpl.s.warning(), "“Templates/Missing.md” isn't in the vault, so the template Plainday used before is used until it is.");
+        window.plainday.Settings.constructor.WRITES.week.push("date", "tags");
+        try {
+            tpl.s.type("Templates/Plain week.md");
+            assert.equal(tpl.s.warning(), "Your template also sets `date`; Plainday writes its own.", "tags are combined, so they don't warn");
+        } finally {
+            window.plainday.Settings.constructor.WRITES.week.length = 0;
+        }
+        tpl.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(plugin.saved.at(-1).templates.week, "Templates/Plain week.md");
+        assert.equal(window.plainday.JumpToDate.templateFor("week"), template, "Jump to date makes a week from it");
+        assert.equal(window.plainday.JumpToDate.templateFor("week", { asBefore: true }), null);
+    } finally {
+        plugin.onunload();
+    }
+});
+
 test("Settings → Plainday → Calendars: Add calendar, the range, the help, then each account's calendars; Copy carries their links (OBS-282)", async () => {
     // Every link here is invented
     const STUDIO = "https://calendar.google.com/calendar/ical/studio-owner%40example.com/private-0000invented/basic.ics";
@@ -538,7 +640,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         let redrawn = 0;
         tab.update = () => { redrawn++; };
         const defs = tab.getSettingDefinitions();
-        assert.deepEqual(defs.slice(4).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
+        assert.deepEqual(defs.slice(6).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
             ["Calendars", [
                 ["row", "Add calendar", undefined],
                 ["row", "Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are."],
@@ -546,7 +648,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
-        const page = defs[4].items[2];
+        const page = defs[6].items[2];
         assert.deepEqual([page.displayValue, page.visible()], ["3 calendars", true]);
         assert.deepEqual(page.items.map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
@@ -597,7 +699,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
 
         // With none left: no calendar list
         for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
-        assert.equal(tab.getSettingDefinitions()[4].items[2].visible(), false);
+        assert.equal(tab.getSettingDefinitions()[6].items[2].visible(), false);
     } finally {
         plugin.onunload();
     }
@@ -807,7 +909,7 @@ test("Edit: a name typed while a new link is checked is the one saved; repeated 
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs[4].items[2].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs[6].items[2].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");

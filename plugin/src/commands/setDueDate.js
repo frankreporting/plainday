@@ -260,7 +260,9 @@ export default class DueDate {
         for (const note of unread) out.push(`${note.basename}'s properties can't be read, so its due wasn't changed. Fix them, then run DueDate again`);
         for (const note of odd) out.push(`${note.basename}'s due is written in a way DueDate doesn't change, so it wasn't changed. Set it by hand`);
         for (const note of kept) {
-            const place = note.path.startsWith(plainday.TaskIds.constructor.ARCHIVE) ? "is in Archive" : "isn't in Projects or the Inbox";
+            // The folders as Settings → Plainday → Folders has them (OBS-283)
+            const tasks = plainday.TaskIds, tr = plainday.TimeReport;
+            const place = tasks.inArchive(note.path) ? `is in ${tr.archiveWords()}` : `isn't in ${tasks.folders().projects} or ${tr.inboxWords()}`;
             out.push(`${note.basename} ${place}, so its due wasn't changed`);
         }
         return out;

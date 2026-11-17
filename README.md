@@ -20,7 +20,7 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 7. **Optional hotkeys** (Settings → Hotkeys, search "Plainday"): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
 8. Open `Welcome.md`.
 
-Plainday's own settings are in **Settings → Plainday**: your details for invoices and the folder they go in, the tables' freeze, the cursor on list lines, the calendars for the calendar sync, by their private links (kept in each device's secret storage, never in the vault), and how far ahead it syncs, and Copy and Paste for a backup or another device. The demo's are filled in, with invented details. The manual's *Settings* says what each does.
+Plainday's own settings are in **Settings → Plainday**: its folders (projects, the Inbox, the archive, the weekly, monthly and yearly notes and the error log, which come as the sample notes have them) and the weekly, monthly and yearly templates, your details for invoices and the folder they go in, the tables' freeze, the cursor on list lines, the calendars for the calendar sync, by their private links (kept in each device's secret storage, never in the vault), and how far ahead it syncs, and Copy and Paste for a backup or another device. The demo's are filled in, with invented details. The manual's *Settings* says what each does.
 
 Optional: `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (the scripts read its week, month and year patterns when it's installed) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in *Settings → Plainday → Tables* (see the manual's *Freezing tables*).
 
@@ -30,7 +30,7 @@ Nothing here backs your vault up. Use Obsidian Sync's version history, Time Mach
 
 ## Folder structure
 
-The sample notes use this layout. Area and project names are yours to choose; only the top-level folders and `Planner` are fixed.
+The sample notes use this layout. Area and project names are yours to choose; the top-level folders are the ones Plainday's settings come with (the manual's *Settings → Folders* says what can change, and what waits for notes made in code).
 
 ```
 Archive/                           finished projects, moved here whole; excluded from search, kept in reports

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { standIn, PLANNER } from "./standInVault.mjs";
+import { standIn, PLANNER, withFolders } from "./standInVault.mjs";
 import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
@@ -215,8 +215,10 @@ test("isEvent: only `[<]` lines, and the checkbox pattern matches every status",
     assert.ok(!AddTaskNote.CHECKBOX.test("- plain bullet"));
 });
 
-test("new notes are staged outside Projects/, so a note left there is unfiled", () => {
-    assert.ok(!AddTaskNote.STAGING_FOLDER.startsWith("Projects/"));
+test("new notes are staged in the Inbox as it's set, outside Projects, so a note left there is unfiled (OBS-283)", () => {
+    const staged = (folders) => new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: withFolders({}, folders) })))().stagingFolder();
+    assert.equal(staged({}), "Inbox");
+    assert.equal(staged({ projects: "Work", inbox: "Waiting" }), "Waiting");
     assert.equal(AddTaskNote.TASK_TEMPLATE, "Config/Templates/Task.md");
     assert.ok(fs.existsSync(new URL("../../Templates/Task.md", here)), "the Task template is where the command looks");
 });
@@ -516,7 +518,7 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
         open() { shown = { placeholder: this.placeholder, items: this.getItems().map((f) => this.getItemText(f)) }; this.onClose(); }
     }
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote",
-        vm.createContext({ app, FuzzySuggestModal, setTimeout }));
+        vm.createContext({ app, FuzzySuggestModal, setTimeout, plainday: withFolders({}) }));
     const helper = new Cls();
     await helper.pickHome("Order toner");
     assert.deepEqual(Array.from(shown.items), ["A", "B", "C"], "in order of their names");
@@ -564,7 +566,7 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
     const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
-        app, plainday: { DueDate: new DueDate() }, Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+        app, plainday: withFolders({ DueDate: new DueDate() }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -654,6 +656,7 @@ test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote an
         },
         normalizePath: (p) => p,
         Notice: class { constructor(m) { notices.push(m); } },
+        plainday: withFolders({}),
     });
     const Fresh = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx);
     const fresh = new Fresh();
@@ -718,11 +721,12 @@ test("createTaskNote cleans the name for any caller, before Templater sees it; a
         },
         normalizePath: (p) => p,
         Notice: class { constructor(m) { notices.push(m); } },
+        plainday: withFolders({}),
     });
     const fresh = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx))();
     const note = await fresh.createTaskNote("Fix #12: order form 2026-09-25");
     assert.equal(note.basename, "Fix 12 - order form 2026-09-25", "the date stays for the template, which makes it `due`");
-    assert.deepEqual(asked, [{ path: `${AddTaskNote.STAGING_FOLDER}/Fix 12 - order form 2026-09-25.md` }, { folder: AddTaskNote.STAGING_FOLDER, name: "Fix 12 - order form 2026-09-25" }]);
+    assert.deepEqual(asked, [{ path: "Inbox/Fix 12 - order form 2026-09-25.md" }, { folder: "Inbox", name: "Fix 12 - order form 2026-09-25" }]);
     assert.deepEqual(notices, []);
     asked.length = 0;
     assert.equal(await fresh.createTaskNote("???"), null);

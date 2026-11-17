@@ -1,8 +1,8 @@
 import { moment, Notice } from "obsidian";
-import { app } from "../host.js";
+import { app, plainday } from "../host.js";
 
-// The error log (OBS-218): every Problem the system found, in one note, `Config/Error Log.md`, one
-// line per kind of Problem per note (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to
+// The error log (OBS-218): every Problem the system found, in one note (Settings → Plainday →
+// Folders → Error log note, OBS-283: `Config/Error Log.md` in a vault from before), one line per kind of Problem per note (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to
 // start from. The detail stays in the reports' Problems callouts; the log is the index across the
 // system. Each command that finds
 // Problems (the time report, the calendar sync) rewrites its own section whole on every run, so a
@@ -10,7 +10,6 @@ import { app } from "../host.js";
 // list changed. A run that finds a line the log didn't have, or a higher count, shows one toast
 // naming the new lines, with a link to the log (View Error Logs opens it too).
 export default class ErrorLog {
-    static PATH = "Config/Error Log.md";
     // The sections, in the order the note has them
     static SECTIONS = ["Time report", "Calendar sync"];
     // Every kind, in the order a section lists them: billing first, then time entries, then
@@ -197,7 +196,8 @@ export default class ErrorLog {
     // Writes `section` from this run's groups, when its list changed, and returns the new ones. Only
     // a device that may create the note does when it's missing (the desktop, as for periodic notes).
     async write(section, groups, { create = false } = {}) {
-        const file = app.vault.getFileByPath(ErrorLog.PATH);
+        const path = this.path();
+        const file = app.vault.getFileByPath(path);
         if (!file && !create) return [];
         const before = file ? await app.vault.read(file) : "";
         const fresh = this.fresh(before, section, groups);
@@ -206,9 +206,9 @@ export default class ErrorLog {
         if (file) {
             await app.vault.process(file, (text) => this.place(text, section, body));
         } else {
-            const folder = ErrorLog.PATH.split("/").slice(0, -1).join("/");
+            const folder = path.split("/").slice(0, -1).join("/");
             if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-            await app.vault.create(ErrorLog.PATH, this.place("", section, body, moment().format("YYYYMMDDHHmmssSS")));
+            await app.vault.create(path, this.place("", section, body, moment().format("YYYYMMDDHHmmssSS")));
         }
         return fresh;
     }
@@ -226,9 +226,15 @@ export default class ErrorLog {
         }), 0);
     }
 
+    // The error log note, as Settings → Plainday → Folders has it (OBS-283): Config/Error Log.md in a
+    // vault from before, Plainday error log.md at the top of a new one, unless you choose another
+    path() {
+        return plainday.Settings.errorLogPath();
+    }
+
     // Opens the log in the pane you're in
     async open() {
-        const file = app.vault.getFileByPath(ErrorLog.PATH);
+        const file = app.vault.getFileByPath(this.path());
         if (!file) { new Notice("No error log yet: the time report makes it, on the desktop"); return; }
         await app.workspace.getLeaf(false).openFile(file);
     }

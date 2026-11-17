@@ -241,8 +241,8 @@ export default class TaskChange {
         } else if (against.length) out.push(`${against.length} lines (${days(against)}) now disagree with their notes, so their time counts nowhere until you fix them. The report lists them under Problems`);
         if (waiting.length === 1) {
             const [{ l, note, project }] = waiting;
-            out.push(`${this.dayName(l.file)}'s line links ${plainday.AddTaskNote.markOf(app.vault.getFileByPath(project))}, but its note ${note.basename} waits in the Inbox. The report lists it under Problems until you run AddProjectLink on the line or MoveToProject on the note`);
-        } else if (waiting.length) out.push(`${waiting.length} lines (${days(waiting)}) link a project, but their notes wait in the Inbox. The report lists them under Problems until you run AddProjectLink on the lines or MoveToProject on the notes`);
+            out.push(`${this.dayName(l.file)}'s line links ${plainday.AddTaskNote.markOf(app.vault.getFileByPath(project))}, but its note ${note.basename} waits in ${plainday.TimeReport.inboxWords()}. The report lists it under Problems until you run AddProjectLink on the line or MoveToProject on the note`);
+        } else if (waiting.length) out.push(`${waiting.length} lines (${days(waiting)}) link a project, but their notes wait in ${plainday.TimeReport.inboxWords()}. The report lists them under Problems until you run AddProjectLink on the lines or MoveToProject on the notes`);
         return out;
     }
 

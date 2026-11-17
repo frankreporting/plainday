@@ -343,9 +343,17 @@ test("folderOf: a folder setting as a vault path; blank is none; anything else i
     }
     // the system's folder and the archive are often excluded, where a base can't list them
     for (const raw of ["Config/Invoices", "config", "Archive/Invoices"]) {
-        assert.match(billing.folderOf(raw).error, /is inside (Config|config|Archive), where invoices don't belong/, raw);
+        assert.match(billing.folderOf(raw, "Archive").error, /is inside (Config|config|Archive), where invoices don't belong/, raw);
     }
-    assert.equal(billing.folderOf("Business/Config/Invoices").error, null, "only at the top");
+    assert.equal(billing.folderOf("Business/Config/Invoices", "Archive").error, null, "only at the top");
+    // the archive as Settings → Plainday → Folders has it (OBS-283), anywhere it is, in any case
+    assert.deepEqual(plain(billing.folderOf("Old/Invoices", "Old")), { folder: "", error: "is inside Old, where invoices don't belong (Old/Invoices)", taken: "Old" });
+    assert.equal(billing.folderOf("work/old", "Work/Old").taken, "Work/Old");
+    assert.equal(billing.folderOf("Archive/Invoices", "Old").error, null, "Archive is only a folder once the archive is elsewhere");
+    assert.equal(billing.folderOf("Work/Older", "Work/Old").error, null, "whole folder names");
+    // any folder setting reads the same way, without the invoice folder's own rule
+    assert.deepEqual(plain(billing.pathOf(" /Archive//Old/ ")), { folder: "Archive/Old", error: null });
+    assert.match(billing.pathOf("../x").error, /isn't a folder in the vault/);
 });
 
 test("hasBilled: the Billed entries heading with its table, or a line that opens the old callout, not the words anywhere", () => {

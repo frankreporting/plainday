@@ -1,8 +1,9 @@
 import { Notice } from "obsidian";
 import { plainday } from "../host.js";
 
-// View Error Logs (OBS-218): opens the error log, `Config/Error Log.md`, where the time report and
-// the calendar sync list every Problem they found, one line per kind of Problem per note.
+// View Error Logs (OBS-218): opens the error log, the note Settings → Plainday → Folders names
+// (OBS-283), where the time report and the calendar sync list every Problem they found, one line per
+// kind of Problem per note.
 export default class ViewErrorLogs {
     async invoke() {
         const log = plainday.ErrorLog;

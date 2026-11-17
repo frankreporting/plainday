@@ -6,7 +6,8 @@ export default class SyncArea {
     // points their `parent` property at the nearest project or area above them, i.e. the first
     // folder note (Folder/Folder.md) tagged #project or #area. A folder note looks from the
     // folder above its own, so a moved project points at its new parent. Notes that land
-    // outside any project or area, or anywhere in Archive or Config, are left untouched,
+    // outside any project or area, or anywhere in the archive (Settings → Plainday → Folders,
+    // OBS-283) or Config, are left untouched,
     // and renaming a folder in place changes nothing (Obsidian updates the links itself).
     // An invoice is never touched either: its `parent` is the project it bills (OBS-114), fixed
     // when it's made, so moving the note mustn't change what it bills.
@@ -14,7 +15,8 @@ export default class SyncArea {
     // its place, in the same spot in the frontmatter.
     // Runs on every device, and each one only ever sees its own moves: Obsidian Sync delivers
     // a move made elsewhere as a delete plus a new file, not a rename (verified 2026-09-11).
-    static IGNORED = ["Archive/", "Config/"];
+    // Config, the system's folder in a vault from before; the archive is added as it's set
+    static IGNORED = ["Config/"];
     static DEBOUNCE_MS = 300;
     // Templater moves notes mid-template and rewrites them when it finishes; wait for that.
     static TEMPLATER_WAIT_MS = 120000;
@@ -26,6 +28,11 @@ export default class SyncArea {
         this.queue = new Map();
         this.renamedFolders = new Map();
         window.syncAreaRef = app.vault.on("rename", (file, oldPath) => this.onRename(file, oldPath));
+    }
+
+    // Whether a note is in the archive or Config, where nothing moves it
+    ignored(file) {
+        return SyncArea.IGNORED.some((p) => file.path.startsWith(p)) || file.path.startsWith(`${plainday.Settings.folders().archive}/`);
     }
 
     deconstructor() {
@@ -47,7 +54,7 @@ export default class SyncArea {
         if (file.extension !== "md") return;
         if (oldFolder === file.parent.path) return; // renamed in place, not moved
         if (this.insideRenamedFolder(file, oldPath)) return;
-        if (SyncArea.IGNORED.some((p) => file.path.startsWith(p))) return;
+        if (this.ignored(file)) return;
 
         // Keyed by the TFile so a note moved twice in quick succession is handled once;
         // keeps the first old path, which is the one Templater knows it by.
@@ -97,7 +104,7 @@ export default class SyncArea {
     // Returns true if the note's parent was written
     async sync(file, templated) {
         if (app.vault.getAbstractFileByPath(file.path) !== file) return false; // deleted since
-        if (SyncArea.IGNORED.some((p) => file.path.startsWith(p))) return false; // moved again since
+        if (this.ignored(file)) return false; // moved again since
 
         const parent = this.nearestProjectOrArea(file);
         if (!parent) return false;
