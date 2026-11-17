@@ -739,7 +739,9 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
     };
     plugin.app.plugins = { plugins: { "notebook-navigator": { settings: NAVIGATOR } }, getPlugin: () => null };
     plugin.app.vault.getAllFolders = () => [];
-    plugin.app.vault.getMarkdownFiles = () => [];
+    const files = new Map();
+    plugin.app.vault.getMarkdownFiles = () => [...files.values()];
+    plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
@@ -771,6 +773,15 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.match(draw("Daily notes").descEl.text, /^`Planner\/days`, named `YYYY-MM-DD`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Weekly note").descEl.text, /^`T\/Week\.md`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Monthly note").descEl.text, /^None\. Set in Notebook Navigator\.$/, "a calendar with no template of its own");
+        // The template Jump to date and Schedule make a new note from is Navigator's own, and nothing else:
+        // not Plainday's setting, not Templater's folder
+        assert.equal(window.plainday.JumpToDate.templateFor("week")?.path ?? null, null, "its template isn't in this vault, so none");
+        files.set("T/Week.md", { path: "T/Week.md" });
+        assert.equal(window.plainday.JumpToDate.templateFor("week")?.path, "T/Week.md");
+        assert.equal(window.plainday.JumpToDate.templateFor("month"), null, "a calendar with no template of its own");
+        await window.plainday.Settings.set("templates", { week: "T/Mine.md" });
+        files.set("T/Mine.md", { path: "T/Mine.md" });
+        assert.equal(window.plainday.JumpToDate.templateFor("week")?.path, "T/Week.md", "Plainday's own setting is not consulted in this source");
         // And the commands read Navigator's patterns, days included
         assert.equal(window.plainday.Schedule.dailyOpts().folder, "Planner/days");
         assert.equal(window.plainday.Schedule.dailyOpts().format, "YYYY-MM-DD");

@@ -964,6 +964,15 @@ test("navigatorNote: the folder, name and template Notebook Navigator's pattern 
     assert.deepEqual(plain(flat.s.navigatorNote("year")), { folder: "Planner", format: "YYYY", template: "" });
     const none = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomWeekPattern: "" } } } });
     assert.equal(none.s.navigatorNote("week"), null);
+    // A pattern whose folder part holds date tokens names a folder per date, which Plainday can't
+    // follow: it reads as none, so the folder falls back instead of a literal "YYYY" folder being made
+    for (const pattern of ["YYYY/MM/YYYY-MM-DD", "[days]/YYYY/YYYY-MM-DD", "YYYY/[days]/YYYY-MM-DD"]) {
+        const tokens = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomFilePattern: pattern } } } });
+        assert.equal(tokens.s.navigatorNote("day"), null, pattern);
+    }
+    // And with no periodic notes folder of its own, there's no base to put them under
+    const baseless = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, vaultProfiles: [{}] } } } });
+    assert.equal(baseless.s.navigatorNote("day"), null);
     assert.equal(withPlugin({}).s.navigatorCalendar(), null, "no Navigator installed");
 });
 

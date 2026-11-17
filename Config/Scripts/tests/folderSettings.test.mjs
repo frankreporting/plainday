@@ -4,6 +4,7 @@
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { standIn, PLANNER } from "./standInVault.mjs";
 
 const day = (d) => `${PLANNER}/days/${d}.md`;
@@ -90,4 +91,16 @@ test("the time report, with the folders moved: a line whose note waits in Waitin
     const line = tr.conflictLine(conflicts[0].conflict, (p) => `[[${tr.basename(p)}]]`, (t) => t);
     assert.match(line, /waits in Waiting; run AddProjectLink on the line, or MoveToProject on the note$/);
     assert.equal(tr.isArchived("Old/Marlowe/Marlowe.md"), true);
+});
+
+test("Plan makes daily notes where everything else looks for them: it reads the Daily notes plugin only through Schedule (OBS-283)", () => {
+    // Schedule is the one place that reads the plugin, so the periodic notes' source can't split what
+    // Plan creates from what the reports and commands look for
+    const src = readFileSync(new URL("../../../plugin/src/commands/plan.js", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /internalPlugins/, "Plan has no copy of dailyOpts' plugin read");
+    assert.match(src, /dailyOpts\(\) \{\s*return plainday\.Schedule\.dailyOpts\(\);/, "it delegates to Schedule");
+    for (const f of ["plugin/src/commands/plan.js", "plugin/src/commands/jumpToDate.js", "plugin/src/commands/timeReport.js", "plugin/src/shared/taskIds.js"]) {
+        const text = readFileSync(new URL(`../../../${f}`, import.meta.url), "utf8");
+        assert.doesNotMatch(text, /internalPlugins\?\.plugins\?\.\["daily-notes"\]/, f);
+    }
 });

@@ -760,7 +760,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const Settings = /** @type {typeof import("./shared/settings.js").default} */ (settings.constructor);
         const now = () => settings.get();
         // The Daily notes plugin's folder, name format and template, as Schedule reads them
-        const daily = () => /** @type {{ folder: string, format: string, template: string }} */ (plainday.Schedule.dailyOpts());
+        /** @param {{ asPlugin?: boolean }} [opts] */
+        const daily = (opts) => /** @type {{ folder: string, format: string, template: string }} */ (plainday.Schedule.dailyOpts(opts));
 
         /** @param {string} v */
         const code = (v) => `\`${v}\``;
@@ -982,15 +983,22 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // (Brian, 2026-11-16). With Notebook Navigator's, every row there is what it says, with no field.
         const source = () => settings.periodicSource();
         const navigator = () => source() === "notebook-navigator";
+        // A row that only says where a note goes and who decides: used for the daily notes, and for every
+        // periodic note in the Notebook Navigator source. When Navigator has no pattern Plainday can
+        // follow for a unit, the row says what decides instead, rather than crediting Navigator (OBS-283).
         /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
         const shown = (name, unit, part) => row(name, "", (s) => {
             const nn = navigator() ? settings.navigatorNote(unit) : null;
+            const plugin = daily({ asPlugin: true });
             const value = part === "folder"
                 ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
                 : (unit === "day" ? daily().template : nn?.template ?? "");
-            const where = navigator() ? "Set in Notebook Navigator" : "Set in Settings → Daily notes";
+            const where = nn ? "Set in Notebook Navigator"
+                : unit === "day" ? "Set in Settings → Daily notes"
+                    : navigator() ? "Notebook Navigator has no pattern Plainday can follow for these, so they sit beside the daily notes"
+                        : "Set in Settings → Daily notes";
             // The daily notes' row also says what names them, which is the other half of finding them
-            const named = unit === "day" && part === "folder" ? `, named ${code(nn ? nn.format : daily().format)}` : "";
+            const named = unit === "day" && part === "folder" ? `, named ${code(nn ? nn.format : plugin.format)}` : "";
             const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
             s.descEl.empty();
             s.descEl.appendText(`${shownValue}${named}. ${where}.`);

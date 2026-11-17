@@ -321,10 +321,16 @@ export default class Settings {
         const pattern = typeof nn[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]) : "";
         if (!pattern) return null;
         const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/\/+$/, "");
+        if (!base) return null;
         const at = pattern.lastIndexOf("/");
-        // The folder is the pattern's own folders with their [literals] unwrapped, under its base; the
-        // name is the rest, as moment reads it (its [literals] stay)
-        const dir = at < 0 ? "" : pattern.slice(0, at).replace(/\[([^\]]*)\]/g, "$1");
+        const folders = at < 0 ? "" : pattern.slice(0, at);
+        // Only a folder part that is all [literals] and slashes is a folder: one with date tokens in it
+        // (`YYYY/MM/YYYY-MM-DD`) names a folder per date, which Plainday can't follow, so it reads as
+        // none and the folder falls back as it did before (OBS-283)
+        if (folders.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") !== "") return null;
+        // The folder is those [literals] unwrapped, under the base; the name is the rest, as moment
+        // reads it (its own [literals] stay)
+        const dir = folders.replace(/\[([^\]]*)\]/g, "$1");
         const format = at < 0 ? pattern : pattern.slice(at + 1);
         const template = typeof nn[`calendarCustom${key}Template`] === "string" ? String(nn[`calendarCustom${key}Template`]) : "";
         return { folder: [base, dir].filter(Boolean).join("/"), format, template };
