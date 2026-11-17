@@ -104,7 +104,6 @@ export default class Settings {
     static COMBINED = ["tags", "aliases"];
     // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
     // Sync brings such a file
-    static DROPPED = "Plainday's Projects, Inbox and Archive folders in its settings file don't hold together (one is inside another, or isn't a folder), so it's using Projects, Inbox and Archive. Set them in Settings → Plainday → Folders.";
     static DROPPED_SYNC = "Plainday's settings file, changed by Sync, has Projects, Inbox and Archive folders that don't hold together (one is inside another, or isn't a folder), so it keeps the ones it had. Check them in Settings → Plainday → Folders.";
 
     constructor() {
@@ -751,9 +750,11 @@ export default class Settings {
             const link = given[id];
             if (typeof link === "string" && this.isLink(link)) links[id] = link.trim();
         }
-        // A copy from before folders: read with this device's, so its invoice folder is checked against
-        // this device's archive
-        const read = this.hasFolders(raw) ? settings : this.normalize({ ...raw, folders: this.data.folders, templates: this.data.templates }, billing);
+        // A copy from before folders is read with this device's folders and templates, and one whose
+        // Projects, Inbox and archive don't hold together with this device's three, so its invoice folder
+        // is checked against this device's archive
+        const read = !this.hasFolders(raw) ? this.normalize({ ...raw, folders: this.data.folders, templates: this.data.templates }, billing)
+            : this.foldersDropped(raw, settings, billing) ? this.normalize(this.withFolders(raw, this.folders()), billing) : settings;
         return { settings: read, links, withCalendars: this.hasCalendars(raw) };
     }
 
@@ -783,7 +784,7 @@ export default class Settings {
         this.calendarsSaved = this.hasCalendars(raw);
         this.foldersSaved = this.hasFolders(raw);
         this.data = this.normalize(raw ?? {});
-        if (this.foldersDropped(raw, this.data)) new Notice(Settings.DROPPED, 0);
+        if (this.foldersDropped(raw, this.data)) new Notice(this.droppedNotice(), 0);
         if (this.unreadable) {
             new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
         }
@@ -794,12 +795,25 @@ export default class Settings {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
 
+    // What loading says when the saved Projects, Inbox or archive didn't read: the folders it uses instead
+    droppedNotice() {
+        const { projects, inbox, archive } = this.folders();
+        return `Plainday's Projects, Inbox and Archive folders in its settings file don't hold together (one is inside another, or isn't a folder), so it's using Projects \`${projects}\`, Inbox \`${inbox}\` and Archive \`${archive}\`. Set them in Settings → Plainday → Folders.`;
+    }
+
     // Whether Projects, the Inbox or the archive a data file names didn't survive normalize(): one that
     // doesn't read, or three that don't hold together, which went back to the defaults
-    foldersDropped(raw, settings) {
+    foldersDropped(raw, settings, billing = plainday.Billing) {
         const f = typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null ? raw.folders : null;
         if (!f) return false;
-        return /** @type {const} */ (["projects", "inbox", "archive"]).some((k) => typeof f[k] === "string" && f[k].trim() !== "" && plainday.Billing.pathOf(f[k]).folder !== settings.folders[k]);
+        return /** @type {const} */ (["projects", "inbox", "archive"]).some((k) => typeof f[k] === "string" && f[k].trim() !== "" && billing.pathOf(f[k]).folder !== settings.folders[k]);
+    }
+
+    // A data file or a copy with `three` (Projects, the Inbox and the archive) in place of its own
+    withFolders(raw, three) {
+        const r = typeof raw === "object" && raw !== null ? raw : {};
+        const f = typeof r.folders === "object" && r.folders !== null ? r.folders : {};
+        return { ...r, folders: { ...f, ...three } };
     }
 
     // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read
@@ -892,12 +906,15 @@ export default class Settings {
         const keep = raw !== null && !this.calendarsSaved && hadCalendars;
         if (keep) next.calendars = this.data.calendars;
         // Projects, the Inbox and the archive that don't hold together (a file edited by hand, two devices'
-        // changes merged) keep this device's, with a notice, rather than going back to the defaults
+        // changes merged) keep this device's, with a notice, rather than going back to the defaults: read
+        // again with them, so the other folders and the invoice folder are checked against them, and
+        // saved, so the next start doesn't read the file that didn't hold together
         const dropped = this.foldersDropped(given, next);
-        if (dropped) Object.assign(next.folders, this.folders());
-        this.data = next;
+        const kept = dropped ? this.pasted(this.normalize(this.withFolders(given, this.folders()))) : next;
+        if (dropped && keep) kept.calendars = this.data.calendars;
+        this.data = kept;
         if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
-        if (keep || keepFolders) await this.save();
+        if (keep || keepFolders || dropped) await this.save();
         await plainday.ListCursor?.invoke();
     }
 

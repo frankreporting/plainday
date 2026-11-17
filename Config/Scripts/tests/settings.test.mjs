@@ -874,7 +874,11 @@ test("Projects, the Inbox and the archive that don't hold together: at the start
     await f.s.load();
     assert.deepEqual(plain(f.s.folders()), plain(Settings.FOLDERS));
     assert.equal(f.notices.length, 1);
-    assert.match(f.notices[0], /don't hold together .* so it's using Projects, Inbox and Archive\. Set them in Settings → Plainday → Folders\.$/);
+    assert.match(f.notices[0], /don't hold together .* so it's using Projects `Projects`, Inbox `Inbox` and Archive `Archive`\. Set them in Settings → Plainday → Folders\.$/);
+    // One that doesn't read keeps the others: the notice names the folders in use
+    const h = withPlugin({ stored: { ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "a:b", archive: "Old" } } });
+    await h.s.load();
+    assert.match(h.notices[0], /using Projects `Work`, Inbox `Inbox` and Archive `Old`\./);
     const g = withPlugin({ stored: { ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "Waiting", archive: "Old" } } });
     await g.s.load();
     assert.deepEqual(g.notices, [], "three that hold together say nothing");
@@ -883,9 +887,17 @@ test("Projects, the Inbox and the archive that don't hold together: at the start
     assert.deepEqual(plain(g.s.folders()), { projects: "Work", inbox: "Waiting", archive: "Old" }, "this device's, not the defaults");
     assert.equal(g.notices.length, 1);
     assert.match(g.notices[0], /changed by Sync, .* so it keeps the ones it had/);
+    assert.deepEqual(plain(g.saves.at(-1).folders).projects, "Work", "and saved, so the next start doesn't read the file that didn't hold together");
+    // The other folders are checked against the ones kept: a weekly folder in Work is as before
+    g.plugin.loadData = async () => ({ ...JUNIPER, folders: { projects: "Work", inbox: "Work/Waiting", archive: "Old", week: "Work/weeks" } });
+    await g.s.reload();
+    assert.equal(g.s.get().folders.week, "");
     // Folders that read, from Sync, are taken
     g.plugin.loadData = async () => ({ ...JUNIPER, folders: { ...FOLDERS, projects: "Clients", inbox: "Waiting", archive: "Old" } });
     await g.s.reload();
     assert.equal(g.s.folders().projects, "Clients");
-    assert.equal(g.notices.length, 1);
+    assert.equal(g.notices.length, 2);
+    // A pasted copy whose three don't hold together keeps this device's
+    const pasted = g.s.readCopy(JSON.stringify({ "plainday-settings": 1, ...JUNIPER, folders: { projects: "Work", inbox: "Work/In", archive: "Old" } }), billing);
+    assert.deepEqual(plain(Object.fromEntries(["projects", "inbox", "archive"].map((k) => [k, pasted.settings.folders[k]]))), { projects: "Clients", inbox: "Waiting", archive: "Old" });
 });

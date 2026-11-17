@@ -532,15 +532,19 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
 test("Settings → Plainday → Folders and Note templates: the folders as set, checked as you type and saved when you leave them (OBS-283)", async () => {
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" } };
     const { plugin, suggests } = load(BUNDLE, { stored });
-    const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference/Invoices", "Reference/Done lists", "Reference/Planner/weeks", "Config"]);
+    const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference", "Reference/Invoices", "Reference/Done lists", "Reference/Old lists", "Reference/Planner", "Reference/Planner/weeks", "Config"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
     plugin.app.vault.getAllFolders = () => [...folders].map((path) => ({ path }));
+    // The folder tree, as Invoice.realFolder walks it
+    const tree = (at) => ({ name: at.split("/").pop(), children: [...folders].filter((f) => f.slice(0, f.lastIndexOf("/") + 1) === (at ? `${at}/` : "") && f !== at && !f.slice(at ? at.length + 1 : 0).includes("/")).map(tree) });
+    plugin.app.vault.getRoot = () => tree("");
     const template = { path: "Templates/Plain week.md" };
     // A note of yours, which the error log mustn't write over, and an error log already made
-    const mine = { path: "Reference/Notes.md", stat: { size: 120 } }, oldLog = { path: "Logs/Old log.md", stat: { size: 80 } };
-    const files = new Map([[template.path, template], [mine.path, mine], [oldLog.path, oldLog]]);
+    const mine = { path: "Reference/Notes.md" }, oldLog = { path: "Logs/Old log.md" }, empty = { path: "Logs/Empty.md" };
+    const files = new Map([[template.path, template], [mine.path, mine], [oldLog.path, oldLog], [empty.path, empty]]);
     plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
-    plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : f === oldLog ? { headings: [{ heading: "Time report" }] } : f === mine ? { headings: [{ heading: "Ideas" }] } : null);
+    plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : f === oldLog ? { headings: [{ heading: "Time report", level: 2 }] }
+        : f === mine ? { headings: [{ heading: "Ideas", level: 2 }] } : f === empty ? { frontmatter: { id: "1" } } : null);
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
@@ -586,7 +590,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.equal(folders()?.archive, "Old");
         assert.equal(plugin.saved.at(-1).invoices.folder, "Reference/Invoices", "the invoice folder is kept");
 
-        // A folder spelled in another case is the vault's own
+        // A folder spelled in another case is the vault's own, folder by folder
         const projects2 = draw("Projects");
         projects2.s.type("projects");
         assert.equal(projects2.s.warning(), "", "Projects as the vault spells it, so no line");
@@ -603,19 +607,28 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
             const el = { isConnected: true, addClass: (c) => classes.add(c), hasClass: (c) => classes.has(c), createSpan: () => {} };
             list.renderSuggestion(folder, el);
         };
+        // The first row, which Obsidian highlights by itself, and doesn't start with what's typed: what you typed
         assert.deepEqual(list.getSuggestions("done"), ["Reference/Done lists"]);
         row("Reference/Done lists", true);
         done.s.type("Done");
         done.s.tab();
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(folders()?.archive, "Done", "what you typed, not the row Obsidian highlighted first");
-        done.s.type("Don");
-        list.getSuggestions("don");
-        row("Reference/Done lists", true);
-        done.s.key("ArrowDown");
+        // A row you moved to (the highlight off the first row): that one
+        assert.deepEqual(list.getSuggestions("lists"), ["Reference/Done lists", "Reference/Old lists"]);
+        row("Reference/Done lists", false);
+        row("Reference/Old lists", true);
+        done.s.type("lists");
         done.s.tab();
         await new Promise((r) => setTimeout(r, 0));
-        assert.equal(folders()?.archive, "Reference/Done lists", "the row you moved to");
+        assert.equal(folders()?.archive, "Reference/Old lists", "the row you moved to");
+        // The first row when it starts with what's typed: it completes it
+        list.getSuggestions("reference/d");
+        row("Reference/Done lists", true);
+        done.s.type("reference/d");
+        done.s.tab();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.archive, "Reference/Done lists");
         done.s.type("Old");
         done.s.leave();
         await new Promise((r) => setTimeout(r, 0));
@@ -646,9 +659,15 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         const log = draw("Error log note");
         assert.equal(log.s.control.inputEl.placeholder, "Config/Error Log.md");
         log.s.type("Reference/Notes");
-        assert.equal(log.s.warning(), "Not used: it's a note of yours, and the error log would write over its sections. The error log stays `Config/Error Log.md`.");
+        assert.equal(log.s.warning(), "Not used: it's a note of yours with sections of its own, which the error log would move. The error log stays `Config/Error Log.md`.");
         log.s.type("Logs/Old log");
         assert.equal(log.s.warning(), "", "an error log already made is fine");
+        log.s.type("Logs/Empty");
+        assert.equal(log.s.warning(), "", "and so is a note with only its properties");
+        log.s.type("reference/Problems");
+        log.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.errorLog, "Reference/Problems.md", "its folder as the vault spells it");
         log.s.type("Logs/Problems");
         log.s.leave();
         await new Promise((r) => setTimeout(r, 0));
