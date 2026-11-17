@@ -185,7 +185,7 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
 // undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
 // vault holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {} } = {}) {
+function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {}, templater = "" } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0;
     const plugin = {
@@ -200,8 +200,9 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
     // This vault's local storage, where its key for its secrets' names is kept: "vault001" unless given
     const local = new Map(vaultKey ? [["plainday-calendar-key", vaultKey]] : []);
     const app = {
-        // The community plugins Settings asks about: Notebook Navigator, for the periodic notes' source
-        plugins: { plugins },
+        // The community plugins Settings asks about: Notebook Navigator for the periodic notes' source,
+        // and Templater, which keeps the vault's template folder
+        plugins: { plugins, getPlugin: (id) => (id === "templater-obsidian" && templater ? { settings: { templates_folder: templater } } : null) },
         loadLocalStorage: (k) => local.get(k) ?? null,
         saveLocalStorage: (k, v) => { local.set(k, v); },
         // As Obsidian's: names in lowercase letters, digits and dashes, one string each
@@ -976,10 +977,22 @@ test("navigatorNote: the folder, name and template Notebook Navigator's pattern 
     assert.equal(withPlugin({}).s.navigatorCalendar(), null, "no Navigator installed");
 });
 
-test("templates: the task and log templates default to the paths the command used to hold, and blank means that default", () => {
+test("templates: blank means the template's own name in the vault's template folder, never a folder of this repository's (OBS-283)", () => {
     const d = settings.defaults().templates;
     assert.deepEqual(plain([d.task, d.log]), ["", ""], "blank as it comes");
-    assert.deepEqual(plain(Settings.TEMPLATES), { task: "Config/Templates/Task.md", log: "Config/Templates/Log.md" });
+    assert.deepEqual(plain(Settings.TEMPLATE_NAMES), { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" });
+    // Templater keeps the folder; without it a template sits at the top of the vault
+    const withTemplater = withPlugin({ templater: "Config/Templates" });
+    assert.equal(withTemplater.s.defaultTemplatePath("task"), "Config/Templates/Task.md");
+    assert.equal(withTemplater.s.defaultTemplatePath("week"), "Config/Templates/Weekly Note.md");
+    const bare = withPlugin({});
+    assert.equal(bare.s.defaultTemplatePath("task"), "Task.md");
+    assert.equal(bare.s.defaultTemplatePath("log"), "Log.md");
+    assert.equal(bare.s.defaultTemplatePath("year"), "Yearly Note.md");
+    const slashes = withPlugin({ templater: "/Templates/" });
+    assert.equal(slashes.s.defaultTemplatePath("log"), "Templates/Log.md");
+    // Nothing writes this repository's own folder in as a default
+    assert.doesNotMatch(fs.readFileSync(new URL("../../../plugin/src/shared/settings.js", import.meta.url), "utf8"), /Config\/Templates/);
     const n = settings.normalize({ templates: { task: "Templates/My task", log: "a|b" } }, billing);
     assert.equal(n.templates.task, "Templates/My task.md");
     assert.equal(n.templates.log, "", "a path that doesn't read is blank, so the default holds");

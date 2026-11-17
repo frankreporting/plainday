@@ -21,7 +21,16 @@ export const weekKey = (date) => new (vm.runInContext(src("timeReport") + "\n;Ti
 // Plainday's folders as the classes read them (OBS-283): the real Settings, with `folders` over its
 // defaults, put on `plainday` where it has none of its own. Returns `plainday`.
 export function withFolders(plainday, folders = {}) {
-    const context = vm.createContext({ plainday, app: { vault: { getFileByPath: () => null, getFolderByPath: () => null } }, URL });
+    const context = vm.createContext({
+        plainday,
+        // Enough of the app for Settings: the vault, and Templater's template folder, which every
+        // template default sits in (OBS-283)
+        app: {
+            vault: { getFileByPath: () => null, getFolderByPath: () => null },
+            plugins: { getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) },
+        },
+        URL,
+    });
     plainday.Settings ??= new (vm.runInContext(`${src("settings")}\n;Settings`, context))();
     Object.assign(plainday.Settings.get().folders, folders);
     return plainday;
@@ -194,7 +203,11 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     const app = {
         internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: `${PLANNER}/days`, format: "YYYY-MM-DD" } } } } },
-        plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {}, getPlugin: () => null },
+        // Templater keeps the vault's template folder, which every template default sits in (OBS-283)
+        plugins: {
+            plugins: nn ? { "notebook-navigator": { settings: nn } } : {},
+            getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null),
+        },
         workspace: { getActiveViewOfType: () => view, getActiveFile: () => view.file, getLeavesOfType: (t) => (t === "markdown" && view.file ? [{ view }] : []), activeLeaf: { view } },
         foldManager: { load: () => null, save: async () => {} },
         metadataCache: {

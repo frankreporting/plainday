@@ -300,7 +300,9 @@ class CalendarModal extends Modal {
         this.modalEl.addClass("plainday-calendar");
 
         const linkSetting = new Setting(this.contentEl).setName(editing ? "New link" : "Private link");
-        linkSetting.descEl.appendText(!editing ? "Paste the calendar's private link. "
+        // Adding: the field's name and placeholder say what to paste, so the description is only the link
+        // (Brian, 2026-11-17). Editing says what a blank field would leave alone.
+        linkSetting.descEl.appendText(!editing ? ""
             : settings.link(editing.id) !== null ? "This calendar is already linked. Leave blank or paste a new link to replace it. "
                 : "This device has no link for it yet. ");
         linkSetting.descEl.createEl("a", { text: "Where to find it", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
@@ -960,7 +962,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         /** @param {"week" | "month" | "year"} unit */
         const templateField = (unit) => {
             const jump = plainday.JumpToDate;
-            const before = () => jump.templateFor(unit, { asBefore: true })?.path ?? "";
+            const before = () => settings.defaultTemplatePath(unit);
             // The line under a template: it isn't there yet, or it sets a property Plainday writes itself
             /** @param {string} value */
             const note = (value) => {
@@ -969,14 +971,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[unit] ?? []);
             };
-            return pathField(`${periods[unit]} note`, `Default: \`${/** @type {{ TEMPLATE: Record<string, string> }} */ (jump.constructor).TEMPLATE[unit]}\` in Templater's template folder.`, {
+            return pathField(`${periods[unit]} note`, "", {
                 saved: () => now().templates[unit],
                 read: (v) => {
                     const got = settings.notePathOf(v);
                     return got.error ? { error: `it ${got.error}` } : { value: got.path };
                 },
                 save: (s, value) => store(s, "templates", { [unit]: value }),
-                placeholder: () => before() || "None",
+                placeholder: () => before(),
                 note,
                 list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
                 was: (value) => `The ${periods[unit].toLowerCase()} note's template stays ${value ? code(value) : "as before"}.`,
@@ -996,16 +998,16 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 return { value: got.path ? spelledNote(got.path) : "" };
             },
             save: (s, value) => store(s, "templates", { [kind]: value }),
-            placeholder: () => Settings.TEMPLATES[kind],
+            placeholder: () => settings.defaultTemplatePath(kind),
             note: (value) => {
-                const path = value || Settings.TEMPLATES[kind];
+                const path = value || settings.defaultTemplatePath(kind);
                 if (missingNote(path)) return `“${path}” isn't in the vault, so Add note has nothing to make a ${made[kind].toLowerCase()} from.`;
                 const file = this.app.vault.getFileByPath(path);
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
             },
             list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
-            was: (value) => `The ${made[kind].toLowerCase()} template stays ${code(value || Settings.TEMPLATES[kind])}.`,
+            was: (value) => `The ${made[kind].toLowerCase()} template stays ${code(value || settings.defaultTemplatePath(kind))}.`,
         });
 
         // Periodic notes: a page of its own under Folders, whose first row is which calendar owns them
@@ -1068,7 +1070,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // The error log note: a note Plainday writes rather than a folder it files into, so it sits in
         // Other at the end rather than among the folders (Brian, 2026-11-17)
         const errorLogField = () =>
-                    pathField("Error log note", "Where the time report and the calendar sync list the Problems they find.", {
+                    pathField("Error log note", "", {
                         saved: () => now().folders.errorLog,
                         read: (v) => {
                             const got = settings.notePathOf(v);

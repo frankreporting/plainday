@@ -38,9 +38,9 @@ export default class Settings {
     //   - templates (OBS-283): what each kind of note Plainday makes is made from. The weekly, monthly
     //     and yearly ones are used in the "daily-notes" source, and blank means Weekly Note, Monthly Note
     //     or Yearly Note in Templater's template folder. `task` and `log` are the Task and Log templates
-    //     AddTaskNote runs, `Config/Templates/Task.md` and `Log.md` as they come, so no template path is
-    //     written into a command; blank means that default, which the panel shows. Projects and areas get
-    //     theirs with OBS-123.
+    //     AddTaskNote runs, so no template path is written into a command. Blank means the template's own
+    //     name (TEMPLATE_NAMES) in the vault's template folder, which Templater keeps, else at the top of
+    //     the vault (defaultTemplatePath); the panel shows it. Projects and areas get theirs with OBS-123.
     //
     // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
     // through normalize(), so a value that doesn't read becomes its default and the rest can trust what
@@ -102,8 +102,10 @@ export default class Settings {
     // Navigator's calendar. "" is neither chosen, which periodicSource() reads from the vault.
     static SOURCES = ["daily-notes", "notebook-navigator"];
     static SOURCE_NAMES = { "daily-notes": "Plainday + Daily Notes plugin", "notebook-navigator": "Notebook Navigator" };
-    // The templates a new vault starts with: the ones AddTaskNote has always run (OBS-283)
-    static TEMPLATES = { task: "Config/Templates/Task.md", log: "Config/Templates/Log.md" };
+    // What each template a command makes a note from is called. Where it sits is the vault's own
+    // template folder, which Templater keeps, else the top of the vault — never a folder of this
+    // repository's (Brian, 2026-11-17).
+    static TEMPLATE_NAMES = { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
     // The system's own folder in a vault from before: never a place for the three, or for invoices
     static SYSTEM_FOLDER = "Config";
     // The error log note: where it is in a vault from before (it, or the Config folder, is there), and
@@ -409,6 +411,18 @@ export default class Settings {
         if (read.error) return { path: "", error: read.error.replace("isn't a folder in the vault", "isn't a note in the vault") };
         if (!read.folder) return { path: "", error: null };
         return { path: /\.md$/i.test(read.folder) ? `${read.folder.slice(0, -3)}.md` : `${read.folder}.md`, error: null };
+    }
+
+    /**
+     * Where a template of `name` sits when its field is blank: in the vault's own template folder, which
+     * Templater keeps, else at the top of the vault. The panel shows it, and the commands use it.
+     * @param {"task" | "log" | "week" | "month" | "year"} kind
+     * @returns {string}
+     */
+    defaultTemplatePath(kind) {
+        const templater = /** @type {{ settings?: { templates_folder?: string } } | null} */ (app.plugins?.getPlugin?.("templater-obsidian") ?? null);
+        const folder = String(templater?.settings?.templates_folder ?? "").replace(/^\/+|\/+$/g, "");
+        return `${folder ? `${folder}/` : ""}${Settings.TEMPLATE_NAMES[kind]}.md`;
     }
 
     /**

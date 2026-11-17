@@ -349,10 +349,10 @@ export default class AddTaskNote {
     }
 
     // The template a task note or a log is made from, as Settings → Plainday → Note templates has it
-    // (OBS-283): `Config/Templates/Task.md` and `Log.md` as they come
+    // (OBS-283); blank means Task.md or Log.md in the vault's template folder
     /** @param {"task" | "log"} kind */
     templatePath(kind) {
-        return plainday.Settings.get().templates[kind] || plainday.Settings.constructor.TEMPLATES[kind];
+        return plainday.Settings.get().templates[kind] || plainday.Settings.defaultTemplatePath(kind);
     }
 
     // Where a new task note or log is made before its template files it: the Inbox, as Settings →

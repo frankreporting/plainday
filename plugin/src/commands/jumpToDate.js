@@ -4,7 +4,6 @@ import { app, plainday } from "../host.js";
 export default class JumpToDate {
     // Set on this device when "Don't ask again" is ticked; the prompt offers to undo it
     static SKIP_KEY = "obsidian-pm-jump-create-without-asking";
-    static TEMPLATE = { week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
 
     // Command: type a date and open its note (OBS-89). A day opens its daily note; this, next or last
     // week, month or year opens the weekly, monthly or yearly note, and so does a note's own name
@@ -174,10 +173,9 @@ export default class JumpToDate {
         // Notebook Navigator's calendar as the source: its own template for that calendar, and nothing
         // else, since it makes the note (OBS-283). Otherwise the setting, else Templater's folder.
         const navigator = !asBefore && settings?.periodicSource?.() === "notebook-navigator";
-        const folder = String(app.plugins.getPlugin("templater-obsidian")?.settings?.templates_folder ?? "").replace(/\/$/, "");
         const set = asBefore || navigator ? "" : settings?.get().templates[unit] ?? "";
         const candidates = navigator ? [settings.navigatorNote(unit)?.template]
-            : [set, folder && `${folder}/${JumpToDate.TEMPLATE[unit]}`];
+            : [set, settings?.defaultTemplatePath(unit)];
         for (const c of candidates) {
             if (!c) continue;
             const file = app.vault.getFileByPath(c.endsWith(".md") ? c : `${c}.md`);

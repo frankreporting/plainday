@@ -385,6 +385,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
     const { plugin, suggests, notices } = load(BUNDLE, { stored });
     plugin.app.vault.getAllFolders = () => [{ path: "Archive" }, { path: "Archive/Old" }, { path: "Business/Invoices" }, { path: "Config" }];
+    plugin.app.plugins = { plugins: {}, getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) };
     const folders = new Set(["Reference/Invoices", "Business/Invoices"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
     plugin.app.vault.getRoot = () => ({ children: [] });
@@ -411,7 +412,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Task note", "Log", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"],
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Task note", "Log", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
             "a row whose name says what it is carries no description (Brian, 11/16 and 11/17)");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
@@ -539,6 +540,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
     const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference", "Reference/Invoices", "Reference/Done lists", "Reference/Old lists", "Reference/Planner", "Reference/Planner/weeks", "Clients [2026]", "Config"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
     plugin.app.vault.getAllFolders = () => [...folders].map((path) => ({ path }));
+    plugin.app.plugins = { plugins: {}, getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) };
     // The folder tree, as Invoice.realFolder walks it
     const tree = (at) => ({ name: at.split("/").pop(), children: [...folders].filter((f) => f.slice(0, f.lastIndexOf("/") + 1) === (at ? `${at}/` : "") && f !== at && !f.slice(at ? at.length + 1 : 0).includes("/")).map(tree) });
     plugin.app.vault.getRoot = () => tree("");
@@ -567,7 +569,8 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         // The periodic folders say their default in Brian's form (11/16), and nothing says "changing it
         // doesn't move the notes" any more
         assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` in same folder as daily notes.");
-        assert.equal(items.find((i) => i.name === "Weekly note").desc, "Default: `Weekly Note` in Templater's template folder.");
+        assert.equal(items.find((i) => i.name === "Weekly note").desc, undefined, "the placeholder says the default, so no description");
+        assert.equal(draw("Weekly note").s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md");
         for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
 
         // Projects, the Inbox and the archive: as a new vault has them
@@ -711,7 +714,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         // A template: none in this vault until one is chosen; one that sets a property Plainday writes
         // itself says so (the list comes with OBS-120: here, a stand-in)
         const tpl = draw("Weekly note");
-        assert.equal(tpl.s.control.inputEl.placeholder, "None");
+        assert.equal(tpl.s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md", "the default is always a path, so the field always suggests one");
         tpl.s.type("Templates/Missing");
         assert.equal(tpl.s.warning(), "“Templates/Missing.md” isn't in the vault, so the template Plainday used before is used until it is.");
         window.plainday.Settings.constructor.WRITES.week.push("date", "tags");
@@ -817,13 +820,14 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
     }
 });
 
-test("Settings → Plainday → Note templates: the Task note and Log templates, blank meaning the paths the commands used to hold (OBS-283)", async () => {
+test("Settings → Plainday → Note templates: the Task note and Log templates, blank meaning the template's name in the vault's template folder (OBS-283)", async () => {
     const { plugin } = load(BUNDLE);
-    const task = { path: "Config/Templates/Task.md" }, mine = { path: "Templates/My task.md" };
+    const task = { path: "Templates/Task.md" }, mine = { path: "Templates/My task.md" };
     const files = new Map([[task.path, task], [mine.path, mine]]);
     plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
     plugin.app.vault.getMarkdownFiles = () => [...files.values()];
     plugin.app.vault.getAllFolders = () => [];
+    plugin.app.plugins = { plugins: {}, getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Templates" } } : null) };
     await plugin.onload();
     try {
         const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
@@ -831,10 +835,10 @@ test("Settings → Plainday → Note templates: the Task note and Log templates,
         const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
         const t = draw("Task note");
         assert.equal(t.control.inputEl.value, "", "blank as it comes");
-        assert.equal(t.control.inputEl.placeholder, "Config/Templates/Task.md");
-        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Config/Templates/Task.md");
+        assert.equal(t.control.inputEl.placeholder, "Templates/Task.md", "Templater's folder, not this repository's");
+        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
         // The Log's default isn't in this vault, so it says Add note has nothing to make one from
-        assert.match(draw("Log").warning(), /^“Config\/Templates\/Log\.md” isn't in the vault/);
+        assert.match(draw("Log").warning(), /^“Templates\/Log\.md” isn't in the vault/);
         t.type("Templates/My task");
         t.leave();
         await new Promise((r) => setTimeout(r, 0));
@@ -868,7 +872,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
                 ["row", "Sync range", "How far ahead to write events into daily notes."],
                 ["page", "Calendar list", undefined],
             ]],
-            ["Other", [["row", "Error log note", "Where the time report and the calendar sync list the Problems they find."]]],
+            ["Other", [["row", "Error log note", undefined]]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
         const page = defs[6].items[2];
