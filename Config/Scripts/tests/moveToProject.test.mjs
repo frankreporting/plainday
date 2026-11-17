@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+import { withFolders } from "./standInVault.mjs";
 const { COMMANDS } = readIndex("commands").exports;
 const { STARTUP } = readIndex("startup").exports;
 
@@ -17,7 +18,7 @@ const here = new URL(".", import.meta.url);
 const notices = [];
 const logged = [];
 const context = vm.createContext({
-    plainday: {}, app: null, window: {}, setTimeout, clearTimeout,
+    plainday: withFolders({}), app: null, window: {}, setTimeout, clearTimeout,
     console: { ...console, info: (...a) => logged.push(a) },
     Notice: class { constructor(message) { notices.push(message); } },
 });
@@ -301,7 +302,7 @@ test("move: Esc in the menu changes nothing, and nothing movable means no menu a
     kept.answer({ pick: "Projects/Household/Household.md" });
     await kept.mover.move([kept.file("Reference/Planner/days/2026-09-18.md"), kept.file("Archive/Freelance/Marlowe/Marlowe.md")]);
     assert.deepEqual(kept.asked.picker, []);
-    assert.deepEqual(notices, ["2026-09-18 stays where it is: run AddProjectLink on a line in it\nMarlowe isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed"]);
+    assert.deepEqual(notices, ["2026-09-18 stays where it is: run AddProjectLink on a line in it\nMarlowe is in Archive, where no command works, so nothing changed"]);
 });
 
 test("invoke: the note you're on, or Notebook Navigator's selection while it has the focus", () => {

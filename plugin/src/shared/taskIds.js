@@ -189,21 +189,35 @@ export default class TaskIds {
         for (const [path, at] of this.recent) if (now - at > TaskIds.RECENT_MS) this.recent.delete(path);
     }
 
-    // The folders the system works in besides the Planner's periodic notes (rule 12, OBS-208): named
-    // once here, a setting later. AddTaskNote's staging folder is the Inbox.
-    static INBOX = "Inbox";
-    static FOLDERS = ["Projects", TaskIds.INBOX];
-    static ARCHIVE = "Archive/";
-
-    // Whether a note is in the system: a daily, weekly, monthly or yearly note, or a note in one of
-    // FOLDERS (rule 12). A line anywhere else is a plain checklist line: no command works on it.
-    inSystem(file) {
-        return !!file && (TaskIds.FOLDERS.some((f) => file.path.startsWith(`${f}/`)) || this.kindOf(file) !== "other");
+    // The folders the system works in besides the Planner's periodic notes (rule 12, OBS-208), and the
+    // archive: Projects, the Inbox and Archive, as Settings → Plainday → Folders has them (OBS-283).
+    // AddTaskNote's staging folder is the Inbox.
+    folders() {
+        return plainday.Settings.folders();
     }
 
-    // What a command that works on a line says when its note is outside the system, and does nothing (rule 12)
+    // Whether `path` is in Projects or the Inbox, or in the archive
+    inWorkFolders(path) {
+        const { projects, inbox } = this.folders();
+        return !!path && (path.startsWith(`${projects}/`) || path.startsWith(`${inbox}/`));
+    }
+
+    inArchive(path) {
+        return !!path && path.startsWith(`${this.folders().archive}/`);
+    }
+
+    // Whether a note is in the system: a daily, weekly, monthly or yearly note, or a note in Projects or
+    // the Inbox (rule 12). A line anywhere else is a plain checklist line: no command works on it.
+    inSystem(file) {
+        return !!file && (this.inWorkFolders(file.path) || this.kindOf(file) !== "other");
+    }
+
+    // What a command that works on a line says when its note is outside the system, and does nothing
+    // (rule 12), naming the folders as they're set: a note in the archive is in it (OBS-283)
     outside(file) {
-        return `${file.basename} isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed`;
+        const { projects, archive } = this.folders();
+        if (this.inArchive(file.path)) return `${file.basename} is in ${archive}, where no command works, so nothing changed`;
+        return `${file.basename} isn't in the Planner, ${projects} or ${plainday.TimeReport.inboxWords()}, where the system works, so nothing changed`;
     }
 
     // Whether a command may work on a line of `file`; when not, it says so (rule 12, OBS-208)
@@ -344,7 +358,7 @@ export default class TaskIds {
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
             const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
-            if (!items.length || (this.ignored(file) && !file.path.startsWith(TaskIds.ARCHIVE))) continue;
+            if (!items.length || (this.ignored(file) && !this.inArchive(file.path))) continue;
             for (const li of items) {
                 const key = li.id.toLowerCase();
                 if (!out.has(key)) out.set(key, []);
@@ -504,7 +518,7 @@ export default class TaskIds {
             if (!texts.has(file.path)) texts.set(file.path, (await this.readNow(file)).split("\n").map((l) => l.replace(/\r$/, "")));
             return texts.get(file.path);
         };
-        const reads = (file) => this.inSystem(file) || file.path.startsWith(TaskIds.ARCHIVE);
+        const reads = (file) => this.inSystem(file) || this.inArchive(file.path);
         // A line a sent task left behind: [>], or a forward date of either form
         const sent = (l) => /^\s*[-*+] \[>\]/.test(l) || !!TaskIds.forwardOf(l) || !!TaskIds.oldForward(l);
         // How the report reads a daily note's entries: entry → its project, or null when disputed

@@ -58,7 +58,7 @@ export function loadTimeReport(root = ROOT) {
     ctx.plainday = { AddTaskNote: new (load("addTaskNote"))() };
     const TimeReport = load("timeReport");
     const tr = new TimeReport();
-    contexts.set(tr, { TaskIds: load("taskIds") });
+    contexts.set(tr, { TaskIds: load("taskIds"), plainday: ctx.plainday });
     return tr;
 }
 
@@ -147,21 +147,42 @@ export function readVault(root = ROOT) {
 
 const basename = (p) => p.split("/").pop().replace(/\.md$/, "");
 
-// A note's kind by its folder, as Schedule's own test says in the app
-const kindOf = (p) => {
-    const dir = p.slice(0, p.lastIndexOf("/"));
-    return dir === DAYS ? "day" : Object.keys(FOLDERS).find((u) => FOLDERS[u] === dir) ?? "other";
-};
-// The three folders the system works in (TaskIds.FOLDERS and the Planner's periodic notes)
-const inSystem = (p) => kindOf(p) !== "other" || p.startsWith("Projects/") || p.startsWith("Inbox/");
+// The weekly, monthly and yearly notes' folders a vault's settings name (OBS-283), which blank leaves
+// where the demo's Notebook Navigator settings put them (FOLDERS)
+export function vaultFolders(settings) {
+    const f = settings.folders;
+    return { week: f.week || FOLDERS.week, month: f.month || FOLDERS.month, year: f.year || FOLDERS.year };
+}
 
-export function makeIndex(tr, vault) {
+// Plainday's settings for `tr`'s run, as TimeReport and TaskIds read them from `plainday.Settings`
+// (OBS-283): the folders the report and the task checks use are then theirs, not this script's.
+// Returns the TaskIds that reads them, or null for a TimeReport this script didn't load.
+export function useSettings(tr, settings) {
+    const loaded = contexts.get(tr);
+    if (!loaded) return null;
+    loaded.plainday.Settings = { get: () => settings, folders: () => ({ projects: settings.folders.projects, inbox: settings.folders.inbox, archive: settings.folders.archive }) };
+    loaded.tasks ??= new loaded.TaskIds();
+    return loaded.tasks;
+}
+
+// A note's kind by its folder, as Schedule's own test says in the app
+const kindOf = (p, folders) => {
+    const dir = p.slice(0, p.lastIndexOf("/"));
+    return dir === DAYS ? "day" : ["week", "month", "year"].find((u) => folders[u] === dir) ?? "other";
+};
+// What the system works in: the Planner's periodic notes, and Projects and the Inbox as TaskIds says
+// (TaskIds.inSystem, whose kindOf needs Schedule, which isn't loaded here)
+const inSystem = (p, folders, tasks) => kindOf(p, folders) !== "other" || tasks.inWorkFolders(p);
+
+// The index the report reads, with the Inbox as TimeReport says (makeIndex's own rule)
+export function makeIndex(tr, vault, settings = vaultSettings(vault)) {
+    const tasks = useSettings(tr, settings), folders = vaultFolders(settings);
     return tr.makeIndex([...vault.notes].map(([p, { fm }]) => ({
         path: p,
         tags: [].concat(fm.tags ?? []).filter(Boolean),
         parent: tr.parentValue(fm),
         props: fm,
-    })), { kind: kindOf, inSystem });
+    })), { kind: (p) => kindOf(p, folders), ...(tasks ? { inSystem: (p) => inSystem(p, folders, tasks) } : {}) });
 }
 
 // readDailyNotes: YYYY-MM-DD notes in the daily notes folder with a time in them
@@ -192,7 +213,8 @@ export function invoiceNotes(vault, billing, settings = vaultSettings(vault, bil
 }
 
 // Link helpers the app builds from the vault: project links and weekly/monthly link targets
-export function linkers(tr, vault) {
+export function linkers(tr, vault, settings = vaultSettings(vault)) {
+    const folders = vaultFolders(settings);
     const count = new Map();
     for (const p of vault.notes.keys()) count.set(basename(p), (count.get(basename(p)) ?? 0) + 1);
     const link = (p) => {
@@ -200,8 +222,8 @@ export function linkers(tr, vault) {
         return tr.reportLink(target, p);
     };
     const linkTarget = (unit, key) => {
-        const own = vault.notes.has(`${FOLDERS[unit]}/${key}.md`) ? 1 : 0;
-        return (count.get(key) ?? 0) - own > 0 ? `${FOLDERS[unit]}/${key}` : key;
+        const own = vault.notes.has(`${folders[unit]}/${key}.md`) ? 1 : 0;
+        return (count.get(key) ?? 0) - own > 0 ? `${folders[unit]}/${key}` : key;
     };
     return { link, linkTarget };
 }
@@ -219,16 +241,17 @@ export function planBlock(tr, content, block, { heading = true, tables = null } 
 // The notes the report's checks read, as TimeReport.taskNotes gathers them: the daily notes, and every
 // other note in the system or Archive that holds a task ID or a ⭕, 🗃️, 🚩, ⋯ or ↗ link, with kinds `day`,
 // `week`, `month`, `year` by folder and `other` for the rest. With no TaskIds, the daily notes.
-export function checkedNotes(tr, vault) {
+export function checkedNotes(tr, vault, settings = vaultSettings(vault)) {
     const daily = dailyNotes(vault);
+    const tasks = useSettings(tr, settings), folders = vaultFolders(settings);
     const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
     const TaskIds = contexts.get(tr)?.TaskIds;
     if (!TaskIds) return [...byPath.values()];
     const hasId = (text) => text.split("\n").some((l) => TaskIds.CHECKBOX.test(l) && TaskIds.idOf(l));
     const hasMark = (text) => /\[\[[^\]|]+\|\s*(?:⭕|🗃|🚩|⋯|↗)/u.test(text);
     for (const [p, { text }] of vault.notes) {
-        if (byPath.has(p) || !(inSystem(p) || p.startsWith("Archive/")) || !(hasId(text) || hasMark(text))) continue;
-        const kind = kindOf(p);
+        if (byPath.has(p) || !(inSystem(p, folders, tasks) || tr.isArchived(p)) || !(hasId(text) || hasMark(text))) continue;
+        const kind = kindOf(p, folders);
         byPath.set(p, { path: p, kind, ...(kind === "day" ? { date: basename(p) } : {}), text });
     }
     return [...byPath.values()];
@@ -245,13 +268,17 @@ export function addDemoTaskProblems(tr, vault, model, index, checked = checkedNo
 // { model, index, targets: { project, week, month, year }, blocks: Map(path → block),
 //   changes: [{ path, before (null for a new note), after }], errors: [{ path, error }] }
 export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(vault.root), settings = vaultSettings(vault, billing) } = {}) {
-    const index = makeIndex(tr, vault);
-    const checked = checkedNotes(tr, vault);
+    // The run reads the vault's folders from its settings, as TimeReport reads them from Plainday's
+    // (OBS-283)
+    useSettings(tr, settings);
+    const folders = vaultFolders(settings);
+    const index = makeIndex(tr, vault, settings);
+    const checked = checkedNotes(tr, vault, settings);
     const model = tr.attachBilling(tr.build(dailyNotes(vault), index, { checked }), invoiceNotes(vault, billing, settings), index, billing);
     addDemoTaskProblems(tr, vault, model, index, checked);
     // The default freeze, as currentModel reads it from Settings → Plainday → Tables (OBS-238)
     model.tables = tr.tableDefault(settings.tables);
-    const { link, linkTarget } = linkers(tr, vault);
+    const { link, linkTarget } = linkers(tr, vault, settings);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();
     const targets = { project: [], week: [], month: [], year: [] };
@@ -302,10 +329,10 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     for (const unit of ["week", "month", "year"]) {
         const keys = new Set(wanted[unit]);
         for (const p of vault.notes.keys()) {
-            if (p.slice(0, p.lastIndexOf("/")) === FOLDERS[unit] && tr.constructor.PERIOD_NAME[unit].test(basename(p)) && hasBlock(p)) keys.add(basename(p));
+            if (p.slice(0, p.lastIndexOf("/")) === folders[unit] && tr.constructor.PERIOD_NAME[unit].test(basename(p)) && hasBlock(p)) keys.add(basename(p));
         }
         for (const key of [...keys].sort()) {
-            const p = `${FOLDERS[unit]}/${key}.md`;
+            const p = `${folders[unit]}/${key}.md`;
             targets[unit].push(p);
             const block = tr.render(model, { kind: "period", unit, key, linkTarget }, stamp, link);
             const fm = tr.periodFrontmatter(unit, key);

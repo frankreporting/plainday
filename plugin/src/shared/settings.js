@@ -21,6 +21,26 @@ export default class Settings {
     //     own local storage (vaultKey()), keeps two vaults apart on a phone, where Obsidian keeps one
     //     secret storage for every vault. Until OBS-275, nothing syncs from the list; Sync calendars reads
     //     only the range from here.
+    //   - folders (OBS-283): where projects and areas live (`projects`), where Plainday puts a note it
+    //     makes before the note has a project (`inbox`, Plainday's own: Obsidian's Default location for
+    //     new notes decides where notes you make go), where finished projects go (`archive`), the
+    //     weekly, monthly and yearly notes' folders (`week`, `month`, `year`: blank is as before,
+    //     TimeReport.periodFolders' rule), and the error log note (`errorLog`: blank is errorLogPath's
+    //     rule). Every command reads them from here (folders(), errorLogPath()), so no folder is written
+    //     into a command. Changing one moves no notes. The daily notes' folder, name and template are
+    //     the Daily notes plugin's, never asked again here.
+    //   - folders.periodic (OBS-283): who owns the daily, weekly, monthly and yearly notes, which is one
+    //     choice rather than a rule per note type: "daily-notes" (Plainday + the Daily Notes plugin: the
+    //     plugin keeps the daily notes, Plainday the weekly, monthly and yearly folders and templates) or
+    //     "notebook-navigator" (Notebook Navigator's calendar keeps all four, folders and templates, and
+    //     Plainday asks for none of them). "" means neither has been chosen, and periodicSource() reads
+    //     the one in use, so a vault whose calendar is Notebook Navigator's starts there.
+    //   - templates (OBS-283): what each kind of note Plainday makes is made from. The weekly, monthly
+    //     and yearly ones are used in the "daily-notes" source, and blank means Weekly Note, Monthly Note
+    //     or Yearly Note in Templater's template folder. `task` and `log` are the Task and Log templates
+    //     AddTaskNote runs, so no template path is written into a command. Blank means the template's own
+    //     name (TEMPLATE_NAMES) in the vault's template folder, which Templater keeps, else at the top of
+    //     the vault (defaultTemplatePath); the panel shows it. Projects and areas get theirs with OBS-123.
     //
     // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
     // through normalize(), so a value that doesn't read becomes its default and the rest can trust what
@@ -70,6 +90,38 @@ export default class Settings {
     // Where this vault keeps its key for the names of its secrets (app.saveLocalStorage: this vault's,
     // on this device)
     static VAULT_KEY = "plainday-calendar-key";
+    // The system's folders in a new vault (OBS-283), which are the folders the system always used, so a
+    // vault from before changes nothing. TimeReport keeps a copy for where Plainday isn't loaded (the
+    // Raycast timer, the private tests), which settings.test.mjs holds to this one.
+    static FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
+    // What each of the three is called in a message, by its setting's name
+    static FOLDER_NAMES = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
+    // The weekly, monthly and yearly notes, by their unit
+    static PERIODS = ["week", "month", "year"];
+    // Who owns the periodic notes (folders.periodic): the Daily notes plugin with Plainday, or Notebook
+    // Navigator's calendar. "" is neither chosen, which periodicSource() reads from the vault.
+    static SOURCES = ["daily-notes", "notebook-navigator"];
+    static SOURCE_NAMES = { "daily-notes": "Plainday + Daily Notes plugin", "notebook-navigator": "Notebook Navigator" };
+    // What each template a command makes a note from is called. Where it sits is the vault's own
+    // template folder, which Templater keeps, else the top of the vault — never a folder of this
+    // repository's (Brian, 2026-11-17).
+    static TEMPLATE_NAMES = { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
+    // The system's own folder in a vault from before: never a place for the three, or for invoices
+    static SYSTEM_FOLDER = "Config";
+    // The error log note: where it is in a vault from before (it, or the Config folder, is there), and
+    // where it goes in a new one
+    static OLD_ERROR_LOG = "Config/Error Log.md";
+    static NEW_ERROR_LOG = "Plainday error log.md";
+    // The properties Plainday writes itself into each kind of note it makes, which a template's own
+    // would give way to (Settings → Plainday → Note templates warns). The list for weekly, monthly and
+    // yearly notes comes with OBS-120, which makes them in code; until then no row warns. List
+    // properties are combined with a template's, not replaced, so they never warn.
+    /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log", string[]>>} */
+    static WRITES = { week: [], month: [], year: [] };
+    static COMBINED = ["tags", "aliases"];
+    // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
+    // Sync brings such a file
+    static DROPPED_SYNC = "Plainday's settings file, changed by Sync, has Projects, Inbox and Archive folders that don't hold together (one is inside another, or isn't a folder), so it keeps the ones it had. Check them in Settings → Plainday → Folders.";
 
     constructor() {
         this.data = this.defaults();
@@ -80,6 +132,8 @@ export default class Settings {
         // Whether the saved settings have calendars: until they have, the first load reads the range
         // from the Calendar Sync note (settings saved before OBS-282 have none)
         this.calendarsSaved = false;
+        // Whether the saved settings have folders (settings saved before OBS-283 have none)
+        this.foldersSaved = false;
     }
 
     // ---------------------------------------------------------------- pure
@@ -91,6 +145,8 @@ export default class Settings {
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean },
      *   calendars: { range: string, list: Calendar[] },
+     *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
+     *   templates: { week: string, month: string, year: string, task: string, log: string },
      * }}
      * @typedef {{ id: string, name: string, account: string, address: string, on: boolean }} Calendar
      */
@@ -100,6 +156,8 @@ export default class Settings {
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true },
             calendars: { range: Settings.DEFAULT_RANGE, list: [] },
+            folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
+            templates: { week: "", month: "", year: "", task: "", log: "" },
         };
     }
 
@@ -183,11 +241,30 @@ export default class Settings {
         const out = this.defaults();
         const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
         const r = obj(raw), inv = obj(r.invoices), tables = obj(r.tables), editor = obj(r.editor);
+        // The folders first (OBS-283): the invoice folder can't be inside the archive. The three
+        // system folders each read as a folder, or keep their default; three that don't hold together
+        // (one inside another) are the defaults, which do.
+        const folders = obj(r.folders), templates = obj(r.templates);
+        for (const key of /** @type {const} */ (["projects", "inbox", "archive"])) {
+            const read = billing.pathOf(typeof folders[key] === "string" ? folders[key] : null);
+            if (read.folder && !read.error) out.folders[key] = read.folder;
+        }
+        if (this.foldersProblem(out.folders, billing)) Object.assign(out.folders, Settings.FOLDERS);
+        for (const key of /** @type {const} */ (["task", "log"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
+        for (const unit of Settings.PERIODS) {
+            const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
+            // A weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding
+            // one, is as before
+            out.folders[unit] = folder && this.overlap(folder, out.folders) ? "" : folder;
+            out.templates[unit] = this.notePathOf(templates[unit], billing).path;
+        }
+        out.folders.periodic = Settings.SOURCES.includes(folders.periodic) ? folders.periodic : "";
+        out.folders.errorLog = this.notePathOf(folders.errorLog, billing).path;
         out.invoices.name = this.text(inv.name);
         out.invoices.address = this.lines(inv.address);
         out.invoices.terms = this.text(inv.terms);
         out.invoices.paymentNote = this.multiline(inv.paymentNote);
-        out.invoices.folder = billing.folderOf(typeof inv.folder === "string" ? inv.folder : null).folder;
+        out.invoices.folder = billing.folderOf(typeof inv.folder === "string" ? inv.folder : null, out.folders.archive).folder;
         out.invoices.firstNumber = this.firstNumberOf(inv.firstNumber).number ?? Settings.FIRST_NUMBER;
         out.invoices.lastNumber = this.lastNumberOf(inv.lastNumber).number ?? Settings.FIRST_LAST_NUMBER;
         out.tables.freezeRows = this.frozenOf(tables.freezeRows).number;
@@ -206,6 +283,180 @@ export default class Settings {
                 address: this.addressOf(cal.address).address, on: typeof cal.on === "boolean" ? cal.on : true });
         }
         return out;
+    }
+
+    // ---------------------------------------------------------------- folders (OBS-283)
+
+    /**
+     * Who owns the daily, weekly, monthly and yearly notes: the setting, else the calendar the vault
+     * already uses — Notebook Navigator's when its own calendar makes the notes, otherwise the Daily
+     * notes plugin's. The panel shows what this says, so the choice is never hidden.
+     * @returns {"daily-notes" | "notebook-navigator"}
+     */
+    periodicSource() {
+        const set = this.data.folders.periodic;
+        if (set === "daily-notes" || set === "notebook-navigator") return set;
+        return this.navigatorCalendar() ? "notebook-navigator" : "daily-notes";
+    }
+
+    /**
+     * Notebook Navigator's settings when its calendar makes the periodic notes itself, else null. With
+     * its integration set to the Daily notes plugin, that plugin owns them, so this is null.
+     * @returns {Record<string, unknown> | null}
+     */
+    navigatorCalendar() {
+        const nn = /** @type {Record<string, unknown> | undefined} */ (app.plugins?.plugins?.["notebook-navigator"]?.settings);
+        return nn && nn.calendarIntegrationMode === "notebook-navigator" ? nn : null;
+    }
+
+    /**
+     * Where Notebook Navigator's calendar puts a note of `unit` and what names it, from its pattern
+     * ("[days]/YYYY-MM-DD" under its periodic notes folder), and the template it uses: { folder, format,
+     * template }. Null when its calendar isn't what makes them, or it has no pattern for that unit.
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @returns {{ folder: string, format: string, template: string } | null}
+     */
+    navigatorNote(unit) {
+        const nn = this.navigatorCalendar();
+        if (!nn) return null;
+        const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
+        const pattern = typeof nn[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]) : "";
+        if (!pattern) return null;
+        const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/\/+$/, "");
+        if (!base) return null;
+        const at = pattern.lastIndexOf("/");
+        const folders = at < 0 ? "" : pattern.slice(0, at);
+        // Only a folder part that is all [literals] and slashes is a folder: one with date tokens in it
+        // (`YYYY/MM/YYYY-MM-DD`) names a folder per date, which Plainday can't follow, so it reads as
+        // none and the folder falls back as it did before (OBS-283)
+        if (folders.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") !== "") return null;
+        // The folder is those [literals] unwrapped, under the base; the name is the rest, as moment
+        // reads it (its own [literals] stay)
+        const dir = folders.replace(/\[([^\]]*)\]/g, "$1");
+        const format = at < 0 ? pattern : pattern.slice(at + 1);
+        const template = typeof nn[`calendarCustom${key}Template`] === "string" ? String(nn[`calendarCustom${key}Template`]) : "";
+        return { folder: [base, dir].filter(Boolean).join("/"), format, template };
+    }
+
+    /**
+     * Projects, the Inbox and the archive, as they're set
+     * @returns {{ projects: string, inbox: string, archive: string }}
+     */
+    folders() {
+        const { projects, inbox, archive } = this.data.folders;
+        return { projects, inbox, archive };
+    }
+
+    /**
+     * What's wrong with a set of the three system folders, or null: the first that doesn't read, is the
+     * top of the vault, is inside the system's own folder, or holds another or sits inside it (or is
+     * it), with the one it meets. `first`, the one you're changing, is checked first.
+     * @param {{ projects: string, inbox: string, archive: string }} folders
+     * @param {{ pathOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
+     * @param {"projects" | "inbox" | "archive" | null} [first]
+     * @returns {{ key: "projects" | "inbox" | "archive", problem: string } | null}
+     */
+    foldersProblem(folders, billing = plainday.Billing, first = null) {
+        /** @type {("projects" | "inbox" | "archive")[]} */
+        const all = ["projects", "inbox", "archive"];
+        const keys = first ? [first, ...all.filter((k) => k !== first)] : all;
+        const lower = (f) => String(f).toLowerCase();
+        for (const key of keys) {
+            const read = billing.pathOf(folders[key]);
+            if (read.error) return { key, problem: `it ${read.error}` };
+            if (!read.folder) return { key, problem: "a folder is needed: notes can't go at the top of the vault" };
+            if (lower(read.folder.split("/")[0]) === lower(Settings.SYSTEM_FOLDER)) return { key, problem: `it's inside ${Settings.SYSTEM_FOLDER}, the system's own folder` };
+            for (const other of all) {
+                if (other === key) continue;
+                const a = lower(read.folder), b = lower(folders[other]);
+                const name = Settings.FOLDER_NAMES[other] === folders[other] ? Settings.FOLDER_NAMES[other] : `${Settings.FOLDER_NAMES[other]} (${folders[other]})`;
+                if (a === b) return { key, problem: `it's the ${Settings.FOLDER_NAMES[other]} folder already` };
+                if (a.startsWith(`${b}/`)) return { key, problem: `it's inside ${name}` };
+                if (b.startsWith(`${a}/`)) return { key, problem: `${name} is inside it` };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Where `folder` meets the system's own folders: the first of Config, Projects, the Inbox and the
+     * archive that it's inside, holds, or is, as { name, folder, how: "in" | "holds" | "is" }; else null
+     * @param {string} folder
+     * @param {{ projects: string, inbox: string, archive: string }} [folders]
+     * @returns {{ name: string, folder: string, how: "in" | "holds" | "is" } | null}
+     */
+    overlap(folder, folders = this.data.folders) {
+        const a = String(folder).toLowerCase();
+        /** @type {[string, string][]} */
+        const named = [[Settings.SYSTEM_FOLDER, Settings.SYSTEM_FOLDER], ...(/** @type {const} */ (["projects", "inbox", "archive"])).map((k) => /** @type {[string, string]} */ ([Settings.FOLDER_NAMES[k], folders[k]]))];
+        for (const [name, f] of named) {
+            const b = String(f).toLowerCase();
+            if (!b) continue;
+            if (a === b) return { name, folder: f, how: "is" };
+            if (a.startsWith(`${b}/`)) return { name, folder: f, how: "in" };
+            if (b.startsWith(`${a}/`)) return { name, folder: f, how: "holds" };
+        }
+        return null;
+    }
+
+    /**
+     * A note's path in a setting (the error log note, a template): { path, error }, with ".md" added when
+     * it's left off and "" for none; it reads as a folder does
+     * @param {unknown} raw
+     * @param {{ pathOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
+     * @returns {{ path: string, error: string | null }}
+     */
+    notePathOf(raw, billing = plainday.Billing) {
+        const read = billing.pathOf(typeof raw === "string" ? raw : raw === undefined || raw === null ? null : raw);
+        if (read.error) return { path: "", error: read.error.replace("isn't a folder in the vault", "isn't a note in the vault") };
+        if (!read.folder) return { path: "", error: null };
+        return { path: /\.md$/i.test(read.folder) ? `${read.folder.slice(0, -3)}.md` : `${read.folder}.md`, error: null };
+    }
+
+    /**
+     * Where a template of `name` sits when its field is blank: in the vault's own template folder, which
+     * Templater keeps, else at the top of the vault. The panel shows it, and the commands use it.
+     * @param {"task" | "log" | "week" | "month" | "year"} kind
+     * @returns {string}
+     */
+    defaultTemplatePath(kind) {
+        const templater = /** @type {{ settings?: { templates_folder?: string } } | null} */ (app.plugins?.getPlugin?.("templater-obsidian") ?? null);
+        const folder = String(templater?.settings?.templates_folder ?? "").replace(/^\/+|\/+$/g, "");
+        return `${folder ? `${folder}/` : ""}${Settings.TEMPLATE_NAMES[kind]}.md`;
+    }
+
+    /**
+     * The error log note: the setting's, else the log already made (Config/Error Log.md, then Plainday
+     * error log.md), else Config/Error Log.md in a vault from before (the Config folder is there), else
+     * Plainday error log.md at the top of the vault
+     * @returns {string}
+     */
+    errorLogPath() {
+        return this.data.folders.errorLog || this.defaultErrorLogPath();
+    }
+
+    // The error log note a blank setting means, which the panel shows: a log already made stays where it
+    // is (the old one first), so a Config folder that turns up later doesn't start a second log
+    defaultErrorLogPath() {
+        if (app.vault.getFileByPath(Settings.OLD_ERROR_LOG)) return Settings.OLD_ERROR_LOG;
+        if (app.vault.getFileByPath(Settings.NEW_ERROR_LOG)) return Settings.NEW_ERROR_LOG;
+        return app.vault.getFolderByPath(Settings.SYSTEM_FOLDER) ? Settings.OLD_ERROR_LOG : Settings.NEW_ERROR_LOG;
+    }
+
+    /**
+     * What the Note templates section warns under a template (OBS-80, 11/13): the properties `props`
+     * (the template's own, by name) sets that Plainday writes itself into a note of that kind, or ""
+     * @param {string[]} props
+     * @param {string[]} writes
+     * @returns {string}
+     */
+    templateWarning(props, writes) {
+        const ours = new Set(writes.map((w) => w.toLowerCase()).filter((w) => !Settings.COMBINED.includes(w)));
+        const both = [...new Set(props.filter((p) => ours.has(String(p).toLowerCase())))];
+        if (!both.length) return "";
+        const named = both.map((p) => `\`${p}\``);
+        const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+        return `Your template also sets ${list}; Plainday writes its own.`;
     }
 
     // ---------------------------------------------------------------- calendars (OBS-282)
@@ -507,7 +758,7 @@ export default class Settings {
                 s.address = this.lines(get("address"));
                 s.terms = this.text(get("terms"));
                 s.paymentNote = this.multiline(typeof get("payment_note") === "string" ? get("payment_note") : this.text(get("payment_note")));
-                const folder = billing.folderOf(get("folder"));
+                const folder = billing.folderOf(get("folder"), settings.folders.archive);
                 if (folder.error) bad.push(`\`folder\` in Invoice Settings (${shown(get("folder"))})`);
                 else s.folder = folder.folder;
                 const last = this.lastNumberOf(get("last_number"));
@@ -560,7 +811,8 @@ export default class Settings {
      * A pasted block: { settings, links, withCalendars }, or { error } when it isn't a copy of
      * Plainday's settings. `links` holds the copy's link for each of its calendars that had one, by the
      * calendar's ID; `withCalendars` is false for a copy made before there were calendars, which a paste
-     * leaves this device's as they are.
+     * leaves this device's as they are. A copy made before there were folders (OBS-283) carries this
+     * device's folders and templates, so a paste leaves them as they are too.
      * @param {string} text
      * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
      * @returns {{ settings: ReturnType<Settings["defaults"]>, links: Record<string, string>, withCalendars: boolean, error?: undefined } | { error: string, settings?: undefined, links?: undefined, withCalendars?: undefined }}
@@ -580,7 +832,12 @@ export default class Settings {
             const link = given[id];
             if (typeof link === "string" && this.isLink(link)) links[id] = link.trim();
         }
-        return { settings, links, withCalendars: this.hasCalendars(raw) };
+        // A copy from before folders is read with this device's folders and templates, and one whose
+        // Projects, Inbox and archive don't hold together with this device's three, so its invoice folder
+        // is checked against this device's archive
+        const read = !this.hasFolders(raw) ? this.normalize({ ...raw, folders: this.data.folders, templates: this.data.templates }, billing)
+            : this.foldersDropped(raw, settings, billing) ? this.normalize(this.withFolders(raw, this.folders()), billing) : settings;
+        return { settings: read, links, withCalendars: this.hasCalendars(raw) };
     }
 
     /**
@@ -607,7 +864,9 @@ export default class Settings {
         this.unreadable = raw === undefined;
         this.saved = raw !== null;
         this.calendarsSaved = this.hasCalendars(raw);
+        this.foldersSaved = this.hasFolders(raw);
         this.data = this.normalize(raw ?? {});
+        if (this.foldersDropped(raw, this.data)) new Notice(this.droppedNotice(), 0);
         if (this.unreadable) {
             new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
         }
@@ -618,6 +877,32 @@ export default class Settings {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
 
+    // What loading says when the saved Projects, Inbox or archive didn't read: the folders it uses instead
+    droppedNotice() {
+        const { projects, inbox, archive } = this.folders();
+        return `Plainday's Projects, Inbox and Archive folders in its settings file don't hold together (one is inside another, or isn't a folder), so it's using Projects \`${projects}\`, Inbox \`${inbox}\` and Archive \`${archive}\`. Set them in Settings → Plainday → Folders.`;
+    }
+
+    // Whether Projects, the Inbox or the archive a data file names didn't survive normalize(): one that
+    // doesn't read, or three that don't hold together, which went back to the defaults
+    foldersDropped(raw, settings, billing = plainday.Billing) {
+        const f = typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null ? raw.folders : null;
+        if (!f) return false;
+        return /** @type {const} */ (["projects", "inbox", "archive"]).some((k) => typeof f[k] === "string" && f[k].trim() !== "" && billing.pathOf(f[k]).folder !== settings.folders[k]);
+    }
+
+    // A data file or a copy with `three` (Projects, the Inbox and the archive) in place of its own
+    withFolders(raw, three) {
+        const r = typeof raw === "object" && raw !== null ? raw : {};
+        const f = typeof r.folders === "object" && r.folders !== null ? r.folders : {};
+        return { ...r, folders: { ...f, ...three } };
+    }
+
+    // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read
+    hasFolders(raw) {
+        return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null);
+    }
+
     // Writes the settings as they are now, through normalize(), so only the keys a setting has reach
     // the file: never a link, even one something put on a calendar in memory
     async save() {
@@ -626,6 +911,7 @@ export default class Settings {
         await plugin.saveData(this.normalize(this.data));
         this.saved = true;
         this.calendarsSaved = true;
+        this.foldersSaved = true;
         this.unreadable = false;
     }
 
@@ -681,7 +967,8 @@ export default class Settings {
     // Sync changed the data file: read it again, and apply the editor switch. A file caught mid-write (or
     // not downloaded yet) reads as undefined: the settings in memory stay until it reads. The last invoice
     // number stays the higher of the two. A file with no calendars, from a device on a release before
-    // them, keeps this device's, and is written again with them, so they're there at the next start.
+    // them, keeps this device's, and is written again with them, so they're there at the next start;
+    // the same for folders and templates (OBS-283).
     async reload() {
         const plugin = plainday.plugin;
         if (!plugin) return;
@@ -689,14 +976,29 @@ export default class Settings {
         if (raw === undefined) return;
         this.unreadable = false;
         this.saved = raw !== null;
-        const hadCalendars = this.calendarsSaved;
-        this.calendarsSaved = this.hasCalendars(raw);
+        const hadCalendars = this.calendarsSaved, hadFolders = this.foldersSaved;
+        const nowCalendars = this.hasCalendars(raw), nowFolders = this.hasFolders(raw);
+        // The same for folders and templates, from a device on a release before them (OBS-283): read with
+        // this device's, so its invoice folder is checked against this device's archive
+        const keepFolders = raw !== null && !nowFolders && hadFolders;
+        const given = keepFolders ? { ...raw, folders: this.data.folders, templates: this.data.templates } : raw ?? {};
         // As a paste does: an older file from another device never lowers the number given here
-        const next = this.pasted(this.normalize(raw ?? {}));
-        const keep = raw !== null && !this.calendarsSaved && hadCalendars;
+        const next = this.pasted(this.normalize(given));
+        const keep = raw !== null && !nowCalendars && hadCalendars;
         if (keep) next.calendars = this.data.calendars;
-        this.data = next;
-        if (keep) await this.save();
+        // Projects, the Inbox and the archive that don't hold together (a file edited by hand, two devices'
+        // changes merged) keep this device's, with a notice, rather than going back to the defaults: read
+        // again with them, so the other folders and the invoice folder are checked against them, and
+        // saved, so the next start doesn't read the file that didn't hold together
+        const dropped = this.foldersDropped(given, next);
+        const kept = dropped ? this.pasted(this.normalize(this.withFolders(given, this.folders()))) : next;
+        if (dropped && keep) kept.calendars = this.data.calendars;
+        this.data = kept;
+        if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
+        // save() sets both flags once the write lands; until then they stay as they were, so a write
+        // that fails can't let the next reload take the defaults over this device's (OBS-283)
+        if (keep || keepFolders || dropped) await this.save();
+        else { this.calendarsSaved = nowCalendars; this.foldersSaved = nowFolders; }
         await plainday.ListCursor?.invoke();
     }
 

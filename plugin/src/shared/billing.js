@@ -341,13 +341,27 @@ export default class Billing {
 
     // ---------------------------------------------------------------- where invoices are filed (OBS-112)
 
-    // Invoice Settings' `folder` as a vault path: { folder, error }, with "" for none. Outer and
-    // doubled slashes go. A part that's blank, `.`, `..`, starts with a dot or has spaces around it,
-    // a character a link or a file name can't hold, a value that isn't one line of text, or a folder
-    // inside `Config` or `Archive` is an error, so an invoice (or the Invoices base, which
+    // The invoice folder as a vault path: { folder, error }, with "" for none. It reads as any folder
+    // setting does (pathOf), and can't be inside `Config` or the archive (`archive`, the archive folder
+    // as Settings → Plainday → Folders has it, OBS-283), so an invoice (or the Invoices base, which
     // UpdateObsidianPM places the same way) never lands outside the vault, in a hidden folder, or
     // where a base can't list it.
-    folderOf(raw) {
+    folderOf(raw, archive = null) {
+        const read = this.pathOf(raw);
+        if (!read.folder) return read;
+        const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
+        const top = read.folder.split("/")[0], lower = read.folder.toLowerCase(), a = String(archive ?? "").toLowerCase();
+        // The system's folder and the archive are often excluded, and a base doesn't list what's
+        // excluded. `taken` names it, for the panel's message.
+        if (top.toLowerCase() === "config") return { folder: "", error: `is inside ${top}, where invoices don't belong (${shown})`, taken: "Config" };
+        if (a && (lower === a || lower.startsWith(`${a}/`))) return { folder: "", error: `is inside ${archive}, where invoices don't belong (${shown})`, taken: archive };
+        return read;
+    }
+
+    // Any folder setting as a vault path (OBS-283): { folder, error }, with "" for none. Outer and
+    // doubled slashes go. A part that's blank, `.`, `..`, starts with a dot or has spaces around it, a
+    // character a link or a file name can't hold, or a value that isn't one line of text is an error.
+    pathOf(raw) {
         if (raw === undefined || raw === null) return { folder: "", error: null };
         const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
         const bad = { folder: "", error: `isn't a folder in the vault (${shown})` };
@@ -357,11 +371,11 @@ export default class Billing {
         const folder = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
         if (!folder) return { folder: "", error: null };
         const parts = folder.split("/");
-        if (/[\\:*?"<>|[\]#^]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
-        // The system's folder and the archive are often excluded, and a base doesn't list what's excluded
-        // `taken` names it, for the panel's message
-        const taken = { config: "Config", archive: "Archive" }[parts[0].toLowerCase()];
-        if (taken) return { folder: "", error: `is inside ${parts[0]}, where invoices don't belong (${shown})`, taken };
+        // `[ ] # ^` are allowed in a note or folder name but break a link to it, and Plainday writes
+        // links to everything it files, so a folder holding one is refused — said plainly, since such a
+        // folder can be in the vault (OBS-283)
+        if (/[[\]#^]/.test(folder)) return { folder: "", error: `holds a character Plainday can't link to, one of [ ] # ^ (${shown})` };
+        if (/[\\:*?"<>|]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
         return { folder, error: null };
     }
 

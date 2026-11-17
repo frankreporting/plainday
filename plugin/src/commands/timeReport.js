@@ -92,7 +92,9 @@ export default class TimeReport {
     static OLD_HEADING = "## Time tracking";
     // A project note's By Week table turns into By Month once its entries span more weeks than this
     static WEEKS_MAX = 13;
-    static ARCHIVE = "Archive/";
+    // Projects, the Inbox and the archive where Plainday's settings aren't loaded (the Raycast timer, the
+    // private tests): Settings.FOLDERS, which settings.test.mjs holds this to (OBS-283)
+    static FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
     // What each of the Planner's folders holds, for makeIndex
     static PLANNER_KIND = { days: "day", weeks: "week", months: "month", years: "year" };
     static QUOTE_MAX = 80;
@@ -989,9 +991,9 @@ export default class TimeReport {
             : l.disputed ? `names ${name(l.lineProject)} and another project, so it counts toward neither`
             : `names and counts toward ${name(l.lineProject)}`;
         const of = l.log ? `a follow-up from the log ${name(l.note)}` : `a subtask of ${name(l.note)}`;
-        const filed = l.noteProject ? `which is filed in ${name(l.noteProject)}` : index.inInbox(l.note) ? "which waits in the Inbox" : "which is in no project";
+        const filed = l.noteProject ? `which is filed in ${name(l.noteProject)}` : index.inInbox(l.note) ? `which waits in ${this.inboxWords()}` : "which is in no project";
         const set = !l.noteProject ? "Take the line's ⭕ off" : l.lineProject ? `Change the line's ⭕ to ${name(l.noteProject)}` : `Add [[${this.basename(l.noteProject)}|${this.linkMark(l.noteProject, index)}]] to the line`;
-        const fix = this.isArchived(l.note) ? `${set} by hand: the ${it} is in Archive, where no command works`
+        const fix = this.isArchived(l.note) ? `${set} by hand: the ${it} is in ${this.archiveWords()}, where no command works`
             : l.noteProject && this.isFinishedProject(l.noteProject, index) ? `${set} by hand: a finished project isn't in AddProjectLink's menu`
             : `Choose one project by running AddProjectLink on one of its task lines or MoveToProject on the ${l.log ? "log" : "task note"}`;
         return `${names}, but it's ${of}, ${filed}. ${fix}`;
@@ -1143,9 +1145,9 @@ export default class TimeReport {
         const head = `belongs to a task whose deadlines differ, ${dates}`;
         // DueDate runs only on a line in the system
         const live = t.dates.some(({ where }) => where.some((w) => !w.due && !this.isArchived(w.path)));
-        if (!live) return `${head}: change ${archived} by hand, since DueDate doesn't change a note in Archive`;
+        if (!live) return `${head}: change ${archived} by hand, since DueDate doesn't change a note in ${this.archiveWords()}`;
         const then = [
-            ...(archived ? [`change ${archived} by hand, since DueDate doesn't change a note in Archive`] : []),
+            ...(archived ? [`change ${archived} by hand, since DueDate doesn't change a note in ${this.archiveWords()}`] : []),
             ...(odd.length ? [`set ${and(odd.map(whose))} by hand, since DueDate doesn't change a \`due\` written another way than \`due:\` and a date`] : []),
         ];
         return `${head}: run DueDate on any of its lines to give it one${then.length ? `, then ${then.join(", and ")}` : ""}`;
@@ -1178,11 +1180,11 @@ export default class TimeReport {
     // frontmatter and inline; props is the frontmatter, for rate and caps). `area` stands in for
     // `parent` on a note that has none, as in an older note's frontmatter. `kind`, `inSystem` and `inInbox`
     // say what a path is; by default a note in the Planner's folders is periodic, every note is in the
-    // system, and an `Inbox` folder is the Inbox.
+    // system, and the Inbox is the folder Settings → Plainday → Folders names (OBS-283).
     makeIndex(notes, {
         kind = (path) => TimeReport.PLANNER_KIND[path.match(/(?:^|\/)Planner\/(days|weeks|months|years)\/[^/]+$/)?.[1]] ?? "other",
         inSystem = () => true,
-        inInbox = (path) => path.startsWith("Inbox/"),
+        inInbox = (path) => this.inFolder(path, this.systemFolders().inbox),
     } = {}) {
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const byLower = new Map();
@@ -1219,8 +1221,29 @@ export default class TimeReport {
 
     // ---------------------------------------------------------------- the model
 
+    // Projects, the Inbox and the archive, as Settings → Plainday → Folders has them (OBS-283)
+    systemFolders() {
+        return plainday?.Settings?.get?.()?.folders ?? TimeReport.FOLDERS;
+    }
+
+    // Whether `path` is inside `folder`, a vault path with no slash at its end
+    inFolder(path, folder) {
+        return !!path && !!folder && path.startsWith(`${folder}/`);
+    }
+
     isArchived(path) {
-        return !!path && path.startsWith(TimeReport.ARCHIVE);
+        return this.inFolder(path, this.systemFolders().archive);
+    }
+
+    // The Inbox and the archive in a message, as they're set: "the Inbox" while it's called Inbox, else
+    // its folder ("Waiting"); the archive's folder ("Archive", "Old")
+    inboxWords() {
+        const inbox = this.systemFolders().inbox;
+        return inbox === TimeReport.FOLDERS.inbox ? "the Inbox" : inbox;
+    }
+
+    archiveWords() {
+        return this.systemFolders().archive;
     }
 
     // Whether a note sits in a project's or area's logs folder, which makes it a log, as AddTaskNote says
@@ -2215,7 +2238,7 @@ export default class TimeReport {
         const at = `${c.kind === "day" ? `[[${c.date}|${this.shortDate(c.date)}]]` : this.noteLink(c.path)} line ${c.line}: \`${quote(c.text)}\``;
         if (c.links) return `- ${at} names ${c.links.map(link).join(" and ")}, so its time isn't counted on either; take the wrong link off`;
         const [kind, it] = c.event ? ["log", "log"] : ["task note", "note"];
-        if (c.inbox) return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} waits in the Inbox; run AddProjectLink on the line, or MoveToProject on the ${it}`;
+        if (c.inbox) return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} waits in ${this.inboxWords()}; run AddProjectLink on the line, or MoveToProject on the ${it}`;
         return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} is filed under ${link(c.noteProject)}, so its time isn't counted on either; run AddProjectLink on the line, which moves the ${it} too, or MoveToProject on the ${it}`;
     }
 
@@ -3273,7 +3296,7 @@ export default class TimeReport {
         const T = tasks.constructor;
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
         const add = async (file) => {
-            if (!byPath.has(file.path) && (!tasks.ignored(file) || file.path.startsWith(T.ARCHIVE ?? "Archive/"))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
+            if (!byPath.has(file.path) && (!tasks.ignored(file) || this.isArchived(file.path))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
         };
         for (const lines of tasks.allIds().values()) for (const { file } of lines) await add(file);
         // A forward date is only checked on a line outside the periodic notes (TaskIds.check)
@@ -3429,9 +3452,9 @@ export default class TimeReport {
                 const head = `is the same task as ${others}, and they don't name the same project`;
                 const named = projects.filter(Boolean);
                 if (named.length && named.every((p) => this.isFinishedProject(p, index))) return `${head}: give its lines the task's one project by hand, since a finished project isn't in AddProjectLink's menu`;
-                const run = `run AddProjectLink on one of its lines${kept ? " outside Archive" : ""} and pick the task's one project`;
+                const run = `run AddProjectLink on one of its lines${kept ? ` outside ${this.archiveWords()}` : ""} and pick the task's one project`;
                 if (!kept) return `${head}: ${run}`;
-                const old = `take the ID off its line in ${kept} by hand, since no command changes a note in Archive`;
+                const old = `take the ID off its line in ${kept} by hand, since no command changes a note in ${this.archiveWords()}`;
                 return `${head}: ${live.size > 1 ? `${run}, then ${old}` : old}`;
             }
             case "open": {
@@ -3500,7 +3523,7 @@ export default class TimeReport {
 
     // The invoice folder in Settings → Plainday (OBS-112, OBS-281), or "" before one is chosen
     invoiceFolder(billing) {
-        return billing.folderOf(plainday?.Settings?.get().invoices.folder ?? null).folder;
+        return billing.folderOf(plainday?.Settings?.get().invoices.folder ?? null, this.systemFolders().archive).folder;
     }
 
     // A note's tags from its cache, frontmatter and inline, lowercased, without the #
@@ -3515,23 +3538,24 @@ export default class TimeReport {
 
     // weeks/months/years folders: Notebook Navigator's periodic notes folder plus the folder part of
     // its week/month/year pattern ("[weeks]/gggg[w]ww" → "Reference/Planner/weeks"); without
-    // that, weeks/months/years beside the daily notes folder. JumpToDate calls it outside a report
-    // run too, before `this.schedule` is set.
-    periodFolders() {
-        const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
-        const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
+    // that, weeks/months/years beside the daily notes folder. A folder set in Settings → Plainday →
+    // Folders comes first (OBS-283); blank is this rule (`asBefore`, which the panel shows). JumpToDate
+    // calls it outside a report run too, before `this.schedule` is set.
+    periodFolders({ asBefore = false } = {}) {
+        const settings = asBefore ? null : plainday?.Settings;
+        const navigator = settings?.periodicSource?.() === "notebook-navigator";
+        const set = navigator ? null : settings?.get?.()?.folders;
+        // Beside the daily notes folder, which is where the Planner's folders sit: the name a blank
+        // setting means, and what the panel shows as its placeholder
         const daily = (this.schedule ?? plainday.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
-        const folderOf = (pattern, fallback) => {
-            const p = String(pattern ?? "");
-            const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null;
-            if (base && dir && dir.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") === "") return `${base}/${dir.replace(/\[([^\]]*)\]/g, "$1")}`;
-            return `${planner ? planner + "/" : ""}${fallback}`;
-        };
+        const beside = (fallback) => `${planner ? `${planner}/` : ""}${fallback}`;
+        /** @param {"week" | "month" | "year"} unit @param {string} fallback */
+        const folderOf = (unit, fallback) => (navigator ? settings.navigatorNote(unit)?.folder : null) || beside(fallback);
         return {
-            week: folderOf(nn?.calendarCustomWeekPattern, "weeks"),
-            month: folderOf(nn?.calendarCustomMonthPattern, "months"),
-            year: folderOf(nn?.calendarCustomYearPattern, "years"),
+            week: set?.week || folderOf("week", "weeks"),
+            month: set?.month || folderOf("month", "months"),
+            year: set?.year || folderOf("year", "years"),
         };
     }
 
@@ -3658,8 +3682,8 @@ export default class TimeReport {
             isLog: (path) => this.inLogsFolder(path) || tagged(path, "log"),
             kind,
             // TaskIds.inSystem's test, through the `kind` above, so it uses the Schedule this run began with
-            inSystem: (path) => !tasks || kind(path) !== "other" || tasks.constructor.FOLDERS.some((f) => path.startsWith(`${f}/`)),
-            inInbox: (path) => !!tasks && path.startsWith(`${tasks.constructor.INBOX}/`),
+            inSystem: (path) => !tasks || kind(path) !== "other" || tasks.inWorkFolders(path),
+            inInbox: (path) => !!tasks && this.inFolder(path, this.systemFolders().inbox),
             paths: () => app.vault.getMarkdownFiles().map((f) => f.path),
             parentLink: (path) => this.parentValue(cacheOf(path)?.frontmatter ?? {}),
             props: (path) => cacheOf(path)?.frontmatter ?? {},

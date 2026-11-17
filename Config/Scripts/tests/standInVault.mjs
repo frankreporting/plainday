@@ -18,6 +18,24 @@ export const MONTHS = ["January", "February", "March", "April", "May", "June", "
 export const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const weekKey = (date) => new (vm.runInContext(src("timeReport") + "\n;TimeReport", vm.createContext({})))().weekKey(date);
 
+// Plainday's folders as the classes read them (OBS-283): the real Settings, with `folders` over its
+// defaults, put on `plainday` where it has none of its own. Returns `plainday`.
+export function withFolders(plainday, folders = {}) {
+    const context = vm.createContext({
+        plainday,
+        // Enough of the app for Settings: the vault, and Templater's template folder, which every
+        // template default sits in (OBS-283)
+        app: {
+            vault: { getFileByPath: () => null, getFolderByPath: () => null },
+            plugins: { getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) },
+        },
+        URL,
+    });
+    plainday.Settings ??= new (vm.runInContext(`${src("settings")}\n;Settings`, context))();
+    Object.assign(plainday.Settings.get().folders, folders);
+    return plainday;
+}
+
 // Dates as "YYYY-MM-DD", moved by days, and their weekday (0 is Sunday)
 export const utc = (date) => { const [y, m, d] = date.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 export const plus = (date, n) => new Date(utc(date).getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -110,7 +128,7 @@ export const parseCache = (text) => {
 // the previous command's writes. create and process write disk and live text together; process
 // replaces the open note's editor text, so unsaved editor edits are lost as in a real conflict.
 // create throws on an existing path; a folder exists once a note lives under it or it was created.
-export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null }) {
+export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null, folders: setFolders = {} }) {
     const vault = new Map(Object.entries(notes));
     const folders = new Map();
     const root = { path: "/", name: "", children: [], isRoot: () => true, parent: null };
@@ -185,7 +203,11 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     const app = {
         internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: `${PLANNER}/days`, format: "YYYY-MM-DD" } } } } },
-        plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {}, getPlugin: () => null },
+        // Templater keeps the vault's template folder, which every template default sits in (OBS-283)
+        plugins: {
+            plugins: nn ? { "notebook-navigator": { settings: nn } } : {},
+            getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null),
+        },
         workspace: { getActiveViewOfType: () => view, getActiveFile: () => view.file, getLeavesOfType: (t) => (t === "markdown" && view.file ? [{ view }] : []), activeLeaf: { view } },
         foldManager: { load: () => null, save: async () => {} },
         metadataCache: {
@@ -274,6 +296,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {
+        Settings: make("settings", "Settings"),
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
@@ -281,6 +304,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
+    // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's
+    Object.assign(plainday.Settings.get().folders, setFolders);
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);
     plainday.TaskChange.ask = async (weighed, ...rest) => {
         const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => plainday.TaskChange.dayName(l.file)))].join(", ");
@@ -475,8 +500,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // the live text says (`vault`, not `disk`: the notes as you'd see them open, which is what must agree;
     // disk lags by design), projects read as the time report reads them
     function checked() {
-        const T = plainday.TaskIds.constructor;
-        const read = (p) => !p.startsWith("Config/") && (plainday.TaskIds.inSystem(fileOf(p)) || p.startsWith(T.ARCHIVE));
+        const read = (p) => !p.startsWith("Config/") && (plainday.TaskIds.inSystem(fileOf(p)) || plainday.TaskIds.inArchive(p));
         return [...vault.keys()].filter(read).map((p) => ({ path: p, kind: plainday.TaskIds.kindOf(fileOf(p)), text: vault.get(p) }));
     }
     function checkAll() {

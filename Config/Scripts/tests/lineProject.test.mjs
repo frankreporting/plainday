@@ -571,10 +571,11 @@ test("a ⭕ with its note in the Inbox bills normally: not in Fix first, and its
     assert.ok(sheet.split("\n").some((l) => /^\|\s*⚠️\s*\|/.test(l) && l.includes("9:00am - 9:20am")), sheet);
 });
 
-test("the Inbox is named once: the index says what waits there", () => {
+test("the Inbox is named once, in Plainday's settings: the index says what waits there (OBS-283)", () => {
     assert.equal(TimeReport.INBOX, undefined);
-    assert.equal(TaskIds.INBOX, "Inbox");
-    assert.ok(TaskIds.FOLDERS.includes(TaskIds.INBOX));
+    assert.equal(TaskIds.INBOX, undefined);
+    assert.equal(TaskIds.FOLDERS, undefined);
+    assert.equal(tr.makeIndex(VAULT).inInbox("Inbox/Desk lamp.md"), true, "where Plainday's settings aren't loaded, the default Inbox");
     const ix = tr.makeIndex(VAULT, { inSystem: SYSTEM, inInbox: () => false });
     assert.deepEqual(plain(tr.ownNoteProblems([{ path: DAY, date: "2026-09-17", text: "- [x] Lamp [[Kestrel|⭕]] [[Desk lamp|⋯]]" }], ix)), []);
 });

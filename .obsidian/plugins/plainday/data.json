@@ -21,5 +21,22 @@
   "calendars": {
     "range": "2 months",
     "list": []
+  },
+  "folders": {
+    "projects": "Projects",
+    "inbox": "Inbox",
+    "archive": "Archive",
+    "periodic": "",
+    "week": "",
+    "month": "",
+    "year": "",
+    "errorLog": ""
+  },
+  "templates": {
+    "week": "",
+    "month": "",
+    "year": "",
+    "task": "",
+    "log": ""
   }
 }

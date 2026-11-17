@@ -16,9 +16,16 @@
 // leaving it the field goes back to the saved value.
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
-// Invoices, Tables (a switch, then the two freezes while it's on), Editor, and Calendars (OBS-282): Add
-// calendar, the sync range and the help, then a group for each account with its calendars. OBS-283 adds
-// Folders.
+// Folders and Note templates (OBS-283), Invoices, Tables (a switch, then the two freezes while it's on),
+// Editor, and Calendars (OBS-282): Add calendar, the sync range and the help, then a group for each
+// account with its calendars.
+//
+// Folders: Projects, the Inbox and the archive, each a real folder, none inside another; the daily
+// notes' folder and name, shown from the Daily notes plugin, which keeps them; the weekly, monthly and
+// yearly notes' folders, and the error log note, blank for what Plainday did before, which the
+// placeholder shows. Note templates: the daily note's, shown the same way, and the weekly, monthly and
+// yearly notes', each with a line when the template sets a property Plainday writes itself. Changing a
+// folder moves no notes.
 //
 // A calendar's link is typed into a masked field, checked by downloading it once (CalendarFeed.check),
 // and kept only in this device's secret storage (Settings.storeLink): never in a setting, a notice or
@@ -73,20 +80,24 @@ const field = (name, desc, draw) => ({
 });
 
 /**
- * Folders to choose an invoice folder from: the vault's own that the field would take, with `Invoices`
- * first while there's none. The folder typed exactly comes first, then those that start with it, then
- * those that hold it. Leaving the field while the list is open takes the folder it highlights.
+ * Folders to choose a folder setting from: the vault's own that the field would take, with `suggested`
+ * (`Invoices` for the invoice folder) first while there's none. The folder typed exactly comes first,
+ * then those that start with it, then those that hold it. Leaving the field while the list is open takes
+ * the folder it highlights.
  * @extends {AbstractInputSuggest<string>}
  */
 class FolderSuggest extends AbstractInputSuggest {
     /**
      * @param {import("obsidian").App} app @param {HTMLInputElement} inputEl @param {string} suggested
      * @param {(folder: string) => boolean} takes
+     * @param {(() => (folder: string) => boolean) | null} [prepare] what the field takes, made once per
+     *   query (OBS-283: its checks read the Planner's folders once, not once per folder)
      */
-    constructor(app, inputEl, suggested, takes) {
+    constructor(app, inputEl, suggested, takes, prepare = null) {
         super(app, inputEl);
         this.suggested = suggested;
         this.takes = takes;
+        this.prepare = prepare;
         // Each folder the list shows, by its row
         /** @type {Map<HTMLElement, string>} */
         this.drawn = new Map();
@@ -95,8 +106,9 @@ class FolderSuggest extends AbstractInputSuggest {
     /** @param {string} query @returns {string[]} */
     getSuggestions(query) {
         const q = query.trim().toLowerCase();
-        const folders = this.app.vault.getAllFolders(false).map((f) => f.path).filter((f) => this.takes(f)).sort((a, b) => a.localeCompare(b));
-        const all = folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
+        const takes = this.prepare ? this.prepare() : this.takes;
+        const folders = this.app.vault.getAllFolders(false).map((f) => f.path).filter((f) => takes(f)).sort((a, b) => a.localeCompare(b));
+        const all = !this.suggested || !takes(this.suggested) || folders.some((f) => f.toLowerCase() === this.suggested.toLowerCase()) ? folders : [this.suggested, ...folders];
         /** @param {string} f */
         const rank = (f) => { const l = f.toLowerCase(); return l === q ? 0 : l.startsWith(q) ? 1 : 2; };
         this.drawn = new Map();
@@ -114,6 +126,42 @@ class FolderSuggest extends AbstractInputSuggest {
     highlighted() {
         for (const [el, folder] of this.drawn) if (el.isConnected && el.hasClass("is-selected")) return folder;
         return null;
+    }
+
+    /**
+     * The folder the open list highlights when it's one you chose (OBS-283): you moved the highlight off
+     * the first row, which Obsidian highlights by itself, or it starts with what you typed; else null.
+     * The list's own ↑ and ↓ never reach the field, so where the highlight is says it.
+     * @param {string} typed
+     * @returns {string | null}
+     */
+    chosen(typed) {
+        const lit = this.highlighted();
+        if (!lit || !typed) return null;
+        const first = [...this.drawn].find(([el]) => el.isConnected)?.[1];
+        return lit !== first || lit.toLowerCase().startsWith(typed.toLowerCase()) ? lit : null;
+    }
+}
+
+/**
+ * Notes to choose a template from (OBS-283): the vault's own that the field would take, the one typed
+ * exactly first, then those whose path starts with it, then those that hold it. Leaving the field while
+ * the list is open takes the note it chose (FolderSuggest.chosen).
+ * @extends {FolderSuggest}
+ */
+class NoteSuggest extends FolderSuggest {
+    // How many notes the list shows at most
+    static MAX = 50;
+
+    /** @param {string} query @returns {string[]} */
+    getSuggestions(query) {
+        const q = query.trim().toLowerCase();
+        /** @param {string} f */
+        const rank = (f) => { const l = f.toLowerCase(); return l === q || l === `${q}.md` ? 0 : l.startsWith(q) ? 1 : 2; };
+        const takes = this.prepare ? this.prepare() : this.takes;
+        this.drawn = new Map();
+        return this.app.vault.getMarkdownFiles().map((f) => f.path).filter((f) => f.toLowerCase().includes(q) && takes(f))
+            .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).slice(0, NoteSuggest.MAX);
     }
 }
 
@@ -252,7 +300,9 @@ class CalendarModal extends Modal {
         this.modalEl.addClass("plainday-calendar");
 
         const linkSetting = new Setting(this.contentEl).setName(editing ? "New link" : "Private link");
-        linkSetting.descEl.appendText(!editing ? "Paste the calendar's private link. "
+        // Adding: the field's name and placeholder say what to paste, so the description is only the link
+        // (Brian, 2026-11-17). Editing says what a blank field would leave alone.
+        linkSetting.descEl.appendText(!editing ? ""
             : settings.link(editing.id) !== null ? "This calendar is already linked. Leave blank or paste a new link to replace it. "
                 : "This device has no link for it yet. ");
         linkSetting.descEl.createEl("a", { text: "Where to find it", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
@@ -435,6 +485,21 @@ class CalendarModal extends Modal {
 }
 
 export default class PlaindaySettingTab extends PluginSettingTab {
+    // The plugin a frozen table needs: without it the marks Plainday writes do nothing (OBS-283)
+    static TABLES_PLUGIN = "selectable-tables";
+    static TABLES_PLUGIN_NAME = "Selectable Tables";
+
+    /**
+     * Whether a community plugin is installed and on. `app.plugins` isn't in Obsidian's public types,
+     * so it's read through one cast here rather than at each use.
+     * @param {import("obsidian").App} app @param {string} id
+     * @returns {boolean}
+     */
+    static hasPlugin(app, id) {
+        const plugins = /** @type {{ plugins?: { getPlugin?: (id: string) => unknown } }} */ (/** @type {unknown} */ (app)).plugins;
+        return !!plugins?.getPlugin?.(id);
+    }
+
     // Obsidian 1.13 and later: the sections as setting definitions, drawn and searched by Obsidian
     getSettingDefinitions() {
         /** @param {Section} section @returns {import("obsidian").SettingDefinitionGroup} */
@@ -538,6 +603,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         let freezing = now().tables.freezeRows > 0 || now().tables.freezeColumns > 0;
         /** @type {import("obsidian").DropdownComponent[]} */
         const freezes = [];
+        // Folders and Note templates sit near the top; Other, which the same helper builds, goes last
+        const [folders, templates, other] = this.folderSections(store, problem);
 
         return [
             {
@@ -563,6 +630,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     }),
                 ],
             },
+            folders, templates,
             {
                 heading: "Invoices",
                 rows: [
@@ -578,7 +646,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         t.inputEl.rows = 3;
                         t.setValue(now().invoices.paymentNote).onChange((v) => { void store(s, "invoices", { paymentNote: settings.multiline(v) }); });
                     })),
-                    field("Invoice folder", "Note that changing it will not move past invoices.", (s) => {
+                    field("Invoice folder", "", (s) => {
+                        const archive = () => settings.folders().archive;
                         /** @type {string | null} */
                         let waiting = null;
                         /** @type {import("obsidian").TextComponent | null} */
@@ -606,7 +675,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         };
                         /** @param {string} v */
                         const check = (v) => {
-                            const { folder, error, taken } = plainday.Billing.folderOf(v);
+                            const { folder, error, taken } = plainday.Billing.folderOf(v, archive());
                             const was = now().invoices.folder;
                             waiting = error ? null : folder;
                             problem(s, taken ? `${taken} is already used by Plainday. Please choose another location.`
@@ -618,7 +687,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                             // Tab leaves before the list closes; a click elsewhere, by the change it makes
                             t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Tab") save(); });
                             t.inputEl.addEventListener("change", save);
-                            const list = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f).error);
+                            const list = new FolderSuggest(this.app, t.inputEl, "Invoices", (f) => !plainday.Billing.folderOf(f, archive()).error);
                             suggest = list;
                             list.onSelect((folder) => {
                                 t.setValue(folder);
@@ -659,14 +728,22 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Tables",
                 rows: [
-                    row("Freeze rows and columns", "Applies only to tables created by Plainday and requires Selectable Tables plugin.", (s) => s.addToggle((t) => t.setValue(freezing).onChange((on) => {
-                        // On freezes the header row and the first column, off unfreezes both
-                        freezing = on;
-                        const n = on ? 1 : 0;
-                        for (const d of freezes) d.setValue(String(n));
-                        void store(s, "tables", { freezeRows: n, freezeColumns: n });
-                        this.refreshShown();
-                    }))),
+                    // Without Selectable Tables a freeze does nothing, so the switch can't be turned on:
+                    // it's disabled and says what's missing (Brian, 2026-11-17)
+                    row("Freeze rows and columns", "Applies only to tables created by Plainday.", (s) => {
+                        const installed = !!PlaindaySettingTab.hasPlugin(this.app, PlaindaySettingTab.TABLES_PLUGIN);
+                        s.addToggle((t) => {
+                            t.setValue(freezing).setDisabled(!installed).onChange((on) => {
+                                // On freezes the header row and the first column, off unfreezes both
+                                freezing = on;
+                                const n = on ? 1 : 0;
+                                for (const d of freezes) d.setValue(String(n));
+                                void store(s, "tables", { freezeRows: n, freezeColumns: n });
+                                this.refreshShown();
+                            });
+                        });
+                        if (!installed) problem(s, `The ${PlaindaySettingTab.TABLES_PLUGIN_NAME} plugin isn't installed, so a freeze would do nothing.`, false);
+                    }),
                     {
                         ...row("Freeze rows", "", (s) => s.addDropdown((d) => {
                             freezes.push(d);
@@ -693,6 +770,350 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 ],
             },
             ...this.calendarSections(store),
+            // Other comes last, after the calendars (Brian, 2026-11-17)
+            other,
+        ];
+    }
+
+    /**
+     * Folders and Note templates (OBS-283). Each folder or note is checked as you type and saved when you
+     * leave the field (or the panel closes), as the invoice folder is; one that doesn't read is refused
+     * with a line under it, and the field goes back to the saved value. The daily notes' rows only show
+     * what the Daily notes plugin has, which is where they're set.
+     * @param {(setting: Setting, section: "folders" | "templates", values: Record<string, string>) => Promise<void>} store
+     * @param {(setting: Setting, text: string, warn?: boolean) => void} problem
+     * @returns {Section[]}
+     */
+    folderSections(store, problem) {
+        const settings = plainday.Settings, billing = plainday.Billing;
+        const Settings = /** @type {typeof import("./shared/settings.js").default} */ (settings.constructor);
+        const now = () => settings.get();
+        // The Daily notes plugin's folder, name format and template, as Schedule reads them
+        /** @param {{ asPlugin?: boolean }} [opts] */
+        const daily = (opts) => /** @type {{ folder: string, format: string, template: string }} */ (plainday.Schedule.dailyOpts(opts));
+
+        /** @param {string} v */
+        const code = (v) => `\`${v}\``;
+        // A folder that isn't in the vault yet: the command that files a note there makes it
+        /** @param {string} folder */
+        const missingFolder = (folder) => !!folder && !this.app.vault.getFolderByPath(folder);
+        /** @param {string} path */
+        const missingNote = (path) => !!path && !this.app.vault.getFileByPath(path);
+        /**
+         * A folder or note field: `read(typed)` gives { value } or { error }; `saved()` the saved value;
+         * `note(value)` the orange line for a value that reads ("" for none); `list(input)` the list to
+         * choose from, which offers only what `read` takes (none for the error log). Leaving the field
+         * with the list open takes the row it highlights only when you chose it (FolderSuggest.chosen),
+         * so a folder you didn't choose never replaces what you typed.
+         * @param {string} name @param {string} desc
+         * @param {{ saved: () => string, read: (v: string) => { value: string, error?: undefined } | { error: string, value?: undefined }, save: (s: Setting, value: string) => Promise<void>, placeholder: () => string, note: (value: string) => string, list: ((input: HTMLInputElement) => FolderSuggest) | null, was: (value: string) => string }} how
+         * @returns {Row}
+         */
+        const pathField = (name, desc, how) => field(name, desc, (s) => {
+            /** @type {string | null} */
+            let waiting = null;
+            /** @type {import("obsidian").TextComponent | null} */
+            let input = null;
+            /** @type {FolderSuggest | null} */
+            let suggest = null;
+            /** @param {string} v */
+            const check = (v) => {
+                const got = how.read(v);
+                waiting = got.error === undefined ? got.value : null;
+                if (got.error !== undefined) problem(s, `Not used: ${got.error}. ${how.was(how.saved())}`);
+                else problem(s, how.note(got.value), false);
+            };
+            // Leaving the field: with something typed and the list open, what it highlights; else what's
+            // typed when it reads, and the saved value at once when it doesn't, its line still saying why
+            const leave = () => {
+                const typed = input !== null ? input.getValue().trim() : "";
+                const pick = suggest !== null ? suggest.chosen(typed) : null;
+                if (pick && input !== null) {
+                    input.setValue(pick);
+                    check(pick);
+                }
+                const value = waiting;
+                waiting = null;
+                if (value !== null && value !== how.saved()) void how.save(s, value);
+                if (value !== null) problem(s, how.note(value), false);
+                input?.setValue(value ?? how.saved());
+            };
+            s.addText((t) => {
+                input = t;
+                t.setPlaceholder(how.placeholder()).setValue(how.saved()).onChange(check);
+                t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Tab") leave(); });
+                t.inputEl.addEventListener("change", leave);
+                if (!how.list) return;
+                const list = how.list(t.inputEl);
+                suggest = list;
+                list.onSelect((v) => {
+                    t.setValue(v);
+                    check(v);
+                    leave();
+                    list.close();
+                });
+            });
+            problem(s, how.note(how.saved()), false);
+            return leave;
+        });
+
+        // Projects, the Inbox and the archive carry no description: their names say what they hold, and
+        // the manual has the detail (Brian, 2026-11-16)
+        /** @type {Record<"projects" | "inbox" | "archive", string>} */
+        const system = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
+        // A path with each folder the vault has spelled as it is there, in any case: `projects/clients` is
+        // `Projects/Clients` (a Mac refuses a folder that differs from one it has only in case)
+        /** @param {string} path */
+        const spelled = (path) => (path ? String(plainday.Invoice.realFolder(path)) : path);
+        // A note's path as the vault spells it: the note it already has in another case, else its folders
+        // spelled as the vault spells them, with the name as typed
+        /** @param {string} path */
+        const spelledNote = (path) => {
+            if (!path) return path;
+            const there = this.app.vault.getMarkdownFiles().find((f) => f.path.toLowerCase() === path.toLowerCase());
+            if (there) return there.path;
+            const at = path.lastIndexOf("/");
+            return at < 0 ? path : `${spelled(path.slice(0, at))}${path.slice(at)}`;
+        };
+        // The daily notes' folder and the weekly, monthly and yearly notes' folders in use: none of
+        // Projects, the Inbox and the archive may be one of them, hold one, or sit inside one
+        /** @returns {[string, string][]} */
+        const planner = () => {
+            const p = plainday.TimeReport.periodFolders();
+            return /** @type {[string, string][]} */ ([["the daily notes' folder", daily().folder], ["the weekly notes' folder", p.week], ["the monthly notes' folder", p.month], ["the yearly notes' folder", p.year]]).filter(([, f]) => !!f);
+        };
+        /** @param {string} folder @param {[string, string][]} plan @returns {string | null} */
+        const meetsPlanner = (folder, plan) => {
+            const a = folder.toLowerCase();
+            for (const [name, f] of plan) {
+                const b = f.toLowerCase();
+                if (a === b) return `it's ${name}`;
+                if (a.startsWith(`${b}/`)) return `it's inside ${name}, ${f}`;
+                if (b.startsWith(`${a}/`)) return `${name}, ${f}, is inside it`;
+            }
+            return null;
+        };
+        // What Projects, the Inbox or the archive takes: { value } as the vault spells it, or { error }. A
+        // list passes the Planner's folders it read once (`plan`), and a folder from the vault (`own`),
+        // already spelled as it is there.
+        /**
+         * @param {"projects" | "inbox" | "archive"} key @param {string} v
+         * @param {{ plan?: [string, string][], own?: boolean }} [opts]
+         * @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }}
+         */
+        const systemRead = (key, v, { plan = planner(), own = false } = {}) => {
+            const got = billing.pathOf(v);
+            if (got.error) return { error: `it ${got.error}` };
+            const folder = got.folder && !own ? spelled(got.folder) : got.folder;
+            if (folder && this.app.vault.getFileByPath(folder)) return { error: "it's a note, not a folder" };
+            const next = { ...settings.folders(), [key]: folder };
+            const wrong = settings.foldersProblem(next, billing, key);
+            if (wrong) return { error: wrong.problem };
+            const planned = meetsPlanner(folder, plan);
+            if (planned) return { error: planned };
+            // The invoice folder can't be in the archive
+            const invoices = now().invoices.folder;
+            if (key === "archive" && invoices && billing.folderOf(invoices, folder).taken) return { error: `the invoice folder, ${invoices}, is inside it` };
+            return { value: folder };
+        };
+        /** @param {"projects" | "inbox" | "archive"} key */
+        const systemField = (key) => pathField(system[key], "", {
+            saved: () => now().folders[key],
+            read: (v) => systemRead(key, v),
+            save: (s, value) => store(s, "folders", { [key]: value }),
+            placeholder: () => Settings.FOLDERS[key],
+            note: (value) => (missingFolder(value) ? `“${value}” doesn't exist yet. Plainday will create it when it first files a note there.` : ""),
+            list: (input) => new FolderSuggest(this.app, input, Settings.FOLDERS[key], (f) => systemRead(key, f).error === undefined, () => {
+                const plan = planner();
+                return (f) => systemRead(key, f, { plan, own: true }).error === undefined;
+            }),
+            was: (value) => `${system[key]} stays ${code(value)}.`,
+        });
+        /** @type {Record<"week" | "month" | "year", string>} */
+        const periods = { week: "Weekly", month: "Monthly", year: "Yearly" };
+        // The folder each one sits in when its field is blank, beside the daily notes
+        /** @type {Record<"week" | "month" | "year", string>} */
+        const beside = { week: "weeks", month: "months", year: "years" };
+        const asBefore = () => plainday.TimeReport.periodFolders({ asBefore: true });
+        // What a weekly, monthly or yearly folder takes: blank (as before), or a folder as the vault spells
+        // it that isn't Config, Projects, the Inbox or the archive, holds one, or sits inside one
+        /** @param {string} v @param {boolean} [own] a folder from the vault, already spelled as it is there @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
+        const periodRead = (v, own = false) => {
+            const got = billing.pathOf(v);
+            if (got.error) return { error: `it ${got.error}` };
+            const folder = got.folder && !own ? spelled(got.folder) : got.folder;
+            const meets = folder ? settings.overlap(folder) : null;
+            if (meets) {
+                const named = meets.name === meets.folder ? meets.name : `${meets.name} (${meets.folder})`;
+                return { error: meets.how === "is" ? `it's the ${meets.name} folder` : meets.how === "in" ? `it's inside ${named}` : `${named} is inside it` };
+            }
+            return { value: folder };
+        };
+        /** @param {"week" | "month" | "year"} unit */
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Default: \`${beside[unit]}\` in same folder as daily notes.`, {
+            saved: () => now().folders[unit],
+            read: (v) => periodRead(v),
+            save: (s, value) => store(s, "folders", { [unit]: value }),
+            placeholder: () => asBefore()[unit],
+            note: (value) => (missingFolder(value) ? `“${value}” doesn't exist yet. Plainday will create it with the first ${periods[unit].toLowerCase()} note.` : ""),
+            list: (input) => new FolderSuggest(this.app, input, "", (f) => periodRead(f, true).error === undefined),
+            was: (value) => `${periods[unit]} notes stay ${value ? code(value) : "as before"}.`,
+        });
+        /** @param {"week" | "month" | "year"} unit */
+        const templateField = (unit) => {
+            const jump = plainday.JumpToDate;
+            const before = () => settings.defaultTemplatePath(unit);
+            // The line under a template: it isn't there yet, or it sets a property Plainday writes itself
+            /** @param {string} value */
+            const note = (value) => {
+                if (missingNote(value)) return `“${value}” isn't in the vault, so the template Plainday used before is used until it is.`;
+                const file = value ? this.app.vault.getFileByPath(value) : jump.templateFor(unit, { asBefore: true });
+                const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
+                return settings.templateWarning(props, Settings.WRITES[unit] ?? []);
+            };
+            return pathField(`${periods[unit]} note`, "", {
+                saved: () => now().templates[unit],
+                read: (v) => {
+                    const got = settings.notePathOf(v);
+                    return got.error ? { error: `it ${got.error}` } : { value: got.path };
+                },
+                save: (s, value) => store(s, "templates", { [unit]: value }),
+                placeholder: () => before(),
+                note,
+                list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
+                was: (value) => `The ${periods[unit].toLowerCase()} note's template stays ${value ? code(value) : "as before"}.`,
+            });
+        };
+
+        // The Task and Log templates AddTaskNote runs (OBS-283). Their names are what they make, and
+        // their default is the path the command had written into it.
+        /** @type {Record<"task" | "log", string>} */
+        const made = { task: "Task note", log: "Log" };
+        /** @param {"task" | "log"} kind */
+        const madeField = (kind) => pathField(made[kind], "", {
+            saved: () => now().templates[kind],
+            read: (v) => {
+                const got = settings.notePathOf(v);
+                if (got.error) return { error: `it ${got.error}` };
+                return { value: got.path ? spelledNote(got.path) : "" };
+            },
+            save: (s, value) => store(s, "templates", { [kind]: value }),
+            placeholder: () => settings.defaultTemplatePath(kind),
+            note: (value) => {
+                const path = value || settings.defaultTemplatePath(kind);
+                if (missingNote(path)) return `“${path}” isn't in the vault, so Add note has nothing to make a ${made[kind].toLowerCase()} from.`;
+                const file = this.app.vault.getFileByPath(path);
+                const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
+                return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
+            },
+            list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
+            was: (value) => `The ${made[kind].toLowerCase()} template stays ${code(value || settings.defaultTemplatePath(kind))}.`,
+        });
+
+        // Periodic notes: a page of its own under Folders, whose first row is which calendar owns them
+        // (Brian, 2026-11-16). With Notebook Navigator's, every row there is what it says, with no field.
+        const source = () => settings.periodicSource();
+        const navigator = () => source() === "notebook-navigator";
+        // A row that only says where a note goes and who decides: used for the daily notes, and for every
+        // periodic note in the Notebook Navigator source. When Navigator has no pattern Plainday can
+        // follow for a unit, the row says what decides instead, rather than crediting Navigator (OBS-283).
+        /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
+        const shown = (name, unit, part) => row(name, "", (s) => {
+            const nn = navigator() ? settings.navigatorNote(unit) : null;
+            const plugin = daily({ asPlugin: true });
+            const value = part === "folder"
+                ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
+                : (unit === "day" ? daily().template : nn?.template ?? "");
+            const where = nn ? "Set in Notebook Navigator"
+                : unit === "day" ? "Set in Settings → Daily notes"
+                    : navigator() ? "Notebook Navigator has no pattern Plainday can follow for these, so they sit beside the daily notes"
+                        : "Set in Settings → Daily notes";
+            // The daily notes' row also says what names them, which is the other half of finding them
+            const named = unit === "day" && part === "folder" ? `, named ${code(nn ? nn.format : plugin.format)}` : "";
+            const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
+            s.descEl.empty();
+            s.descEl.appendText(`${shownValue}${named}. ${where}.`);
+        });
+
+        /** @returns {Section[]} */
+        const periodicSections = () => [
+            {
+                heading: null,
+                rows: [
+                    row("Define periodic notes using", "",
+                        (s) => s.addDropdown((d) => d.addOptions(Object.fromEntries(Settings.SOURCES.map((v) => [v, Settings.SOURCE_NAMES[v]])))
+                            .setValue(source()).onChange((v) => {
+                                void store(s, "folders", { periodic: v }).then(() => this.redraw());
+                            }))),
+                ],
+            },
+            {
+                heading: "Folders",
+                rows: [
+                    shown("Daily notes", "day", "folder"),
+                    ...(navigator()
+                        ? [shown("Weekly notes", "week", "folder"), shown("Monthly notes", "month", "folder"), shown("Yearly notes", "year", "folder")]
+                        : [periodField("week"), periodField("month"), periodField("year")]),
+                ],
+            },
+            {
+                heading: "Templates",
+                rows: [
+                    shown("Daily note", "day", "template"),
+                    ...(navigator()
+                        ? [shown("Weekly note", "week", "template"), shown("Monthly note", "month", "template"), shown("Yearly note", "year", "template")]
+                        : [templateField("week"), templateField("month"), templateField("year")]),
+                ],
+            },
+        ];
+
+        // The error log note: a note Plainday writes rather than a folder it files into, so it sits in
+        // Other at the end rather than among the folders (Brian, 2026-11-17)
+        const errorLogField = () =>
+                    pathField("Error log note", "", {
+                        saved: () => now().folders.errorLog,
+                        read: (v) => {
+                            const got = settings.notePathOf(v);
+                            if (got.error) return { error: `it ${got.error}` };
+                            // The note as the vault spells it, so a path in another case can't make a
+                            // second log beside the one that's there (a Mac's volume ignores case)
+                            const path = spelledNote(got.path);
+                            // A note of yours with sections of its own: the log would move them after its own
+                            // (its properties and any text above its first heading stay where they are)
+                            const there = path ? this.app.vault.getFileByPath(path) : null;
+                            const heads = (there && this.app.metadataCache.getFileCache(there)?.headings) ?? [];
+                            const ours = /** @type {{ SECTIONS: string[] }} */ (plainday.ErrorLog.constructor).SECTIONS;
+                            if (heads.some((h) => h.level === 2 && !ours.includes(h.heading))) return { error: "it's a note of yours with sections of its own, which the error log would move" };
+                            return { value: path };
+                        },
+                        save: (s, value) => store(s, "folders", { errorLog: value }),
+                        placeholder: () => settings.defaultErrorLogPath(),
+                        note: (value) => (missingNote(value) ? `“${value}” isn't in the vault yet. The next run that finds a Problem makes it.` : ""),
+                        list: null,
+                        was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
+                    })
+;
+        return [
+            {
+                heading: "Folders",
+                rows: [
+                    systemField("projects"),
+                    systemField("inbox"),
+                    systemField("archive"),
+                    {
+                        ...row("Periodic notes", "", () => {}),
+                        page: { displayValue: Settings.SOURCE_NAMES[source()], sections: periodicSections() },
+                    },
+                ],
+            },
+            {
+                heading: "Note templates",
+                rows: [madeField("task"), madeField("log")],
+            },
+            {
+                heading: "Other",
+                rows: [errorLogField()],
+            },
         ];
     }
 
@@ -714,7 +1135,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // "Calendar (2)", and an account named like one of the panel's own sections is "… calendars".
         /** @type {Map<string, Calendar[]>} */
         const accounts = new Map();
-        const taken = new Set(["", "invoices", "tables", "editor", "calendars"]);
+        const taken = new Set(["", "folders", "note templates", "invoices", "tables", "editor", "calendars"]);
         for (const c of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
             const name = c.account || "No account";
             const account = taken.has(name.toLowerCase()) ? `${name} calendars` : name;
@@ -744,14 +1165,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     // new one each time Obsidian draws it
                     row("Add calendar", "", (s) => {
                         s.descEl.empty();
-                        s.descEl.appendText("Add using ");
-                        s.descEl.createEl("a", { text: "private calendar links", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
+                        s.descEl.appendText("You'll need to copy its ");
+                        s.descEl.createEl("a", { text: "private link", href: "#", cls: "plainday-link" }, (a) => a.addEventListener("click", (e) => {
                             e.preventDefault();
                             help();
                         }));
                         s.addButton((b) => b.setButtonText("Add calendar").onClick(() => dialog(null)));
                     }),
-                    row("Sync range", "How far ahead to write events into daily notes. Days beyond it are left as they are.",
+                    row("Sync range", "How far ahead to write events into daily notes.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
                     // The calendars, each account's, on a page of their own
                     {

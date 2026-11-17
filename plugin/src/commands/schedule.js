@@ -755,7 +755,13 @@ export default class Schedule {
         return `Wk of ${first.getUTCMonth() + 1}/${first.getUTCDate()}`;
     }
 
-    dailyOpts() {
+    // Where the daily notes are, what names them and what they're made from. With Notebook Navigator's
+    // calendar as the periodic notes' source (Settings → Plainday → Folders → Periodic notes, OBS-283),
+    // its own day pattern says; otherwise the Daily notes plugin does, as before. `asPlugin` reads the
+    // plugin whichever source is chosen, for the panel to show.
+    dailyOpts({ asPlugin = false } = {}) {
+        const nn = asPlugin ? null : plainday.Settings?.periodicSource?.() === "notebook-navigator" ? plainday.Settings.navigatorNote("day") : null;
+        if (nn) return { folder: nn.folder, format: nn.format || "YYYY-MM-DD", template: nn.template };
         const opts = app.internalPlugins?.plugins?.["daily-notes"]?.instance?.options ?? {};
         return {
             folder: (opts.folder ?? "").replace(/\/$/, ""),

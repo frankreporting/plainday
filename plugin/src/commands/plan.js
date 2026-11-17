@@ -93,13 +93,10 @@ export default class Plan {
         return found;
     }
 
+    // Where the daily notes are, what names them and what they're made from: Schedule's, so Plan makes
+    // them where everything else looks for them — the periodic notes' source decides (OBS-283)
     dailyOpts() {
-        const opts = app.internalPlugins?.plugins?.["daily-notes"]?.instance?.options ?? {};
-        return {
-            folder: (opts.folder ?? "").replace(/\/$/, ""),
-            format: opts.format || "YYYY-MM-DD",
-            template: opts.template ?? ""
-        };
+        return plainday.Schedule.dailyOpts();
     }
 
     dailyNotePath(m) {

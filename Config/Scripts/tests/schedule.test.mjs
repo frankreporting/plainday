@@ -4,12 +4,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn } from "./standInVault.mjs";
+import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withFolders } from "./standInVault.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
 // Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn) and the
 // calendar sync, whose top list placeInTopList writes into (OBS-280)
-const statics = vm.createContext({ plainday: {} });
+const statics = vm.createContext({ plainday: withFolders({}) });
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
 statics.plainday.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
 statics.plainday.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
@@ -83,6 +83,7 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
     const context = vm.createContext({ MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
     const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {
+        Settings: make("settings", "Settings"),
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
         TaskIds: make("taskIds", "TaskIds"), CalendarSync: make("calendarSync", "CalendarSync"),
@@ -109,10 +110,16 @@ test("periodic notes: a weekly, monthly or yearly note is named by its pattern, 
     assert.equal(s.periodOf(file("Projects/Kestrel/Kestrel.md")), null);
 });
 
-test("periodic notes: the folders follow Notebook Navigator's patterns, or sit beside the daily notes", async () => {
-    const moved = await scheduleIn({ nn: { ...NN, calendarCustomMonthPattern: "[periodic/months]/YYYY-MM" } });
+test("periodic notes: the folders follow Notebook Navigator's patterns when it's the source, else sit beside the daily notes (OBS-283)", async () => {
+    // Its patterns count only where its calendar is what makes the notes
+    const navigator = { ...NN, calendarIntegrationMode: "notebook-navigator", calendarCustomMonthPattern: "[periodic/months]/YYYY-MM" };
+    const moved = await scheduleIn({ nn: navigator });
     assert.equal(moved.schedule.periodOf(file(`${PLANNER}/periodic/months/2026-09.md`)), "month");
     assert.equal(moved.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), null);
+    // The same Navigator, integrating with the Daily notes plugin instead: its pattern says nothing
+    const plugin = await scheduleIn({ nn: { ...navigator, calendarIntegrationMode: "daily-notes" } });
+    assert.equal(plugin.schedule.periodOf(file(`${PLANNER}/periodic/months/2026-09.md`)), null);
+    assert.equal(plugin.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), "month");
     const bare = await scheduleIn({ nn: null });
     assert.equal(bare.schedule.periodOf(file(`${PLANNER}/weeks/2026w38.md`)), "week");
     assert.equal(bare.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), "month");
@@ -442,7 +449,7 @@ const withVault = (paths) => {
             getFirstLinkpathDest: (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase()) ?? null,
         },
     };
-    const context = vm.createContext({ app, plainday: {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) });
+    const context = vm.createContext({ app, plainday: withFolders({}), getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) });
     const AddTaskNote = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", context);
     context.plainday.AddTaskNote = new AddTaskNote();
     return { schedule: new (vm.runInContext(code + "\n;Schedule", context))(), file: (p) => files.find((f) => f.path === p) };

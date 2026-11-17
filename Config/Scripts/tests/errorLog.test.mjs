@@ -209,14 +209,16 @@ test("fresh and toastText count only what's new: a line that went from 2 to 3 is
     assert.deepEqual(plain(log.fresh(crlf, "Time report", two)), []);
 });
 
-// write, toast and open against a stub of the little of `app` they use
-const harness = ({ text = null } = {}) => {
+// write, toast and open against a stub of the little of `app` they use, with the error log note where
+// Plainday's settings put it (OBS-283): Config/Error Log.md in a vault from before
+const harness = ({ text = null, path = "Config/Error Log.md" } = {}) => {
     const state = { text, created: [], folders: [], notices: [], opened: [] };
-    const file = () => (state.text === null ? null : { path: "Config/Error Log.md" });
+    const file = () => (state.text === null ? null : { path });
     const context = {
+        plainday: { Settings: { errorLogPath: () => path } },
         app: {
             vault: {
-                getFileByPath: (p) => (p === "Config/Error Log.md" ? file() : null),
+                getFileByPath: (p) => (p === path ? file() : null),
                 getFolderByPath: (p) => (state.folders.includes(p) ? {} : null),
                 createFolder: async (p) => { state.folders.push(p); },
                 read: async () => state.text,
@@ -247,6 +249,17 @@ test("write: the desktop makes the note when it's missing, a phone doesn't; an u
     // A fix: the line leaves, nothing is new, and the section is written
     assert.deepEqual(plain(await desk.log.write("Time report", GROUPS.slice(0, 1), { create: true })), []);
     assert.ok(desk.state.text.includes("Updated 10/29 9:14am · 1 open") && !desk.state.text.includes("Bad formatting"));
+});
+
+test("write and open: the error log note Plainday's settings name, its folder made when it's missing; at the top of the vault, none (OBS-283)", async () => {
+    const elsewhere = harness({ path: "Logs/Problems.md" });
+    await elsewhere.log.write("Time report", GROUPS, { create: true });
+    assert.deepEqual(plain([elsewhere.state.created, elsewhere.state.folders]), [["Logs/Problems.md"], ["Logs"]]);
+    await elsewhere.log.open();
+    assert.deepEqual(plain(elsewhere.state.opened), ["Logs/Problems.md"]);
+    const top = harness({ path: "Plainday error log.md" });
+    await top.log.write("Time report", GROUPS, { create: true });
+    assert.deepEqual(plain([top.state.created, top.state.folders]), [["Plainday error log.md"], []], "no Config folder in a new vault");
 });
 
 test("toast: one notice for a run's new lines, with a View Error Logs link; none when nothing is new; open says when there's no log yet", async () => {
