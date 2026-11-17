@@ -901,3 +901,21 @@ test("Projects, the Inbox and the archive that don't hold together: at the start
     const pasted = g.s.readCopy(JSON.stringify({ "plainday-settings": 1, ...JUNIPER, folders: { projects: "Work", inbox: "Work/In", archive: "Old" } }), billing);
     assert.deepEqual(plain(Object.fromEntries(["projects", "inbox", "archive"].map((k) => [k, pasted.settings.folders[k]]))), { projects: "Clients", inbox: "Waiting", archive: "Old" });
 });
+
+test("reload: the saved flags move only once the write lands, so a failed save can't let the defaults replace this device's folders (OBS-283)", async () => {
+    const mine = { ...JUNIPER, folders: { ...FOLDERS, projects: "Work", inbox: "Waiting", archive: "Old" } };
+    const f = withPlugin({ stored: mine });
+    await f.s.load();
+    assert.equal(f.s.foldersSaved, true);
+    const { folders, templates, ...older } = mine;
+    // Sync brings a file from the release before, and the write that keeps this device's folders fails
+    f.plugin.loadData = async () => JSON.parse(JSON.stringify(older));
+    f.plugin.failSave = true;
+    await f.s.reload().catch(() => {});
+    assert.deepEqual(plain(f.s.folders()), { projects: "Work", inbox: "Waiting", archive: "Old" }, "kept in memory");
+    assert.equal(f.s.foldersSaved, true, "still saved, so the next reload keeps them again");
+    f.plugin.failSave = false;
+    await f.s.reload();
+    assert.deepEqual(plain(f.s.folders()), { projects: "Work", inbox: "Waiting", archive: "Old" }, "and the next one keeps them, not the defaults");
+    assert.deepEqual(plain(f.saves.at(-1).folders).projects, "Work");
+});

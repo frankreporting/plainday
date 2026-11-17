@@ -895,15 +895,14 @@ export default class Settings {
         this.unreadable = false;
         this.saved = raw !== null;
         const hadCalendars = this.calendarsSaved, hadFolders = this.foldersSaved;
-        this.calendarsSaved = this.hasCalendars(raw);
-        this.foldersSaved = this.hasFolders(raw);
+        const nowCalendars = this.hasCalendars(raw), nowFolders = this.hasFolders(raw);
         // The same for folders and templates, from a device on a release before them (OBS-283): read with
         // this device's, so its invoice folder is checked against this device's archive
-        const keepFolders = raw !== null && !this.foldersSaved && hadFolders;
+        const keepFolders = raw !== null && !nowFolders && hadFolders;
         const given = keepFolders ? { ...raw, folders: this.data.folders, templates: this.data.templates } : raw ?? {};
         // As a paste does: an older file from another device never lowers the number given here
         const next = this.pasted(this.normalize(given));
-        const keep = raw !== null && !this.calendarsSaved && hadCalendars;
+        const keep = raw !== null && !nowCalendars && hadCalendars;
         if (keep) next.calendars = this.data.calendars;
         // Projects, the Inbox and the archive that don't hold together (a file edited by hand, two devices'
         // changes merged) keep this device's, with a notice, rather than going back to the defaults: read
@@ -914,7 +913,10 @@ export default class Settings {
         if (dropped && keep) kept.calendars = this.data.calendars;
         this.data = kept;
         if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
+        // save() sets both flags once the write lands; until then they stay as they were, so a write
+        // that fails can't let the next reload take the defaults over this device's (OBS-283)
         if (keep || keepFolders || dropped) await this.save();
+        else { this.calendarsSaved = nowCalendars; this.foldersSaved = nowFolders; }
         await plainday.ListCursor?.invoke();
     }
 

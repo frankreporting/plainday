@@ -532,7 +532,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
 test("Settings → Plainday → Folders and Note templates: the folders as set, checked as you type and saved when you leave them (OBS-283)", async () => {
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" } };
     const { plugin, suggests } = load(BUNDLE, { stored });
-    const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference", "Reference/Invoices", "Reference/Done lists", "Reference/Old lists", "Reference/Planner", "Reference/Planner/weeks", "Config"]);
+    const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference", "Reference/Invoices", "Reference/Done lists", "Reference/Old lists", "Reference/Planner", "Reference/Planner/weeks", "Clients [2026]", "Config"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
     plugin.app.vault.getAllFolders = () => [...folders].map((path) => ({ path }));
     // The folder tree, as Invoice.realFolder walks it
@@ -541,8 +541,10 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
     const template = { path: "Templates/Plain week.md" };
     // A note of yours, which the error log mustn't write over, and an error log already made
     const mine = { path: "Reference/Notes.md" }, oldLog = { path: "Logs/Old log.md" }, empty = { path: "Logs/Empty.md" };
-    const files = new Map([[template.path, template], [mine.path, mine], [oldLog.path, oldLog], [empty.path, empty]]);
+    const linkless = { path: "Templates/Week [new].md" };
+    const files = new Map([[template.path, template], [mine.path, mine], [oldLog.path, oldLog], [empty.path, empty], [linkless.path, linkless]]);
     plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+    plugin.app.vault.getMarkdownFiles = () => [...files.values()];
     plugin.app.metadataCache.getFileCache = (f) => (f === template ? { frontmatter: { date: "x", tags: ["week"] } } : f === oldLog ? { headings: [{ heading: "Time report", level: 2 }] }
         : f === mine ? { headings: [{ heading: "Ideas", level: 2 }] } : f === empty ? { frontmatter: { id: "1" } } : null);
     await plugin.onload();
@@ -668,11 +670,30 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         log.s.leave();
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(folders()?.errorLog, "Reference/Problems.md", "its folder as the vault spells it");
+        log.s.type("logs/old log");
+        log.s.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(folders()?.errorLog, "Logs/Old log.md", "the log already there, as the vault spells it, so no second one is made");
         log.s.type("Logs/Problems");
+        assert.equal(log.s.warning(), "“Logs/Problems.md” isn't in the vault yet. The next run that finds a Problem makes it.");
         log.s.leave();
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(folders()?.errorLog, "Logs/Problems.md", "a note, .md added");
         assert.equal(window.plainday.ErrorLog.path(), "Logs/Problems.md");
+
+        // A note Plainday can't write a link to isn't offered, and is refused by name
+        const tplList = (draw("Weekly note"), suggests.at(-1));
+        assert.deepEqual(tplList.getSuggestions("week"), ["Templates/Plain week.md"], "the [ ] note isn't offered");
+        const tpl2 = draw("Weekly note");
+        tpl2.s.type("Templates/Week [new].md");
+        assert.match(tpl2.s.warning(), /^Not used: it holds a character Plainday can't link to, one of \[ \] # \^/);
+        // A folder the vault has, whose name Plainday can't link to, is refused the same way
+        const inbox2 = draw("Inbox");
+        inbox2.s.type("Clients [2026]");
+        assert.match(inbox2.s.warning(), /holds a character Plainday can't link to/);
+        // A note isn't a folder
+        inbox2.s.type("Reference/Notes.md");
+        assert.equal(inbox2.s.warning(), "Not used: it's a note, not a folder. Inbox stays `Waiting`.");
 
         // A template: none in this vault until one is chosen; one that sets a property Plainday writes
         // itself says so (the list comes with OBS-120: here, a stand-in)

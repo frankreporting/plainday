@@ -336,10 +336,16 @@ test("folderOf: a folder setting as a vault path; blank is none; anything else i
         assert.deepEqual(plain(billing.folderOf(raw)), { folder: want, error: null }, String(raw));
     }
     for (const raw of ["../Invoices", "a/../../b", "./Invoices", ".obsidian", "a/.trash", "a/ /b", "C:\\Invoices", "a\\b",
-        "[[Invoices]]", "Invoices#1", "a|b", "Business /Invoices", "Business/ Invoices", "a\nb", "a\tb", 2026, ["a"], { a: 1 }, true]) {
+        "a|b", "Business /Invoices", "Business/ Invoices", "a\nb", "a\tb", 2026, ["a"], { a: 1 }, true]) {
         const r = billing.folderOf(raw);
         assert.equal(r.folder, "", String(raw));
         assert.match(r.error, /isn't a folder in the vault/, String(raw));
+    }
+    // `[ ] # ^` can be in a folder's name but break a link to it, so they're refused by name (OBS-283)
+    for (const raw of ["[[Invoices]]", "Invoices#1", "Clients [2026]", "a^b"]) {
+        const r = billing.folderOf(raw);
+        assert.equal(r.folder, "", raw);
+        assert.match(r.error, /holds a character Plainday can't link to, one of \[ \] # \^/, raw);
     }
     // the system's folder and the archive are often excluded, where a base can't list them
     for (const raw of ["Config/Invoices", "config", "Archive/Invoices"]) {

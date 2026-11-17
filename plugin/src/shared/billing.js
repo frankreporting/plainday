@@ -371,7 +371,11 @@ export default class Billing {
         const folder = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
         if (!folder) return { folder: "", error: null };
         const parts = folder.split("/");
-        if (/[\\:*?"<>|[\]#^]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
+        // `[ ] # ^` are allowed in a note or folder name but break a link to it, and Plainday writes
+        // links to everything it files, so a folder holding one is refused — said plainly, since such a
+        // folder can be in the vault (OBS-283)
+        if (/[[\]#^]/.test(folder)) return { folder: "", error: `holds a character Plainday can't link to, one of [ ] # ^ (${shown})` };
+        if (/[\\:*?"<>|]/.test(folder) || parts.some((p) => !p.trim() || p !== p.trim() || p.startsWith("."))) return bad;
         return { folder, error: null };
     }
 

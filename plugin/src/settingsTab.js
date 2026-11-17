@@ -144,9 +144,9 @@ class FolderSuggest extends AbstractInputSuggest {
 }
 
 /**
- * Notes to choose a template from (OBS-283): the vault's own, the one typed exactly first, then those
- * whose path starts with it, then those that hold it. Leaving the field while the list is open takes
- * the note it highlights.
+ * Notes to choose a template from (OBS-283): the vault's own that the field would take, the one typed
+ * exactly first, then those whose path starts with it, then those that hold it. Leaving the field while
+ * the list is open takes the note it chose (FolderSuggest.chosen).
  * @extends {FolderSuggest}
  */
 class NoteSuggest extends FolderSuggest {
@@ -158,8 +158,9 @@ class NoteSuggest extends FolderSuggest {
         const q = query.trim().toLowerCase();
         /** @param {string} f */
         const rank = (f) => { const l = f.toLowerCase(); return l === q || l === `${q}.md` ? 0 : l.startsWith(q) ? 1 : 2; };
+        const takes = this.prepare ? this.prepare() : this.takes;
         this.drawn = new Map();
-        return this.app.vault.getMarkdownFiles().map((f) => f.path).filter((f) => f.toLowerCase().includes(q))
+        return this.app.vault.getMarkdownFiles().map((f) => f.path).filter((f) => f.toLowerCase().includes(q) && takes(f))
             .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).slice(0, NoteSuggest.MAX);
     }
 }
@@ -837,6 +838,16 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // `Projects/Clients` (a Mac refuses a folder that differs from one it has only in case)
         /** @param {string} path */
         const spelled = (path) => (path ? String(plainday.Invoice.realFolder(path)) : path);
+        // A note's path as the vault spells it: the note it already has in another case, else its folders
+        // spelled as the vault spells them, with the name as typed
+        /** @param {string} path */
+        const spelledNote = (path) => {
+            if (!path) return path;
+            const there = this.app.vault.getMarkdownFiles().find((f) => f.path.toLowerCase() === path.toLowerCase());
+            if (there) return there.path;
+            const at = path.lastIndexOf("/");
+            return at < 0 ? path : `${spelled(path.slice(0, at))}${path.slice(at)}`;
+        };
         // The daily notes' folder and the weekly, monthly and yearly notes' folders in use: none of
         // Projects, the Inbox and the archive may be one of them, hold one, or sit inside one
         /** @returns {[string, string][]} */
@@ -867,6 +878,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             const got = billing.pathOf(v);
             if (got.error) return { error: `it ${got.error}` };
             const folder = got.folder && !own ? spelled(got.folder) : got.folder;
+            if (folder && this.app.vault.getFileByPath(folder)) return { error: "it's a note, not a folder" };
             const next = { ...settings.folders(), [key]: folder };
             const wrong = settings.foldersProblem(next, billing, key);
             if (wrong) return { error: wrong.problem };
@@ -938,7 +950,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 save: (s, value) => store(s, "templates", { [unit]: value }),
                 placeholder: () => before() || "None",
                 note,
-                list: (input) => new NoteSuggest(this.app, input, "", () => true),
+                list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
                 was: (value) => `The ${periods[unit].toLowerCase()} note's template stays ${value ? code(value) : "as before"}.`,
             });
         };
@@ -964,18 +976,20 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         read: (v) => {
                             const got = settings.notePathOf(v);
                             if (got.error) return { error: `it ${got.error}` };
-                            const at = got.path.lastIndexOf("/");
-                            const path = at < 0 ? got.path : `${spelled(got.path.slice(0, at))}${got.path.slice(at)}`;
+                            // The note as the vault spells it, so a path in another case can't make a
+                            // second log beside the one that's there (a Mac's volume ignores case)
+                            const path = spelledNote(got.path);
                             // A note of yours with sections of its own: the log would move them after its own
                             // (its properties and any text above its first heading stay where they are)
                             const there = path ? this.app.vault.getFileByPath(path) : null;
                             const heads = (there && this.app.metadataCache.getFileCache(there)?.headings) ?? [];
-                            if (heads.some((h) => h.level === 2 && !["Time report", "Calendar sync"].includes(h.heading))) return { error: "it's a note of yours with sections of its own, which the error log would move" };
+                            const ours = /** @type {{ SECTIONS: string[] }} */ (plainday.ErrorLog.constructor).SECTIONS;
+                            if (heads.some((h) => h.level === 2 && !ours.includes(h.heading))) return { error: "it's a note of yours with sections of its own, which the error log would move" };
                             return { value: path };
                         },
                         save: (s, value) => store(s, "folders", { errorLog: value }),
                         placeholder: () => settings.defaultErrorLogPath(),
-                        note: () => "",
+                        note: (value) => (missingNote(value) ? `“${value}” isn't in the vault yet. The next run that finds a Problem makes it.` : ""),
                         list: null,
                         was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
                     }),
