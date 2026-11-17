@@ -392,8 +392,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const defs = tab.getSettingDefinitions();
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
-            ["group", "Folders", ["Projects", "Inbox", "Archive", "Daily notes", "Weekly notes", "Monthly notes", "Yearly notes", "Error log note"]],
-            ["group", "Note templates", ["Daily note", "Weekly note", "Monthly note", "Yearly note"]],
+            ["group", "Folders", ["Projects", "Inbox", "Archive", "Error log note", "Periodic notes"]],
+            ["group", "Note templates", ["Task note", "Log"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
@@ -408,7 +408,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Your name or company name", "Address", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"]);
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Your name or company name", "Address", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list"],
+            "Projects, Inbox and Archive say what they hold in their names (Brian, 11/16)");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
@@ -550,10 +551,17 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
     await plugin.onload();
     try {
         const tab = plugin.tabs[0];
-        const items = tab.getSettingDefinitions().flatMap((g) => g.items);
+        // Every row, the Periodic notes page's own included (OBS-283)
+        const rowsOf = (groups) => groups.flatMap((g) => (g.items ?? []).flatMap((i) => (i.type === "page" ? rowsOf(i.items) : [i])));
+        const items = rowsOf(tab.getSettingDefinitions());
         const draw = (name) => { const s = standInSetting(); const cleanup = items.find((i) => i.name === name).render(s); return { s, cleanup }; };
         const folders = () => plugin.saved.at(-1)?.folders;
-        for (const name of ["Projects", "Inbox", "Archive", "Weekly notes"]) {
+        // Projects, the Inbox and the archive carry no description (Brian, 11/16); the periodic folders,
+        // which do take one, still say that changing them moves nothing
+        for (const name of ["Projects", "Inbox", "Archive"]) {
+            assert.ok(!items.find((i) => i.name === name).desc, name);
+        }
+        for (const name of ["Weekly notes", "Monthly notes", "Yearly notes"]) {
             assert.match(items.find((i) => i.name === name).desc, /Changing it doesn't move the notes already there\.$/, name);
         }
 
@@ -713,6 +721,89 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.equal(plugin.saved.at(-1).templates.week, "Templates/Plain week.md");
         assert.equal(window.plainday.JumpToDate.templateFor("week"), template, "Jump to date makes a week from it");
         assert.equal(window.plainday.JumpToDate.templateFor("week", { asBefore: true }), null);
+    } finally {
+        plugin.onunload();
+    }
+});
+
+test("Settings → Plainday → Folders → Periodic notes: the source decides who owns them, and hides Plainday's fields when it isn't Plainday (OBS-283)", async () => {
+    const { plugin } = load(BUNDLE, { stored: { folders: { periodic: "daily-notes" } } });
+    const NAVIGATOR = {
+        calendarIntegrationMode: "notebook-navigator",
+        vaultProfiles: [{ periodicNotesFolder: "Planner" }],
+        calendarCustomFilePattern: "[days]/YYYY-MM-DD",
+        calendarCustomWeekPattern: "[weeks]/gggg[w]ww",
+        calendarCustomMonthPattern: "[months]/YYYY-MM",
+        calendarCustomYearPattern: "[years]/YYYY",
+        calendarCustomWeekTemplate: "T/Week.md",
+    };
+    plugin.app.plugins = { plugins: { "notebook-navigator": { settings: NAVIGATOR } }, getPlugin: () => null };
+    plugin.app.vault.getAllFolders = () => [];
+    plugin.app.vault.getMarkdownFiles = () => [];
+    await plugin.onload();
+    try {
+        const tab = plugin.tabs[0];
+        // Obsidian 1.13+ redraws the panel through update(), which the stand-in tab doesn't have
+        tab.update = () => {};
+        const page = () => tab.getSettingDefinitions()[1].items.find((i) => i.name === "Periodic notes");
+        const rowsOf = (groups) => groups.flatMap((g) => (g.items ?? []).map((i) => [g.heading, i.name, i.type ?? "row"]));
+        // The Daily notes plugin with Plainday: Plainday asks for the three folders and three templates
+        assert.equal(page().displayValue, "Daily notes plugin + Plainday");
+        assert.deepEqual(rowsOf(page().items), [
+            [undefined, "Periodic notes come from", "row"],
+            ["Folders", "Daily notes", "row"], ["Folders", "Weekly notes", "row"], ["Folders", "Monthly notes", "row"], ["Folders", "Yearly notes", "row"],
+            ["Templates", "Daily note", "row"], ["Templates", "Weekly note", "row"], ["Templates", "Monthly note", "row"], ["Templates", "Yearly note", "row"],
+        ]);
+        const draw = (name) => { const s = standInSetting(); page().items.flatMap((g) => g.items).find((i) => i.name === name).render(s); return s; };
+        assert.equal(draw("Weekly notes").control.inputEl.placeholder, "Reference/Planner/weeks", "beside the daily notes, not Navigator's");
+        assert.equal(window.plainday.TimeReport.periodFolders().week, "Reference/Planner/weeks");
+        assert.equal(window.plainday.Schedule.dailyOpts().folder, "Reference/Planner/days", "the Daily notes plugin's");
+
+        // Switch the source: Navigator owns all four, so no field is drawn and each row says where it's set
+        const choice = draw("Periodic notes come from");
+        choice.control.handlers.change("notebook-navigator");
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(plugin.saved.at(-1).folders.periodic, "notebook-navigator");
+        assert.equal(page().displayValue, "Notebook Navigator");
+        const weekly = draw("Weekly notes");
+        assert.equal(weekly.control.inputEl.value, "", "no input to type into");
+        assert.match(weekly.descEl.text, /^`Planner\/weeks`\. Set in Notebook Navigator\.$/);
+        assert.match(draw("Daily notes").descEl.text, /^`Planner\/days`, named `YYYY-MM-DD`\. Set in Notebook Navigator\.$/);
+        assert.match(draw("Weekly note").descEl.text, /^`T\/Week\.md`\. Set in Notebook Navigator\.$/);
+        assert.match(draw("Monthly note").descEl.text, /^None\. Set in Notebook Navigator\.$/, "a calendar with no template of its own");
+        // And the commands read Navigator's patterns, days included
+        assert.equal(window.plainday.Schedule.dailyOpts().folder, "Planner/days");
+        assert.equal(window.plainday.Schedule.dailyOpts().format, "YYYY-MM-DD");
+        assert.equal(window.plainday.TimeReport.periodFolders().month, "Planner/months");
+        assert.equal(window.plainday.Schedule.dailyOpts({ asPlugin: true }).folder, "Reference/Planner/days", "the plugin's own, for the panel to show");
+    } finally {
+        plugin.onunload();
+    }
+});
+
+test("Settings → Plainday → Note templates: the Task note and Log templates, blank meaning the paths the commands used to hold (OBS-283)", async () => {
+    const { plugin } = load(BUNDLE);
+    const task = { path: "Config/Templates/Task.md" }, mine = { path: "Templates/My task.md" };
+    const files = new Map([[task.path, task], [mine.path, mine]]);
+    plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+    plugin.app.vault.getMarkdownFiles = () => [...files.values()];
+    plugin.app.vault.getAllFolders = () => [];
+    await plugin.onload();
+    try {
+        const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
+        assert.deepEqual(items.map((i) => i.name), ["Task note", "Log"]);
+        const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
+        const t = draw("Task note");
+        assert.equal(t.control.inputEl.value, "", "blank as it comes");
+        assert.equal(t.control.inputEl.placeholder, "Config/Templates/Task.md");
+        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Config/Templates/Task.md");
+        // The Log's default isn't in this vault, so it says Add note has nothing to make one from
+        assert.match(draw("Log").warning(), /^“Config\/Templates\/Log\.md” isn't in the vault/);
+        t.type("Templates/My task");
+        t.leave();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(plugin.saved.at(-1).templates.task, "Templates/My task.md");
+        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/My task.md");
     } finally {
         plugin.onunload();
     }

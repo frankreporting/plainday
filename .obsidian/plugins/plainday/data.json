@@ -26,6 +26,7 @@
     "projects": "Projects",
     "inbox": "Inbox",
     "archive": "Archive",
+    "periodic": "",
     "week": "",
     "month": "",
     "year": "",
@@ -34,6 +35,8 @@
   "templates": {
     "week": "",
     "month": "",
-    "year": ""
+    "year": "",
+    "task": "",
+    "log": ""
   }
 }

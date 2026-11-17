@@ -15,8 +15,8 @@ const Settings = load("settings.js", "Settings");
 const settings = new Settings();
 const plain = (x) => JSON.parse(JSON.stringify(x));
 // The folders a new vault starts with (OBS-283): the system's three as they always were, the rest blank
-const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", week: "", month: "", year: "", errorLog: "" };
-const TEMPLATES = { week: "", month: "", year: "" };
+const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", periodic: "", week: "", month: "", year: "", errorLog: "" };
+const TEMPLATES = { week: "", month: "", year: "", task: "", log: "" };
 const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
@@ -185,7 +185,7 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
 // undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
 // vault holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001" } = {}) {
+function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {} } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0;
     const plugin = {
@@ -200,6 +200,8 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
     // This vault's local storage, where its key for its secrets' names is kept: "vault001" unless given
     const local = new Map(vaultKey ? [["plainday-calendar-key", vaultKey]] : []);
     const app = {
+        // The community plugins Settings asks about: Notebook Navigator, for the periodic notes' source
+        plugins: { plugins },
         loadLocalStorage: (k) => local.get(k) ?? null,
         saveLocalStorage: (k, v) => { local.set(k, v); },
         // As Obsidian's: names in lowercase letters, digits and dashes, one string each
@@ -747,8 +749,8 @@ test("normalize: each folder that reads, a note's path with .md, blank for what 
         folders: { projects: " Work/ ", inbox: "Waiting", archive: "Old", week: "/Planner//Weeks/", month: "../x", year: 7, errorLog: "Logs/Problems" },
         templates: { week: "Templates/Plain week", month: "Templates/Month.md", year: "a|b" },
     }, billing);
-    assert.deepEqual(plain(n.folders), { projects: "Work", inbox: "Waiting", archive: "Old", week: "Planner/Weeks", month: "", year: "", errorLog: "Logs/Problems.md" });
-    assert.deepEqual(plain(n.templates), { week: "Templates/Plain week.md", month: "Templates/Month.md", year: "" });
+    assert.deepEqual(plain(n.folders), { projects: "Work", inbox: "Waiting", archive: "Old", periodic: "", week: "Planner/Weeks", month: "", year: "", errorLog: "Logs/Problems.md" });
+    assert.deepEqual(plain(n.templates), { ...TEMPLATES, week: "Templates/Plain week.md", month: "Templates/Month.md", year: "" });
     // One that doesn't read keeps its default; the others stay
     assert.deepEqual(plain(settings.normalize({ folders: { projects: "../x", inbox: "Waiting" } }, billing).folders).inbox, "Waiting");
     assert.equal(settings.normalize({ folders: { projects: "../x" } }, billing).folders.projects, "Projects");
@@ -918,4 +920,58 @@ test("reload: the saved flags move only once the write lands, so a failed save c
     await f.s.reload();
     assert.deepEqual(plain(f.s.folders()), { projects: "Work", inbox: "Waiting", archive: "Old" }, "and the next one keeps them, not the defaults");
     assert.deepEqual(plain(f.saves.at(-1).folders).projects, "Work");
+});
+
+// ------------------------------------------------------------- the periodic notes' source (OBS-283)
+
+// A vault whose Notebook Navigator makes the periodic notes itself, with its own patterns and templates
+const NAVIGATOR = {
+    calendarIntegrationMode: "notebook-navigator",
+    vaultProfiles: [{ periodicNotesFolder: "Planner" }],
+    calendarCustomFilePattern: "[days]/YYYY-MM-DD",
+    calendarCustomWeekPattern: "[weeks]/gggg[w]ww",
+    calendarCustomMonthPattern: "[months]/YYYY-MM",
+    calendarCustomYearPattern: "[years]/YYYY",
+    calendarCustomFileTemplate: "T/Day.md",
+    calendarCustomWeekTemplate: "T/Week.md",
+};
+
+test("periodicSource: the setting, else the calendar the vault uses; Navigator integrating with the Daily notes plugin means that plugin", async () => {
+    const plain2 = withPlugin({});
+    assert.equal(plain2.s.periodicSource(), "daily-notes", "no Navigator at all");
+    const nn = withPlugin({ plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
+    assert.equal(nn.s.periodicSource(), "notebook-navigator");
+    const integrated = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarIntegrationMode: "daily-notes" } } } });
+    assert.equal(integrated.s.periodicSource(), "daily-notes", "its calendar isn't what makes them");
+    // The setting wins over what's installed, both ways
+    const chosen = withPlugin({ stored: { folders: { periodic: "daily-notes" } }, plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
+    await chosen.s.load();
+    assert.equal(chosen.s.periodicSource(), "daily-notes");
+    const other = withPlugin({ stored: { folders: { periodic: "notebook-navigator" } } });
+    await other.s.load();
+    assert.equal(other.s.periodicSource(), "notebook-navigator");
+    // Anything else isn't a source
+    assert.equal(settings.normalize({ folders: { periodic: "periodic-notes" } }, billing).folders.periodic, "");
+});
+
+test("navigatorNote: the folder, name and template Notebook Navigator's pattern says, with its [literals] unwrapped", async () => {
+    const f = withPlugin({ plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
+    assert.deepEqual(plain(f.s.navigatorNote("day")), { folder: "Planner/days", format: "YYYY-MM-DD", template: "T/Day.md" });
+    assert.deepEqual(plain(f.s.navigatorNote("week")), { folder: "Planner/weeks", format: "gggg[w]ww", template: "T/Week.md" });
+    assert.deepEqual(plain(f.s.navigatorNote("month")), { folder: "Planner/months", format: "YYYY-MM", template: "" });
+    // A pattern with no folder of its own sits at its base; no pattern means nothing to read
+    const flat = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomYearPattern: "YYYY" } } } });
+    assert.deepEqual(plain(flat.s.navigatorNote("year")), { folder: "Planner", format: "YYYY", template: "" });
+    const none = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomWeekPattern: "" } } } });
+    assert.equal(none.s.navigatorNote("week"), null);
+    assert.equal(withPlugin({}).s.navigatorCalendar(), null, "no Navigator installed");
+});
+
+test("templates: the task and log templates default to the paths the command used to hold, and blank means that default", () => {
+    const d = settings.defaults().templates;
+    assert.deepEqual(plain([d.task, d.log]), ["", ""], "blank as it comes");
+    assert.deepEqual(plain(Settings.TEMPLATES), { task: "Config/Templates/Task.md", log: "Config/Templates/Log.md" });
+    const n = settings.normalize({ templates: { task: "Templates/My task", log: "a|b" } }, billing);
+    assert.equal(n.templates.task, "Templates/My task.md");
+    assert.equal(n.templates.log, "", "a path that doesn't read is blank, so the default holds");
 });

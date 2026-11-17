@@ -110,10 +110,16 @@ test("periodic notes: a weekly, monthly or yearly note is named by its pattern, 
     assert.equal(s.periodOf(file("Projects/Kestrel/Kestrel.md")), null);
 });
 
-test("periodic notes: the folders follow Notebook Navigator's patterns, or sit beside the daily notes", async () => {
-    const moved = await scheduleIn({ nn: { ...NN, calendarCustomMonthPattern: "[periodic/months]/YYYY-MM" } });
+test("periodic notes: the folders follow Notebook Navigator's patterns when it's the source, else sit beside the daily notes (OBS-283)", async () => {
+    // Its patterns count only where its calendar is what makes the notes
+    const navigator = { ...NN, calendarIntegrationMode: "notebook-navigator", calendarCustomMonthPattern: "[periodic/months]/YYYY-MM" };
+    const moved = await scheduleIn({ nn: navigator });
     assert.equal(moved.schedule.periodOf(file(`${PLANNER}/periodic/months/2026-09.md`)), "month");
     assert.equal(moved.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), null);
+    // The same Navigator, integrating with the Daily notes plugin instead: its pattern says nothing
+    const plugin = await scheduleIn({ nn: { ...navigator, calendarIntegrationMode: "daily-notes" } });
+    assert.equal(plugin.schedule.periodOf(file(`${PLANNER}/periodic/months/2026-09.md`)), null);
+    assert.equal(plugin.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), "month");
     const bare = await scheduleIn({ nn: null });
     assert.equal(bare.schedule.periodOf(file(`${PLANNER}/weeks/2026w38.md`)), "week");
     assert.equal(bare.schedule.periodOf(file(`${PLANNER}/months/2026-09.md`)), "month");

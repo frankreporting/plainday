@@ -219,8 +219,18 @@ test("new notes are staged in the Inbox as it's set, outside Projects, so a note
     const staged = (folders) => new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: withFolders({}, folders) })))().stagingFolder();
     assert.equal(staged({}), "Inbox");
     assert.equal(staged({ projects: "Work", inbox: "Waiting" }), "Waiting");
-    assert.equal(AddTaskNote.TASK_TEMPLATE, "Config/Templates/Task.md");
+    // The Task and Log templates are settings now (OBS-283), with the paths the command used to hold
+    // written in as their defaults, and a blank setting meaning that default
+    const withTemplates = (templates) => {
+        const plainday = withFolders({});
+        Object.assign(plainday.Settings.get().templates, templates);
+        return new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday })))();
+    };
+    assert.equal(withTemplates({}).templatePath("task"), "Config/Templates/Task.md");
+    assert.equal(withTemplates({}).templatePath("log"), "Config/Templates/Log.md");
+    assert.equal(withTemplates({ task: "Templates/My task.md" }).templatePath("task"), "Templates/My task.md");
     assert.ok(fs.existsSync(new URL("../../Templates/Task.md", here)), "the Task template is where the command looks");
+    assert.ok(fs.existsSync(new URL("../../Templates/Log.md", here)), "and the Log template");
 });
 
 test("projectLinks: the ⭕ links on a line, with their link paths", () => {

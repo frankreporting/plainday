@@ -5,7 +5,6 @@ export default class JumpToDate {
     // Set on this device when "Don't ask again" is ticked; the prompt offers to undo it
     static SKIP_KEY = "obsidian-pm-jump-create-without-asking";
     static TEMPLATE = { week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
-    static NN_TEMPLATE = { week: "calendarCustomWeekTemplate", month: "calendarCustomMonthTemplate", year: "calendarCustomYearTemplate" };
 
     // Command: type a date and open its note (OBS-89). A day opens its daily note; this, next or last
     // week, month or year opens the weekly, monthly or yearly note, and so does a note's own name
@@ -159,7 +158,8 @@ export default class JumpToDate {
         // can disagree with the folder set for it, or with Notebook Navigator's pattern; then the next
         // jump wouldn't find it
         if (file.path !== target.path) {
-            const where = plainday.Settings?.get().folders[unit] ? `Settings → Plainday → Folders puts ${target.kind} notes` : "Notebook Navigator's pattern puts it";
+            const navigator = plainday.Settings?.periodicSource?.() === "notebook-navigator";
+            const where = navigator ? "Notebook Navigator's pattern puts it" : `Settings → Plainday → Periodic notes puts ${target.kind} notes`;
             new Notice(`The ${target.kind} note's template moved it to ${file.parent?.path ?? "/"}, but ${where} in ${folder}. Make them agree, or the next jump won't find it.`, 0);
         }
         return file;
@@ -170,10 +170,14 @@ export default class JumpToDate {
     // Note in Templater's template folder; null when none is there. `asBefore` leaves the setting out,
     // for the panel to show what blank means.
     templateFor(unit, { asBefore = false } = {}) {
-        const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
+        const settings = plainday.Settings;
+        // Notebook Navigator's calendar as the source: its own template for that calendar, and nothing
+        // else, since it makes the note (OBS-283). Otherwise the setting, else Templater's folder.
+        const navigator = !asBefore && settings?.periodicSource?.() === "notebook-navigator";
         const folder = String(app.plugins.getPlugin("templater-obsidian")?.settings?.templates_folder ?? "").replace(/\/$/, "");
-        const set = asBefore ? "" : plainday.Settings?.get().templates[unit] ?? "";
-        const candidates = [set, nn?.[JumpToDate.NN_TEMPLATE[unit]], folder && `${folder}/${JumpToDate.TEMPLATE[unit]}`];
+        const set = asBefore || navigator ? "" : settings?.get().templates[unit] ?? "";
+        const candidates = navigator ? [settings.navigatorNote(unit)?.template]
+            : [set, folder && `${folder}/${JumpToDate.TEMPLATE[unit]}`];
         for (const c of candidates) {
             if (!c) continue;
             const file = app.vault.getFileByPath(c.endsWith(".md") ? c : `${c}.md`);

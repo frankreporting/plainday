@@ -4,8 +4,6 @@ import { app, plainday } from "../host.js";
 export default class AddTaskNote {
     // "- [ ]", "- [x]", "- [<]", … at the start of a line
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\] ?/;
-    static TASK_TEMPLATE = "Config/Templates/Task.md";
-    static LOG_TEMPLATE = "Config/Templates/Log.md";
     static DATE = /\d{4}-\d{2}-\d{2}/g;
     // An event line's time, which comes before its title: "1:00pm\t", "all day\t", or a time with
     // nothing after it (a line with no title)
@@ -350,6 +348,13 @@ export default class AddTaskNote {
         return note.path.startsWith(`${plainday.Settings.folders().archive}/`);
     }
 
+    // The template a task note or a log is made from, as Settings → Plainday → Note templates has it
+    // (OBS-283): `Config/Templates/Task.md` and `Log.md` as they come
+    /** @param {"task" | "log"} kind */
+    templatePath(kind) {
+        return plainday.Settings.get().templates[kind] || plainday.Settings.constructor.TEMPLATES[kind];
+    }
+
     // Where a new task note or log is made before its template files it: the Inbox, as Settings →
     // Plainday → Folders has it (OBS-283). A note still there afterwards is unfiled: its line named no
     // project, so it waits there until AddProjectLink or MoveToProject files it (OBS-55).
@@ -686,7 +691,7 @@ export default class AddTaskNote {
             return null;
         }
         const templater = app.plugins.plugins["templater-obsidian"]?.templater;
-        const template = app.vault.getFileByPath(AddTaskNote.TASK_TEMPLATE);
+        const template = app.vault.getFileByPath(this.templatePath("task"));
         if (!templater || !template) {
             new Notice("Can't create the note: Templater or the Task template is missing");
             return null;
@@ -850,7 +855,7 @@ export default class AddTaskNote {
     async makeLog(name) {
         if (app.metadataCache.getFirstLinkpathDest(name, app.workspace.getActiveFile()?.path ?? "")) return;
         const templater = app.plugins.plugins["templater-obsidian"]?.templater;
-        const template = app.vault.getFileByPath(AddTaskNote.LOG_TEMPLATE);
+        const template = app.vault.getFileByPath(this.templatePath("log"));
         if (!templater || !template) {
             new Notice("Templater or the Log template is missing, so the log wasn't made: click its link to make it");
             return;

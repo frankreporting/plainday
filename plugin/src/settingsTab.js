@@ -828,12 +828,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         });
 
         const moves = "Changing it doesn't move the notes already there.";
-        /** @type {Record<"projects" | "inbox" | "archive", [string, string]>} */
-        const system = {
-            projects: ["Projects", "Every project and area."],
-            inbox: ["Inbox", "Where Plainday puts a note it makes before the note has a project."],
-            archive: ["Archive", "Finished projects, which the reports and commands leave out."],
-        };
+        // Projects, the Inbox and the archive carry no description: their names say what they hold, and
+        // the manual has the detail (Brian, 2026-11-16)
+        /** @type {Record<"projects" | "inbox" | "archive", string>} */
+        const system = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
         // A path with each folder the vault has spelled as it is there, in any case: `projects/clients` is
         // `Projects/Clients` (a Mac refuses a folder that differs from one it has only in case)
         /** @param {string} path */
@@ -890,7 +888,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             return { value: folder };
         };
         /** @param {"projects" | "inbox" | "archive"} key */
-        const systemField = (key) => pathField(system[key][0], `${system[key][1]} ${moves}`, {
+        const systemField = (key) => pathField(system[key], "", {
             saved: () => now().folders[key],
             read: (v) => systemRead(key, v),
             save: (s, value) => store(s, "folders", { [key]: value }),
@@ -900,7 +898,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 const plan = planner();
                 return (f) => systemRead(key, f, { plan, own: true }).error === undefined;
             }),
-            was: (value) => `${system[key][0]} stays ${code(value)}.`,
+            was: (value) => `${system[key]} stays ${code(value)}.`,
         });
         /** @type {Record<"week" | "month" | "year", string>} */
         const periods = { week: "Weekly", month: "Monthly", year: "Yearly" };
@@ -920,7 +918,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             return { value: folder };
         };
         /** @param {"week" | "month" | "year"} unit */
-        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Blank uses Notebook Navigator's calendar folder, or a folder beside the daily notes. ${moves}`, {
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Blank is a folder beside the daily notes. ${moves}`, {
             saved: () => now().folders[unit],
             read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
@@ -939,9 +937,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 if (missingNote(value)) return `“${value}” isn't in the vault, so the template Plainday used before is used until it is.`;
                 const file = value ? this.app.vault.getFileByPath(value) : jump.templateFor(unit, { asBefore: true });
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
-                return settings.templateWarning(props, Settings.WRITES[unit]);
+                return settings.templateWarning(props, Settings.WRITES[unit] ?? []);
             };
-            return pathField(`${periods[unit]} note`, `Blank uses Notebook Navigator's template, or ${/** @type {{ TEMPLATE: Record<string, string> }} */ (jump.constructor).TEMPLATE[unit]} in Templater's template folder.`, {
+            return pathField(`${periods[unit]} note`, `Blank uses ${/** @type {{ TEMPLATE: Record<string, string> }} */ (jump.constructor).TEMPLATE[unit]} in Templater's template folder.`, {
                 saved: () => now().templates[unit],
                 read: (v) => {
                     const got = settings.notePathOf(v);
@@ -955,6 +953,81 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             });
         };
 
+        // The Task and Log templates AddTaskNote runs (OBS-283). Their names are what they make, and
+        // their default is the path the command had written into it.
+        /** @type {Record<"task" | "log", string>} */
+        const made = { task: "Task note", log: "Log" };
+        /** @param {"task" | "log"} kind */
+        const madeField = (kind) => pathField(made[kind], `What Add note makes a ${kind === "task" ? "task note" : "meeting log"} from.`, {
+            saved: () => now().templates[kind],
+            read: (v) => {
+                const got = settings.notePathOf(v);
+                if (got.error) return { error: `it ${got.error}` };
+                return { value: got.path ? spelledNote(got.path) : "" };
+            },
+            save: (s, value) => store(s, "templates", { [kind]: value }),
+            placeholder: () => Settings.TEMPLATES[kind],
+            note: (value) => {
+                const path = value || Settings.TEMPLATES[kind];
+                if (missingNote(path)) return `“${path}” isn't in the vault, so Add note has nothing to make a ${made[kind].toLowerCase()} from.`;
+                const file = this.app.vault.getFileByPath(path);
+                const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
+                return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
+            },
+            list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
+            was: (value) => `The ${made[kind].toLowerCase()} template stays ${code(value || Settings.TEMPLATES[kind])}.`,
+        });
+
+        // Periodic notes: a page of its own under Folders, whose first row is which calendar owns them
+        // (Brian, 2026-11-16). With Notebook Navigator's, every row there is what it says, with no field.
+        const source = () => settings.periodicSource();
+        const navigator = () => source() === "notebook-navigator";
+        /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
+        const shown = (name, unit, part) => row(name, "", (s) => {
+            const nn = navigator() ? settings.navigatorNote(unit) : null;
+            const value = part === "folder"
+                ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
+                : (unit === "day" ? daily().template : nn?.template ?? "");
+            const where = navigator() ? "Set in Notebook Navigator" : "Set in Settings → Daily notes";
+            // The daily notes' row also says what names them, which is the other half of finding them
+            const named = unit === "day" && part === "folder" ? `, named ${code(nn ? nn.format : daily().format)}` : "";
+            const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
+            s.descEl.empty();
+            s.descEl.appendText(`${shownValue}${named}. ${where}.`);
+        });
+
+        /** @returns {Section[]} */
+        const periodicSections = () => [
+            {
+                heading: null,
+                rows: [
+                    row("Periodic notes come from", "Which one makes your daily, weekly, monthly and yearly notes and says where they go. Plainday reads them from it, and never moves notes you already have.",
+                        (s) => s.addDropdown((d) => d.addOptions(Object.fromEntries(Settings.SOURCES.map((v) => [v, Settings.SOURCE_NAMES[v]])))
+                            .setValue(source()).onChange((v) => {
+                                void store(s, "folders", { periodic: v }).then(() => this.redraw());
+                            }))),
+                ],
+            },
+            {
+                heading: "Folders",
+                rows: [
+                    shown("Daily notes", "day", "folder"),
+                    ...(navigator()
+                        ? [shown("Weekly notes", "week", "folder"), shown("Monthly notes", "month", "folder"), shown("Yearly notes", "year", "folder")]
+                        : [periodField("week"), periodField("month"), periodField("year")]),
+                ],
+            },
+            {
+                heading: "Templates",
+                rows: [
+                    shown("Daily note", "day", "template"),
+                    ...(navigator()
+                        ? [shown("Weekly note", "week", "template"), shown("Monthly note", "month", "template"), shown("Yearly note", "year", "template")]
+                        : [templateField("week"), templateField("month"), templateField("year")]),
+                ],
+            },
+        ];
+
         return [
             {
                 heading: "Folders",
@@ -962,15 +1035,6 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     systemField("projects"),
                     systemField("inbox"),
                     systemField("archive"),
-                    // Shown, not asked: the Daily notes plugin keeps them
-                    row("Daily notes", "Set in Settings → Daily notes.", (s) => {
-                        const { folder, format } = daily();
-                        s.descEl.empty();
-                        s.descEl.appendText(`${folder ? code(folder) : "The top of the vault"}, named ${code(format)}. Set in Settings → Daily notes.`);
-                    }),
-                    periodField("week"),
-                    periodField("month"),
-                    periodField("year"),
                     pathField("Error log note", "Where the time report and the calendar sync list the Problems they find.", {
                         saved: () => now().folders.errorLog,
                         read: (v) => {
@@ -993,20 +1057,15 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         list: null,
                         was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
                     }),
+                    {
+                        ...row("Periodic notes", "", () => {}),
+                        page: { displayValue: Settings.SOURCE_NAMES[source()], sections: periodicSections() },
+                    },
                 ],
             },
             {
                 heading: "Note templates",
-                rows: [
-                    row("Daily note", "Set in Settings → Daily notes.", (s) => {
-                        const { template } = daily();
-                        s.descEl.empty();
-                        s.descEl.appendText(`${template ? code(template.endsWith(".md") ? template : `${template}.md`) : "None"}. Set in Settings → Daily notes.`);
-                    }),
-                    templateField("week"),
-                    templateField("month"),
-                    templateField("year"),
-                ],
+                rows: [madeField("task"), madeField("log")],
             },
         ];
     }

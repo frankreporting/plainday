@@ -3542,21 +3542,20 @@ export default class TimeReport {
     // Folders comes first (OBS-283); blank is this rule (`asBefore`, which the panel shows). JumpToDate
     // calls it outside a report run too, before `this.schedule` is set.
     periodFolders({ asBefore = false } = {}) {
-        const set = asBefore ? null : plainday?.Settings?.get?.()?.folders;
-        const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
-        const base = String(nn?.vaultProfiles?.[0]?.periodicNotesFolder ?? "").replace(/\/$/, "");
+        const settings = asBefore ? null : plainday?.Settings;
+        const navigator = settings?.periodicSource?.() === "notebook-navigator";
+        const set = navigator ? null : settings?.get?.()?.folders;
+        // Beside the daily notes folder, which is where the Planner's folders sit: the name a blank
+        // setting means, and what the panel shows as its placeholder
         const daily = (this.schedule ?? plainday.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
-        const folderOf = (pattern, fallback) => {
-            const p = String(pattern ?? "");
-            const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null;
-            if (base && dir && dir.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") === "") return `${base}/${dir.replace(/\[([^\]]*)\]/g, "$1")}`;
-            return `${planner ? planner + "/" : ""}${fallback}`;
-        };
+        const beside = (fallback) => `${planner ? `${planner}/` : ""}${fallback}`;
+        /** @param {"week" | "month" | "year"} unit @param {string} fallback */
+        const folderOf = (unit, fallback) => (navigator ? settings.navigatorNote(unit)?.folder : null) || beside(fallback);
         return {
-            week: set?.week || folderOf(nn?.calendarCustomWeekPattern, "weeks"),
-            month: set?.month || folderOf(nn?.calendarCustomMonthPattern, "months"),
-            year: set?.year || folderOf(nn?.calendarCustomYearPattern, "years"),
+            week: set?.week || folderOf("week", "weeks"),
+            month: set?.month || folderOf("month", "months"),
+            year: set?.year || folderOf("year", "years"),
         };
     }
 

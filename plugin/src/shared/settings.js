@@ -29,9 +29,18 @@ export default class Settings {
     //     rule). Every command reads them from here (folders(), errorLogPath()), so no folder is written
     //     into a command. Changing one moves no notes. The daily notes' folder, name and template are
     //     the Daily notes plugin's, never asked again here.
-    //   - templates (OBS-283): the weekly, monthly and yearly notes' templates (blank is as before:
-    //     JumpToDate.templateFor's rule). Task notes, logs, projects and areas get theirs with the
-    //     commands that make them in code (OBS-121 to OBS-123).
+    //   - folders.periodic (OBS-283): who owns the daily, weekly, monthly and yearly notes, which is one
+    //     choice rather than a rule per note type: "daily-notes" (the Daily notes plugin keeps the daily
+    //     notes; Plainday keeps the weekly, monthly and yearly folders and templates) or
+    //     "notebook-navigator" (Notebook Navigator's calendar keeps all four, folders and templates, and
+    //     Plainday asks for none of them). "" means neither has been chosen, and periodicSource() reads
+    //     the one in use, so a vault whose calendar is Notebook Navigator's starts there.
+    //   - templates (OBS-283): what each kind of note Plainday makes is made from. The weekly, monthly
+    //     and yearly ones are used in the "daily-notes" source, and blank means Weekly Note, Monthly Note
+    //     or Yearly Note in Templater's template folder. `task` and `log` are the Task and Log templates
+    //     AddTaskNote runs, `Config/Templates/Task.md` and `Log.md` as they come, so no template path is
+    //     written into a command; blank means that default, which the panel shows. Projects and areas get
+    //     theirs with OBS-123.
     //
     // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
     // through normalize(), so a value that doesn't read becomes its default and the rest can trust what
@@ -89,6 +98,12 @@ export default class Settings {
     static FOLDER_NAMES = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
     // The weekly, monthly and yearly notes, by their unit
     static PERIODS = ["week", "month", "year"];
+    // Who owns the periodic notes (folders.periodic): the Daily notes plugin with Plainday, or Notebook
+    // Navigator's calendar. "" is neither chosen, which periodicSource() reads from the vault.
+    static SOURCES = ["daily-notes", "notebook-navigator"];
+    static SOURCE_NAMES = { "daily-notes": "Daily notes plugin + Plainday", "notebook-navigator": "Notebook Navigator" };
+    // The templates a new vault starts with: the ones AddTaskNote has always run (OBS-283)
+    static TEMPLATES = { task: "Config/Templates/Task.md", log: "Config/Templates/Log.md" };
     // The system's own folder in a vault from before: never a place for the three, or for invoices
     static SYSTEM_FOLDER = "Config";
     // The error log note: where it is in a vault from before (it, or the Config folder, is there), and
@@ -99,7 +114,7 @@ export default class Settings {
     // would give way to (Settings → Plainday → Note templates warns). The list for weekly, monthly and
     // yearly notes comes with OBS-120, which makes them in code; until then no row warns. List
     // properties are combined with a template's, not replaced, so they never warn.
-    /** @type {Record<"week" | "month" | "year", string[]>} */
+    /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log", string[]>>} */
     static WRITES = { week: [], month: [], year: [] };
     static COMBINED = ["tags", "aliases"];
     // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
@@ -128,8 +143,8 @@ export default class Settings {
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean },
      *   calendars: { range: string, list: Calendar[] },
-     *   folders: { projects: string, inbox: string, archive: string, week: string, month: string, year: string, errorLog: string },
-     *   templates: { week: string, month: string, year: string },
+     *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
+     *   templates: { week: string, month: string, year: string, task: string, log: string },
      * }}
      * @typedef {{ id: string, name: string, account: string, address: string, on: boolean }} Calendar
      */
@@ -139,8 +154,8 @@ export default class Settings {
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true },
             calendars: { range: Settings.DEFAULT_RANGE, list: [] },
-            folders: { ...Settings.FOLDERS, week: "", month: "", year: "", errorLog: "" },
-            templates: { week: "", month: "", year: "" },
+            folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
+            templates: { week: "", month: "", year: "", task: "", log: "" },
         };
     }
 
@@ -233,6 +248,7 @@ export default class Settings {
             if (read.folder && !read.error) out.folders[key] = read.folder;
         }
         if (this.foldersProblem(out.folders, billing)) Object.assign(out.folders, Settings.FOLDERS);
+        for (const key of /** @type {const} */ (["task", "log"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
         for (const unit of Settings.PERIODS) {
             const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
             // A weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding
@@ -240,6 +256,7 @@ export default class Settings {
             out.folders[unit] = folder && this.overlap(folder, out.folders) ? "" : folder;
             out.templates[unit] = this.notePathOf(templates[unit], billing).path;
         }
+        out.folders.periodic = Settings.SOURCES.includes(folders.periodic) ? folders.periodic : "";
         out.folders.errorLog = this.notePathOf(folders.errorLog, billing).path;
         out.invoices.name = this.text(inv.name);
         out.invoices.address = this.lines(inv.address);
@@ -267,6 +284,51 @@ export default class Settings {
     }
 
     // ---------------------------------------------------------------- folders (OBS-283)
+
+    /**
+     * Who owns the daily, weekly, monthly and yearly notes: the setting, else the calendar the vault
+     * already uses — Notebook Navigator's when its own calendar makes the notes, otherwise the Daily
+     * notes plugin's. The panel shows what this says, so the choice is never hidden.
+     * @returns {"daily-notes" | "notebook-navigator"}
+     */
+    periodicSource() {
+        const set = this.data.folders.periodic;
+        if (set === "daily-notes" || set === "notebook-navigator") return set;
+        return this.navigatorCalendar() ? "notebook-navigator" : "daily-notes";
+    }
+
+    /**
+     * Notebook Navigator's settings when its calendar makes the periodic notes itself, else null. With
+     * its integration set to the Daily notes plugin, that plugin owns them, so this is null.
+     * @returns {Record<string, unknown> | null}
+     */
+    navigatorCalendar() {
+        const nn = /** @type {Record<string, unknown> | undefined} */ (app.plugins?.plugins?.["notebook-navigator"]?.settings);
+        return nn && nn.calendarIntegrationMode === "notebook-navigator" ? nn : null;
+    }
+
+    /**
+     * Where Notebook Navigator's calendar puts a note of `unit` and what names it, from its pattern
+     * ("[days]/YYYY-MM-DD" under its periodic notes folder), and the template it uses: { folder, format,
+     * template }. Null when its calendar isn't what makes them, or it has no pattern for that unit.
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @returns {{ folder: string, format: string, template: string } | null}
+     */
+    navigatorNote(unit) {
+        const nn = this.navigatorCalendar();
+        if (!nn) return null;
+        const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
+        const pattern = typeof nn[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]) : "";
+        if (!pattern) return null;
+        const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/\/+$/, "");
+        const at = pattern.lastIndexOf("/");
+        // The folder is the pattern's own folders with their [literals] unwrapped, under its base; the
+        // name is the rest, as moment reads it (its [literals] stay)
+        const dir = at < 0 ? "" : pattern.slice(0, at).replace(/\[([^\]]*)\]/g, "$1");
+        const format = at < 0 ? pattern : pattern.slice(at + 1);
+        const template = typeof nn[`calendarCustom${key}Template`] === "string" ? String(nn[`calendarCustom${key}Template`]) : "";
+        return { folder: [base, dir].filter(Boolean).join("/"), format, template };
+    }
 
     /**
      * Projects, the Inbox and the archive, as they're set
