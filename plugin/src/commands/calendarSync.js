@@ -53,6 +53,8 @@ export default class CalendarSync {
     static MAX_REMOVALS = 10;   // a run that would remove or forward more than this does neither
     // How long a line the sync saw must stay gone, across two runs, before it counts as one you deleted
     static MISSING_MS = 10 * 60 * 1000;
+    // How long the sync works before it hands the app a turn (breathe)
+    static SLICE_MS = 5;
     // An event line's ID: ID_LENGTH letters and digits, from ID_SPACE (36^6) values. One that another
     // line of the note already uses steps to the next of ID_STEPS.
     static ID_LENGTH = 6;
@@ -380,6 +382,7 @@ export default class CalendarSync {
             const at = slot(entry.calendarId, entry.date, entry.lines);
             gone.set(at, gone.has(at) ? null : { key, entry });
         }
+        if (!gone.size) return [];
         for (const event of events.values()) {
             if (!event.recurring || cached[event.key]) continue;
             const at = slot(event.calendarId, event.date, this.lines(event));
@@ -567,6 +570,7 @@ export default class CalendarSync {
         const handedOver = new Set(splits.map((s) => s.key));
 
         for (const [key, cached] of Object.entries(cache.events)) {
+            await this.breathe();
             if (handedOver.has(key)) continue;
             const event = events.get(key);
             if (event) events.delete(key);   // handled here; whatever is left over is new
@@ -617,6 +621,7 @@ export default class CalendarSync {
         // Events this device doesn't know: new ones, or ones another device wrote first
         const fresh = [];
         for (const [key, event] of events) {
+            await this.breathe();
             const lines = this.lines(event);
             if (cache.dismissed[key]) continue;
             // A line you'd deleted before OBS-275, known by its day and the line the sync wrote
@@ -678,6 +683,7 @@ export default class CalendarSync {
             for (const [date] of [...plan].sort()) {
                 const ops = plan.get(date).filter(wanted);
                 if (!ops.length) continue;
+                await this.breathe();
                 try {
                     await this.applyToNote(date, ops, cache, report, landed, ctx);
                 } catch (e) {
@@ -700,11 +706,12 @@ export default class CalendarSync {
         for (let d = from; d <= to; d = this.addDays(d, 1)) days.add(d);
         const index = new Map();
         for (const date of [...days].sort()) {
+            await this.breathe();
             const file = app.vault.getFileByPath(this.dailyPath(date));
             if (!file) continue;
             const text = await (app.vault.cachedRead ?? app.vault.read).call(app.vault, file);
             for (const line of text.split("\n")) {
-                const lid = this.head(line) ? this.lidOf(line) : null;
+                const lid = line.includes("^") && this.head(line) ? this.lidOf(line) : null;
                 if (!lid) continue;
                 if (!index.has(lid)) index.set(lid, []);
                 const list = index.get(lid);
@@ -727,9 +734,11 @@ export default class CalendarSync {
     assignLids(events, cache, index) {
         const out = new Map(), used = new Set();
         for (const key of [...events.keys()].sort()) {
-            const ids = this.lineIds(key);
             const known = cache.events[key]?.lid ?? cache.canceled[key]?.lid ?? null;
-            const lid = known ?? ids.find((id) => index.has(id) && !used.has(id)) ?? ids.find((id) => !used.has(id)) ?? ids[0];
+            const first = known ? null : this.lineId(key);
+            // The next steps only when the first is taken by another event this run
+            const ids = known || !used.has(first) ? null : this.lineIds(key);
+            const lid = known ?? (ids ? ids.find((id) => index.has(id) && !used.has(id)) ?? ids.find((id) => !used.has(id)) ?? ids[0] : first);
             used.add(lid);
             out.set(key, lid);
         }
@@ -748,6 +757,14 @@ export default class CalendarSync {
     // Now, in ms (a test sets it)
     now() {
         return Date.now();
+    }
+
+    // Hands the app a turn once the sync has held it for SLICE_MS, so a long run never holds it up
+    // for more than that at a time
+    async breathe() {
+        if (performance.now() - (this.sliceAt ?? 0) < CalendarSync.SLICE_MS) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+        this.sliceAt = performance.now();
     }
 
     // What a moved event's new line takes from the old one: its ⭕ links, and its log link if the
@@ -844,10 +861,23 @@ export default class CalendarSync {
             const now = Array.isArray(op.lines) ? op.lines : Array.isArray(op.entry?.lines) ? op.entry.lines : null;
             known.set(lid, { title: op.event?.title ?? op.entry?.title ?? "", now, was: Array.isArray(op.entry?.lines) ? op.entry.lines : null });
         }
-        for (const [lid, { title, now, was }] of known) {
-            const at = [];
-            for (let i = 0; i < lines.length; i++) if (this.head(lines[i]) && this.lidOf(lines[i]) === lid) at.push(this.blockAt(lines, i));
-            if (at.length < 2) continue;
+        // Each ID's event lines, in one pass over the note; again after a merge, which moves the lines below
+        const doubled = (done) => {
+            const where = new Map();
+            for (let i = 0; i < lines.length; i++) {
+                if (!lines[i].includes("^")) continue;
+                const lid = this.lidOf(lines[i]);
+                if (!lid || !known.has(lid) || done.has(lid) || !this.head(lines[i])) continue;
+                where.set(lid, [...(where.get(lid) ?? []), i]);
+            }
+            return [...where].find(([, rows]) => rows.length > 1) ?? null;
+        };
+        const done = new Set();
+        for (let next = doubled(done); next; next = doubled(done)) {
+            const [lid, rows] = next;
+            done.add(lid);
+            const { title, now, was } = known.get(lid);
+            const at = rows.map((i) => this.blockAt(lines, i));
             const blocks = at.map((b) => lines.slice(b.from, b.to + 1));
             const plain = [now, was].filter(Boolean).map((l) => this.labeled(l, lid).join("\n"));
             const texts = blocks.map((b) => b.join("\n"));
@@ -1301,7 +1331,7 @@ export default class CalendarSync {
     // for an insert only (`timeless`), a log's line with no time and the same title.
     findBlock(lines, entry, { adopt = null, timeless = false } = {}) {
         if (entry.lid) {
-            const from = lines.findIndex((l) => this.lidOf(l) === entry.lid && this.head(l));
+            const from = lines.findIndex((l) => l.includes(entry.lid) && this.lidOf(l) === entry.lid && this.head(l));
             return from === -1 ? null : this.blockAt(lines, from);
         }
         if (!Array.isArray(entry.lines)) return null;
@@ -1538,6 +1568,15 @@ export default class CalendarSync {
     // reads as one span: otherwise its end's clock time would read as a span on the first day
     // (OBS-24), so it's listed as an event with no end time instead.
     lines(event) {
+        // Worked out once a run for each event: moment's formatting is the slow part
+        const memo = (this.linesMemo ??= new WeakMap());
+        if (typeof event === "object" && event && memo.has(event)) return [...memo.get(event)];
+        const out = this.renderLines(event);
+        if (typeof event === "object" && event) memo.set(event, out);
+        return [...out];
+    }
+
+    renderLines(event) {
         const title = this.title(event);
         if (event.allDay) return [`- [<] All day\t${title}`];
         const mark = event.availability === "free" ? ` ${CalendarSync.FREE_MARK}` : "";
