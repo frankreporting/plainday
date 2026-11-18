@@ -608,7 +608,21 @@ export class CalendarReader {
             recurring,
             status: CalendarReader.STATUS[String(item.getFirstPropertyValue("status") ?? "").toUpperCase()] ?? "none",
             availability: transp === "TRANSPARENT" ? "free" : "busy",
+            // When the calendar last changed it (LAST-MODIFIED, as ms), or null: the sync never acts on a
+            // copy of the calendar older than one it has already seen (OBS-275)
+            modified: this.modified(item),
         };
+    }
+
+    // An event's LAST-MODIFIED as ms since 1970, or null when it has none or it doesn't read
+    modified(item) {
+        try {
+            const value = item.getFirstPropertyValue("last-modified");
+            const ms = value && typeof value.toJSDate === "function" ? value.toJSDate().getTime() : NaN;
+            return Number.isFinite(ms) ? ms : null;
+        } catch {
+            return null;
+        }
     }
 
     // An attendee's address: its EMAIL parameter (iCloud's), or its value without `mailto:`

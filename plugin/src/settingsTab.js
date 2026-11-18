@@ -1118,6 +1118,17 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     }
 
     /**
+     * What a calendar's row says about its link on this device: nothing when it works, else what to do
+     * (the last Sync calendars that read it says whether it stopped working, OBS-275)
+     * @param {string} id
+     * @returns {string}
+     */
+    linkSaid(id) {
+        if (!plainday.Settings.link(id)) return "Add link on this device: Edit, then paste it";
+        return plainday.CalendarSync?.deadLink?.(id) ? "Link stopped working on this device: Edit, then paste a new one" : "";
+    }
+
+    /**
      * Calendars (OBS-282): Add calendar, whose description links to How to get the links, the sync range,
      * and the calendar list, a page of each account's calendars, accounts and calendars in alphabetical
      * order
@@ -1182,7 +1193,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                             displayValue: `${list.length} calendar${list.length === 1 ? "" : "s"}`,
                             sections: [...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
                                 heading: account,
-                                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
+                                rows: named(calendars).map(([c, name]) => row(name, this.linkSaid(c.id), (s) => {
                                     // Put back when its save fails, which runs onChange again: that turn is ignored
                                     let reverting = false;
                                     s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {

@@ -22,9 +22,11 @@ This README covers trying it and installing it. **[The manual](<Config/Manual.md
 
 Plainday's own settings are in **Settings → Plainday**: its folders (projects, the Inbox, the archive and the error log, which come as the sample notes have them), a *Periodic notes* page where you choose whether the Daily notes plugin and Plainday or Notebook Navigator owns the daily, weekly, monthly and yearly notes, the Task and Log templates, your details for invoices and the folder they go in, the tables' freeze, the cursor on list lines, the calendars for the calendar sync, by their private links (kept in each device's secret storage, never in the vault), and how far ahead it syncs, and Copy and Paste for a backup or another device. The demo's are filled in, with invented details. The manual's *Settings* says what each does.
 
+**Calendars:** in *Settings → Plainday → Calendars*, *Add calendar* takes a calendar's private link: Google Calendar's *Secret address in iCal format* (on the web, the calendar's settings, *Integrate calendar*), iCloud's *Public Calendar* link (share the calendar in Calendar), or Outlook's published *ICS* link (*Settings → Calendar → Shared calendars → Publish a calendar*); *How to get the links*, in the panel, says the same. Then *Plainday: Sync calendars*, on any device, downloads them and writes their events into your daily notes, each event line ending in its event's ID. For now you run it; syncing on its own, on a schedule, is coming. Each link works like a password, so it's kept in that device's secret storage, and *Copy* and *Paste* carry it to another device. Outlook's links haven't been tried with a real Outlook calendar yet. **Network:** Plainday goes over the network only to download the calendar links you add, and sends nothing.
+
 Optional: `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (choose it in *Settings → Plainday → Folders → Periodic notes* and Plainday reads its folders and templates for all four note types) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in *Settings → Plainday → Tables* (see the manual's *Freezing tables*).
 
-The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal; the scheduled calendar sync uses it.
+The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal.
 
 Nothing here backs your vault up. Use Obsidian Sync's version history, Time Machine, or a backup tool of your choice.
 
@@ -36,7 +38,7 @@ The sample notes use this layout. Area and project names are yours to choose; th
 Archive/                           finished projects, moved here whole; excluded from search, kept in reports
 Config/                            the system
   Bases/                           Bases views (and the Invoices base, in a vault with no invoice folder)
-  Scripts/                         Templater user scripts, Calendar, tests
+  Scripts/                         Templater user scripts, tests
   Templates/                       Templater templates
 Inbox/                             new notes that haven't been filed
 Projects/
@@ -133,7 +135,7 @@ Run from the command palette ("Plainday: Add note"), a hotkey, or the command li
 | Toggle time entry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
 | Plan | | Opens the next 2–5 daily notes side by side |
 | Convert to project | | Turns the selection into a new project folder and note |
-| Sync calendars | | Fetches this Mac's calendars and writes events into daily notes, keeping the lines it wrote current |
+| Sync calendars | | Downloads your calendars from their private links and writes their events into daily notes, keeping the lines it wrote current |
 | Time report | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note, and lists every Problem in the error log |
 | View error logs | | Opens the error log: every Problem the time report and the calendar sync found, one line per kind per note |
 | Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick (on a flat-fee project, records the day its fee was earned); on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
@@ -156,8 +158,6 @@ Startup scripts (run when Obsidian starts):
 
 | Script | What it does |
 | --- | --- |
-| `Scripts/Calendar/fetchCalendar.swift` | Reads macOS calendars (EventKit) into `calendar-events.json`, each event with its status and its free/busy availability; *Sync calendars* runs it |
-| `Scripts/Calendar/sync-calendar.sh` | Sync from a terminal or a schedule: asks Obsidian (opening it in the background if needed), and falls back to fetching the events file. `on`/`off`/`status` manage the launchd schedule |
 | `Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
 
 ## Raycast

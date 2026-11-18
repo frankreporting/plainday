@@ -21,7 +21,7 @@ const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
-    calendars: { range: "2 months", list: [] },
+    calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
 };
@@ -30,7 +30,7 @@ const JUNIPER = {
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true },
-    calendars: { range: "2 months", list: [] },
+    calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
 };
@@ -59,7 +59,7 @@ test("normalize: each value that reads, else its default", () => {
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false },
-        calendars: { range: "2 months", list: [] },
+        calendars: { range: "2 months", list: [], recurring: null },
         folders: FOLDERS,
         templates: TEMPLATES,
     });
@@ -377,7 +377,7 @@ const HOME_LINK = "webcal://p00-caldav.icloud.com/published/2/INVENTEDinvented";
 const NO_LINK = /https?:|webcals?:|calendar\.google|caldav|private-0000|invented/i;
 
 test("calendars: the range and the list, as they read; anything else is left out, a link above all", () => {
-    assert.deepEqual(plain(settings.defaults().calendars), { range: "2 months", list: [] }, "2 months for a new vault");
+    assert.deepEqual(plain(settings.defaults().calendars), { range: "2 months", list: [], recurring: null }, "2 months for a new vault");
     const n = settings.normalize({ calendars: {
         range: " 3  Weeks ",
         list: [
@@ -393,7 +393,7 @@ test("calendars: the range and the list, as they read; anything else is left out
     assert.deepEqual(plain(n.calendars), { range: "3 weeks", list: [
         { id: "abc123", name: "Studio", account: "Work", address: "me@example.com", on: false },
         { id: "home99", name: "Home", account: "", address: "", on: true },
-    ] });
+    ], recurring: null });
     assert.doesNotMatch(JSON.stringify(n), NO_LINK, "no link from what came in");
     for (const range of ["5 weeks", 14, null, "", "2 Months!"]) {
         assert.equal(settings.normalize({ calendars: { range } }, billing).calendars.range, "2 months", String(range));
@@ -516,7 +516,7 @@ test("Copy carries each calendar's link beside the settings; Paste stores them, 
     assert.equal(phone.s.link("nosuch"), null);
     // A copy from before OBS-282: no calendars, and the defaults
     const old = phone.s.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J" } }), billing);
-    assert.deepEqual(plain([old.settings?.calendars, old.links]), [{ range: "2 months", list: [] }, {}]);
+    assert.deepEqual(plain([old.settings?.calendars, old.links]), [{ range: "2 months", list: [], recurring: null }, {}]);
 });
 
 test("readOldNotes: settings saved before OBS-282 read the Calendar Sync note's range once, and say so", async () => {
@@ -526,7 +526,7 @@ test("readOldNotes: settings saved before OBS-282 read the Calendar Sync note's 
     assert.equal(f.s.get().calendars.range, "2 months", "until the note is read");
     await f.s.readOldNotes();
     assert.equal(f.s.get().calendars.range, "3 weeks");
-    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [] } }], "the rest as it was");
+    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [], recurring: null } }], "the rest as it was");
     assert.deepEqual(f.notices, [settings.rangeNotice({ range: "3 weeks" })]);
     assert.deepEqual(f.reads, ["Config/Calendar Sync.md"], "Invoice Settings and Table Settings aren't read again");
     await f.s.readOldNotes();
@@ -575,7 +575,7 @@ test("readOldNotes: no range line, calendars already saved, or a data file that 
 
 test("the demo's data file holds no calendar, and no link", () => {
     const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
-    assert.deepEqual(JSON.parse(text).calendars, { range: "2 months", list: [] });
+    assert.deepEqual(JSON.parse(text).calendars, { range: "2 months", list: [], recurring: null });
     assert.doesNotMatch(text, NO_LINK);
 });
 
@@ -640,7 +640,7 @@ test("reload: a data file from a device on a release before calendars leaves thi
     assert.deepEqual(plain([f.s.get().calendars.range, f.s.get().calendars.list.map((c) => c.name)]), ["3 weeks", ["Studio"]]);
     f.plugin.loadData = async () => ({ ...JUNIPER, calendars: { range: "1 week", list: [] } });
     await f.s.reload();
-    assert.deepEqual(plain(f.s.get().calendars), { range: "1 week", list: [] }, "one that has calendars is taken as it is");
+    assert.deepEqual(plain(f.s.get().calendars), { range: "1 week", list: [], recurring: null }, "one that has calendars is taken as it is");
 });
 
 test("readOldNotes: a new device with only the Calendar Sync note uses its range but writes nothing, and saves it with the invoice notes when they arrive", async () => {
@@ -652,7 +652,7 @@ test("readOldNotes: a new device with only the Calendar Sync note uses its range
     notes["Config/Invoice Settings.md"] = INVOICE_TEXT;
     await f.s.load();
     await f.s.readOldNotes();
-    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [] } }]);
+    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [], recurring: null } }]);
     assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice"], bad: [] })}\n\n${settings.rangeNotice({ range: "3 weeks" })}`);
 });
 
@@ -708,7 +708,7 @@ test("reload: a file with no calendars from an older device keeps this device's,
     await f.s.load();
     f.plugin.loadData = async () => ({ ...JUNIPER_BEFORE, invoices: { ...JUNIPER.invoices, lastNumber: 1007 } });
     await f.s.reload();
-    assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", address: "", on: true }] });
+    assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", address: "", on: true }], recurring: null });
     assert.equal(f.saves.at(-1).invoices.lastNumber, 1007, "the rest is the other device's");
     // The next start reads what was written back, and nothing from the old note
     f.plugin.loadData = async () => f.saves.at(-1);
@@ -996,4 +996,31 @@ test("templates: blank means the template's own name in the vault's template fol
     const n = settings.normalize({ templates: { task: "Templates/My task", log: "a|b" } }, billing);
     assert.equal(n.templates.task, "Templates/My task.md");
     assert.equal(n.templates.log, "", "a path that doesn't read is blank, so the default holds");
+});
+
+test("recurring events' projects (OBS-275): each title once with its ⭕ and 🗃️ links; null until read; anything else left out", () => {
+    assert.equal(settings.normalize({}, billing).calendars.recurring, null, "never read: null");
+    assert.deepEqual(plain(settings.normalize({ calendars: { recurring: [] } }, billing).calendars.recurring), [], "read, with none");
+    const n = settings.normalize({ calendars: { recurring: [
+        { title: " Kestrel  standup ", links: ["[[Kestrel Outfitters 2026|⭕]]", "not a link", STUDIO_LINK, 7] },
+        { title: "Kestrel standup", links: ["[[Household|🗃️]]", "[[Kestrel Outfitters 2026|⭕]]"] },
+        { title: "No links", links: [] },
+        { title: "", links: ["[[A|⭕]]"] },
+        { title: "Link text", links: ["[[https://example.com/feed.ics|⭕]]"] },
+        "not a series",
+    ] } }, billing);
+    assert.deepEqual(plain(n.calendars.recurring), [{ title: "Kestrel standup", links: ["[[Kestrel Outfitters 2026|⭕]]", "[[Household|🗃️]]"] }]);
+    assert.doesNotMatch(JSON.stringify(n), NO_LINK);
+});
+
+test("reload and paste: a file or copy from before recurring events keeps this device's (OBS-275)", async () => {
+    const mine = [{ title: "Kestrel standup", links: ["[[Kestrel Outfitters 2026|⭕]]"] }];
+    const f = withPlugin({ stored: { ...JUNIPER, calendars: { range: "1 week", list: [], recurring: mine } } });
+    await f.s.load();
+    f.plugin.loadData = async () => ({ ...JUNIPER, calendars: { range: "3 weeks", list: [] } });
+    await f.s.reload();
+    assert.deepEqual(plain(f.s.get().calendars), { range: "3 weeks", list: [], recurring: mine });
+    assert.deepEqual(plain(f.saves.at(-1).calendars.recurring), mine, "written back, so it's there at the next start");
+    await f.s.replaceWith(f.s.normalize({ ...JUNIPER, calendars: { range: "2 weeks", list: [] } }, billing), {}, true);
+    assert.deepEqual(plain(f.s.get().calendars.recurring), mine, "a copy from before keeps them too");
 });

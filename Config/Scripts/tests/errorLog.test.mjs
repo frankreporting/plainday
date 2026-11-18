@@ -231,7 +231,7 @@ const harness = ({ text = null, path = "Config/Error Log.md" } = {}) => {
         Notice: class { constructor(m, d) { state.notices.push({ m: typeof m === "string" ? m : m.text, d }); } },
         createFragment: (fn) => { const f = { text: "", appendText: (t) => { f.text += t; }, createEl: (_t, o) => { f.text += o.text; return { addEventListener: () => {} }; } }; fn(f); return f; },
     };
-    return { state, log: new (load("errorLog.js", "ErrorLog", context))() };
+    return { state, app: context.app, log: new (load("errorLog.js", "ErrorLog", context))() };
 };
 
 test("write: the desktop makes the note when it's missing, a phone doesn't; an unchanged list isn't written again; it returns the new lines", async () => {
@@ -275,14 +275,28 @@ test("toast: one notice for a run's new lines, with a View Error Logs link; none
     assert.deepEqual(plain(none.state.notices), [{ m: "No error log yet: the time report makes it, on the desktop" }]);
 });
 
-test("the calendar sync's section: held-back changes and skipped lines, each one line with a count, linking the Calendar Sync note", async () => {
-    const h = harness({ text: "" });
-    const Sync = load("calendarSync.js", "CalendarSync", { plainday: { ErrorLog: h.log }, app: { isMobile: false } });
-    await new Sync().logProblems({ held: ["a", "b"], skipped: ["c"] });
-    assert.ok(h.state.text.includes("## Calendar sync\n\nUpdated 10/29 9:14am · 3 open\n\n- Held back changes (2) · [[Calendar Sync]]\n- Skipped lines · [[Calendar Sync]]"), h.state.text);
-    assert.deepEqual(plain(h.state.notices.map((n) => n.m)), ["Calendar sync: 3 new problems: Held back changes ×2 (Calendar Sync), Skipped lines (Calendar Sync). View Error Logs"]);
-    // A run with nothing held or skipped empties the section, with no toast
-    await new Sync().logProblems({ held: [], skipped: [] });
-    assert.ok(h.state.text.includes("## Calendar sync\n\nUpdated 10/29 9:14am · nothing to fix"));
+test("the calendar sync's section (OBS-275): a calendar by its name, a skipped event by its title, a held or skipped line at its daily note, each on this device; another device's lines stay", async () => {
+    const h = harness({ text: "---\nid: 1\n---\n\n## Calendar sync\n\nUpdated 10/28 9:00am · 2 open\n\n- Link stopped working · Studio (on iPhone)\n- Held back changes · [[Calendar Sync]]\n" });
+    const Sync = load("calendarSync.js", "CalendarSync", {
+        plainday: { ErrorLog: h.log, Schedule: { dailyNotePath: (m) => `Days/${m.format("YYYY-MM-DD")}.md` } },
+        app: { ...h.app, isMobile: false }, Platform: { isMacOS: true }, moment: (d) => ({ format: () => d }),
+    });
+    const report = {
+        notSynced: [{ name: "Studio", problem: "dead" }, { name: "Home", problem: "unreachable" }],
+        failedEvents: [{ title: "Book swap", calendar: "Home" }],
+        held: ["2026-11-20 Planning", "2026-11-20 Standup (not added)"], skipped: ["2026-11-21 Review: the line didn't land, will try again next run"],
+    };
+    await new Sync().logProblems(report);
+    assert.ok(h.state.text.includes([
+        "## Calendar sync", "", "Updated 10/29 9:14am · 7 open", "",
+        "- Link stopped working · Studio (on Mac)", "- Link stopped working · Studio (on iPhone)", "- Calendar not synced · Home (on Mac)",
+        "- Event skipped · Book swap (Home) (on Mac)", "- Held back changes (2) · [[2026-11-20]] (on Mac)", "- Skipped lines · [[2026-11-21]] (on Mac)",
+    ].join("\n")), h.state.text);
+    assert.doesNotMatch(h.state.text, /Calendar Sync\]\]/, "a line from before, about no device, goes");
+    assert.equal(h.state.notices.length, 1);
+    assert.match(h.state.notices[0].m, /^Calendar sync: 6 new problems: Link stopped working \(Studio\), Calendar not synced \(Home\)/);
+    // A run with nothing to say keeps only the other device's line, with no toast
+    await new Sync().logProblems({ notSynced: [], failedEvents: [], held: [], skipped: [] });
+    assert.ok(h.state.text.includes("Updated 10/29 9:14am · 1 open\n\n- Link stopped working · Studio (on iPhone)\n"), h.state.text);
     assert.equal(h.state.notices.length, 1);
 });

@@ -41,6 +41,16 @@ export default class TaskIds {
     // tab after its link, and isn't one.
     static OLD_FORWARD = /^(\s*[-*+]\s+\[>\]\s+)\[\[((?:[^\]|]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4}))(?:\|([^\]]*))?\]\] (?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)/iu;
 
+    // An event line: its checkbox, a forwarded event's date link if it has one, then its start (a time
+    // or "All day") and a tab, as the calendar sync writes it. Since OBS-275 an event line ends in its
+    // event's ID, which the sync works out from the event: it's never a task's, so every rule here passes
+    // an event line by, whatever ID it ends in (isEvent).
+    static EVENT_LINE = /^\s*[-*+]\s+\[.\]\s+(?:\[\[[^\]]*\]\]\s+)?(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i;
+
+    static isEvent(line) {
+        return TaskIds.EVENT_LINE.test(line);
+    }
+
     // The block ID a line ends with, or null
     static idOf(line) {
         return line.match(TaskIds.ID_AT_END)?.[1] ?? null;
@@ -153,7 +163,7 @@ export default class TaskIds {
             const bare = cr ? l.slice(0, -1) : l;
             // Only a sent line ([>], or [x] or [-] once finished): an open line with the same ID is a copy
             const box = bare.match(TaskIds.CHECKBOX);
-            if (!box || !">xX-".includes(box[1]) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
+            if (!box || !">xX-".includes(box[1]) || TaskIds.isEvent(bare) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
             let next = TaskIds.withForward(TaskIds.oldForward(bare)?.line ?? bare, link);
             if (mark) next = next.replace(/^(\s*[-*+]\s+)\[.\]/, `$1[${mark}]`);
             else if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
@@ -171,7 +181,7 @@ export default class TaskIds {
         const all = text.split("\n");
         const lines = all.map((l, i) => {
             const box = l.match(TaskIds.CHECKBOX);
-            if (!box || !"xX-".includes(box[1]) || TaskIds.idOf(l.replace(/\r$/, ""))?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
+            if (!box || !"xX-".includes(box[1]) || TaskIds.isEvent(l) || TaskIds.idOf(l.replace(/\r$/, ""))?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
             changed = true;
             return l.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
         });
@@ -304,7 +314,7 @@ export default class TaskIds {
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
-                const id = box ? TaskIds.idOf(text)?.toLowerCase() : null;
+                const id = box && !TaskIds.isEvent(text) ? TaskIds.idOf(text)?.toLowerCase() : null;
                 if (!id || !want.has(id) || !TaskIds.isTop(ls, line)) return;
                 if (!out.has(id)) out.set(id, []);
                 out.get(id).push({ file, line, task: box[1], text });
@@ -345,7 +355,7 @@ export default class TaskIds {
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
-                if (box && TaskIds.idOf(text)?.toLowerCase() === want && TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
+                if (box && !TaskIds.isEvent(text) && TaskIds.idOf(text)?.toLowerCase() === want && TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
             });
         }
         return out;
@@ -400,7 +410,7 @@ export default class TaskIds {
             const lines = note.text.split("\n");
             const seen = new Map();
             lines.forEach((text, line) => {
-                const box = topLevel(text) ? text.match(TaskIds.CHECKBOX) : null;
+                const box = topLevel(text) && !TaskIds.isEvent(text) ? text.match(TaskIds.CHECKBOX) : null;
                 const raw = box ? TaskIds.idOf(text) : null;
                 if (!raw) return;
                 const hit = { id: raw.toLowerCase(), path: note.path, kind: note.kind, line, task: box[1], text: text.trim(), note, lines };
@@ -455,7 +465,7 @@ export default class TaskIds {
         const known = new Set([...byId].filter(([, hits]) => isTask(hits)).map(([id]) => id));
         for (const note of notes) {
             note.text.split("\n").forEach((text, line) => {
-                if (!topLevel(text) || TaskIds.idOf(text)) return;
+                if (!topLevel(text) || TaskIds.isEvent(text) || TaskIds.idOf(text)) return;
                 for (const m of text.matchAll(/\s\^([A-Za-z0-9-]+)\s+\S/g)) {
                     if (known.has(m[1].toLowerCase())) out.push({ rule: "trailing", id: m[1].toLowerCase(), lines: [{ path: note.path, line, text: text.trim() }], detail: {} });
                 }

@@ -37,6 +37,29 @@ const BUDGET = "20 Projects/Productivity/Budget Book/Budget Book.md";
 const note = (date, text) => ({ date, path: `${LOG}/${date}.md`, text });
 const entriesOf = (text, date = "2026-09-01") => plain(tr.parseNote(text, date));
 
+// ------------------------------------------------------------------ event lines' IDs (OBS-275)
+
+test("an event line's ID is passed by: the same entries, projects, free and 🆓 marks with it as without", () => {
+    const lines = [
+        "- [<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]] ^q7m2xk",
+        "\t- 9:00am - 9:20am",
+        "- [<] 10:00am\tDelivery window ℹ️ ^a1b2c3",
+        "\t- 10:30am",
+        "- [<] 11:00am\tReview 🆓 [[Orchard Lane Web 2026|⭕]] [[2026-09-01 Review|⋯]] ^zz9yx8",
+        "\t- 11:00am - 11:45am",
+        "- [-] 1:00pm\tCanceled call ^c4n5c6",
+        "\t- 1:30pm",
+    ];
+    const withIds = ["---", "aliases: 9/1/26 Tuesday", "---", ...lines].join("\n");
+    const without = withIds.replace(/ \^[a-z0-9]{6}$/gm, "");
+    // The same, but for the lines' own text, which a Problem quotes
+    const unquoted = (x) => JSON.parse(JSON.stringify(x).replace(/ \^[a-z0-9]{6}/g, ""));
+    assert.deepEqual(unquoted(entriesOf(withIds)), entriesOf(without));
+    const model = (text) => plain(tr.build([note("2026-09-01", text)], INDEX, {}).entries.map((e) => [e.start, e.end, e.project ?? null, !!e.free]));
+    assert.deepEqual(model(withIds), model(without));
+    assert.equal(projectFor("[<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]] ^q7m2xk"), projectFor("[<] 9:00am\tStandup [[Orchard Lane Web 2026|⭕]]"));
+});
+
 // ------------------------------------------------------------------ times
 
 test("minutes: am/pm, noon and midnight", () => {

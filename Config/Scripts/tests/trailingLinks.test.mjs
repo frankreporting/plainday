@@ -154,6 +154,11 @@ test("textEnd: where the text stops, ahead of the links and the ID (OBS-221)", (
     assert.equal(TrailingLinks.textEnd(id), at(id, " ^"), "an ID and no links");
     const event = "- [<] 10:00am\tKickoff call ℹ️ [[Kickoff call|⋯]] [[Kestrel|⭕]]";
     assert.equal(TrailingLinks.textEnd(event), at(event, " [[Kickoff"), "an event line");
+    // An event line ends in its event's ID since OBS-275: the text ends before the ⭕, the ℹ️ is text
+    const synced = "- [<] 9:30am\tKestrel standup ℹ️ [[Kestrel Outfitters 2026|⭕]] ^q7m2xk";
+    assert.equal(TrailingLinks.textEnd(synced), at(synced, " [[Kestrel"), "a synced event line, ⭕ and ID");
+    const bare = "- [<] 9:30am\tKestrel standup ^q7m2xk";
+    assert.equal(TrailingLinks.textEnd(bare), at(bare, " ^"), "a synced event line with only its ID");
 });
 
 test("textEnd: a line with nothing trailing has none, so End is left to Obsidian (OBS-221)", () => {

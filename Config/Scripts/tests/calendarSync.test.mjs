@@ -2,19 +2,21 @@
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // The class is loaded with vm. The pure parts (applyOne, runOps,
 // findBlock) are tested on note text; whole runs go through run() against an in-memory vault, with
-// just enough of moment for the formats the sync uses.
+// stand-ins for Plainday's settings (the calendars and their links), the calendar reader (the events
+// each calendar gives) and this device's local storage (the cache), and just enough of moment for
+// the formats the sync uses.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
 
 const code = classScript("calendarSync.js");
 const TODAY = "2026-09-15";
 const DAYS = "Planner/days";
-const EVENTS = "Config/Scripts/Calendar/calendar-events.json";
-const LEDGER = "Config/Scripts/Calendar/calendar-sync.json";
 const NOTE = "Config/Calendar Sync.md";
+const OLD_LEDGER = "Config/Scripts/Calendar/calendar-sync.json";
+const OLD_EVENTS = "Config/Scripts/Calendar/calendar-events.json";
+const ERROR_LOG = "Config/Error Log.md";
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // moment, for the calls the sync makes: moment(), moment(date, "YYYY-MM-DD", true), moment(iso)
@@ -30,13 +32,17 @@ function moment(input = `${TODAY}T09:00:00-04:00`) {
         "h:mma": clock,
         "M/D": () => `${m}/${d}`,
         "M/D/YY dddd": () => `${m}/${d}/${String(y).slice(2)} ${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}`,
+        "YYYY-MM-DD": () => date,
+        "DD-MM-YYYY": () => `${String(d).padStart(2, "0")}-${String(m).padStart(2, "0")}-${y}`,
         "YYYY-MM-DD h:mma": () => `${date} ${clock()}`,
         "YYYYMMDDHHmmssSS": () => "2026091509000000",
+        "M/D h:mma": () => `${m}/${d} ${clock()}`,
     };
     const self = {
         date,
         startOf: () => self,
         isBefore: (other) => date < other.date,
+        isValid: () => /^\d{4}-\d{2}-\d{2}$/.test(date),
         format: (f) => {
             if (!formats[f]) throw new Error(`moment stub: no format ${f}`);
             return formats[f]();
@@ -47,14 +53,16 @@ function moment(input = `${TODAY}T09:00:00-04:00`) {
 
 function makeApp(files) {
     const map = new Map(Object.entries(files));
+    const local = new Map();
     const app = {
-        isMobile: true,   // no fetcher: the events file is whatever the test wrote
+        isMobile: true,   // the error log isn't made, only written when it's there
         vault: {
             getFileByPath: (p) => (map.has(p) ? { path: p } : null),
             getFolderByPath: () => ({}),
             createFolder: async () => {},
             create: async (p, text) => { map.set(p, text); return { path: p }; },
             read: async (f) => map.get(f.path),
+            cachedRead: async (f) => map.get(f.path),
             process: async (f, fn) => { const t = fn(map.get(f.path)); map.set(f.path, t); return t; },
             adapter: {
                 exists: async (p) => map.has(p),
@@ -62,6 +70,10 @@ function makeApp(files) {
                 write: async (p, t) => { map.set(p, t); },
             },
         },
+        // This device's local storage: what saveLocalStorage keeps, as Obsidian does, a copy
+        loadLocalStorage: (k) => (local.has(k) ? JSON.parse(local.get(k)) : null),
+        saveLocalStorage: (k, v) => { if (v === null || v === undefined) local.delete(k); else local.set(k, JSON.stringify(v)); },
+        local,
         foldManager: { load: () => null },
         workspace: { getLeavesOfType: () => [] },
         // Enough of the metadata cache and the frontmatter editor for a log's `time` and `endTime`
@@ -90,11 +102,56 @@ function frontmatterOf(text) {
     return Object.fromEntries(block.split("\n").filter((l) => l.includes(":")).map((l) => [l.slice(0, l.indexOf(":")).trim(), l.slice(l.indexOf(":") + 1).trim()]));
 }
 
-function load(app = {}) {
+// The calendars and their links (Settings), and what each calendar's read gives (CalendarFeed): one
+// calendar, Work, on and linked, unless a test changes `state`
+function newState() {
+    return {
+        calendars: { range: "1 month", list: [{ id: "cal", name: "Work", account: "Work", address: "", on: true }], recurring: [] },
+        links: { cal: "https://calendar.example.com/work.ics" },
+        reads: {},   // calendar ID -> what load() gives: { events, failed } or { problem }
+        format: "YYYY-MM-DD",
+        saves: 0,
+    };
+}
+
+function stand(state) {
+    const Settings = {
+        get: () => ({ calendars: state.calendars }),
+        link: (id) => state.links[id] ?? null,
+        rangeDays: () => 30,
+        set: async (section, values) => { Object.assign({ calendars: state.calendars }[section], values); state.saves++; },
+        recurringOf: (v) => (Array.isArray(v) ? v : null),
+    };
+    const CalendarFeed = {
+        loads: [],
+        window: () => ({ start: new Date(`${TODAY}T00:00:00`), end: new Date("2026-10-16T00:00:00"), windowStart: TODAY, windowEnd: "2026-10-15" }),
+        load: async (link, { calendar }) => {
+            CalendarFeed.loads.push(calendar.id);
+            const got = state.reads[calendar.id] ?? { events: [], failed: [] };
+            return got.problem ? { problem: got.problem } : { events: got.events, failed: got.failed ?? [], stats: { downloadMs: 5, readMs: 2, wallMs: 4 } };
+        },
+        feed: (reads, w) => ({
+            windowStart: w.windowStart, windowEnd: w.windowEnd,
+            calendars: reads.map(({ calendar }) => ({ id: calendar.id, title: calendar.name, account: calendar.account })),
+            events: reads.flatMap((r) => r.events),
+        }),
+    };
+    const Schedule = {
+        dailyOpts: () => ({ folder: DAYS, format: state.format }),
+        dailyNotePath: (m) => `${DAYS}/${m.format(state.format)}.md`,
+    };
+    return { Settings, CalendarFeed, Schedule };
+}
+
+function load(app = {}, state = newState(), extra = {}) {
     const context = vm.createContext({
         app,
         moment,
-        plainday: { Schedule: { dailyOpts: () => ({ folder: DAYS }) } },
+        Notice: class { constructor(m) { (state.notices ??= []).push(m); } hide() {} },
+        window: { setTimeout, clearTimeout },
+        Platform: { isMacOS: true },
+        performance,
+        plainday: { ...stand(state), ...extra },
         console,
     });
     return new (vm.runInContext(code + "\n;CalendarSync", context))();
@@ -105,6 +162,8 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 const text = (...lines) => lines.join("\n");
 const FM = ["---", "aliases: 9/16/26 Wednesday", "---"];
 const note = (...lines) => text(...FM, ...lines, "");
+// An event's line ID, as the sync works it out from its key
+const lid = (key) => cs.lineId(key);
 
 // The ledger entry for a line the sync wrote, and the ops the planner makes
 const ENTRY = {
@@ -295,44 +354,77 @@ test("a ⭕ link doesn't change which line is meant", () => {
 
 // ------------------------------------------------------------------ whole runs
 
-const CALENDAR_NOTE = text("---", "id: 1", "tags: ", "---", "", "## Calendars", "", "### Work", "- [x] Work", "");
+// A vault, this device's state (settings, links, reads) and its cache; `sync(map, events)` runs Sync
+// calendars with the Work calendar giving `events`. Lines carry their IDs, which `body` shows as the
+// event's key (` ^E1`), so expectations read plainly.
 let clock = 0;
-const feed = (events) => ({
-    generatedAt: `2026-09-15T10:${String(clock++).padStart(2, "0")}:00-04:00`,
-    windowStart: TODAY, windowEnd: "2026-10-15", source: "test",
-    calendars: [{ id: "cal", account: "Work", title: "Work" }],
-    events: events.map((e) => ({ calendar: "Work", account: "Work", endsSameDay: true, ...e })),
-});
+const keys = new Set();
 const day = (date) => `${DAYS}/${date}.md`;
-const body = (t) => t.split("\n").slice(3).join("\n").replace(/\n+$/, "");
+const named = (t) => t.replace(/ \^([a-z0-9]{6})$/gm, (m, id) => { const k = [...keys].find((key) => lid(key) === id); return k ? ` ^${k}` : m; });
+const body = (t) => named(t.split("\n").slice(3).join("\n").replace(/\n+$/, ""));
 
-async function sync(map, events) {
-    map.set(EVENTS, JSON.stringify(feed(events)));
-    const { app } = { app: sync.app };
-    return load(app).run();
+async function sync(map, events, { device = sync.device, now } = {}) {
+    for (const e of events) keys.add(e.key);
+    device.state.reads.cal = { events: events.map((e) => ({ calendar: "Work", account: "Work", endsSameDay: true, ...e })), failed: [] };
+    const s = load(device.app, device.state);
+    if (now !== undefined) s.now = () => now;
+    else s.now = () => (clock += 60 * 60 * 1000);
+    return s.run();
 }
+// A vault with one device on it; `twin(map)` is a second device on the same vault, with its own cache
+const devices = new WeakMap();
 function vault(files = {}) {
-    const { app, map } = makeApp({ [NOTE]: CALENDAR_NOTE, ...files });
+    const { app, map } = makeApp(files);
+    sync.device = { app, state: newState() };
     sync.app = app;
+    devices.set(map, sync.device);
     return map;
 }
-const edit = (map, path, fn) => map.set(path, fn(map.get(path)));
-const ledger = (map) => JSON.parse(map.get(LEDGER));
+function twin(map) {
+    const { app } = makeApp({});
+    // The same notes: the second device's vault reads and writes the first one's map
+    for (const k of ["getFileByPath", "create", "read", "cachedRead", "process"]) app.vault[k] = sync.device.app.vault[k];
+    app.vault.adapter = sync.device.app.vault.adapter;
+    app.metadataCache = sync.device.app.metadataCache;
+    app.fileManager = sync.device.app.fileManager;
+    return { app, state: newState() };
+}
+// A note edited by hand, its IDs shown as their events' keys while `fn` edits it, as `body` shows them
+const unnamed = (t) => t.replace(/ \^([A-Za-z0-9@.-]+)$/gm, (m, k) => (keys.has(k) ? ` ^${lid(k)}` : m));
+const edit = (map, path, fn) => map.set(path, unnamed(fn(named(map.get(path)))));
+// A vault's device's cache, and its last run's report, as a list of `- item` lines
+const ledger = (map) => (devices.get(map) ?? sync.device).app.loadLocalStorage("plainday-calendar-cache");
+const last = (map) => (devices.get(map) ?? sync.device).app.loadLocalStorage("plainday-calendar-last");
+const LISTS = ["added", "adopted", "updated", "linked", "restored", "removed", "canceled", "forwarded", "merged", "yours", "held", "skipped"];
+const reported = (map) => { const r = last(map); return LISTS.flatMap((k) => r[k].map((i) => `- ${i}\n`)).join(""); };
+// The line IDs aside, for checks about the rest of a line
+const noIds = (t) => t.replace(/ \^[a-z0-9]{6}$/gm, "");
+const plainBody = (t) => noIds(t.split("\n").slice(3).join("\n").replace(/\n+$/, ""));
+// Recurring events' projects, in Plainday's settings
+const recurring = (map) => (devices.get(map) ?? sync.device).state.calendars.recurring;
+const setLinks = (map, title, links) => {
+    const device = devices.get(map) ?? sync.device;
+    const list = device.state.calendars.recurring.filter((r) => r.title !== title);
+    const at = device.state.calendars.recurring.findIndex((r) => r.title === title);
+    if (links.length) list.splice(at === -1 ? list.length : at, 0, { title, links });
+    device.state.calendars.recurring = list;
+};
+const section = (map) => `\n${recurring(map).map((r) => `- ${r.title} ${r.links.join(" ")}`).join("\n")}\n`;
 
 test("run: ⭕ and a time entry survive a time change, and nothing is 'yours'", async () => {
     const map = vault();
     await sync(map, [event()]);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]]\n\t- 4:00pm - 4:30pm: 🆓"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:00pm - 4:30pm: 🆓"));
     await sync(map, [event()]);
     assert.deepEqual(ledger(map).events.E1.projects, ["[[Pinecone Studio|⭕]]"], "the project is remembered");
 
     const summary = await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]);
     assert.equal(summary, "Calendar sync: 1 updated");
-    assert.match(map.get(NOTE), /- 2026-09-16 Planning \(time changed; check its time entries\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm: 🆓"));
-    assert.doesNotMatch(map.get(NOTE), /this line is yours/);
+    assert.match(reported(map), /- 2026-09-16 Planning \(time changed; check its time entries\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm: 🆓"));
+    assert.doesNotMatch(reported(map), /this line is yours/);
     assert.deepEqual(ledger(map).events.E1.lines, ["- [<] 5:00pm\tPlanning", "\t- 5:30pm"]);
 
     // And a run with nothing new changes nothing
@@ -344,10 +436,10 @@ test("run: ⭕ and a time entry survive a time change, and nothing is 'yours'", 
 test("run: moved to another day, the ⭕ follows and the time entries stay", async () => {
     const map = vault();
     await sync(map, [event()]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]]\n\t- 4:00pm - 4:30pm"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:00pm - 4:30pm"));
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm"));
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
     assert.deepEqual(ledger(map).events.E1.projects, ["[[Pinecone Studio|⭕]]"]);
 });
 
@@ -356,8 +448,8 @@ test("run: a ⭕ added since the last run moves with the event, and the old line
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\t[[2026-09-16 Planning|Planning]] [[Pinecone Studio|⭕]]"));
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
-    assert.equal(body(map.get(day("2026-09-16"))), "");
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), "");
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("run: canceled is marked [-] and reported; back in the calendar, it's [<] again and kept current", async () => {
@@ -365,15 +457,15 @@ test("run: canceled is marked [-] and reported; back in the calendar, it's [<] a
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\t- 4:30pm", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, []), "Calendar sync: 1 canceled");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
-    assert.match(map.get(NOTE), /\*\*Canceled \(marked \[-\]\)\*\*\n\n- 2026-09-16 Planning\n/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+    assert.deepEqual(last(map).canceled, ["2026-09-16 Planning"]);
     assert.equal(ledger(map).events.E1, undefined);
     assert.equal(await sync(map, []), "Calendar sync: nothing to change");
 
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 restored");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
 });
 
 test("run: a canceled line you deleted: the event, if it returns, is written afresh", async () => {
@@ -384,7 +476,7 @@ test("run: a canceled line you deleted: the event, if it returns, is written afr
     await sync(map, [event()]);
     assert.equal(ledger(map).canceled.E1, undefined);
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 added");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 });
 
 test("run: an event whose ID changes keeps its line (it isn't canceled, or forgotten as deleted)", async () => {
@@ -392,7 +484,7 @@ test("run: an event whose ID changes keeps its line (it isn't canceled, or forgo
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\tPlanning [[Pinecone Studio|⭕]]"));
     assert.equal(await sync(map, [event({ key: "E9", id: "E9" })]), "Calendar sync: 1 adopted");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
     assert.deepEqual(Object.keys(ledger(map).events), ["E9"]);
     assert.deepEqual(ledger(map).dismissed, {});
     assert.equal(await sync(map, [event({ key: "E9", id: "E9" })]), "Calendar sync: nothing to change");
@@ -402,18 +494,25 @@ test("run: a new event doesn't adopt a line another event still has", async () =
     const map = vault();
     await sync(map, [event()]);
     await sync(map, [event(), event({ key: "E2", id: "E2" })]);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm", "- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm", "- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
     assert.equal(await sync(map, [event(), event({ key: "E2", id: "E2" })]), "Calendar sync: nothing to change");
 });
 
-test("run: a ledger from before this change loads and behaves as before", async () => {
+test("run: a vault from before (OBS-275): its lines with no ID are adopted and given IDs, nothing twice; the old record's deleted lines stay deleted", async () => {
+    // The Mac's old record keyed events by its own IDs, which no feed has: its deleted line is found in
+    // the Mac's last events file, by its day and the line the sync wrote
     const map = vault({
-        [LEDGER]: JSON.stringify({ version: 1, updatedAt: "2026-09-15T08:00:00-04:00", events: { E1: { ...ENTRY } }, dismissed: {} }),
-        [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning", "\t- 4:30pm"),
+        [OLD_LEDGER]: JSON.stringify({ version: 1, updatedAt: "2026-09-15T08:00:00-04:00", events: { "MAC-1": { ...ENTRY } }, dismissed: { "MAC-2": "2026-09-17" } }),
+        [OLD_EVENTS]: JSON.stringify({ events: [{ key: "MAC-2", date: "2026-09-17", title: "Dentist", start: "2026-09-17T08:00:00-04:00", end: "2026-09-17T09:00:00-04:00", allDay: false, endsSameDay: true }] }),
+        [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm"),
     });
-    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
-    assert.equal(await sync(map, [event({ title: "Planning 2" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning 2", "\t- 4:30pm"));
+    const dentist = event({ key: "D1", id: "D1", title: "Dentist", date: "2026-09-17", start: "2026-09-17T08:00:00-04:00", end: "2026-09-17T09:00:00-04:00" });
+    assert.equal(await sync(map, [event(), dentist]), "Calendar sync: 1 adopted");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 4:00pm - 4:20pm"));
+    assert.equal(map.get(day("2026-09-17")), undefined, "the line you'd deleted isn't added");
+    assert.equal(ledger(map).dismissed.D1, "2026-09-17");
+    assert.equal(await sync(map, [event(), dentist]), "Calendar sync: nothing to change");
+    assert.ok(map.has(OLD_LEDGER) && map.has(OLD_EVENTS), "the old files are left for you");
 });
 
 // ------------------------------------------------------------------ recurring series
@@ -424,18 +523,15 @@ const weekly = (date, over = {}) => event({
 });
 const SERIES = ["2026-09-16", "2026-09-23", "2026-09-30"];
 
-test("run: the Calendar Sync note lists recurring series, and a ⭕ there reaches every upcoming line", async () => {
+test("run: a recurring series' ⭕ in Plainday's settings reaches every upcoming line", async () => {
     const map = vault();
     await sync(map, [...SERIES.map((d) => weekly(d)), event()]);
-    assert.match(map.get(NOTE), /## Recurring events\n\n[^\n]*\n\n- Weekly sync\n/);
-    assert.doesNotMatch(map.get(NOTE), /- Planning\n/, "one-off events aren't listed");
-    assert.ok(map.get(NOTE).indexOf("## Recurring events") < map.get(NOTE).indexOf("## Last run"));
+    assert.deepEqual(recurring(map), [], "nothing listed until you give a series a project");
 
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     assert.equal(await sync(map, [...SERIES.map((d) => weekly(d)), event()]), "Calendar sync: 3 linked");
-    for (const d of SERIES) assert.match(map.get(day(d)), /- \[<\] 10:00am\tWeekly sync \[\[Pinecone Studio\|⭕\]\]\n\t- 10:30am/);
-    assert.match(map.get(NOTE), /- Weekly sync \[\[Pinecone Studio\|⭕\]\]\n/, "the mapping stays");
-    assert.doesNotMatch(map.get(day("2026-09-16")), /Planning \[\[/);
+    for (const d of SERIES) assert.match(noIds(map.get(day(d))), /- \[<\] 10:00am\tWeekly sync \[\[Pinecone Studio\|⭕\]\]\n\t- 10:30am/);
+    assert.doesNotMatch(noIds(map.get(day("2026-09-16"))), /Planning \[\[/);
 
     // A ⭕ you take off one instance stays off
     edit(map, day("2026-09-23"), (t) => t.replace(" [[Pinecone Studio|⭕]]", ""));
@@ -449,19 +545,16 @@ test("run: the Calendar Sync note lists recurring series, and a ⭕ there reache
 
     // Changing the mapping swaps the link where the sync put it; one you set differently stays
     edit(map, day("2026-09-30"), (t) => t.replace("[[Pinecone Studio|⭕]]", "[[Budget Book|⭕]]"));
-    edit(map, NOTE, (t) => t.replace("- Weekly sync [[Pinecone Studio|⭕]]", "- Weekly sync [[Kestrel|⭕]]"));
+    setLinks(map, "Weekly sync", ["[[Kestrel|⭕]]"]);
     await sync(map, [...more.map((d) => weekly(d)), event()]);
-    assert.match(map.get(day("2026-09-16")), /Weekly sync \[\[Kestrel\|⭕\]\]\n/);
+    assert.match(noIds(map.get(day("2026-09-16"))), /Weekly sync \[\[Kestrel\|⭕\]\]\n/);
     assert.doesNotMatch(map.get(day("2026-09-23")), /⭕/);
-    assert.match(map.get(day("2026-09-30")), /Weekly sync \[\[Budget Book\|⭕\]\]\n/);
+    assert.match(noIds(map.get(day("2026-09-30"))), /Weekly sync \[\[Budget Book\|⭕\]\]\n/);
 
-    // Taking the mapping away leaves the links alone, and a series gone from the feed drops off
-    // the list unless it's mapped
-    edit(map, NOTE, (t) => t.replace(" [[Kestrel|⭕]]", ""));
+    // Taking the mapping away leaves the links alone
+    setLinks(map, "Weekly sync", []);
     await sync(map, [...more.map((d) => weekly(d)), event()]);
-    assert.match(map.get(day("2026-09-16")), /Weekly sync \[\[Kestrel\|⭕\]\]\n/);
-    await sync(map, [event()]);
-    assert.doesNotMatch(map.get(NOTE), /- Weekly sync/);
+    assert.match(noIds(map.get(day("2026-09-16"))), /Weekly sync \[\[Kestrel\|⭕\]\]\n/);
 });
 
 test("run: series links skip lines with time entries or a log link, and survive a retime once taken off", async () => {
@@ -469,11 +562,11 @@ test("run: series links skip lines with time entries or a log link, and survive 
     await sync(map, SERIES.map((d) => weekly(d)));
     edit(map, day("2026-09-16"), (t) => t.replace("\t- 10:30am", "\t- 10:00am - 10:40am"));
     edit(map, day("2026-09-23"), (t) => t.replace("\tWeekly sync", "\t[[2026-09-23 Weekly sync|Weekly sync]]"));
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕️]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕️]]"]);
     assert.equal(await sync(map, SERIES.map((d) => weekly(d))), "Calendar sync: 1 linked");
-    assert.doesNotMatch(map.get(day("2026-09-16")), /⭕/, "time already logged keeps its project");
-    assert.doesNotMatch(map.get(day("2026-09-23")), /⭕/, "a log's project comes from the log");
-    assert.match(map.get(day("2026-09-30")), /\tWeekly sync \[\[Pinecone Studio\|⭕️\]\]\n/, "the link is written as you typed it");
+    assert.doesNotMatch(noIds(map.get(day("2026-09-16"))), /⭕/, "time already logged keeps its project");
+    assert.doesNotMatch(noIds(map.get(day("2026-09-23"))), /⭕/, "a log's project comes from the log");
+    assert.match(noIds(map.get(day("2026-09-30"))), /\tWeekly sync \[\[Pinecone Studio\|⭕️\]\]\n/, "the link is written as you typed it");
 
     // Taken off, then the event is retimed: the ledger still knows, so it isn't put back
     edit(map, day("2026-09-30"), (t) => t.replace(" [[Pinecone Studio|⭕️]]", ""));
@@ -481,30 +574,31 @@ test("run: series links skip lines with time entries or a log link, and survive 
     const later = SERIES.map((d) => weekly(d, d === "2026-09-30" ? { start: `${d}T11:00:00-04:00`, end: `${d}T11:30:00-04:00` } : {}));
     await sync(map, later);
     await sync(map, later);
-    assert.match(map.get(day("2026-09-30")), /- \[<\] 11:00am\tWeekly sync\n/);
+    assert.match(noIds(map.get(day("2026-09-30"))), /- \[<\] 11:00am\tWeekly sync\n/);
 
     // Nor after the mapping is taken away while the event changes, and then put back
-    edit(map, NOTE, (t) => t.replace(" [[Pinecone Studio|⭕️]]", ""));
+    setLinks(map, "Weekly sync", []);
     const again = SERIES.map((d) => weekly(d, d === "2026-09-30" ? { title: "Weekly sync", start: `${d}T12:00:00-04:00`, end: `${d}T12:30:00-04:00` } : {}));
     await sync(map, again);
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕️]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕️]]"]);
     await sync(map, again);
-    assert.match(map.get(day("2026-09-30")), /- \[<\] 12:00pm\tWeekly sync\n/);
+    assert.match(noIds(map.get(day("2026-09-30"))), /- \[<\] 12:00pm\tWeekly sync\n/);
 });
 
-test("run: no series links in a held run, or for a calendar you've unticked", async () => {
+test("run: no series links in a held run, or for a calendar you've switched off", async () => {
     const map = vault();
     const others = Array.from({ length: 11 }, (_, i) => event({ key: `X${i}`, id: `X${i}`, title: `One-off ${i}` }));
     await sync(map, [...SERIES.map((d) => weekly(d)), ...others]);
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     assert.match(await sync(map, SERIES.map((d) => weekly(d))), /held back/);
-    for (const d of SERIES) assert.doesNotMatch(map.get(day(d)), /⭕/);
+    for (const d of SERIES) assert.doesNotMatch(noIds(map.get(day(d))), /⭕/);
 
     const unticked = vault();
     await sync(unticked, SERIES.map((d) => weekly(d)));
-    edit(unticked, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]]\n").replace("- [x] Work", "- [ ] Work"));
+    setLinks(unticked, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
+    devices.get(unticked).state.calendars.list[0].on = false;
     await sync(unticked, SERIES.map((d) => weekly(d)));
-    for (const d of SERIES) assert.doesNotMatch(unticked.get(day(d)), /⭕/);
+    for (const d of SERIES) assert.doesNotMatch(noIds(unticked.get(day(d))), /⭕/);
 });
 
 test("run: moved onto a day that already has a line for it, the old line is forwarded, links and all", async () => {
@@ -514,17 +608,17 @@ test("run: moved onto a day that already has a line for it, the old line is forw
     map.set(day("2026-09-18"), note("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
     const summary = await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
     assert.match(summary, /1 adopted/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\t[[2026-09-16 Planning|Planning]]", "\t- 4:30pm"));
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\t[[2026-09-16 Planning|Planning]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 });
 
 test("run: a line that's yours is forwarded when its event moves, and its ⭕ still goes along", async () => {
     const map = vault();
     await sync(map, [event()]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]]\n\t- 4:30pm\n\t- bring the draft"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n\t- bring the draft"));
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
-    assert.match(map.get(day("2026-09-16")), /- \[>\] \[\[2026-09-18\|9\/18\]\] 4:00pm\tPlanning \[\[Pinecone Studio\|⭕\]\]\n\t- 4:30pm\n\t- bring the draft/);
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    assert.match(noIds(map.get(day("2026-09-16"))), /- \[>\] \[\[2026-09-18\|9\/18\]\] 4:00pm\tPlanning \[\[Pinecone Studio\|⭕\]\]\n\t- 4:30pm\n\t- bring the draft/);
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
 });
 
 test("notes under a time entry: deeper by tabs or spaces; a note beside it is yours", () => {
@@ -534,11 +628,6 @@ test("notes under a time entry: deeper by tabs or spaces; a note beside it is yo
     assert.equal(cs.annotations(["- [<] 4:00pm\tPlanning", "\t- 4:30pm", "\t\t- under the end time"], synced), null);
 });
 
-test("calendar ticks are read from the Calendars section only", () => {
-    const t = text("## Calendars", "### Work", "- [x] Work", "## Recurring events", "- [x] Standup", "### Other", "- [x] Thing");
-    assert.deepEqual([...cs.tickedTitles(t)], ["Work/Work"]);
-});
-
 const moved = (over = {}) => event({ date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00", ...over });
 
 test("run: moved and renamed to a title with a | in it: the log link goes along at the end, and the old line goes", async () => {
@@ -546,8 +635,8 @@ test("run: moved and renamed to a title with a | in it: the log link goes along 
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\t[[2026-09-16 Planning|Planning]]"));
     assert.equal(await sync(map, [moved({ title: "Planning | Q3" })]), "Calendar sync: 1 added, 1 removed");
-    assert.equal(body(map.get(day("2026-09-16"))), "");
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning | Q3 [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), "");
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning | Q3 [[2026-09-16 Planning|⋯]]", "\t- 4:30pm"));
 });
 
 test("run: moved after you deleted its line: the new line is still recorded", async () => {
@@ -563,39 +652,27 @@ test("run: a ⭕ you typed that matches the series isn't swapped when the mappin
     const map = vault();
     await sync(map, [weekly("2026-09-16")]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tWeekly sync", "\tWeekly sync [[Pinecone Studio|⭕]]"));
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     await sync(map, [weekly("2026-09-16")]);
-    edit(map, NOTE, (t) => t.replace("[[Pinecone Studio|⭕]]", "[[Kestrel|⭕]]"));
+    setLinks(map, "Weekly sync", ["[[Kestrel|⭕]]"]);
     await sync(map, [weekly("2026-09-16")]);
-    assert.match(map.get(day("2026-09-16")), /Weekly sync \[\[Pinecone Studio\|⭕\]\]\n/);
-});
-
-test("run: what you write in Recurring events stays; only plain titles of series that are gone drop off", async () => {
-    const map = vault();
-    await sync(map, [weekly("2026-09-16")]);
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "Some words of yours.\n\n- Weekly sync\n- Board call [[Kestrel|⭕]] %% Q3 only %%\n- Old series\n- Retro [[Pinecone Studio|⭕]]\n"));
-    await sync(map, [weekly("2026-09-16"), weekly("2026-09-16", { key: "S2@2026-09-16", id: "S2", title: "Design crit" })]);
-    const section = map.get(NOTE).split("## Recurring events")[1].split("## Last run")[0];
-    assert.match(section, /Some words of yours\.\n\n- Weekly sync\n- Board call \[\[Kestrel\|⭕\]\] %% Q3 only %%\n- Retro \[\[Pinecone Studio\|⭕\]\]\n- Design crit\n/);
-    assert.doesNotMatch(section, /Old series/);
+    assert.match(noIds(map.get(day("2026-09-16"))), /Weekly sync \[\[Pinecone Studio\|⭕\]\]\n/);
 });
 
 test("run: time entries past a blank line under an event aren't left behind under another one", async () => {
     const review = event({ key: "E2", id: "E2", title: "Review", start: "2026-09-16T15:00:00-04:00", end: "2026-09-16T15:30:00-04:00" });
     const map = vault();
     await sync(map, [review, event()]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]]\n\t- 4:30pm\n\n\t- 4:00pm - 4:45pm: billed"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n\n\t- 4:00pm - 4:45pm: billed"));
     const later = event({ start: "2026-09-16T14:00:00-04:00", end: "2026-09-16T14:30:00-04:00" });
     assert.equal(await sync(map, [review, later]), "Calendar sync: 1 left for you");
-    assert.match(map.get(day("2026-09-16")), /- \[<\] 3:00pm\tReview\n\t- 3:30pm\n- \[<\] 4:00pm\tPlanning \[\[Pinecone Studio\|⭕\]\]\n\t- 4:30pm\n\n\t- 4:00pm - 4:45pm: billed/);
+    assert.match(noIds(map.get(day("2026-09-16"))), /- \[<\] 3:00pm\tReview\n\t- 3:30pm\n- \[<\] 4:00pm\tPlanning \[\[Pinecone Studio\|⭕\]\]\n\t- 4:30pm\n\n\t- 4:00pm - 4:45pm: billed/);
 });
-
-const section = (map) => map.get(NOTE).split("## Recurring events")[1].split("## Last run")[0];
 
 test("run: a series follows its ID: renamed in the calendar, its line in the note is renamed and keeps the project", async () => {
     const map = vault();
     await sync(map, SERIES.map((d) => weekly(d)));
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]] \n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     await sync(map, SERIES.map((d) => weekly(d)));
     assert.equal(ledger(map).seriesTitles.S1, "Weekly sync");
 
@@ -603,8 +680,8 @@ test("run: a series follows its ID: renamed in the calendar, its line in the not
     await sync(map, renamed);
     assert.match(section(map), /\n- Weekly sync \(studio\) \[\[Pinecone Studio\|⭕\]\]\n/);
     assert.doesNotMatch(section(map), /- Weekly sync\n|- Weekly sync \[/);
-    for (const d of SERIES) assert.match(map.get(day(d)), /\tWeekly sync \(studio\) \[\[Pinecone Studio\|⭕\]\]\n/);
-    assert.match(map.get(day("2026-10-07")), /\tWeekly sync \(studio\) \[\[Pinecone Studio\|⭕\]\]\n/, "a new occurrence gets it too");
+    for (const d of SERIES) assert.match(noIds(map.get(day(d))), /\tWeekly sync \(studio\) \[\[Pinecone Studio\|⭕\]\]\n/);
+    assert.match(noIds(map.get(day("2026-10-07"))), /\tWeekly sync \(studio\) \[\[Pinecone Studio\|⭕\]\]\n/, "a new occurrence gets it too");
     assert.equal(ledger(map).seriesTitles.S1, "Weekly sync (studio)");
 });
 
@@ -612,18 +689,17 @@ test("run: occurrences of one series with different titles share its project", a
     const map = vault();
     const anniversary = (date, age) => weekly(date, { key: `B1@${date}`, id: "B1", title: `${age}th Anniversary`, allDay: true });
     await sync(map, [anniversary("2026-09-16", 12), anniversary("2026-10-16", 13)]);
-    assert.match(section(map), /\n- 12th Anniversary\n/);
-    assert.doesNotMatch(section(map), /13th/, "listed once, by the next occurrence's title");
-    edit(map, NOTE, (t) => t.replace("- 12th Anniversary\n", "- 12th Anniversary [[Budget Book|⭕]]\n"));
+    assert.equal(ledger(map).seriesTitles.B1, "12th Anniversary", "known by the next occurrence's title");
+    setLinks(map, "12th Anniversary", ["[[Budget Book|⭕]]"]);
     await sync(map, [anniversary("2026-09-16", 12), anniversary("2026-10-16", 13)]);
-    assert.match(map.get(day("2026-10-16")), /- \[<\] All day\t13th Anniversary \[\[Budget Book\|⭕\]\]/);
+    assert.match(noIds(map.get(day("2026-10-16"))), /- \[<\] All day\t13th Anniversary \[\[Budget Book\|⭕\]\]/);
 });
 
 test("run: when a renamed series' old title still belongs to another series, the line is copied, not moved", async () => {
     const map = vault();
     const standup = (id, title) => weekly("2026-09-16", { key: `${id}@2026-09-16`, id, title });
     await sync(map, [standup("S1", "Standup"), standup("S2", "Standup")]);
-    edit(map, NOTE, (t) => t.replace("- Standup\n", "- Standup [[Kestrel|⭕]]\n"));
+    setLinks(map, "Standup", ["[[Kestrel|⭕]]"]);
     await sync(map, [standup("S1", "Standup"), standup("S2", "Standup")]);
     await sync(map, [standup("S1", "Standup"), standup("S2", "Standup B")]);
     assert.match(section(map), /\n- Standup \[\[Kestrel\|⭕\]\]\n- Standup B \[\[Kestrel\|⭕\]\]\n/);
@@ -634,27 +710,26 @@ test("run: an event deleted and then made again (a new ID) takes back the line m
     await sync(map, [event()]);
     await sync(map, []);
     assert.equal(await sync(map, [event({ key: "E9", id: "E9" })]), "Calendar sync: 1 adopted");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
     assert.deepEqual(ledger(map).canceled, {});
     assert.equal(await sync(map, [event({ key: "E9", id: "E9", start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
 
     // A [-] you set yourself is yours: a matching new event is adopted but the mark stays
     const own = vault({ [day("2026-09-16")]: note("- [-] 4:00pm\tPlanning", "\t- 4:30pm") });
     await sync(own, [event()]);
-    assert.equal(body(own.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(plainBody(own.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning", "\t- 4:30pm"));
 });
 
-test("run: a calendar that comes back with new IDs (an account added again) adopts its lines rather than duplicating them", async () => {
+test("run: a calendar removed and added again (a new calendar ID, the same events) finds its lines by their IDs", async () => {
     const map = vault();
     await sync(map, [event()]);
-    map.set(NOTE, map.get(NOTE).replace("- [x] Work", "- [ ] Work\n### Work again\n- [x] Work"));
-    map.set(EVENTS, JSON.stringify({
-        ...feed([]), calendars: [{ id: "cal2", account: "Work again", title: "Work" }],
-        events: [{ ...event({ key: "N1", id: "N1" }), calendarId: "cal2", calendar: "Work", account: "Work again", endsSameDay: true }],
-    }));
-    assert.equal(await load(sync.app).run(), "Calendar sync: 1 adopted");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
-    assert.deepEqual(Object.keys(ledger(map).events), ["N1"]);
+    const device = devices.get(map);
+    device.state.calendars.list = [{ id: "cal2", name: "Work", account: "Work again", address: "", on: true }];
+    device.state.links = { cal2: "https://calendar.example.com/work.ics" };
+    device.state.reads.cal2 = { events: [{ ...event(), calendarId: "cal2", calendar: "Work", account: "Work again", endsSameDay: true }], failed: [] };
+    assert.equal(await load(device.app, device.state).run(), "Calendar sync: nothing to change");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+    assert.equal(ledger(map).events.E1.calendarId, "cal2");
 });
 
 test("run: new events still go in time order past a line marked canceled", async () => {
@@ -663,13 +738,13 @@ test("run: new events still go in time order past a line marked canceled", async
     await sync(map, [at("A", "09"), at("B", "10"), at("C", "11")]);
     await sync(map, [at("A", "09"), at("C", "11")]);
     await sync(map, [at("A", "09"), at("C", "11"), at("D", "12"), at("Z", "10")]);
-    assert.equal(body(map.get(day("2026-09-16"))), text(
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text(
         "- [<] 9:00am\tA", "\t- 9:30am", "- [-] 10:00am\tB", "\t- 10:30am", "- [<] 10:00am\tZ", "\t- 10:30am",
         "- [<] 11:00am\tC", "\t- 11:30am", "- [<] 12:00pm\tD", "\t- 12:30pm",
     ));
 });
 
-test("run: a canceled line whose [-] you changed isn't reported restored, and a lost ledger write doesn't strand a [-]", async () => {
+test("run: a canceled line whose [-] you changed isn't reported restored, and a lost cache write doesn't strand a [-]", async () => {
     const map = vault();
     await sync(map, [event()]);
     await sync(map, []);
@@ -679,9 +754,9 @@ test("run: a canceled line whose [-] you changed isn't reported restored, and a 
 
     const lost = vault();
     await sync(lost, [event()]);
-    const saved = lost.get(LEDGER);
+    const saved = devices.get(lost).app.local.get("plainday-calendar-cache");
     await sync(lost, []);
-    lost.set(LEDGER, saved.replace(/"updatedAt": "[^"]*"/, '"updatedAt": "2026-09-15T09:00:00-04:00"'));
+    devices.get(lost).app.local.set("plainday-calendar-cache", saved);
     assert.equal(await sync(lost, []), "Calendar sync: 1 canceled");
     assert.equal(await sync(lost, [event()]), "Calendar sync: 1 restored");
     assert.match(lost.get(day("2026-09-16")), /- \[<\] 4:00pm\tPlanning/);
@@ -693,18 +768,34 @@ test("run: a held run doesn't restore canceled lines", async () => {
     await sync(map, [event(), ...others]);
     await sync(map, others);
     assert.match(await sync(map, [event()]), /held back/);
-    assert.match(map.get(day("2026-09-16")), /- \[-\] 4:00pm\tPlanning\n/);
+    assert.match(noIds(map.get(day("2026-09-16"))), /- \[-\] 4:00pm\tPlanning\n/);
 });
 
-test("run: deleting one of two identical lines is still noticed when the other event is canceled", async () => {
+test("run: a line you delete counts as deleted once a second run, a while later, still finds it gone; an identical line of another event is left", async () => {
     const map = vault();
     const e2 = event({ key: "E2", id: "E2" });
     await sync(map, [event(), e2]);
-    await sync(map, [event(), e2]);
-    edit(map, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning\n\t- 4:30pm\n", ""));
-    await sync(map, [e2]);
-    assert.equal(Object.keys(ledger(map).dismissed).length, 1);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    edit(map, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm\n", ""));
+    // Gone for a moment (it could be on its way through Sync): nothing put back, nothing decided
+    assert.equal(await sync(map, [event(), e2], { now: 1000 }), "Calendar sync: nothing to change");
+    assert.deepEqual(ledger(map).dismissed, {});
+    assert.equal(await sync(map, [event(), e2], { now: 1000 + 5 * 60 * 1000 }), "Calendar sync: nothing to change", "five minutes isn't long enough");
+    assert.equal(await sync(map, [event(), e2], { now: 1000 + 11 * 60 * 1000 }), "Calendar sync: 1 left for you");
+    assert.match(reported(map), /2026-09-16 Planning — you deleted this one/);
+    assert.deepEqual(Object.keys(ledger(map).dismissed), ["E1"]);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E2", "\t- 4:30pm"));
+    assert.equal(await sync(map, [event(), e2]), "Calendar sync: nothing to change");
+
+    // A line back before the second run is the sync's again
+    const back = vault();
+    await sync(back, [event()]);
+    const was = back.get(day("2026-09-16"));
+    back.set(day("2026-09-16"), note());
+    await sync(back, [event()], { now: 1000 });
+    back.set(day("2026-09-16"), was);
+    await sync(back, [event()], { now: 1000 + 20 * 60 * 1000 });
+    assert.equal(ledger(back).events.E1.missingSince, undefined);
+    assert.deepEqual(ledger(back).dismissed, {});
 });
 
 test("run: series renamed in one run: chains, swaps and a shared line each keep the right project", async () => {
@@ -712,7 +803,7 @@ test("run: series renamed in one run: chains, swaps and a shared line each keep 
     const setUp = async (events, links) => {
         const map = vault();
         await sync(map, events);
-        edit(map, NOTE, (t) => Object.entries(links).reduce((acc, [title, link]) => acc.replace(`- ${title}\n`, `- ${title} ${link}\n`), t));
+        for (const [title, link] of Object.entries(links)) setLinks(map, title, [link]);
         await sync(map, events);
         return map;
     };
@@ -739,15 +830,15 @@ test("run: an event made again with a new end time takes over the old line and u
     edit(map, day("2026-09-17"), (t) => t.replace("\tDaily", "\tDaily [[Pinecone Studio|⭕]]"));
     const series = days.map((d) => weekly(d, { key: `R1@${d}`, id: "R1", title: "Daily", start: `${d}T09:00:00-04:00`, end: `${d}T09:30:00-04:00` }));
     assert.equal(await sync(map, series), "Calendar sync: 2 adopted");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 9:00am\tDaily", "\t- 9:30am"));
-    assert.equal(body(map.get(day("2026-09-17"))), text("- [<] 9:00am\tDaily [[Pinecone Studio|⭕]]", "\t- 9:30am"));
-    assert.match(map.get(NOTE), /- 2026-09-16 Daily \(end time updated\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 9:00am\tDaily", "\t- 9:30am"));
+    assert.equal(plainBody(map.get(day("2026-09-17"))), text("- [<] 9:00am\tDaily [[Pinecone Studio|⭕]]", "\t- 9:30am"));
+    assert.match(reported(map), /- 2026-09-16 Daily \(end time updated\)/);
     assert.equal(await sync(map, series), "Calendar sync: nothing to change");
 
     // A line with a note of yours is taken over as it is
     const noted = vault({ [day("2026-09-16")]: note("- [<] 9:00am\tDaily", "\t- 9:15am", "\t- bring slides") });
     await sync(noted, [series[0]]);
-    assert.equal(body(noted.get(day("2026-09-16"))), text("- [<] 9:00am\tDaily", "\t- 9:15am", "\t- bring slides"));
+    assert.equal(plainBody(noted.get(day("2026-09-16"))), text("- [<] 9:00am\tDaily", "\t- 9:15am", "\t- bring slides"));
 });
 
 test("run: a series split with \"this and future events\" (a new series ID) renames its lines instead of canceling them", async () => {
@@ -755,15 +846,15 @@ test("run: a series split with \"this and future events\" (a new series ID) rena
     const occ = (id, title, d, h = "10") => weekly(d, { key: `${id}@${d}`, id, title, start: `${d}T${h}:00:00-04:00`, end: `${d}T${h}:30:00-04:00` });
     const before = SERIES.map((d) => occ("S1", "Weekly sync", d));
     await sync(map, before);
-    edit(map, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Pinecone Studio|⭕]]\n"));
+    setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     await sync(map, before);
     edit(map, day("2026-09-30"), (t) => t.replace("\t- 10:30am", "\t- 10:30am\n\t- 10:00am - 10:20am"));
 
     const after = [occ("S1", "Weekly sync", "2026-09-16"), occ("S2", "Studio sync", "2026-09-23"), occ("S2", "Studio sync", "2026-09-30")];
     assert.equal(await sync(map, after), "Calendar sync: 2 updated");
-    assert.match(map.get(day("2026-09-16")), /- \[<\] 10:00am\tWeekly sync \[\[Pinecone Studio\|⭕\]\]\n/);
-    assert.equal(body(map.get(day("2026-09-23"))), text("- [<] 10:00am\tStudio sync [[Pinecone Studio|⭕]]", "\t- 10:30am"));
-    assert.equal(body(map.get(day("2026-09-30"))), text("- [<] 10:00am\tStudio sync [[Pinecone Studio|⭕]]", "\t- 10:30am", "\t- 10:00am - 10:20am"));
+    assert.match(noIds(map.get(day("2026-09-16"))), /- \[<\] 10:00am\tWeekly sync \[\[Pinecone Studio\|⭕\]\]\n/);
+    assert.equal(plainBody(map.get(day("2026-09-23"))), text("- [<] 10:00am\tStudio sync [[Pinecone Studio|⭕]]", "\t- 10:30am"));
+    assert.equal(plainBody(map.get(day("2026-09-30"))), text("- [<] 10:00am\tStudio sync [[Pinecone Studio|⭕]]", "\t- 10:30am", "\t- 10:00am - 10:20am"));
     assert.match(section(map), /\n- Weekly sync \[\[Pinecone Studio\|⭕\]\]\n- Studio sync \[\[Pinecone Studio\|⭕\]\]\n/);
     assert.deepEqual(Object.keys(ledger(map).events).sort(), ["S1@2026-09-16", "S2@2026-09-23", "S2@2026-09-30"]);
     assert.deepEqual(ledger(map).canceled, {});
@@ -773,7 +864,7 @@ test("run: a series split with \"this and future events\" (a new series ID) rena
     const whole = vault();
     const two = ["2026-09-23", "2026-09-30"];
     await sync(whole, two.map((d) => occ("S1", "Weekly sync", d)));
-    edit(whole, NOTE, (t) => t.replace("- Weekly sync\n", "- Weekly sync [[Kestrel|⭕]]\n"));
+    setLinks(whole, "Weekly sync", ["[[Kestrel|⭕]]"]);
     await sync(whole, two.map((d) => occ("S1", "Weekly sync", d)));
     await sync(whole, two.map((d) => occ("S2", "Studio sync", d)));
     assert.match(section(whole), /\n- Studio sync \[\[Kestrel\|⭕\]\]\n/);
@@ -909,20 +1000,20 @@ test("adopting a line: a time-looking note nested deeper isn't the end line; an 
 test("run: a 🆓 on the line is remembered, survives a time change, and follows the event to another day", async () => {
     const map = vault();
     await sync(map, [event()]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning\n\t- 4:30pm", "\tPlanning 🆓 [[Pinecone Studio|⭕]]\n\t- 4:30pm: not my meeting"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning 🆓 [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm: not my meeting"));
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
     assert.equal(ledger(map).events.E1.nonbillable, true);
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
     // Moved: the note on the end line keeps the old line (forwarded); the 🆓 and the ⭕ go with the event
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T17:00:00-04:00", end: "2026-09-18T17:30:00-04:00" })]);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm: not my meeting"));
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]]", "\t- 5:30pm"));
     assert.equal(ledger(map).events.E1.nonbillable, true);
     // Take the 🆓 off, and it stays off through the next change
     edit(map, day("2026-09-18"), (t) => t.replace(" 🆓", ""));
     await sync(map, [event({ date: "2026-09-18", start: "2026-09-18T17:00:00-04:00", end: "2026-09-18T18:00:00-04:00" })]);
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 6:00pm"));
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 6:00pm"));
     assert.equal(ledger(map).events.E1.nonbillable, undefined);
 });
 
@@ -940,24 +1031,24 @@ test("run: busy → free → busy on an untouched line: the mark comes and goes,
     const map = vault();
     await sync(map, [event()]);
     assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 updated");
-    assert.match(map.get(NOTE), /- 2026-09-16 Planning \(now free\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"));
+    assert.match(reported(map), /- 2026-09-16 Planning \(now free\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"));
     assert.deepEqual(ledger(map).events.E1.lines, ["- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm"]);
     assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: nothing to change");
     assert.equal(await sync(map, [event({ availability: "busy" })]), "Calendar sync: 1 updated");
-    assert.match(map.get(NOTE), /- 2026-09-16 Planning \(now busy\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.match(reported(map), /- 2026-09-16 Planning \(now busy\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 });
 
 test("run: free → busy keeps the log link, the ⭕ and the time entry; the mark sits between the title and the links", async () => {
     const map = vault();
     await sync(map, [event({ availability: "free" })]);
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️\n\t- 4:30pm", "\t[[2026-09-16 Planning|Planning]] ℹ️ [[Pinecone Studio|⭕]]\n\t- 4:00pm - 4:30pm"));
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️ ^E1\n\t- 4:30pm", "\t[[2026-09-16 Planning|Planning]] ℹ️ [[Pinecone Studio|⭕]] ^E1\n\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ availability: "free", title: "Planning call" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call ℹ️ [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ title: "Planning call" })]), "Calendar sync: 1 updated");
-    assert.match(map.get(NOTE), /Planning call \(now busy\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
+    assert.match(reported(map), /Planning call \(now busy\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning call [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]]", "\t- 4:00pm - 4:30pm"));
 });
 
 test("run: the mark is the sync's: taken off or added by hand, the line is yours, and it's still found", async () => {
@@ -965,54 +1056,47 @@ test("run: the mark is the sync's: taken off or added by hand, the line is yours
     await sync(map, [event({ availability: "free" })]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️", "\tPlanning"));
     assert.equal(await sync(map, [event({ availability: "free", start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 left for you");
-    assert.match(map.get(NOTE), /this line is yours/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.match(reported(map), /this line is yours/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 
     const map2 = vault();
     await sync(map2, [event()]);
     edit(map2, day("2026-09-16"), (t) => t.replace("\tPlanning", "\tPlanning ℹ️"));
     assert.equal(await sync(map2, [event({ title: "Planning call" })]), "Calendar sync: 1 left for you");
-    assert.doesNotMatch(map2.get(NOTE), /you deleted/);
+    assert.doesNotMatch(reported(map2), /you deleted/);
 });
 
-test("run: a free event that moves takes its mark along; a ledger from before this change gets the mark on its next run", async () => {
+test("run: a free event that moves takes its mark along", async () => {
     const map = vault();
     await sync(map, [event({ availability: "free" })]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ℹ️", "\tPlanning ℹ️ [[Pinecone Studio|⭕]]"));
     await sync(map, [event({ availability: "free", date: "2026-09-18", start: "2026-09-18T16:00:00-04:00", end: "2026-09-18T16:30:00-04:00" })]);
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
-
-    // A line written before the sync knew about availability, and its ledger entry
-    const old = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm") });
-    old.set(LEDGER, JSON.stringify({ version: 1, updatedAt: null, events: { E1: { ...ENTRY, projects: ["[[Pinecone Studio|⭕]]"] } }, dismissed: {} }));
-    assert.equal(await sync(old, [event({ availability: "free" })]), "Calendar sync: 1 updated");
-    assert.match(old.get(NOTE), /Planning \(now free\)/);
-    assert.equal(body(old.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
 });
 
 test("run: a first run adopts a hand-written or older line and gives a free event its mark", async () => {
     const map = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm") });
     assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 adopted");
-    assert.match(map.get(NOTE), /Planning \(now free\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
+    assert.match(reported(map), /Planning \(now free\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️ [[Pinecone Studio|⭕]]", "\t- 4:30pm"));
     // And a busy one adopting a line that has the mark by hand: the mark comes off
     const map2 = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm") });
     assert.equal(await sync(map2, [event()]), "Calendar sync: 1 adopted");
-    assert.match(map2.get(NOTE), /Planning \(now busy\)/);
-    assert.equal(body(map2.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.match(reported(map2), /Planning \(now busy\)/);
+    assert.equal(plainBody(map2.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 });
 
 test("run: adopting a line whose end line a time entry replaced changes only the mark, and writes no end line back", async () => {
     // A first run (no ledger): the line is in the sync's shape but for the entry in place of the end
     const map = vault({ [day("2026-09-16")]: note("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm") });
     assert.equal(await sync(map, [event({ availability: "free" })]), "Calendar sync: 1 adopted");
-    assert.match(map.get(NOTE), /Planning \(now free\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
+    assert.match(reported(map), /Planning \(now free\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
     // Deleted, then made again with a new ID as busy: the [-] line is revived and the mark comes off
     await sync(map, []);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ key: "E2", id: "E2" })]), "Calendar sync: 1 adopted");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
 });
 
 // ------------------------------------------------------------------ a log's line with no time (OBS-10)
@@ -1046,12 +1130,12 @@ test("only an insert adopts a timeless line: a cancel or a check for a line that
 test("run: a log's timeless line is adopted when its event arrives, remembered, and kept current after", async () => {
     const map = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Planning|Planning]]", "- [ ] A task") });
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 adopted");
-    assert.match(map.get(NOTE), /Planning \(time added\)/);
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"));
+    assert.match(reported(map), /Planning \(time added\)/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 4:30pm", "- [ ] A task"));
     assert.equal(ledger(map).events.E1.log, "[[2026-09-16 Planning|⋯]]");
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 5:30pm", "- [ ] A task"));
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[2026-09-16 Planning|⋯]]", "\t- 5:30pm", "- [ ] A task"));
 });
 
 test("adopting a timeless line for a moved event: its ⭕ comes along, the old day's log link can't, so the old line stays", () => {
@@ -1083,11 +1167,11 @@ test("run: a log a line links takes the line's times: on adoption, on a retime, 
         [LOG]: "---\ntags: log\ndate: 2026-09-16\ntime: \nendTime: \n---\n## Notes\n",
     });
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 adopted");
-    assert.match(map.get(NOTE), /Planning \(time added; log times updated\)/);
+    assert.match(reported(map), /Planning \(time added; log times updated\)/);
     assert.equal(map.get(LOG), "---\ntags: log\ndate: 2026-09-16\ntime: 4:00pm\nendTime: 4:30pm\n---\n## Notes\n");
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
-    assert.match(map.get(NOTE), /Planning \(log times updated\)/);
+    assert.match(reported(map), /Planning \(log times updated\)/);
     assert.equal(map.get(LOG), "---\ntags: log\ndate: 2026-09-16\ntime: 5:00pm\nendTime: 5:30pm\n---\n## Notes\n");
     // Moved to another day: the new line carries the link, and the log's times follow
     assert.equal(await sync(map, [event({ date: "2026-09-17", start: "2026-09-17T09:00:00-04:00", end: "2026-09-17T09:45:00-04:00" })]), "Calendar sync: 1 added, 1 removed");
@@ -1095,8 +1179,8 @@ test("run: a log a line links takes the line's times: on adoption, on a retime, 
     // An all-day event adopts a timeless line too, and says nothing about time; a log that isn't there is no error
     const map2 = vault({ [day("2026-09-16")]: note("- [<] [[2026-09-16 Offsite|Offsite]]") });
     assert.equal(await sync(map2, [event({ key: "E2", id: "E2", title: "Offsite", allDay: true })]), "Calendar sync: 1 adopted");
-    assert.equal(body(map2.get(day("2026-09-16"))), "- [<] All day\tOffsite [[2026-09-16 Offsite|⋯]]");
-    assert.match(map2.get(NOTE), /Offsite \(time added\)/);
+    assert.equal(plainBody(map2.get(day("2026-09-16"))), "- [<] All day\tOffsite [[2026-09-16 Offsite|⋯]]");
+    assert.match(reported(map2), /Offsite \(time added\)/);
 });
 
 // ------------------------------------------------------------------ the event's note link at the end (OBS-57, OBS-87)
@@ -1254,29 +1338,279 @@ test("isLog: a note in a ›logs folder (AddTaskNote's name, any case) or tagged
 
 // ------------------------------------------------------------------ the range (OBS-282)
 
-test("the range comes from Plainday's settings: the fetcher is asked for its days, and the note gets no Range section", async () => {
-    const { app, map } = makeApp({});
-    app.isMobile = false;
-    app.vault.adapter.getBasePath = () => "/vault";
-    const calls = [];
+test("run: only calendars that are on and have a link on this device are read; with none, nothing goes over the network", async () => {
+    const map = vault();
+    const device = devices.get(map);
+    device.state.calendars.list.push({ id: "off", name: "Off", account: "", address: "", on: false }, { id: "nolink", name: "Elsewhere", account: "", address: "", on: true });
+    device.state.links.off = "https://calendar.example.com/off.ics";
+    const feed = stand(device.state).CalendarFeed;
+    device.state.reads.cal = { events: [event()], failed: [] };
+    assert.equal(await load(device.app, device.state, { CalendarFeed: feed }).run(), "Calendar sync: 1 added");
+    assert.deepEqual(feed.loads, ["cal"]);
+
+    const none = vault();
+    devices.get(none).state.calendars.list = [];
+    const quiet = stand(devices.get(none).state).CalendarFeed;
+    assert.equal(await load(devices.get(none).app, devices.get(none).state, { CalendarFeed: quiet }).run(), "No calendars to sync yet: add one in Settings → Plainday → Calendars");
+    assert.deepEqual(quiet.loads, []);
+    devices.get(none).state.calendars.list = [{ id: "x", name: "X", account: "", address: "", on: true }];
+    assert.equal(await load(devices.get(none).app, devices.get(none).state, { CalendarFeed: quiet }).run(), "No calendar is switched on with a link on this device: see Settings → Plainday → Calendars");
+    assert.deepEqual(quiet.loads, []);
+    assert.equal(none.size, 0, "no note written");
+});
+
+// ------------------------------------------------------------------ IDs on event lines (OBS-275)
+
+test("lineId: six letters and digits from the event's key, the same every time; steps are other IDs", () => {
+    const a = cs.lineId("E1"), b = load().lineId("E1");
+    assert.match(a, /^[a-z0-9]{6}$/);
+    assert.equal(a, b, "every device works out the same one");
+    assert.notEqual(cs.lineId("E1", 1), a);
+    assert.notEqual(cs.lineId("S1@2026-09-16"), cs.lineId("S1@2026-09-23"), "each occurrence its own");
+    assert.deepEqual(plain(cs.lineIds("E1")), [a, cs.lineId("E1", 1), cs.lineId("E1", 2)]);
+});
+
+test("the ID is read at the end of a line or ahead of links typed after it, and written last", () => {
+    const id = lid("E1");
+    assert.equal(cs.lidOf(`- [<] 9:30am\tReview ^${id}`), id);
+    assert.equal(cs.lidOf(`- [<] 9:30am\tReview ^${id} [[Acme|⭕]] [[2026-09-16 Review|⋯]]`), id);
+    assert.equal(cs.lidOf(`- [<] 9:30am\tReview ^${id} and more words`), null, "text after it: not an ID");
+    assert.equal(cs.bare(`- [<] 9:30am\tReview ^${id} [[Acme|⭕]]`), "- [<] 9:30am\tReview [[Acme|⭕]]");
+    assert.equal(cs.withLid("- [<] 9:30am\tReview [[Acme|⭕]] ^old", id), `- [<] 9:30am\tReview [[Acme|⭕]] ^${id}`);
+    assert.deepEqual(plain(cs.head(`- [<] 9:30am\tReview [[Acme|⭕]] ^${id}`)), { start: "9:30am", title: "Review" });
+    assert.equal(cs.eventHead(`- [<] 9:30am\tReview 🆓 [[Acme|⭕]] ^${id}`).shown, "Review");
+});
+
+test("run: each event line ends in its event's ID; a moved line keeps it, a forwarded one gives it up", async () => {
+    const map = vault();
+    await sync(map, [event(), weekly("2026-09-16")]);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 10:00am\tWeekly sync ^S1@2026-09-16", "\t- 10:30am", "- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+    await sync(map, [moved(), weekly("2026-09-16")]);
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+    edit(map, day("2026-09-18"), (t) => t.replace("\t- 4:30pm", "\t- 4:00pm - 4:20pm"));
+    await sync(map, [event({ date: "2026-09-19", start: "2026-09-19T16:00:00-04:00", end: "2026-09-19T16:30:00-04:00" }), weekly("2026-09-16")]);
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [>] [[2026-09-19|9/19]] 4:00pm\tPlanning", "\t- 4:00pm - 4:20pm"), "no ID: the event's line is on the 19th");
+    assert.equal(body(map.get(day("2026-09-19"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+});
+
+test("run: a line with links typed after its ID is still the event's: found, and its ID put back at the end", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    map.set(day("2026-09-16"), map.get(day("2026-09-16")).replace(/(\^[a-z0-9]{6})/, "$1 [[Pinecone Studio|⭕]]"));
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 4:30pm"));
+    assert.deepEqual(ledger(map).dismissed, {});
+});
+
+test("run: a second vault, or a device with no cache, finds the same lines by the same IDs and changes nothing", async () => {
+    const map = vault();
+    await sync(map, [event(), weekly("2026-09-16")]);
+    const before = map.get(day("2026-09-16"));
+    const phone = twin(map);
+    assert.equal(await sync(map, [event(), weekly("2026-09-16")], { device: phone }), "Calendar sync: nothing to change");
+    assert.equal(map.get(day("2026-09-16")), before);
+    assert.equal(phone.app.loadLocalStorage("plainday-calendar-cache").events.E1.lid, lid("E1"));
+
+    // A vault of its own, from the same calendars: the same lines, the same IDs
+    const other = vault();
+    await sync(other, [event(), weekly("2026-09-16")]);
+    assert.equal(other.get(day("2026-09-16")), before);
+});
+
+test("run: two devices: a change one applied is current for the other, which doesn't call the line yours", async () => {
+    const map = vault();
+    const mac = sync.device;
+    await sync(map, [event()]);
+    const phone = twin(map);
+    await sync(map, [event()], { device: phone });
+    const later = event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" });
+    assert.equal(await sync(map, [later], { device: mac }), "Calendar sync: 1 updated");
+    assert.equal(await sync(map, [later], { device: phone }), "Calendar sync: nothing to change");
+    assert.deepEqual(phone.app.loadLocalStorage("plainday-calendar-cache").events.E1.lines, ["- [<] 5:00pm\tPlanning", "\t- 5:30pm"]);
+    // And it keeps the line current from then on
+    const again = event({ start: "2026-09-16T18:00:00-04:00", end: "2026-09-16T18:30:00-04:00" });
+    assert.equal(await sync(map, [again], { device: phone }), "Calendar sync: 1 updated");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 6:00pm\tPlanning ^E1", "\t- 6:30pm"));
+});
+
+test("run: two devices: one reading an older copy of the calendar never moves a line back", async () => {
+    const map = vault();
+    const mac = sync.device;
+    await sync(map, [event({ modified: 1 })]);
+    const phone = twin(map);
+    await sync(map, [event({ modified: 1 })], { device: phone });
+    // The Mac reads the move; the phone's copy of the calendar still has the event where it was
+    await sync(map, [moved({ modified: 2 })], { device: mac });
+    assert.equal(await sync(map, [event({ modified: 1 })], { device: phone }), "Calendar sync: nothing to change");
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(phone.app.loadLocalStorage("plainday-calendar-cache").events.E1.date, "2026-09-18", "it follows the line");
+    // Its copy catches up: still nothing to do
+    assert.equal(await sync(map, [moved({ modified: 2 })], { device: phone }), "Calendar sync: nothing to change");
+    // A copy older than one it has seen changes nothing either
+    assert.equal(await sync(map, [event({ modified: 1 })], { device: mac }), "Calendar sync: nothing to change");
+    assert.equal(plainBody(map.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: a device in another time zone doesn't rewrite a line whose event hasn't changed (Brian, 11/18)", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    // The same instants, as a device an ocean away writes them
+    const away = event({ start: "2026-09-16T21:00:00+01:00", end: "2026-09-16T21:30:00+01:00" });
+    assert.equal(await sync(map, [away]), "Calendar sync: nothing to change");
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    // The event changes: written as this device writes it
+    assert.equal(await sync(map, [event({ start: "2026-09-16T22:00:00+01:00", end: "2026-09-16T22:30:00+01:00" })]), "Calendar sync: 1 updated");
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 10:00pm\tPlanning", "\t- 10:30pm"));
+});
+
+test("run: a device with no cache leaves a line that differs from what it would write, and forwards a moved line rather than removing it", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning", "\tPlanning (our side)"));
+    const phone = twin(map);
+    assert.equal(await sync(map, [event()], { device: phone }), "Calendar sync: 1 left for you");
+    assert.match(phone.app.loadLocalStorage("plainday-calendar-last").yours[0], /this device didn't write it/);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning (our side)", "\t- 4:30pm"));
+
+    const moving = vault();
+    await sync(moving, [event()]);
+    const fresh = twin(moving);
+    assert.equal(await sync(moving, [moved()], { device: fresh }), "Calendar sync: 1 added, 1 forwarded");
+    assert.equal(body(moving.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(body(moving.get(day("2026-09-18"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+});
+
+test("run: a device with no cache cancels nothing: it can't tell which calendar a line is from", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    const phone = twin(map);
+    assert.equal(await sync(map, [], { device: phone }), "Calendar sync: nothing to change");
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: two lines with one ID in a note are merged, keeping yours, brought up to the event's time", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    // Two devices wrote the event before Sync met; one copy has your time entry
+    edit(map, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm", "- [<] 4:00pm\tPlanning ^E1\n\t- 4:00pm - 4:20pm\n- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm"));
+    assert.equal(await sync(map, [event()]), "Calendar sync: 1 doubled line merged");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:00pm - 4:20pm"));
+    assert.deepEqual(last(map).merged, ["2026-09-16 Planning"]);
+
+    // One device retimed it while you added a ⭕ to the old line on another: yours, at the new time
+    const retimed = vault();
+    await sync(retimed, [event()]);
+    edit(retimed, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n- [<] 5:00pm\tPlanning ^E1\n\t- 5:30pm"));
+    const later = event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" });
+    await sync(retimed, [later]);
+    assert.equal(body(retimed.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 5:30pm"));
+
+    // Two copies each with something of yours: both stay, and the report says so
+    const both = vault();
+    await sync(both, [event()]);
+    edit(both, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n- [<] 4:00pm\tPlanning ^E1\n\t- 4:00pm - 4:20pm"));
+    assert.equal(await sync(both, [event()]), "Calendar sync: 1 left for you");
+    assert.match(reported(both), /two lines for this event/);
+    assert.equal((both.get(day("2026-09-16")).match(/\^/g) ?? []).length, 2);
+});
+
+test("run: a calendar that couldn't be read, or an event the reader skipped, keeps its lines; the summary names them", async () => {
+    const map = vault();
+    const device = sync.device;
+    device.state.calendars.list.push({ id: "home", name: "Home", account: "iCloud", address: "", on: true });
+    device.state.links.home = "https://calendar.example.com/home.ics";
+    device.state.reads.home = { events: [event({ key: "H1", id: "H1", title: "Dentist", calendarId: "home", start: "2026-09-16T08:00:00-04:00", end: "2026-09-16T09:00:00-04:00" })], failed: [] };
+    await sync(map, [event()]);
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 8:00am\tDentist", "\t- 9:00am", "- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+
+    device.state.reads.home = { problem: "unreachable" };
+    const said = await sync(map, []).then((s) => s);
+    // Work read fine and Planning is gone from it: canceled; Home couldn't be reached: Dentist stays
+    assert.equal(said, "Calendar sync: 1 canceled. Not synced: Home (couldn't be reached)");
+    assert.match(map.get(day("2026-09-16")), /- \[<\] 8:00am\tDentist/);
+
+    // The reader skipped an event: its line stays as it is, never canceled
+    device.state.reads.home = { events: [], failed: [{ uid: "H1", title: "Dentist" }] };
+    assert.equal(await sync(map, []), "Calendar sync: nothing to change. 1 event skipped, which the calendar sync can't read: see the error log");
+    assert.match(map.get(day("2026-09-16")), /- \[<\] 8:00am\tDentist/);
+});
+
+test("run: a link that stopped working: the error log names the calendar and this device, a toast once, and never the link", async () => {
+    const map = vault({ [ERROR_LOG]: "---\nid: 1\ntags:\n---\n\n## Calendar sync\n\nUpdated 9/14 8:00am · 1 open\n\n- Link stopped working · Studio (on iPhone)\n" });
+    const device = sync.device;
+    device.state.calendars.list[0].name = "Studio";
+    device.state.reads.cal = { problem: "dead" };
+    const toasts = [];
+    const errorLog = makeErrorLog(device.app, toasts);
+    const run = () => load(device.app, device.state, { ErrorLog: errorLog }).run();
+    assert.equal(await run(), "Calendar sync: nothing synced. Not synced: Studio (its link stopped working on this device)");
+    assert.match(map.get(ERROR_LOG), /- Link stopped working · Studio \(on Mac\)\n/);
+    assert.match(map.get(ERROR_LOG), /- Link stopped working · Studio \(on iPhone\)\n/, "the phone's line is the phone's");
+    assert.equal(toasts.length, 1);
+    await run();
+    assert.equal(toasts.length, 1, "no second toast");
+    assert.equal(load(device.app, device.state).deadLink("cal"), true);
+    for (const t of [...map.values(), ...toasts, ...(device.state.notices ?? []), ...device.app.local.values()]) assert.doesNotMatch(String(t), /calendar\.example\.com/);
+    // It works again: the Mac's line goes, the phone's stays until the phone's next run
+    device.state.reads.cal = { events: [], failed: [] };
+    await run();
+    assert.doesNotMatch(map.get(ERROR_LOG), /Studio \(on Mac\)/);
+    assert.match(map.get(ERROR_LOG), /Studio \(on iPhone\)/);
+    assert.equal(load(device.app, device.state).deadLink("cal"), false);
+});
+
+// The real ErrorLog, writing into the test vault, its toasts kept in `toasts`
+function makeErrorLog(app, toasts) {
     const context = vm.createContext({
-        app, moment, console,
-        plainday: { Schedule: { dailyOpts: () => ({ folder: DAYS }) }, Settings: { rangeDays: () => 21 } },
-        require: (m) => {
-            assert.equal(m, "child_process");
-            return { execFile: (cmd, args, opts, done) => { calls.push(args); map.set(EVENTS, JSON.stringify(feed([event()]))); done(null, "", ""); } };
-        },
+        app, moment, Notice: class { constructor(m) { toasts.push(m); } },
+        createFragment: (fn) => { const parts = []; fn({ appendText: (t) => parts.push(t), createEl: (_, o) => { parts.push(o.text); return { addEventListener() {} }; } }); return parts.join(""); },
+        plainday: { Settings: { errorLogPath: () => ERROR_LOG } }, console,
     });
-    const sync = new (vm.runInContext(code + "\n;CalendarSync", context))();
-    assert.equal(sync.rangeDays(), 21);
-    await sync.run();
-    assert.deepEqual(plain(calls[0].slice(1, 3)), ["--days", "21"]);
-    assert.ok(map.has(NOTE), "the note made on the first run");
-    assert.doesNotMatch(map.get(NOTE), /## Range|Sync range/);
-    // A note from before keeps its Range section as it is: not read, not written
-    const old = "---\nid: 1\ntags: \n---\n\n## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync.\n\n" + map.get(NOTE).split("\n---\n")[1].trimStart();
-    map.set(NOTE, old);
-    await sync.run();
-    assert.match(map.get(NOTE), /## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync\.\n/);
-    assert.deepEqual(plain(calls[1].slice(1, 3)), ["--days", "21"], "the note's 3 weeks isn't read");
+    return new (vm.runInContext(classScript("errorLog.js") + "\n;ErrorLog", context))();
+}
+
+test("run: one sync at a time: a second one says so and does nothing", async () => {
+    const map = vault();
+    const device = sync.device;
+    device.state.reads.cal = { events: [event()], failed: [] };
+    const s = load(device.app, device.state);
+    const [a, b] = await Promise.all([s.run(), s.run()]);
+    assert.equal(a, "Calendar sync: 1 added");
+    assert.equal(b, "A calendar sync is already running");
+    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: daily notes named DD-MM-YYYY get the events, and no YYYY-MM-DD notes appear (OBS-124)", async () => {
+    const map = vault();
+    sync.device.state.format = "DD-MM-YYYY";
+    await sync(map, [event()]);
+    assert.equal(plainBody(map.get(`${DAYS}/16-09-2026.md`)), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+    assert.equal(map.has(day("2026-09-16")), false);
+    edit(map, `${DAYS}/16-09-2026.md`, (t) => t.replace("\t- 4:30pm", "\t- 4:00pm - 4:20pm"));
+    await sync(map, [moved()]);
+    assert.equal(plainBody(map.get(`${DAYS}/16-09-2026.md`)), text("- [>] [[18-09-2026|9/18]] 4:00pm\tPlanning", "\t- 4:00pm - 4:20pm"), "the forward links the day by its name");
+    assert.equal(plainBody(map.get(`${DAYS}/18-09-2026.md`)), text("- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
+});
+
+test("run: recurring events' projects are read from the old Calendar Sync note once, into the settings", async () => {
+    const map = vault({ [NOTE]: text("---", "id: 1", "---", "", "## Calendars", "### Work", "- [x] Work", "", "## Recurring events", "", "Put a project link after a series.", "", "- Weekly sync [[Pinecone Studio|⭕]]", "- Board call", "", "## Last run", "") });
+    const device = sync.device;
+    device.state.calendars.recurring = null;
+    const before = map.get(NOTE);
+    assert.equal(await sync(map, SERIES.map((d) => weekly(d))), "Calendar sync: 3 added");
+    assert.deepEqual(plain(device.state.calendars.recurring), [{ title: "Weekly sync", links: ["[[Pinecone Studio|⭕]]"] }]);
+    for (const d of SERIES) assert.match(noIds(map.get(day(d))), /Weekly sync \[\[Pinecone Studio\|⭕\]\]/);
+    assert.equal(map.get(NOTE), before, "the note isn't changed");
+    // Read once: a link added to the note now isn't taken
+    edit(map, NOTE, (t) => t.replace("- Board call", "- Board call [[Kestrel|⭕]]"));
+    const saves = device.state.saves;
+    await sync(map, SERIES.map((d) => weekly(d)));
+    assert.equal(device.state.saves, saves);
+    assert.deepEqual(plain(device.state.calendars.recurring), [{ title: "Weekly sync", links: ["[[Pinecone Studio|⭕]]"] }]);
+});
+
+test("run: the sync writes no file of its own: only daily notes", async () => {
+    const map = vault();
+    await sync(map, [event(), moved({ key: "E2", id: "E2" })]);
+    assert.deepEqual([...map.keys()].sort(), [day("2026-09-16"), day("2026-09-18")]);
 });

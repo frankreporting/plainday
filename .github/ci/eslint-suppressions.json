@@ -1,9 +1,4 @@
 {
-  "plugin/src/commands/calendarSync.js": {
-    "preserve-caught-error": {
-      "count": 1
-    }
-  },
   "plugin/src/commands/invoice.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 2
