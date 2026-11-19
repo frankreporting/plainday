@@ -1052,10 +1052,15 @@ test("run: daily notes named DD-MM-YYYY get the events, and no YYYY-MM-DD notes 
     assert.equal(body(map.get(`${DAYS}/18-09-2026.md`)), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
 });
 
-test("run: the sync writes no file of its own: only daily notes", async () => {
+test("run: the sync writes no file of its own: only daily notes, and no error log with nothing in it", async () => {
     const map = vault();
+    device(map).app.isMobile = false;
+    device(map).extra = { ErrorLog: makeErrorLog(device(map).app, []) };
     await sync(map, [event(), moved({ key: "E2", id: "E2" })]);
     assert.deepEqual([...map.keys()].sort(), [day("2026-09-16"), day("2026-09-18")]);
+    device(map).state.reads.cal = { problem: "dead" };
+    await load(device(map).app, device(map).state, device(map).extra).run();
+    assert.ok(map.has(ERROR_LOG), "made when there's something to say");
 });
 
 test("run: until the one-time conversion runs, the sync changes nothing and says why", async () => {

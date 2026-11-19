@@ -1444,7 +1444,8 @@ export default class CalendarSync {
                 if (!device || ` (on ${device[1]})` === on) continue;
                 for (let i = 0; i < count; i++) items.push({ kind, link, name: link });
             }
-            log.toast("Calendar sync", await log.write("Calendar sync", log.group(items), { create: !app.isMobile }));
+            // The log is made only when there's something to put in it, and only on a desktop
+            log.toast("Calendar sync", await log.write("Calendar sync", log.group(items), { create: !app.isMobile && items.length > 0 }));
         } catch (e) {
             console.error("CalendarSync: couldn't update the error log", e);
         }
