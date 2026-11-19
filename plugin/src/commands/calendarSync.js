@@ -192,7 +192,7 @@ export default class CalendarSync {
             feed.outside = new Set(ok.flatMap(({ calendar, got }) => (got.outside ?? []).map((key) => `${calendar.id}|${key}`)));
             const selected = new Set(ok.map((r) => r.calendar.id));
             await this.recurringFromNote();
-            this.handOver(feed, selected, cache);
+            await this.handOver(feed, selected, cache);
             const applied = performance.now();
             const series = await this.seriesProjects(feed, selected, cache);
             await this.apply(feed, cache, selected, series, report);
@@ -320,23 +320,29 @@ export default class CalendarSync {
     // calendar, day, start and end, are the same meeting: the new one takes over the old one's line, and
     // its series goes by the old one's title, so seriesProjects renames the series' project to it (as
     // the sync did before Plainday). Only places where one of each pairs up.
-    handOver(feed, selected, cache) {
+    async handOver(feed, selected, cache) {
         const today = moment().format("YYYY-MM-DD");
         const slot = (calendarId, date, start, end) => `${calendarId}|${date}|${start}|${end}`;
-        const read = new Set(), known = new Set(Object.values(cache.lines).map((m) => m.key));
-        const fresh = new Map(), gone = new Map();
-        for (const event of feed.events) {
-            if (!selected.has(event.calendarId) || event.status === "canceled") continue;
-            read.add(`${event.calendarId}|${event.key}`);
-            if (!event.recurring || event.date < today || known.has(event.key)) continue;
-            const lines = this.lines(event);
-            const at = slot(event.calendarId, event.date, this.head(lines[0])?.start, lines.length > 1 ? lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false);
-            fresh.set(at, fresh.has(at) ? null : event);
-        }
+        const read = new Set();
+        for (const event of feed.events) if (selected.has(event.calendarId) && event.status !== "canceled") read.add(`${event.calendarId}|${event.key}`);
+        // The occurrences this device has a line for that the calendars read no longer have: usually none,
+        // and then nothing else is looked at
+        const gone = new Map();
         for (const [lid, m] of Object.entries(cache.lines)) {
             if (m.key === m.uid || !m.start || !selected.has(m.calendarId) || read.has(`${m.calendarId}|${m.key}`)) continue;
             const at = slot(m.calendarId, m.date, m.start, m.end);
             gone.set(at, gone.has(at) ? null : lid);
+        }
+        if (!gone.size) return;
+        const known = new Set(Object.values(cache.lines).map((m) => m.key));
+        const places = new Set([...gone.keys()].map((at) => at.split("|").slice(0, 2).join("|")));
+        const fresh = new Map();
+        for (const event of feed.events) {
+            await this.breathe();
+            if (!event.recurring || !places.has(`${event.calendarId}|${event.date}`) || event.date < today || known.has(event.key) || !read.has(`${event.calendarId}|${event.key}`)) continue;
+            const lines = this.lines(event);
+            const at = slot(event.calendarId, event.date, this.head(lines[0])?.start, lines.length > 1 ? lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false);
+            fresh.set(at, fresh.has(at) ? null : event);
         }
         const titles = cache.seriesTitles ?? {};
         for (const [at, lid] of gone) {
@@ -750,15 +756,22 @@ export default class CalendarSync {
         if (text !== before) {
             // Keep the folds you have: snapshot first, and let RefoldDailyNotes sort out the rest
             plainday.RefoldDailyNotes?.remember(file, before, this.currentFolds(file, before));
+            await this.breathe();
+            // Worked out again only if the note changed since it was read (you typed in it meanwhile)
+            const read = before;
             await app.vault.process(file, (now) => {
-                ({ text, outcomes } = this.runOps(now, ops, ctx));
+                if (now !== read) ({ text, outcomes } = this.runOps(now, ops, ctx));
                 return text;
             });
+            await this.breathe();
             after = await app.vault.read(file);   // read back what actually landed
             await plainday.RefoldDailyNotes?.refold(file, "open");
         }
         const lines = after.split("\n").map((l) => l.replace(/\r$/, ""));
-        for (const result of outcomes) await this.record(date, result, lines, ctx, report);
+        for (const result of outcomes) {
+            await this.breathe();
+            await this.record(date, result, lines, ctx, report);
+        }
     }
 
     // Applies the operations to `text` in order, each seeing the one before it: { text, outcomes }
