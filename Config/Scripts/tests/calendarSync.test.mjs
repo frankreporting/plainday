@@ -121,6 +121,7 @@ function stand(state) {
         rangeDays: () => 30,
         set: async (section, values) => { Object.assign({ calendars: state.calendars }[section], values); state.saves++; },
         recurringOf: (v) => (Array.isArray(v) ? v : null),
+        syncHere: () => state.syncHere !== false,
     };
     const CalendarFeed = {
         loads: [],
@@ -456,6 +457,8 @@ test("run: canceled is marked [-] and reported; back in the calendar, it's [<] a
     const map = vault();
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\t- 4:30pm", "\t- 4:00pm - 4:30pm"));
+    // Gone from one read: nothing yet, since a calendar's copy can lag; still gone a while later: canceled
+    assert.equal(await sync(map, []), "Calendar sync: nothing to change");
     assert.equal(await sync(map, []), "Calendar sync: 1 canceled");
     assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
     assert.deepEqual(last(map).canceled, ["2026-09-16 Planning"]);
@@ -471,6 +474,7 @@ test("run: canceled is marked [-] and reported; back in the calendar, it's [<] a
 test("run: a canceled line you deleted: the event, if it returns, is written afresh", async () => {
     const map = vault();
     await sync(map, [event()]);
+    await sync(map, []);
     await sync(map, []);
     edit(map, day("2026-09-16"), () => note());
     await sync(map, [event()]);
@@ -589,6 +593,7 @@ test("run: no series links in a held run, or for a calendar you've switched off"
     const map = vault();
     const others = Array.from({ length: 11 }, (_, i) => event({ key: `X${i}`, id: `X${i}`, title: `One-off ${i}` }));
     await sync(map, [...SERIES.map((d) => weekly(d)), ...others]);
+    await sync(map, SERIES.map((d) => weekly(d)));
     setLinks(map, "Weekly sync", ["[[Pinecone Studio|⭕]]"]);
     assert.match(await sync(map, SERIES.map((d) => weekly(d))), /held back/);
     for (const d of SERIES) assert.doesNotMatch(noIds(map.get(day(d))), /⭕/);
@@ -748,12 +753,14 @@ test("run: a canceled line whose [-] you changed isn't reported restored, and a 
     const map = vault();
     await sync(map, [event()]);
     await sync(map, []);
+    await sync(map, []);
     edit(map, day("2026-09-16"), (t) => t.replace("[-]", "[x]"));
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
     assert.match(map.get(day("2026-09-16")), /- \[x\] 4:00pm\tPlanning/);
 
     const lost = vault();
     await sync(lost, [event()]);
+    await sync(lost, []);
     const saved = devices.get(lost).app.local.get("plainday-calendar-cache");
     await sync(lost, []);
     devices.get(lost).app.local.set("plainday-calendar-cache", saved);
@@ -767,6 +774,9 @@ test("run: a held run doesn't restore canceled lines", async () => {
     const others = Array.from({ length: 11 }, (_, i) => event({ key: `X${i}`, id: `X${i}`, title: `One-off ${i}` }));
     await sync(map, [event(), ...others]);
     await sync(map, others);
+    await sync(map, others);
+    // The others gone once; then back comes Planning, in a run that would cancel all eleven
+    await sync(map, []);
     assert.match(await sync(map, [event()]), /held back/);
     assert.match(noIds(map.get(day("2026-09-16"))), /- \[-\] 4:00pm\tPlanning\n/);
 });
@@ -873,7 +883,9 @@ test("run: a series split with \"this and future events\" (a new series ID) rena
     // At a different time it's a different event: canceled, and the new one added
     const moved = vault();
     await sync(moved, before);
-    assert.equal(await sync(moved, [occ("S1", "Weekly sync", "2026-09-16"), occ("S2", "Studio sync", "2026-09-23", "11"), occ("S2", "Studio sync", "2026-09-30", "11")]), "Calendar sync: 2 added, 2 canceled");
+    const later = [occ("S1", "Weekly sync", "2026-09-16"), occ("S2", "Studio sync", "2026-09-23", "11"), occ("S2", "Studio sync", "2026-09-30", "11")];
+    assert.equal(await sync(moved, later), "Calendar sync: 2 added");
+    assert.equal(await sync(moved, later), "Calendar sync: 2 canceled");
 });
 
 // ------------------------------------------------------------------ free events (OBS-47)
@@ -1093,6 +1105,7 @@ test("run: adopting a line whose end line a time entry replaced changes only the
     assert.match(reported(map), /Planning \(now free\)/);
     assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
     // Deleted, then made again with a new ID as busy: the [-] line is revived and the mark comes off
+    await sync(map, []);
     await sync(map, []);
     assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [-] 4:00pm\tPlanning ℹ️", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ key: "E2", id: "E2" })]), "Calendar sync: 1 adopted");
@@ -1524,7 +1537,8 @@ test("run: a calendar that couldn't be read, or an event the reader skipped, kee
     assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 8:00am\tDentist", "\t- 9:00am", "- [<] 4:00pm\tPlanning", "\t- 4:30pm"));
 
     device.state.reads.home = { problem: "unreachable" };
-    const said = await sync(map, []).then((s) => s);
+    await sync(map, []);
+    const said = await sync(map, []);
     // Work read fine and Planning is gone from it: canceled; Home couldn't be reached: Dentist stays
     assert.equal(said, "Calendar sync: 1 canceled. Not synced: Home (couldn't be reached)");
     assert.match(map.get(day("2026-09-16")), /- \[<\] 8:00am\tDentist/);
@@ -1619,31 +1633,6 @@ test("run: the sync writes no file of its own: only daily notes", async () => {
 
 const at = (h, over = {}) => event({ start: `2026-09-16T${h}:00:00-04:00`, end: `2026-09-16T${h}:30:00-04:00`, ...over });
 
-test("run: a device that missed a change brings up to date another device's line, with your ⭕, and says nothing is yours", async () => {
-    const map = vault();
-    const mac = sync.device;
-    await sync(map, [at(16)]);
-    const phone = twin(map);
-    await sync(map, [at(16)], { device: phone });
-    edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1", "\tPlanning [[Pinecone Studio|⭕]] ^E1"));
-    await sync(map, [at(17)], { device: mac });
-    assert.equal(await sync(map, [at(18)], { device: phone }), "Calendar sync: 1 updated");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 6:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 6:30pm"));
-    assert.equal(await sync(map, [at(18)], { device: mac }), "Calendar sync: nothing to change");
-
-    // A phone in another time zone wrote the change in its own time: the Mac writes it in its own
-    const travel = vault();
-    const home = sync.device;
-    await sync(travel, [at(16)]);
-    const away = twin(travel);
-    await sync(travel, [at(16)], { device: away });
-    await sync(travel, [event({ start: "2026-09-16T22:00:00+01:00", end: "2026-09-16T22:30:00+01:00" })], { device: away });
-    assert.equal(plainBody(travel.get(day("2026-09-16"))), text("- [<] 10:00pm\tPlanning", "\t- 10:30pm"));
-    assert.equal(await sync(travel, [at(17)], { device: home }), "Calendar sync: 1 updated");
-    assert.equal(plainBody(travel.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning", "\t- 5:30pm"));
-    assert.equal(await sync(travel, [at(17)], { device: home }), "Calendar sync: nothing to change");
-});
-
 test("run: a line you changed by hand is yours, said once, not on every run", async () => {
     const map = vault();
     await sync(map, [at(16)]);
@@ -1662,7 +1651,8 @@ test("run: words typed after a line's ID: still the event's line, now yours, nev
         assert.equal(await sync(map, [event()], { now: 1000 + 20 * 60 * 1000 }), "Calendar sync: nothing to change", typed);
         assert.deepEqual(ledger(map).dismissed, {}, typed);
         // Canceled in the calendar: marked, as any line of its is
-        assert.equal(await sync(map, [], { now: 1000 + 40 * 60 * 1000 }), "Calendar sync: 1 canceled", typed);
+        await sync(map, [], { now: 1000 + 40 * 60 * 1000 });
+        assert.equal(await sync(map, [], { now: 1000 + 60 * 60 * 1000 }), "Calendar sync: 1 canceled", typed);
         assert.match(map.get(day("2026-09-16")), new RegExp(`- \\[-\\] 4:00pm\\tPlanning \\^${lid("E1")}`), typed);
     }
 });
@@ -1677,27 +1667,17 @@ test("run: a line you deleted doesn't come back when its event changes after the
     assert.equal(plainBody(map.get(day("2026-09-16"))), "");
 });
 
-test("run: a new device in another time zone takes a line a day away where it is, rather than moving it", async () => {
-    const map = vault();
-    const mac = sync.device;
-    const ny = at(20);
-    await sync(map, [ny]);
-    const phone = twin(map);
-    const london = event({ date: "2026-09-17", start: "2026-09-17T01:00:00+01:00", end: "2026-09-17T01:30:00+01:00" });
-    assert.equal(await sync(map, [london], { device: phone }), "Calendar sync: 1 left for you");
-    assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 8:00pm\tPlanning", "\t- 8:30pm"));
-    assert.equal(map.get(day("2026-09-17")), undefined);
-    assert.equal(phone.app.loadLocalStorage("plainday-calendar-cache").events.E1.date, "2026-09-16");
-    assert.equal(await sync(map, [london], { device: phone }), "Calendar sync: nothing to change");
-    assert.equal(await sync(map, [ny], { device: mac }), "Calendar sync: nothing to change");
-});
-
 test("run: copies of the calendar that alternate with and without an event don't flip its line between canceled and back", async () => {
     const map = vault();
     await sync(map, [event({ modified: 5 })]);
+    // A copy without it, then one with it: nothing, either way
+    assert.equal(await sync(map, []), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, [event({ modified: 5 })]), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, []), "Calendar sync: nothing to change");
     assert.equal(await sync(map, []), "Calendar sync: 1 canceled");
     for (let i = 0; i < 3; i++) {
         assert.equal(await sync(map, [event({ modified: 5 })]), "Calendar sync: nothing to change");
+        assert.equal(await sync(map, []), "Calendar sync: nothing to change");
         assert.equal(await sync(map, []), "Calendar sync: nothing to change");
     }
     assert.match(map.get(day("2026-09-16")), /- \[-\] 4:00pm\tPlanning/);
@@ -1730,10 +1710,94 @@ test("run: a daily note that's gone (renamed folder, not synced yet) takes none 
     assert.deepEqual(ledger(many).dismissed, {});
 });
 
-test("run: two plain copies of one event, written by devices in different time zones, are one, the one this device writes kept", async () => {
+
+// ------------------------------------------------------------------ one device syncs (OBS-275, Brian 11/18)
+
+test("run: on a device that isn't the one that syncs, Sync calendars says so, writes nothing and downloads nothing", async () => {
     const map = vault();
-    await sync(map, [at(16)]);
-    map.set(day("2026-09-16"), map.get(day("2026-09-16")).replace(/\n$/, "") + `\n- [<] 9:00pm\tPlanning ^${lid("E1")}\n\t- 9:30pm\n`);
-    assert.equal(await sync(map, [at(16)]), "Calendar sync: 1 doubled line merged");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+    const device = sync.device;
+    device.state.syncHere = false;
+    const feed = stand(device.state).CalendarFeed;
+    device.state.reads.cal = { events: [event()], failed: [] };
+    assert.equal(await load(device.app, device.state, { CalendarFeed: feed }).run(), "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars on this device, and keep it off on your other devices.");
+    assert.deepEqual(feed.loads, []);
+    assert.equal(map.size, 0);
+});
+
+// ------------------------------------------------------------------ from the third review (OBS-275)
+
+test("run: a daily note the sync makes (its name changed) takes none of that day's remembered lines for deleted", async () => {
+    const map = vault();
+    const alpha = event({ key: "A1", id: "A1", title: "Alpha" }), beta = event({ key: "B1", id: "B1", title: "Beta", start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" });
+    await sync(map, [alpha, beta]);
+    sync.device.state.format = "DD-MM-YYYY";
+    const gamma = event({ key: "C1", id: "C1", title: "Gamma", start: "2026-09-16T18:00:00-04:00", end: "2026-09-16T18:30:00-04:00" });
+    await sync(map, [alpha, beta, gamma], { now: 1000 });
+    await sync(map, [alpha, beta, gamma], { now: 1000 + 30 * 60 * 1000 });
+    assert.deepEqual(ledger(map).dismissed, {});
+    assert.doesNotMatch(reported(map), /you deleted/);
+});
+
+test("run: a log keeps its times when the line that links it is left as it is", async () => {
+    const map = vault({
+        [day("2026-09-16")]: note(`- [<] 4:00pm\tPlanning [[2026-09-16 Planning|⋯]] ^${lid("E1")}`, "\t- 4:30pm"),
+        "Logs/2026-09-16 Planning.md": "---\ntags: log\ntime: 4:00pm\nendTime: 4:30pm\n---\n",
+    });
+    keys.add("E1");
+    // A device with nothing remembered reads another time: the line is left, and so is the log
+    assert.equal(await sync(map, [at(21)]), "Calendar sync: 1 left for you");
+    assert.match(map.get("Logs/2026-09-16 Planning.md"), /time: 4:00pm/);
+});
+
+test("run: a forwarded line gives up its ID even with words after it; a line with words after its ID isn't taken by another event", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    map.set(day("2026-09-16"), map.get(day("2026-09-16")).replace(`^${lid("E1")}`, `^${lid("E1")} - room 4`));
+    await sync(map, [moved()]);
+    assert.doesNotMatch(map.get(day("2026-09-16")), /\^[a-z0-9]{6}/, "the forwarded line has no ID");
+
+    const other = vault();
+    await sync(other, [event()]);
+    other.set(day("2026-09-16"), other.get(day("2026-09-16")).replace(`^${lid("E1")}`, `^${lid("E1")} - room 4`));
+    await sync(other, [event(), event({ key: "E2", id: "E2" })]);
+    assert.equal((other.get(day("2026-09-16")).match(new RegExp(`\\^${lid("E1")}`, "g")) ?? []).length, 1);
+    assert.match(other.get(day("2026-09-16")), new RegExp(`\\^${lid("E2")}$`, "m"), "E2 gets a line of its own");
+});
+
+test("run: a deleted event that moves to a later day stays deleted until that day", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    edit(map, day("2026-09-16"), () => note());
+    await sync(map, [event()], { now: 1000 });
+    await sync(map, [event()], { now: 1000 + 20 * 60 * 1000 });
+    assert.equal(ledger(map).dismissed.E1, "2026-09-16");
+    await sync(map, [moved()], { now: 1000 + 40 * 60 * 1000 });
+    assert.equal(ledger(map).dismissed.E1, "2026-09-18");
+    assert.equal(map.get(day("2026-09-18")), undefined);
+});
+
+test("run: a device with nothing remembered finds a line whose ID stepped past a task's", async () => {
+    const id = lid("E1");
+    const map = vault({ [day("2026-09-16")]: note(`- [ ] A task that happens to end in it ^${id}`) });
+    await sync(map, [event()]);
+    const stepped = cs.lineId("E1", 1);
+    assert.match(map.get(day("2026-09-16")), new RegExp(`\\tPlanning \\^${stepped}$`, "m"));
+    sync.device.app.saveLocalStorage("plainday-calendar-cache", null);
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal((map.get(day("2026-09-16")).match(/\tPlanning/g) ?? []).length, 1);
+});
+
+test("run: a line found by its ID, with nothing remembered, keeps its end time and mark", async () => {
+    const map = vault({ [day("2026-09-16")]: note(`- [<] 4:00pm\tPlanning ^${lid("E1")}`, "\t- 5:00pm") });
+    keys.add("E1");
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 5:00pm"));
+});
+
+test("run: two copies each with something of yours are reported once, not on every run", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    edit(map, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n- [<] 4:00pm\tPlanning ^E1\n\t- 4:00pm - 4:20pm"));
+    assert.equal(await sync(map, [event()]), "Calendar sync: 1 left for you");
+    assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
 });

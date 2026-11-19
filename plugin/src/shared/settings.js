@@ -94,6 +94,8 @@ export default class Settings {
     // Where this vault keeps its key for the names of its secrets (app.saveLocalStorage: this vault's,
     // on this device)
     static VAULT_KEY = "plainday-calendar-key";
+    // Whether this device syncs calendars (syncHere), in this vault's local storage on this device
+    static SYNC_HERE = "plainday-calendar-sync-here";
     // The system's folders in a new vault (OBS-283), which are the folders the system always used, so a
     // vault from before changes nothing. TimeReport keeps a copy for where Plainday isn't loaded (the
     // Raycast timer, the private tests), which settings.test.mjs holds to this one.
@@ -560,6 +562,22 @@ export default class Settings {
         return key;
     }
 
+    /**
+     * Whether this device is the one that syncs calendars (OBS-275): one device writes events into the
+     * daily notes, and Sync brings them to the others. Kept in this vault's local storage on this device,
+     * so a copy of the settings never carries it. Off until it's turned on, or until a calendar is added
+     * here to an empty list.
+     * @returns {boolean}
+     */
+    syncHere() {
+        return app.loadLocalStorage?.(Settings.SYNC_HERE) === true;
+    }
+
+    /** @param {boolean} on */
+    setSyncHere(on) {
+        app.saveLocalStorage?.(Settings.SYNC_HERE, on ? true : null);
+    }
+
     // What names a calendar's link in this device's secret storage: this vault's, by its ID
     secretId(id) {
         return `${Settings.SECRET_PREFIX}${this.vaultKey()}-${id}`;
@@ -667,6 +685,7 @@ export default class Settings {
      * @returns {Promise<Calendar>}
      */
     async addCalendar({ name, account = "", address = "", link }) {
+        const first = !this.data.calendars.list.length;
         const id = this.newId();
         this.storeLink(id, link);
         /** @type {Calendar} */
@@ -679,6 +698,8 @@ export default class Settings {
             this.forgetLink(id);
             throw e;
         }
+        // The device you add your first calendar on is the one that syncs them (OBS-275)
+        if (first) this.setSyncHere(true);
         return calendar;
     }
 

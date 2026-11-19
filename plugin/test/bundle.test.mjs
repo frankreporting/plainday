@@ -400,7 +400,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
+            ["group", "Calendars", ["Add calendar", "Sync range", "Sync calendars on this device", "Calendar list"]],
             ["group", "Other", ["Error log note"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
@@ -870,12 +870,13 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Calendars", [
                 ["row", "Add calendar", undefined],
                 ["row", "Sync range", "How far ahead to write events into daily notes."],
+                ["row", "Sync calendars on this device", "Turn this on for one device only. It writes the events into your daily notes, and Sync brings them to your other devices."],
                 ["page", "Calendar list", undefined],
             ]],
             ["Other", [["row", "Error log note", undefined]]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
-        const page = defs[6].items[2];
+        const page = defs[6].items[3];
         assert.deepEqual([page.displayValue, page.visible()], ["3 calendars", true]);
         assert.deepEqual(page.items.map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
@@ -883,7 +884,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         ], "accounts and calendars in alphabetical order, each saying when this device has no link");
         // A link the last Sync calendars found stopped working on this device says so (OBS-275)
         plugin.app.saveLocalStorage("plainday-calendar-cache", { version: 1, dead: { studio0001: true } });
-        const dead = tab.getSettingDefinitions()[6].items[2].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
+        const dead = tab.getSettingDefinitions()[6].items[3].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
         assert.equal(dead.desc, "Link stopped working on this device: Edit, then paste a new one");
         plugin.app.saveLocalStorage("plainday-calendar-cache", null);
         const item = (group, name) => groupsOf(defs).find((g) => g.heading === group).items.find((i) => i.name === name);
@@ -931,7 +932,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
 
         // With none left: no calendar list
         for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
-        assert.equal(tab.getSettingDefinitions()[6].items[2].visible(), false);
+        assert.equal(tab.getSettingDefinitions()[6].items[3].visible(), false);
     } finally {
         plugin.onunload();
     }
@@ -1141,7 +1142,7 @@ test("Edit: a name typed while a new link is checked is the one saved; repeated 
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs[6].items[2].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs[6].items[3].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");
@@ -1165,7 +1166,7 @@ test("Settings → Plainday on an Obsidian before 1.13: display() draws the Cale
         plugin.tabs[0].display();
         // display() has no pages, so the calendar list's own sections follow its row, and Other comes last
         assert.deepEqual(fake.groups.slice(-3).map((g) => [g.heading, g.rows.map((r) => r.name)]),
-            [["Calendars", ["Add calendar", "Sync range"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
+            [["Calendars", ["Add calendar", "Sync range", "Sync calendars on this device"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
         assert.equal(fake.groups.at(-2).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
     } finally {
         plugin.onunload();

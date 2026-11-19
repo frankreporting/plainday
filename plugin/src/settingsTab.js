@@ -1185,6 +1185,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     }),
                     row("Sync range", "How far ahead to write events into daily notes.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
+                    // One device writes the events (OBS-275): kept on this device only, never in a copy
+                    row("Sync calendars on this device", "Turn this on for one device only. It writes the events into your daily notes, and Sync brings them to your other devices.",
+                        (s) => s.addToggle((t) => t.setValue(settings.syncHere()).onChange((on) => settings.setSyncHere(on)))),
                     // The calendars, each account's, on a page of their own
                     {
                         ...row("Calendar list", "", () => {}),

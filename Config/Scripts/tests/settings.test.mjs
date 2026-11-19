@@ -1024,3 +1024,17 @@ test("reload and paste: a file or copy from before recurring events keeps this d
     await f.s.replaceWith(f.s.normalize({ ...JUNIPER, calendars: { range: "2 weeks", list: [] } }, billing), {}, true);
     assert.deepEqual(plain(f.s.get().calendars.recurring), mine, "a copy from before keeps them too");
 });
+
+test("syncHere (OBS-275): off until turned on, on for the device a first calendar is added on, kept on this device only", async () => {
+    const f = withPlugin({ stored: JUNIPER });
+    await f.s.load();
+    assert.equal(f.s.syncHere(), false);
+    await f.s.addCalendar({ name: "Studio", link: STUDIO_LINK });
+    assert.equal(f.s.syncHere(), true, "the device the first calendar is added on syncs");
+    f.s.setSyncHere(false);
+    await f.s.addCalendar({ name: "Home", link: HOME_LINK });
+    assert.equal(f.s.syncHere(), false, "a second calendar doesn't turn it back on");
+    f.s.setSyncHere(true);
+    assert.doesNotMatch(f.s.copyText(), /sync-here|syncHere/, "a copy never carries it");
+    assert.ok(!JSON.stringify(f.saves).includes("syncHere"), "nor the settings file");
+});
