@@ -198,15 +198,15 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.match(days, /^- \[\/\] |^- \[x\] /m, "started or done task");
     assert.match(days, /\[\[\d{4}-\d{2}-\d{2}\|🚩 \d{1,2}\/\d{1,2}\]\]/, "due date");
     assert.match(days, /^## Notes$/m, "notes section");
-    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|⋯\]\] \^[a-z0-9]{6}\n\t- \d/m, "event linking its project, then its meeting log at the end of its line, then its ID");
+    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|⋯\]\] \^e-[a-z0-9]{6}\n\t- \d/m, "event linking its project, then its meeting log at the end of its line, then its ID");
     // Every synced event line ends in its event's ID (OBS-275); a forwarded one and a log's line with no time have none
-    for (const line of days.split("\n").filter((l) => /^- \[[<x-]\] (?:All day|\d{1,2}:\d{2}[ap]m)\t/.test(l))) assert.match(line, / \^[a-z0-9]{6}$/, line);
-    assert.doesNotMatch(days, /^- \[>\] \[\[[^\n]*\^[a-z0-9]{6}$/m, "a forwarded event line has no ID");
+    for (const line of days.split("\n").filter((l) => /^- \[[<x-]\] (?:All day|\d{1,2}:\d{2}[ap]m)\t/.test(l))) assert.match(line, / \^e-[a-z0-9]{6}$/, line);
+    assert.doesNotMatch(days, /^- \[>\] \[\[[^\n]*\^e-[a-z0-9]{6}$/m, "a forwarded event line has no ID");
     assert.match(days, /^- \[<\] [^\t\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|⋯\]\]$/m, "a log's line with no time yet");
     assert.doesNotMatch(days, /\|\s*(?:🗒|🔗)/u, "the demo's note links are ⋯ and ↗, none of the old marks (OBS-208)");
     assert.match(days, /^- \[ \] [^\n]*\[\[[^\]|]+\|⭕\]\] \[\[[^\]|#]+#\^([a-z0-9]{6})\|↗\]\] \^\1$/m, "a line sent from its task note, with its ⭕ and a ↗ back to the task's line there, by its ID (OBS-208)");
     assert.doesNotMatch(days, /^- \[.\] (?:[^\t\n]*\t)?\[\[\d{4}-\d{2}-\d{2} [^\]|]+\|(?!⋯)[^\]]+\]\]/m, "no event title wrapped in its log link (OBS-57)");
-    assert.match(days, /^- \[<\] [^\n]*\|⭕\]\] \^[a-z0-9]{6}\n\t- \d{1,2}:\d{2}[ap]m - /m, "event with a ⭕ link and a time entry");
+    assert.match(days, /^- \[<\] [^\n]*\|⭕\]\] \^e-[a-z0-9]{6}\n\t- \d{1,2}:\d{2}[ap]m - /m, "event with a ⭕ link and a time entry");
     assert.ok(entries.some((e) => e.free), "🆓 entry");
     assert.ok(entries.some((e) => !e.free && e.note), "entry with a note");
     // A sub-task has no time of its own (OBS-181 rule 5): every entry sits right under its task or event
@@ -231,9 +231,9 @@ test("demo vault: every line that links a note also links its project or area, b
     const { changes, skipped, moved } = convert(vault, tr, tr, tasks);
     assert.deepEqual(changes.map((c) => `${c.path}:${c.line}: ${c.after}`), [], "the conversion (tests/demo/addProjectLinks.mjs) finds nothing left to do");
     assert.deepEqual([skipped, moved].map((l) => l.length), [0, 0]);
-    const noted = dailyNotes(vault).flatMap((n) => n.text.split("\n")).filter((l) => /^\s*- \[.\] .*\|(?:⋯|↗)\]\](?: \^[a-z0-9]{6})?$/.test(l));
+    const noted = dailyNotes(vault).flatMap((n) => n.text.split("\n")).filter((l) => /^\s*- \[.\] .*\|(?:⋯|↗)\]\](?: \^(?:e-)?[a-z0-9]{6})?$/.test(l));
     assert.ok(noted.length >= 10, "the demo has lines to show it");
-    for (const l of noted) assert.match(l, /\|(?:⭕|🗃️)\]\] \[\[[^\]]+\|(?:⋯|↗)\]\](?: \^[a-z0-9]{6})?$/, l);
+    for (const l of noted) assert.match(l, /\|(?:⭕|🗃️)\]\] \[\[[^\]]+\|(?:⋯|↗)\]\](?: \^(?:e-)?[a-z0-9]{6})?$/, l);
 });
 
 test("the conversion's check: an entry counted on one side only, or with other minutes or 🆓, is caught (OBS-90 review)", () => {

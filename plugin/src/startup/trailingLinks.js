@@ -148,9 +148,10 @@ export default class TrailingLinks {
     static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
-    // An ID of six letters or digits, the shape Obsidian's and the task IDs have: the one that's
-    // hidden and kept at the end of its line, so a typed "^3" stays plain text
-    static HIDDEN_ID = /\s\^[A-Za-z0-9]{6}\s*$/;
+    // An ID of six letters or digits, the shape Obsidian's and the task IDs have, or an event line's
+    // (`e-` and six, OBS-275): the one that's hidden and kept at the end of its line, so a typed "^3"
+    // stays plain text
+    static HIDDEN_ID = /\s\^(?:[A-Za-z0-9]{6}|e-[a-z0-9]{6})\s*$/;
 
     // ---------------------------------------------------------------- the text rules (no app)
 

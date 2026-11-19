@@ -140,6 +140,8 @@ test("blockId: strict takes only an ID of six letters or digits, the one that's 
     assert.ok(TrailingLinks.blockId("- [ ] Book it ^K3x9M2", { strict: true }), "either case");
     assert.equal(TrailingLinks.blockId("- [ ] Book it ^3", { strict: true }), null, "a typed ^3 stays text");
     assert.equal(TrailingLinks.blockId("- [ ] Book it ^Ab3-x9", { strict: true }), null, "a hand-made ID with a dash");
+    assert.ok(TrailingLinks.blockId("- [<] 9:00am\tStandup [[Kestrel Outfitters 2026|⭕]] ^e-q7m2xk", { strict: true }), "an event line's ID (OBS-275)");
+    assert.equal(TrailingLinks.blockId("- [ ] Book it ^e-q7m2", { strict: true }), null, "only with six after the e-");
     assert.ok(TrailingLinks.blockId("- [ ] Book it ^Ab3-x9"), "but any ID ends the search for the run");
     const spaced = "- [ ] Book it ^k3x9m2  ";
     assert.deepEqual(plain(TrailingLinks.blockId(spaced, { strict: true })), { from: at(spaced, " ^"), to: spaced.length - 2 }, "spaces after it aren't part of it");
