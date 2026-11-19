@@ -16,6 +16,7 @@ export default class CalendarFeed {
     //   got.events    the events, as calendar-events.json held them; got.name, the feed's own name
     //   got.failed    [{ uid, title }]: events it couldn't read, whose lines are to be left as they
     //                 are, not taken for canceled
+    //   got.outside   the keys of events the feed has that start outside the window: not canceled either
     //   feed.feed([{ calendar, events }], window)   the whole events file, for apply()
     //
     // The reading runs in a background worker (plugin/src/worker/), which says how it reads a feed.

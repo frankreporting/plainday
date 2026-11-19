@@ -128,8 +128,9 @@ function stand(state) {
         window: () => ({ start: new Date(`${TODAY}T00:00:00`), end: new Date("2026-10-16T00:00:00"), windowStart: TODAY, windowEnd: "2026-10-15" }),
         load: async (link, { calendar }) => {
             CalendarFeed.loads.push(calendar.id);
+            await state.duringLoad?.();
             const got = state.reads[calendar.id] ?? { events: [], failed: [] };
-            return got.problem ? { problem: got.problem } : { events: got.events, failed: got.failed ?? [], stats: { downloadMs: 5, readMs: 2, wallMs: 4 } };
+            return got.problem ? { problem: got.problem } : { events: got.events, failed: got.failed ?? [], outside: got.outside ?? [], stats: { downloadMs: 5, readMs: 2, wallMs: 4 } };
         },
         feed: (reads, w) => ({
             windowStart: w.windowStart, windowEnd: w.windowEnd,
@@ -358,7 +359,8 @@ test("a ⭕ link doesn't change which line is meant", () => {
 // A vault, this device's state (settings, links, reads) and its cache; `sync(map, events)` runs Sync
 // calendars with the Work calendar giving `events`. Lines carry their IDs, which `body` shows as the
 // event's key (` ^E1`), so expectations read plainly.
-let clock = 0;
+// The device's clock: a real time on the test day, an hour on for each run (a run asks it many times)
+let clock = Date.UTC(2026, 8, 15, 13);
 const keys = new Set();
 const day = (date) => `${DAYS}/${date}.md`;
 const named = (t) => t.replace(/ \^([a-z0-9]{6})$/gm, (m, id) => { const k = [...keys].find((key) => lid(key) === id); return k ? ` ^${k}` : m; });
@@ -368,8 +370,8 @@ async function sync(map, events, { device = sync.device, now } = {}) {
     for (const e of events) keys.add(e.key);
     device.state.reads.cal = { events: events.map((e) => ({ calendar: "Work", account: "Work", endsSameDay: true, ...e })), failed: [] };
     const s = load(device.app, device.state);
-    if (now !== undefined) s.now = () => now;
-    else s.now = () => (clock += 60 * 60 * 1000);
+    const at = now !== undefined ? now : (clock += 60 * 60 * 1000);
+    s.now = () => at;
     return s.run();
 }
 // A vault with one device on it; `twin(map)` is a second device on the same vault, with its own cache
@@ -1800,4 +1802,149 @@ test("run: two copies each with something of yours are reported once, not on eve
     edit(map, day("2026-09-16"), (t) => t.replace("- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm", "- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm\n- [<] 4:00pm\tPlanning ^E1\n\t- 4:00pm - 4:20pm"));
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 left for you");
     assert.equal(await sync(map, [event()]), "Calendar sync: nothing to change");
+});
+
+// ------------------------------------------------------------------ from the fourth review (OBS-275)
+
+test("run: a restored event isn't canceled again by one read without it, and copies that alternate don't flip it", async () => {
+    const map = vault();
+    await sync(map, [event({ modified: 1 })]);
+    await sync(map, []);
+    assert.equal(await sync(map, []), "Calendar sync: 1 canceled");
+    assert.equal(await sync(map, [event({ modified: 9 })]), "Calendar sync: 1 restored");
+    for (let i = 0; i < 3; i++) {
+        assert.equal(await sync(map, []), "Calendar sync: nothing to change");
+        assert.equal(await sync(map, [event({ modified: 9 })]), "Calendar sync: nothing to change");
+    }
+    assert.match(map.get(day("2026-09-16")), /- \[<\] 4:00pm\tPlanning/);
+});
+
+test("run: an event back at the same version is restored once a second read, 10 minutes on, still has it", async () => {
+    const map = vault();
+    const M = Date.UTC(2026, 8, 1);
+    await sync(map, [event({ modified: M })]);
+    await sync(map, []);
+    assert.equal(await sync(map, []), "Calendar sync: 1 canceled");
+    assert.equal(await sync(map, [event({ modified: M })], { now: Date.UTC(2026, 8, 15, 20) }), "Calendar sync: nothing to change");
+    assert.equal(await sync(map, [event({ modified: M })], { now: Date.UTC(2026, 8, 15, 20, 11) }), "Calendar sync: 1 restored");
+});
+
+test("run: a known event that moves takes no other event's canceled or just-missing line", async () => {
+    const focus = (key, date) => event({ key, id: key, title: "Focus time", date, start: `${date}T14:00:00-04:00`, end: `${date}T15:00:00-04:00` });
+    const map = vault();
+    await sync(map, [focus("F1", "2026-09-16"), focus("F2", "2026-09-17")]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\tFocus time ^F1\n\t- 3:00pm", "\tFocus time [[Kestrel|⭕]] ^F1\n\t- 2:00pm - 2:40pm"));
+    await sync(map, [focus("F2", "2026-09-17")]);
+    await sync(map, [focus("F2", "2026-09-17")]);
+    assert.match(map.get(day("2026-09-16")), /- \[-\] 2:00pm\tFocus time \[\[Kestrel\|⭕\]\]/);
+    await sync(map, [focus("F2", "2026-09-16")]);
+    const lines = body(map.get(day("2026-09-16")));
+    assert.match(lines, /- \[-\] 2:00pm\tFocus time \[\[Kestrel\|⭕\]\] \^F1\n\t- 2:00pm - 2:40pm/, "F1's canceled line, ⭕ and time entry stay F1's");
+    assert.match(lines, /- \[<\] 2:00pm\tFocus time \^F2\n\t- 3:00pm/, "F2 gets a line of its own");
+});
+
+test("run: an event-shaped line nested under a task is the task's subtask, never an event's line", async () => {
+    const nested = note("- [ ] Prepare launch", `\t- [<] 4:00pm\tPlanning ^${lid("E1")}`, "\t- [ ] Write the brief", "\t- [ ] Email Ana");
+    const map = vault({ [day("2026-09-16")]: nested });
+    keys.add("E1");
+    await sync(map, [event()]);
+    await sync(map, [moved()]);
+    assert.match(map.get(day("2026-09-16")), /- \[ \] Prepare launch\n\t- \[<\] 4:00pm\tPlanning \^[a-z0-9]{6}\n\t- \[ \] Write the brief\n\t- \[ \] Email Ana/);
+});
+
+test("run: a line you put back after the sync took it for deleted is kept current again", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    const was = map.get(day("2026-09-16"));
+    map.set(day("2026-09-16"), note());
+    await sync(map, [event()], { now: Date.UTC(2026, 8, 15, 20) });
+    await sync(map, [event()], { now: Date.UTC(2026, 8, 15, 20, 20) });
+    assert.ok(ledger(map).dismissed.E1);
+    map.set(day("2026-09-16"), was);
+    await sync(map, [event()], { now: Date.UTC(2026, 8, 15, 21) });
+    assert.equal(ledger(map).dismissed.E1, undefined);
+    assert.equal(await sync(map, [at(17)], { now: Date.UTC(2026, 8, 15, 22) }), "Calendar sync: 1 updated");
+});
+
+test("run: an event moved further ahead than the range isn't taken for canceled", async () => {
+    const map = vault();
+    await sync(map, [event()]);
+    for (const t of [Date.UTC(2026, 8, 15, 20), Date.UTC(2026, 8, 15, 21)]) {
+        sync.device.state.reads.cal = { events: [], failed: [], outside: ["E1"] };
+        const s = load(sync.device.app, sync.device.state);
+        s.now = () => t;
+        assert.equal(await s.run(), "Calendar sync: nothing to change");
+    }
+    assert.match(map.get(day("2026-09-16")), /- \[<\] 4:00pm\tPlanning/);
+});
+
+test("run: a link pasted while a sync works isn't taken for the one that stopped working", async () => {
+    const map = vault();
+    const device = sync.device;
+    device.state.reads.cal = { problem: "dead" };
+    const s = load(device.app, device.state);
+    device.state.duringLoad = () => { s.linkChanged("cal"); };
+    await s.run();
+    assert.equal(s.deadLink("cal"), false);
+    device.state.duringLoad = null;
+    await load(device.app, device.state).run();
+    assert.equal(load(device.app, device.state).deadLink("cal"), true, "a sync that reads the dead link again says so");
+    assert.equal(map.size, 0);
+});
+
+// The fourth review's randomized check: events retimed, moved, renamed, freed, deleted and put back over
+// several runs, with ⭕ links added by hand. Every event keeps one line, a ⭕ stays with its event, and a
+// third run with nothing new changes nothing.
+test("run: random runs keep one line per event, each ⭕ with its event, and settle", async () => {
+    for (const start of [1, 7, 42]) {
+        let seed = start;
+        const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+        const pick = (a) => a[Math.floor(rnd() * a.length)];
+        const DATES = ["2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18"];
+        const TITLES = ["Planning", "Standup", "Lunch"];
+        const make = (i) => {
+            const date = pick(DATES), h = 8 + Math.floor(rnd() * 4);
+            return event({ key: `K${i}`, id: `K${i}`, title: pick(TITLES), date, start: `${date}T${String(h).padStart(2, "0")}:00:00-04:00`, end: `${date}T${String(h + 1).padStart(2, "0")}:00:00-04:00`, availability: rnd() < 0.2 ? "free" : "busy" });
+        };
+        const change = (e) => {
+            const r = rnd();
+            if (r < 0.25) { const h = 8 + Math.floor(rnd() * 4); return { ...e, start: `${e.date}T${String(h).padStart(2, "0")}:30:00-04:00`, end: `${e.date}T${String(h + 1).padStart(2, "0")}:30:00-04:00` }; }
+            if (r < 0.5) { const d = pick(DATES); return { ...e, date: d, start: d + e.start.slice(10), end: d + e.end.slice(10) }; }
+            if (r < 0.6) return { ...e, title: pick(TITLES) };
+            if (r < 0.7) return { ...e, availability: e.availability === "free" ? "busy" : "free" };
+            if (r < 0.8) return null;
+            return e;
+        };
+        for (let round = 0; round < 40; round++) {
+            const map = vault();
+            let evs = Array.from({ length: 6 }, (_, i) => make(i));
+            await sync(map, evs);
+            const notes = () => [...map].filter(([k]) => k.startsWith(DAYS));
+            const tagged = new Set();
+            for (const e of evs) if (rnd() < 0.5) {
+                const id = lid(e.key);
+                for (const [k, v] of notes()) if (v.includes(` ^${id}`)) { map.set(k, v.split("\n").map((l) => (l.endsWith(` ^${id}`) ? l.replace(` ^${id}`, ` [[P${e.key}|⭕]] ^${id}`) : l)).join("\n")); tagged.add(e.key); }
+            }
+            for (let step = 0; step < 4; step++) {
+                evs = evs.map(change).filter(Boolean);
+                await sync(map, evs);
+                await sync(map, evs);
+                const all = () => notes().map(([k, v]) => `${k}\n${v}`).join("\n");
+                const before = all();
+                const third = await sync(map, evs);
+                const where = `seed ${start} round ${round} step ${step}`;
+                assert.equal(third, "Calendar sync: nothing to change", where);
+                assert.equal(all(), before, where);
+                for (const e of evs) {
+                    const id = lid(e.key);
+                    const ls = notes().flatMap(([, v]) => v.split("\n").filter((l) => l.endsWith(` ^${id}`)));
+                    assert.equal(ls.length, 1, `${where}: ${e.key}`);
+                }
+                for (const [, v] of notes()) for (const l of v.split("\n")) {
+                    const m = l.match(/\[\[P(K\d+)\|⭕\]\]/), idm = l.match(/ \^([a-z0-9]{6})$/);
+                    if (m && idm) assert.equal(idm[1], lid(m[1]), `${where}: a ⭕ on another event's line: ${l}`);
+                }
+            }
+        }
+    }
 });

@@ -6,7 +6,8 @@
 // worker that does can't freeze Obsidian. Nothing here hands control back or times itself out.
 //
 //   new CalendarReader().read(text, { calendar: { id, name, account }, window: { start, end }, owner })
-//   → { name, events, failed: [{ uid, title }], stats } or { problem: "unreadable" }
+//   → { name, events, failed: [{ uid, title }], outside: [key], stats } or { problem: "unreadable" }
+//   (`outside`: the keys of events the feed has but that start outside the window)
 //
 // `window` holds the instants (or ms) an event's start must fall between; `owner` is the address (or a
 // list of addresses) whose declined invitations are left out: your address on the calendar, from
@@ -227,12 +228,14 @@ export class CalendarReader {
 
             const owners = this.owners(owner);
             const events = [];
+            // The keys of events the feed has outside the window
+            const outside = new Set();
             for (const [uid, { master, exceptions, title }] of series) {
                 if (failed.has(uid)) continue;
                 const found = [];
                 const keys = new Set();
                 const emit = (item, startTime, endTime, recurrenceId) => {
-                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats });
+                    const event = this.event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats, outside });
                     if (!event) return;
                     // Two events with one key: an override that matched no occurrence of its own,
                     // or a series that repeats twice in a day. The sync would keep just one.
@@ -260,7 +263,7 @@ export class CalendarReader {
             stats.failed = failed.size;
             stats.events = read.length;
             stats.readMs = performance.now() - started;
-            return { name, events: this.sorted(read), failed: [...failed].map(([uid, title]) => ({ uid, title })), stats };
+            return { name, events: this.sorted(read), failed: [...failed].map(([uid, title]) => ({ uid, title })), outside: [...outside], stats };
         } catch {
             // A parse error's message quotes the feed, but there's nothing in it the user can act
             // on: the feed isn't one Plainday can read
@@ -576,9 +579,15 @@ export class CalendarReader {
 
     // One occurrence as the events file holds it, or null when it doesn't start in the window or
     // the calendar's own address declined it. `recurrenceId` is its original start, for an occurrence of a series.
-    event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats }) {
+    event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats, outside }) {
         const start = startTime.toJSDate();
-        if (start < range.start || start >= range.end) return null;
+        if (start < range.start || start >= range.end) {
+            // An event the feed still has, outside the window (moved further ahead than the sync range,
+            // say): the sync leaves its line alone rather than take it for canceled (OBS-275)
+            const id = String(item.getFirstPropertyValue("uid") ?? "").trim();
+            if (id) outside?.add(recurrenceId ? `${id}@${recurrenceId.toString().slice(0, 10)}` : id);
+            return null;
+        }
         if (this.declined(item, owners)) { stats.declined++; return null; }
         const allDay = startTime.isDate;
         const end = (endTime ?? startTime).toJSDate();

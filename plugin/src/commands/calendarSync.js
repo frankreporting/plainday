@@ -168,6 +168,8 @@ export default class CalendarSync {
         const ok = reads.filter((r) => !r.got.problem);
         if (ok.length) {
             const feed = reader.feed(ok.map(({ calendar, got }) => ({ calendar, events: got.events ?? [] })), range);
+            // Events each calendar still has, outside the range: their lines aren't taken for canceled
+            feed.outside = new Set(ok.flatMap(({ calendar, got }) => (got.outside ?? []).map((key) => `${calendar.id}|${key}`)));
             const selected = new Set(ok.map((r) => r.calendar.id));
             await this.migrate(cache);
             await this.recurringFromNote();
@@ -177,6 +179,8 @@ export default class CalendarSync {
             stats.applyMs = performance.now() - applied;
             stats.window = { start: feed.windowStart, end: feed.windowEnd };
         }
+        // A link given a new one since this run began: not the one that stopped working (linkChanged)
+        for (const [id, at] of this.changedLinks ?? []) if (at >= stats.started) delete cache.dead[id];
         this.saveCache(cache);
         stats.longestBlockMs = probe.stop();
         this.saveLast(report, stats);
@@ -219,6 +223,8 @@ export default class CalendarSync {
 
     // A calendar's link changed (Settings.storeLink): it's no longer the one that stopped working
     linkChanged(id) {
+        // A run working now loaded the cache before this; it leaves this calendar's flag off when it saves
+        (this.changedLinks ??= new Map()).set(id, Date.now());
         const cache = this.loadCache();
         if (!cache.dead[id]) return;
         delete cache.dead[id];
@@ -550,6 +556,7 @@ export default class CalendarSync {
         const read = new Set(feed.calendars.map((c) => c.id));
         // An event the reader couldn't read: its line is left as it is, never taken for canceled
         const unread = new Set((report.failedEvents ?? []).map((f) => `${f.calendarId}|${f.uid}`));
+        const outside = feed.outside ?? new Set();
 
         const events = new Map();
         for (const event of feed.events) {
@@ -595,7 +602,9 @@ export default class CalendarSync {
             if (!event) {
                 // Only call it canceled when this run could have seen it: a calendar that's off, has no
                 // link here or wasn't read, or an event the reader couldn't read, tells us nothing
-                if (!covered(entry.date) || !selected.has(entry.calendarId) || !read.has(entry.calendarId) || unread.has(`${entry.calendarId}|${entry.id}`)) {
+                if (!covered(entry.date) || !selected.has(entry.calendarId) || !read.has(entry.calendarId) || unread.has(`${entry.calendarId}|${entry.id}`)
+                    // Moved outside the range (further ahead than the range reaches): left as it is
+                    || outside.has(`${entry.calendarId}|${key}`)) {
                     add(entry.date, { kind: "verify", key, entry, lid });
                     continue;
                 }
@@ -647,11 +656,16 @@ export default class CalendarSync {
         const returning = [];
         for (const [key, entry] of Object.entries(cache.canceled)) {
             const event = events.get(key);
-            if (!event || cache.events[key]) continue;
+            if (cache.events[key]) continue;
+            // Gone again from a calendar that read fine: a return that hadn't settled is forgotten
+            if (!event) { if (read.has(entry.calendarId)) delete entry.backSince; continue; }
             events.delete(key);
-            // Back in a copy of the calendar no newer than the one it was canceled from (a provider's
-            // copies can lag, and alternate): not a return, so the [-] stays
-            if (entry.modified && this.modifiedOf(event) && this.modifiedOf(event) <= entry.modified) continue;
+            // Back in a copy of the calendar no newer than the one it was canceled from: a provider's copies
+            // can lag, and alternate, so that's a return only once a later read, MISSING_MS on, still has it
+            if (entry.modified && this.modifiedOf(event) && this.modifiedOf(event) <= entry.modified) {
+                if (!entry.backSince) entry.backSince = this.now();
+                if (this.now() - entry.backSince < CalendarSync.MISSING_MS) continue;
+            }
             returning.push({ kind: "restore", key, entry: located(entry), event, lid: entry.lid });
         }
 
@@ -660,6 +674,8 @@ export default class CalendarSync {
         for (const [key, event] of events) {
             await this.breathe();
             const lines = this.lines(event);
+            // A line you'd deleted and put back (undone, say) is the event's again
+            if (cache.dismissed[key] && index.has(lids.get(key))) delete cache.dismissed[key];
             if (cache.dismissed[key]) {
                 // Kept until the event's day passes, wherever it has moved
                 if (event.date > cache.dismissed[key]) cache.dismissed[key] = event.date;
@@ -758,7 +774,7 @@ export default class CalendarSync {
             if (!file) continue;
             const text = await (app.vault.cachedRead ?? app.vault.read).call(app.vault, file);
             for (const line of text.split("\n")) {
-                const lid = line.includes("^") && this.head(line) ? this.lidIn(line) : null;
+                const lid = line.includes("^") && this.topEvent(line) ? this.lidIn(line) : null;
                 if (!lid) continue;
                 if (!index.has(lid)) index.set(lid, []);
                 const list = index.get(lid);
@@ -808,6 +824,12 @@ export default class CalendarSync {
     modifiedOf(event) {
         const m = event?.modified;
         return typeof m === "number" && Number.isFinite(m) && m <= this.now() + 24 * 3600 * 1000 ? m : null;
+    }
+
+    // An entry without the timers of a line or an event found gone, nor of a canceled event found back
+    untimed(entry) {
+        const { goneSince: _g, missingSince: _m, backSince: _b, ...rest } = entry;
+        return rest;
     }
 
     // Now, in ms (a test sets it)
@@ -940,7 +962,7 @@ export default class CalendarSync {
             for (let i = 0; i < lines.length; i++) {
                 if (!lines[i].includes("^")) continue;
                 const lid = this.lidOf(lines[i]);
-                if (!lid || !known.has(lid) || done.has(lid) || !this.head(lines[i])) continue;
+                if (!lid || !known.has(lid) || done.has(lid) || !this.topEvent(lines[i])) continue;
                 where.set(lid, [...(where.get(lid) ?? []), i]);
             }
             return [...where].find(([, rows]) => rows.length > 1) ?? null;
@@ -1002,7 +1024,9 @@ export default class CalendarSync {
             // Its own line, by its ID; else a line from before IDs, or one whose event is gone from this
             // run, with the same start and title; else a log's line with no time and the same title
             const byId = this.findBlock(lines, { lid: op.lid });
-            const existing = byId ?? this.findBlock(lines, { lines: op.lines }, { adopt: adoptable, timeless: true });
+            // A moved event is one this device knows: it takes no line another event left (canceled, or
+            // gone this run), only one from before IDs
+            const existing = byId ?? this.findBlock(lines, { lines: op.lines }, { adopt: op.move ? null : adoptable, timeless: true });
             const had = existing ? this.lidOf(lines[existing.from]) : null;
             const taking = had && had !== op.lid ? had : null;
             // A new line takes the next of its IDs when another line of the note (a task's, or one of
@@ -1036,7 +1060,7 @@ export default class CalendarSync {
                 return { text, outcome: "adopted", lines: op.lines, written, lid, differs: true };
             }
             // A line the sync marked canceled for an event that's been made again gets its [<] back
-            const revived = /^\s*[-*+]\s+\[-\]/.test(lines[existing.from])
+            const revived = !op.move && /^\s*[-*+]\s+\[-\]/.test(lines[existing.from])
                 && (op.canceled ?? []).find(([, entry]) => this.findBlock(lines, entry)?.from === existing.from);
             // Marked canceled, by a device that isn't this one (or by you): left as it is
             const stillCanceled = !revived && /^\s*[-*+]\s+\[-\]/.test(lines[existing.from]);
@@ -1254,14 +1278,17 @@ export default class CalendarSync {
                     return;
                 }
                 report.canceled.push(where(entry.date, entry.title));
-                cache.canceled[op.key] = entry;
+                // Without the timers that led here: a restored event starts them afresh
+                cache.canceled[op.key] = this.untimed(entry);
                 delete cache.events[op.key];
                 return;
             case "restored": {
                 if (!result.quiet) report.restored.push(where(entry.date, entry.title));
-                // Without what it last read, so the next run brings the line up to date
-                const { sig: _, ...back } = entry;
-                cache.events[op.key] = { ...back, confirmed: true };
+                // Without what it last read, so the next run brings the line up to date, and with the
+                // returning event's version, which a later copy is compared with
+                const { sig: _, ...back } = this.untimed(entry);
+                const modified = this.modifiedOf(op.event) ?? back.modified;
+                cache.events[op.key] = { ...back, ...(modified ? { modified } : {}), confirmed: true };
                 delete cache.canceled[op.key];
                 return;
             }
@@ -1420,11 +1447,11 @@ export default class CalendarSync {
     // for an insert only (`timeless`), a log's line with no time and the same title.
     findBlock(lines, entry, { adopt = null, timeless = false } = {}) {
         if (entry.lid) {
-            const from = lines.findIndex((l) => l.includes(entry.lid) && this.lidIn(l) === entry.lid && this.head(l));
+            const from = lines.findIndex((l) => l.includes(entry.lid) && this.lidIn(l) === entry.lid && this.topEvent(l));
             return from === -1 ? null : this.blockAt(lines, from);
         }
         if (!Array.isArray(entry.lines)) return null;
-        const free = (l) => { const lid = this.lidIn(l); return !lid || !!adopt?.has(lid); };
+        const free = (l) => { const lid = this.lidIn(l); return /^[-*+]\s/.test(l) && (!lid || !!adopt?.has(lid)); };
         const wanted = this.head(entry.lines[0]);
         let from = lines.findIndex((l) => free(l) && this.bare(l) === entry.lines[0]);
         if (from === -1 && wanted) {
@@ -1447,6 +1474,12 @@ export default class CalendarSync {
         let to = from;
         while (to + 1 < lines.length && /^\s/.test(lines[to + 1]) && lines[to + 1].trim() !== "") to++;
         return { from, to };
+    }
+
+    // An event line where the sync writes them: at the left edge. A line in that shape nested under
+    // another is a subtask, never an event's (nesting decides what a line is)
+    topEvent(line) {
+        return /^[-*+]\s/.test(line) && !!this.head(line);
     }
 
     // Whether indented lines follow a block after a blank line: the block would end at the blank,
