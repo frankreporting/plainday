@@ -818,6 +818,63 @@ test("run: a copy on another day with different links: the event's line keeps it
     assert.match(map.get(day("2026-09-16")), /Planning \[\[Pinecone Studio\|⭕\]\] \^/);
 });
 
+// ------------------------------------------------------------------ from the seventh review (OBS-275)
+
+test("run: an afternoon event that ends after midnight keeps one end line and settles", async () => {
+    const map = vault();
+    const party = event({ title: "Launch party", start: "2026-09-16T17:00:00-04:00", end: "2026-09-17T00:00:00-04:00" });
+    await sync(map, [party]);
+    assert.equal(await sync(map, [party]), "Calendar sync: nothing to change");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tLaunch party ^E1", "\t- 12:00am"));
+});
+
+test("run: lines of yours below a blank line under an event stay with it: nothing is inserted between, and they move or merge with it", async () => {
+    const map = vault();
+    await sync(map, [at(9, { title: "Standup" })]);
+    edit(map, day("2026-09-16"), (t) => t.replace("\t- 9:30am", "\t- 9:30am\n\n\t- 9:00am - 9:20am\n\t- notes for the standup"));
+    await sync(map, [at(9, { title: "Standup" }), at(10, { key: "E2", id: "E2", title: "Client call" })]);
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 9:00am\tStandup ^E1", "\t- 9:30am", "", "\t- 9:00am - 9:20am", "\t- notes for the standup", "- [<] 10:00am\tClient call ^E2", "\t- 10:30am"));
+    // A copy with lines below a blank line merges with them
+    const copy = vault();
+    await sync(copy, [at(9, { title: "Standup" }), at(10, { key: "E2", id: "E2", title: "Client call" })]);
+    edit(copy, day("2026-09-16"), (t) => `${t.replace(/\n+$/, "")}\n- [<] 9:00am\tStandup ^E1\n\t- 9:30am\n\n\t- standup notes\n`);
+    assert.equal(await sync(copy, [at(9, { title: "Standup" }), at(10, { key: "E2", id: "E2", title: "Client call" })]), "Calendar sync: 1 doubled line merged");
+    assert.equal(body(copy.get(day("2026-09-16"))), text("- [<] 9:00am\tStandup ^E1", "\t- 9:30am", "", "\t- standup notes", "- [<] 10:00am\tClient call ^E2", "\t- 10:30am"));
+});
+
+test("🆓 anywhere on the line is kept, and an ℹ️ on a line from before IDs is the sync's", () => {
+    for (const line of ["- [<] 4:00pm\t🆓 Planning ^E1", "- [<] 4:00pm\tPlanning (🆓) ^E1", "- [<] 4:00pm\tPlanning 🆓 internal ^E1"]) {
+        assert.equal(write(note(line, "\t- 4:30pm")).text, note("- [<] 4:00pm\tPlanning 🆓 ^E1", "\t- 4:30pm"), line);
+    }
+    assert.equal(write(note("- [<] 4:00pm\tPlanning ℹ️", "\t- 4:30pm")).text, note("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"), "busy now: the old sync's ℹ️ goes");
+});
+
+test("a line from before with a block link of yours is taken over and keeps its ID; a note with a template's raw code gets events after it; a line marked [x] still sorts by time", () => {
+    const own = cs.runOps(note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^x7k2p9", "\t- 4:30pm"), [{ kind: "event", key: "E1", lid: lid("E1"), event: event(), title: "Planning", lines: cs.lines(event()) }], { cache: { lines: {} }, free: new Map(), known: new Set([lid("E1")]) });
+    assert.equal(own.text, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^x7k2p9", "\t- 4:30pm"));
+    assert.equal(own.outcomes[0].lid, "x7k2p9");
+    const raw = "<%* tR += await tp.file.include('[[Daily Note]]') %>\n";
+    assert.equal(write(raw).text, `<%* tR += await tp.file.include('[[Daily Note]]') %>\n- [<] 4:00pm\tPlanning ^E1\n\t- 4:30pm\n`);
+    keys.add("E2");
+    const sorted = write(note("- [<] 9:00am\tStandup", "- [x] 10:00am\tReview ^E2", "- [ ] A task"), at(14, { title: "Late call" }));
+    assert.equal(sorted.text, note("- [<] 9:00am\tStandup", "- [x] 10:00am\tReview ^E2", "- [<] 2:00pm\tLate call ^E1", "\t- 2:30pm", "- [ ] A task"));
+});
+
+test("copies merging into an event with no end time now keep every end line with a note, as it was", () => {
+    const copies = note("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm", "- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm: bring the signed contract");
+    assert.equal(write(copies, event({ endsSameDay: false, end: "2026-09-18T09:00:00-04:00" })).text, note("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm: bring the signed contract"));
+});
+
+test("run: a log two event lines link keeps its own times", async () => {
+    const LOG = "Projects/Studio/logs/2026-09-16 One on one.md";
+    const map = vault({ [LOG]: "---\ntags: log\ntime: \nendTime: \n---\n" });
+    const one = (d, key) => event({ key, id: key, title: "1-1", date: d, start: `${d}T10:00:00-04:00`, end: `${d}T10:30:00-04:00` });
+    await sync(map, [one("2026-09-16", "E1"), one("2026-09-23", "E2")]);
+    for (const d of ["2026-09-16", "2026-09-23"]) edit(map, day(d), (t) => t.replace("\t1-1 ^", "\t1-1 [[2026-09-16 One on one|⋯]] ^"));
+    assert.equal(await sync(map, [one("2026-09-16", "E1"), one("2026-09-23", "E2")]), "Calendar sync: nothing to change");
+    assert.equal(map.get(LOG), "---\ntags: log\ntime: \nendTime: \n---\n");
+});
+
 // ------------------------------------------------------------------ recurring series
 
 const weekly = (date, over = {}) => event({

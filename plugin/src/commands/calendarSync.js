@@ -545,8 +545,9 @@ export default class CalendarSync {
 
         // Each event's line first; then the lines it moved from, once its new line is in place, and the
         // canceled ones. `free`: whether the sync gave each event's line ℹ️; `placed`: each event's line ID
-        // where its line is in place.
-        const ctx = { cache, free: new Map(), placed: new Map(), kept: new Set() };
+        // where its line is in place; `kept`: events whose line is one you'd marked another way; `known`:
+        // the IDs that are events' (adoptable); `done`: what each event's line came to (tell).
+        const ctx = { cache, free: new Map(), placed: new Map(), kept: new Set(), known: new Set([...lids.values(), ...Object.keys(cache.lines)]), done: [] };
         const pass = async (wanted) => {
             for (const date of [...plan.keys()].sort()) {
                 const ops = plan.get(date).filter(wanted);
@@ -561,6 +562,7 @@ export default class CalendarSync {
             }
         };
         await pass((op) => op.kind === "event");
+        await this.tell(ctx.done, report);
         const waiting = new Set();
         for (const ops of plan.values()) {
             for (const op of ops) {
@@ -719,12 +721,14 @@ export default class CalendarSync {
         let found = this.blocksWith(lines, op.lid);
         let adopted = false;
         if (!found.length) {
-            const old = this.adoptable(lines, op.lines, op.day);
+            const old = this.adoptable(lines, op.lines, op.day, ctx.known ?? null);
             if (old) { found = [old]; adopted = true; }
         }
         const copies = found.map((at) => ({ at, ...this.parseBlock(lines.slice(at.from, at.to + 1)) }));
-        // A line taken over steps past an ID a task in the note already has, as a new line does
-        const lid = copies.length && !adopted ? op.lid : this.freeLid(lines, op.key, op.lid);
+        // A line taken over steps past an ID a task in the note already has, as a new line does; one with
+        // a block ID of yours keeps it, so a link to it still works
+        const own = adopted ? this.lidIn(lines[found[0].from]) : null;
+        const lid = own && /^[a-z0-9]{6}$/.test(own) ? own : copies.length && !adopted ? op.lid : this.freeLid(lines, op.key, op.lid);
         if (copies.some((c) => !c.head || !this.ours(c.head.box))) {
             // A line from before marked another way takes the ID, and stays as it is (a moved line's
             // old line is then forwarded, with everything of yours, rather than removed)
@@ -741,7 +745,7 @@ export default class CalendarSync {
         // sync wrote those too); one already on the line when its event went free stays yours.
         const free = this.splitTail(op.lines[0].slice(op.lines[0].indexOf("\t") + 1)).free;
         const had = sources.some((s) => s.head.free), given = !!ctx.cache?.lines?.[op.lid]?.free;
-        mine.free = !free && had && !given;
+        mine.free = !free && had && !given && !adopted;
         ctx.free?.set(op.key, free && (given || !had || adopted));
         const block = this.blockFor(op.lines, lid, mine, sources);
 
@@ -832,22 +836,36 @@ export default class CalendarSync {
         }
         ctx.placed.set(op.key, result.lid);
         if (result.kept) ctx.kept?.add(op.key);
-        const changed = [...(result.changed ?? [])];
+        // Said once every line is in place, when its log has its times (tell)
         const head = this.parseHead(after[found[0].from]);
-        if (this.ours(head?.box) && head.notes[0] && await this.fillLog(head.notes[0], op.lines, date)) changed.push("log times updated");
-        const said = changed.length ? `${at} (${changed.join("; ")})` : at;
-        if (outcome === "added") report.added.push(said);
-        else if (outcome === "adopted") report.adopted.push(said);
-        else if (outcome === "restored") report.restored.push(said);
-        else if (outcome === "merged") report.merged.push(result.differs ? `${said} — the copies had different links, so the first one's are kept` : said);
-        if (result.differs && outcome !== "merged") report.merged.push(`${at} — its line on another day had different links, so this one's are kept`);
-        // A line written from its line on another day is said once, where it moved from (leaveIn)
-        else if (outcome === "updated" || (outcome === "present" && changed.length)) report.updated.push(said);
+        ctx.done?.push({ date, at, op, result, log: this.ours(head?.box) ? head.notes[0] ?? null : null });
+    }
+
+    // What an event's line came to, into the report, once its log (if one line alone links it) has the
+    // line's times. A log more than one event line links (one kept across a series' meetings, say)
+    // keeps its own: which line's times it should have would be a guess.
+    async tell(done, report) {
+        const links = new Map();
+        for (const d of done) if (d.log) links.set(d.log, (links.get(d.log) ?? 0) + 1);
+        for (const { date, at, op, result, log } of done) {
+            const { outcome } = result;
+            const changed = [...(result.changed ?? [])];
+            if (log && links.get(log) === 1 && await this.fillLog(log, op.lines, date)) changed.push("log times updated");
+            const said = changed.length ? `${at} (${changed.join("; ")})` : at;
+            if (outcome === "added") report.added.push(said);
+            else if (outcome === "adopted") report.adopted.push(said);
+            else if (outcome === "restored") report.restored.push(said);
+            else if (outcome === "merged") report.merged.push(result.differs ? `${said} — the copies had different links, so the first one's are kept` : said);
+            // A line written from its line on another day is said once, where it moved from (leaveIn)
+            else if (outcome === "updated" || (outcome === "present" && changed.length)) report.updated.push(said);
+            if (result.differs && outcome !== "merged") report.merged.push(`${at} — its line on another day had different links, so this one's are kept`);
+        }
     }
 
     // `want`, or the next of `key`'s IDs, when another line of the note that isn't an event line
     // already ends in it
     freeLid(lines, key, want) {
+        if (!lines.some((l) => l.includes(want))) return want;
         const taken = new Set(lines.filter((l) => !this.head(l)).map((l) => this.lidOf(l)).filter(Boolean));
         if (!taken.has(want)) return want;
         return this.lineIds(key).find((id) => !taken.has(id)) ?? want;
@@ -872,7 +890,7 @@ export default class CalendarSync {
         const out = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            if (!line.includes("^") || !line.toLowerCase().includes(lid) || !this.topEvent(line) || this.lidIn(line) !== lid) continue;
+            if (!line.includes(lid) || !this.topEvent(line) || this.lidIn(line) !== lid) continue;
             const at = this.blockAt(lines, i);
             out.push(at);
             i = at.to;
@@ -884,29 +902,42 @@ export default class CalendarSync {
     // writes, or, when only one line could be meant, a title that starts with it and isn't another of the
     // day's events' (`day`: [{ start, title }]); else a log's line with no time and the event's title,
     // when no other event that day has it. At the left edge only: a nested line is a subtask. Not a
-    // line marked [-]: a gone event's line isn't another's to take. A line counts as having an ID when it
-    // ends in six letters and digits, so a title ending in ` ^v2` doesn't.
-    adoptable(lines, eventLines, day = []) {
-        const free = (l) => /^[-*+]\s+\[(?!-)/.test(l) && !/^[a-z0-9]{6}$/.test(this.lidIn(l) ?? "");
-        const wanted = this.head(eventLines[0]);
-        let from = lines.findIndex((l) => free(l) && l.trimEnd() === eventLines[0]);
-        if (from === -1 && wanted) {
-            const sameStart = (l) => free(l) && this.head(l)?.start === wanted.start;
-            from = lines.findIndex((l) => sameStart(l) && this.head(l).title === wanted.title);
-            if (from === -1) {
-                const others = new Set(day.filter((e) => e.start === wanted.start).map((e) => e.title));
-                const near = lines.filter((l) => sameStart(l) && this.head(l).title.startsWith(wanted.title) && !others.has(this.head(l).title));
-                if (new Set(near).size === 1) from = lines.indexOf(near[0]);
-            }
-            if (from === -1 && !day.some((e) => e.title === wanted.title)) from = lines.findIndex((l) => free(l) && this.logLine(l)?.shown === wanted.title);
+    // line marked [-]: a gone event's line isn't another's to take. A line counts as having an event's ID
+    // when it ends in six letters and digits, so a title ending in ` ^v2` doesn't; with `known` (the IDs
+    // this run gave events, and those this device has seen on event lines), only one of those counts, so
+    // a line you made a block link to (Obsidian's IDs look the same) is still taken over, keeping its ID.
+    adoptable(lines, eventLines, day = [], known = null) {
+        // The lines that could be taken over, in one pass: event lines and logs' lines with no event's ID
+        const candidates = [];
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (!/^[-*+]\s+\[(?!-)/.test(l)) continue;
+            const head = l.includes("\t") ? this.head(l) : null;
+            const log = !head && l.includes("[[") ? this.logLine(l) : null;
+            if (!head && !log) continue;
+            const id = this.lidIn(l) ?? "";
+            if (/^[a-z0-9]{6}$/.test(id) && (!known || known.has(id))) continue;
+            candidates.push({ i, l, head, log });
         }
-        return from === -1 ? null : this.blockAt(lines, from);
+        const wanted = this.head(eventLines[0]);
+        let found = candidates.find((c) => c.l.trimEnd() === eventLines[0]);
+        if (!found && wanted) {
+            const sameStart = candidates.filter((c) => c.head?.start === wanted.start);
+            found = sameStart.find((c) => c.head.title === wanted.title);
+            if (!found) {
+                const others = new Set(day.filter((e) => e.start === wanted.start).map((e) => e.title));
+                const near = sameStart.filter((c) => c.head.title.startsWith(wanted.title) && !others.has(c.head.title));
+                if (new Set(near.map((c) => c.l)).size === 1) found = near[0];
+            }
+            if (!found && !day.some((e) => e.title === wanted.title)) found = candidates.find((c) => c.log?.shown === wanted.title);
+        }
+        return found ? this.blockAt(lines, found.i) : null;
     }
 
     // An event line taken apart by who owns what (see the top): { box, start, title (as the line has it:
     // the calendar's), projects (⭕ and 🗃️ links), notes (note links, as the sync writes them), free (ℹ️),
-    // nonbillable (🆓), lid }, or null when it isn't one. Your links are found wherever on the line they
-    // are, and ℹ️ and 🆓 at the end of the title; a title wrapped in a link to its log, from before
+    // nonbillable (🆓), lid }, or null when it isn't one. Your links and 🆓 are found wherever on the line
+    // they are, and ℹ️ at the end of the title; a title wrapped in a link to its log, from before
     // OBS-57, gives that link.
     parseHead(line) {
         const lid = this.lidIn(line);
@@ -929,7 +960,9 @@ export default class CalendarSync {
             if (!notes.includes(log)) notes.unshift(log);
             title = (wrapped[2] ?? wrapped[1]).trim();
         }
-        return { box: m[1], start: m[2].toLowerCase(), title, projects, notes, free: tail.free, nonbillable: tail.nonbillable, lid };
+        // 🆓 is read anywhere outside the links, as the time report reads it (TimeReport.FREE_WORD)
+        const nonbillable = tail.nonbillable || /(?:^|[\s([])🆓\uFE0F?(?=$|[\s.,;:!?)\]])/u.test(rest);
+        return { box: m[1], start: m[2].toLowerCase(), title, projects, notes, free: tail.free, nonbillable, lid };
     }
 
     // An event line's block taken apart: { head (parseHead, or a log's line with no time), groups: the
@@ -937,7 +970,8 @@ export default class CalendarSync {
     // among the groups it was), time, note (what follows the time: `: …`), line (as it was), under
     // (lines nested under it) } or null; entries: whether time entries are under it }. The end time is
     // only under a timed line: a line one tab in that holds only a time (or, failing one, a time and a
-    // note after a colon) no earlier than the start, or in the morning after an evening start. A note of
+    // note after a colon) no earlier than the start, or a bare morning time after an afternoon start
+    // (an event that runs past midnight). A note of
     // yours that starts with a time earlier than that, or under an all-day line, is never it.
     parseBlock(block) {
         let head = this.parseHead(block[0]);
@@ -959,7 +993,7 @@ export default class CalendarSync {
         const fits = (g) => {
             const m = this.indentWidth(g[0]) === 4 && g[0].match(CalendarSync.END_LINE);
             const at = m && minutes(m[1].replace(/^\s*[-*+]\s+/, ""));
-            return at !== null && at !== false && (at >= start || (start >= 18 * 60 && at < 12 * 60)) ? m : null;
+            return at !== null && at !== false && (at >= start || (start >= 12 * 60 && at < 12 * 60 && !m[2])) ? m : null;
         };
         let endAt = start === null ? -1 : groups.findIndex((g) => { const m = fits(g); return m && !m[2]; });
         if (endAt === -1 && start !== null) endAt = groups.findIndex((g) => fits(g));
@@ -997,7 +1031,7 @@ export default class CalendarSync {
         const { rest: title, free } = this.splitTail(first.slice(tab + 1));
         const marks = [...(free || mine.free ? [CalendarSync.FREE_MARK] : []), ...(mine.nonbillable ? [CalendarSync.NONBILLABLE_MARK] : [])];
         const head = `${first.slice(0, tab)}\t${[title, ...marks, ...mine.projects, ...mine.notes].join(" ")} ^${lid}`;
-        const groups = [], seen = new Set(), notes = [];
+        const groups = [], seen = new Set(), notes = [], noted = [];
         let end = null;
         const said = (n) => n.replace(/^\s*:?\s*/, "");
         for (const s of sources) {
@@ -1008,12 +1042,12 @@ export default class CalendarSync {
             if (!s.end) continue;
             if (!end) end = { at: Math.min(s.end.at, groups.length), line: s.end.line, under: [...s.end.under] };
             else for (const l of s.end.under) if (!end.under.includes(l)) end.under.push(l);
-            if (said(s.end.note) && !notes.some((n) => said(n) === said(s.end.note))) notes.push(s.end.note);
+            if (said(s.end.note) && !notes.some((n) => said(n) === said(s.end.note))) { notes.push(s.end.note); noted.push(s.end.line); }
         }
         const under = end?.under ?? [];
         let endGroup;
         if (eventLines.length > 1) endGroup = [eventLines[1] + (notes[0] ?? ""), ...notes.slice(1).map((n) => `\t- ${said(n)}`), ...under];
-        else endGroup = [...(notes.length ? [end.line] : []), ...notes.slice(1).map((n) => `\t- ${said(n)}`), ...under];
+        else endGroup = [...noted, ...under];
         if (endGroup.length) groups.splice(end?.at ?? 0, 0, endGroup);
         return [head, ...groups.flat()];
     }
@@ -1057,7 +1091,9 @@ export default class CalendarSync {
     // Where an event line sorts: all-day events first by title, then timed ones by time, then
     // event lines with no time (a log's line, see `timeless`), which nothing can order
     rank(line) {
-        const match = this.bare(line).match(/^\s*[-*+]\s+\[[<-]\]\s+(?:(all day)|(\d{1,2}):(\d{2})\s?([ap]m))\t(.*)$/i);
+        // Most lines of a long note are neither: tell them cheaply
+        if (!line.includes("\t")) return line.includes("[<]") && this.timeless(line) ? [2, 0, ""] : null;
+        const match = this.bare(line).match(/^\s*[-*+]\s+\[[^\] ]\]\s+(?:(all day)|(\d{1,2}):(\d{2})\s?([ap]m))\t(.*)$/i);
         if (!match) return this.timeless(line) ? [2, 0, ""] : null;
         if (match[1]) return [0, 0, match[5].toLowerCase()];
         let hour = Number(match[2]) % 12;
@@ -1074,6 +1110,12 @@ export default class CalendarSync {
     }
 
     insert(lines, block) {
+        // A note just made from a template that Templater hasn't run yet holds raw code (`<%`), which
+        // becomes its properties: above it, the events would end up above them (Schedule.placeInTopList)
+        if (/^\s*<%/.test(lines.join("\n"))) {
+            const body = lines.join("\n").replace(/\s+$/, "");
+            return `${body}\n${block.join("\n")}\n`;
+        }
         const rank = this.rank(block[0]);
         const list = this.checklist(lines);
         if (!list) {
@@ -1096,6 +1138,7 @@ export default class CalendarSync {
             at = last + 1;
             i = last;
         }
+        at = this.pastDetached(lines, at);
         return [...lines.slice(0, at), ...block, ...lines.slice(at)].join("\n");
     }
 
@@ -1119,14 +1162,30 @@ export default class CalendarSync {
                 at = last + 1;
             }
         }
+        at = this.pastDetached(without, at);
         return [...without.slice(0, at), ...moved, ...without.slice(at)].join("\n");
     }
 
-    // The block a line starts: it and the indented lines under it, to the first blank line
+    // The block a line starts: it and the indented lines under it, and those below a blank line that
+    // are still indented (the time report reads them as the line's too), so they move with it
     blockAt(lines, from) {
         let to = from;
-        while (to + 1 < lines.length && /^\s/.test(lines[to + 1]) && lines[to + 1].trim() !== "") to++;
-        return { from, to };
+        for (;;) {
+            while (to + 1 < lines.length && /^\s/.test(lines[to + 1]) && lines[to + 1].trim() !== "") to++;
+            const past = this.pastDetached(lines, to + 1);
+            if (past === to + 1) return { from, to };
+            to = past - 1;
+        }
+    }
+
+    // Where an insert at `at` goes so as not to come between a block and its lines below a blank line:
+    // past blank lines followed by indented ones, and those lines
+    pastDetached(lines, at) {
+        let k = at;
+        while (k < lines.length && lines[k].trim() === "") k++;
+        if (k === at || k >= lines.length || !/^\s+\S/.test(lines[k])) return at;
+        while (k < lines.length && /^\s+\S/.test(lines[k])) k++;
+        return this.pastDetached(lines, k);
     }
 
     // An event line where the sync writes them: at the left edge. A line in that shape nested under
