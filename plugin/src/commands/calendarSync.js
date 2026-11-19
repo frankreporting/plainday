@@ -25,7 +25,9 @@ export default class CalendarSync {
     // - ℹ️ (free time, not counted): a new line gets it right after its title when the calendar says the
     //   event is free. After that, the latest change wins: when the calendar switches the event between
     //   free and busy, ℹ️ is set to match; one you add or take off in between stays.
-    // - Any other box ([x], [!], [/]): the line is yours, and its event is left alone.
+    // - The box is yours, as before Plainday: a new line gets [<], and the line is kept current whatever box
+    //   you give it. The sync marks [<] lines [-] when their event is gone, and puts back [<] on a line
+    //   it marked [-] when the event returns; a [-] you set yourself (a meeting you skipped) stays.
     // - The ID, last: `^e-` and six letters and digits worked out from the event's key (its UID, with the
     //   date it was due for one occurrence of a repeating event: lineId), so the line is found on any day
     //   with nothing kept in the vault. The `e-` sets it apart from a task's ID or a block link.
@@ -555,7 +557,7 @@ export default class CalendarSync {
 
         // Where each event line is now, by its ID: every day from today to the window's end, and any
         // other day this device remembers a line on
-        const { where, yours } = await this.lineIndex(today, feed.windowEnd ?? today, Object.values(cache.lines).map((m) => m.date));
+        const { where } = await this.lineIndex(today, feed.windowEnd ?? today, Object.values(cache.lines).map((m) => m.date));
         const lids = await this.assignLids(events, cache, where);
         const claimed = new Set(lids.values());
 
@@ -574,8 +576,6 @@ export default class CalendarSync {
         for (const [key, event] of events) {
             await this.breathe();
             const lid = lids.get(key);
-            // A line of it you've marked another way ([x], [!]): the event is yours, and left alone
-            if (yours.has(lid)) continue;
             const others = (where.get(lid) ?? []).filter((d) => d !== event.date);
             const title = this.title(event);
             const carry = others.length ? await this.carryFrom(others, lid, this.recalled(cache.lines[lid], key, title)) : null;
@@ -612,9 +612,10 @@ export default class CalendarSync {
 
         // Each event's line first; then the lines it moved from, once its new line is in place, and the
         // canceled ones. `wrote`: the sync's part of each event's line as it's written now (writeEvent),
-        // for the cache; `placed`: each event's line ID where its line is in place; `kept`: events whose
-        // line is one you'd marked another way; `done`: what each event's line came to (tell).
-        const ctx = { cache, wrote: new Map(), placed: new Map(), kept: new Set(), done: [] };
+        // for the cache; `placed`: each event's line ID where its line is in place; `canceled`: the lines
+        // this run marked [-], remembered so their [<] comes back with their event; `done`: what each
+        // event's line came to (tell).
+        const ctx = { cache, wrote: new Map(), placed: new Map(), canceled: new Set(), done: [] };
         const pass = async (wanted) => {
             for (const date of [...plan.keys()].sort()) {
                 const ops = plan.get(date).filter(wanted);
@@ -638,9 +639,6 @@ export default class CalendarSync {
                 report.skipped.push(`${op.to} ${op.title}: couldn't write its line on its new day, so the old one stays where it is`);
             }
         }
-        // An event whose line on its day is one you'd marked another way takes nothing from its old line,
-        // which is forwarded, everything of yours with it
-        for (const ops of plan.values()) for (const op of ops) if (op.kind === "leave" && ctx.kept.has(op.key)) op.expect = [];
         await pass((op) => op.kind === "cancel" || op.kind === "drop" || (op.kind === "leave" && ctx.placed.has(op.key)));
 
         // What this device remembers from here: each event line it has seen, and the lines of events gone
@@ -657,7 +655,7 @@ export default class CalendarSync {
             for (const k of ["title", "free", "end", "start"]) if (now[k] !== undefined) m[k] = now[k];
             lines[lid] = m;
         }
-        for (const [lid, dates] of where) if (!claimed.has(lid) && cache.lines[lid]) lines[lid] = { ...cache.lines[lid], date: dates[0] };
+        for (const [lid, dates] of where) if (!claimed.has(lid) && cache.lines[lid]) lines[lid] = { ...cache.lines[lid], date: dates[0], ...(ctx.canceled.has(lid) ? { canceled: true } : {}) };
         cache.lines = lines;
         return report;
     }
@@ -669,7 +667,7 @@ export default class CalendarSync {
     async lineIndex(from, to, also = []) {
         const days = new Set(also.filter((d) => typeof d === "string" && d >= from));
         for (let d = from; d <= to; d = this.addDays(d, 1)) days.add(d);
-        const where = new Map(), yours = new Set();
+        const where = new Map();
         for (const date of [...days].sort()) {
             await this.breathe();
             const file = app.vault.getFileByPath(this.dailyPath(date));
@@ -679,13 +677,12 @@ export default class CalendarSync {
                 const line = raw.replace(/\r$/, "");
                 const lid = line.includes("^") && this.topEvent(line) ? this.lidIn(line) : null;
                 if (!lid) continue;
-                if (!this.ours(line.match(/^[-*+]\s+\[(.)\]/)?.[1])) yours.add(lid);
                 if (!where.has(lid)) where.set(lid, []);
                 const list = where.get(lid);
                 if (list[list.length - 1] !== date) list.push(date);
             }
         }
-        return { where, yours };
+        return { where };
     }
 
     // YYYY-MM-DD, `n` days on
@@ -731,7 +728,7 @@ export default class CalendarSync {
             for (const at of this.blocksWith(lines, lid)) {
                 const raw = lines.slice(at.from, at.to + 1);
                 const block = this.parseBlock(raw, recall);
-                if (!block.head || !this.ours(block.head.box)) continue;
+                if (!block.head) continue;
                 const staying = this.staysBehind(lines, at, block);
                 parts.push({ ...(staying ? { head: block.head, groups: [], end: null } : block), date, raw: raw.join("\n"), staying });
             }
@@ -800,7 +797,7 @@ export default class CalendarSync {
         let found = this.blocksWith(lines, op.lid);
         let adopted = false;
         if (!found.length) {
-            const old = this.adoptable(lines, op.lines, op.day);
+            const old = this.adoptable(lines, op.lines, op.day, op.title);
             if (old) { found = [old]; adopted = true; }
         }
         // What this device remembers of the line; nothing for a line taken over, which had no ID
@@ -809,15 +806,12 @@ export default class CalendarSync {
         const copies = found.map((at) => ({ at, ...this.parseBlock(lines.slice(at.from, at.to + 1), recall) }));
         // A line taken over steps past an ID another line of the note ends in, as a new line does
         const lid = copies.length && !adopted ? op.lid : this.freeLid(lines, op.key, op.lid);
-        if (copies.some((c) => !c.head || !this.ours(c.head.box))) {
-            // A line from before marked another way takes the ID, and stays as it is (a moved line's
-            // old line is then forwarded, with everything of yours, rather than removed)
-            if (!adopted || !copies[0].head) return { lines, outcome: "left" };
-            const out = [...lines];
-            out[found[0].from] = this.withLid(out[found[0].from], lid);
-            return { lines: out, outcome: "adopted", lid, kept: true };
-        }
+        if (copies.some((c) => !c.head)) return { lines, outcome: "left" };
         const sources = [...copies, ...(op.carry?.parts ?? [])];
+        // The box stays as you set it, on the line or the one it moved from; a [-] the sync wrote goes
+        // back to [<] now its event is here, and a forwarded line's new line starts [<]
+        const had = copies[0]?.head.box ?? (op.carry?.parts ?? []).find((p) => !p.staying)?.head.box ?? "<";
+        const box = had === "-" && memory?.canceled ? "<" : had;
         const part = this.partOf(sources);
         const start = this.head(op.lines[0])?.start;
         const free = op.event ? op.event.availability === "free" : this.splitTail(op.lines[0].slice(op.lines[0].indexOf("\t") + 1)).free;
@@ -830,7 +824,7 @@ export default class CalendarSync {
             flipped = free ? "free" : "busy";
             tail = !free ? this.dropFree(tail) : this.hasFree(tail) ? tail : this.addFree(tail);
         }
-        const block = this.blockFor(op.lines, lid, { title: op.title, tail, fresh: !sources.length }, sources);
+        const block = this.blockFor(op.lines, lid, { title: op.title, tail, box, fresh: !sources.length }, sources);
         const wrote = { title: op.title, free, start, end: op.lines.length > 1 ? op.lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false };
 
         let out;
@@ -858,7 +852,7 @@ export default class CalendarSync {
         const outcome = adopted ? "adopted"
             : copies.length > 1 ? "merged"
                 : !copies.length ? (sources.length ? "moved" : "added")
-                    : copies[0].head.box === "-" ? "restored" : "updated";
+                    : copies[0].head.box === "-" && box === "<" ? "restored" : "updated";
         return { lines: out, outcome, lid, changed, differs: part.differs, wrote };
     }
 
@@ -878,7 +872,7 @@ export default class CalendarSync {
     leaveIn(lines, op) {
         let out = [...lines], outcome = "gone";
         for (;;) {
-            const at = this.blocksWith(out, op.lid).find((b) => this.ours(this.parseHead(out[b.from])?.box));
+            const at = this.blocksWith(out, op.lid)[0];
             if (!at) break;
             const raw = out.slice(at.from, at.to + 1);
             const block = this.parseBlock(raw);
@@ -899,7 +893,7 @@ export default class CalendarSync {
     dropIn(lines, op) {
         let out = [...lines], outcome = "present";
         for (const at of this.blocksWith(lines, op.lid).reverse()) {
-            if (!this.ours(this.parseHead(lines[at.from])?.box) || this.staysBehind(lines, at, this.parseBlock(lines.slice(at.from, at.to + 1)))) continue;
+            if (this.staysBehind(lines, at, this.parseBlock(lines.slice(at.from, at.to + 1)))) continue;
             out.splice(at.from, at.to - at.from + 1);
             outcome = "removed";
         }
@@ -929,7 +923,7 @@ export default class CalendarSync {
             return;
         }
         if (op.kind === "cancel") {
-            if (outcome === "canceled") report.canceled.push(at);
+            if (outcome === "canceled") { report.canceled.push(at); ctx.canceled?.add(op.lid); }
             return;
         }
         if (op.kind === "drop") {
@@ -943,11 +937,10 @@ export default class CalendarSync {
             return;
         }
         ctx.placed.set(op.key, result.lid);
-        if (result.kept) ctx.kept?.add(op.key);
         if (result.wrote) ctx.wrote?.set(op.key, result.wrote);
         // Said once every line is in place, when its log has its times (tell)
         const head = this.parseHead(after[found[0].from], [op.title]);
-        ctx.done?.push({ date, at, op, result, log: this.ours(head?.box) ? head.notes[0] ?? null : null });
+        ctx.done?.push({ date, at, op, result, log: head?.notes[0] ?? null });
     }
 
     // What an event's line came to, into the report, once its log (if one line alone links it) has the
@@ -1012,7 +1005,7 @@ export default class CalendarSync {
     // that day has it (`day`: [{ start, title }]). At the left edge only: a nested line is a subtask. Not
     // a line marked [-] (a gone event's line isn't another's to take), and not one with any ID: an
     // event's, a task's, or a block link of yours.
-    adoptable(lines, eventLines, day = []) {
+    adoptable(lines, eventLines, day = [], title = null) {
         const wanted = this.head(eventLines[0]);
         if (!wanted) return null;
         let same = null, log = null;
@@ -1022,7 +1015,10 @@ export default class CalendarSync {
             if (l.includes("\t")) {
                 if (same !== null) continue;
                 const head = this.head(l);
-                if (head && head.start === wanted.start && head.title === wanted.title) same = i;
+                // The event's title at the start, then anything of yours, as on every line (splitTitle); not a
+                // line whose title is another of that time's events'
+                const m = head && head.start === wanted.start && l.match(/\t(.*)$/);
+                if (m && this.splitTitle(this.bare(m[1]), [title ?? wanted.title]).title === (title ?? wanted.title) && !day.some((e) => e.start === head.start && e.title === head.title && head.title !== wanted.title)) same = i;
             } else if (log === null && l.includes("[[") && this.logLine(l)?.shown === wanted.title) log = i;
         }
         if (same !== null) return this.blockAt(lines, same);
@@ -1155,7 +1151,8 @@ export default class CalendarSync {
         const first = eventLines[0];
         const tab = first.indexOf("\t");
         const tail = part.tail ?? "";
-        const line = part.fresh ? `${first}${tail}` : `${first.slice(0, tab)}\t${part.title}${tail}`;
+        const box = (l) => l.replace(/^(\s*[-*+]\s+)\[<\]/, `$1[${part.box ?? "<"}]`);
+        const line = part.fresh ? `${first}${tail}` : box(`${first.slice(0, tab)}\t${part.title}${tail}`);
         const groups = [], seen = new Set(), notes = [], noted = [], under = [];
         const said = (n) => n.replace(/^\s*:?\s*/, "");
         for (const s of sources) {
@@ -1271,7 +1268,7 @@ export default class CalendarSync {
         const moved = lines.slice(block.from, block.to + 1);
         const lid = this.lidIn(moved[0]);
         const bare = lid ? this.withLid(moved[0], null).replace(new RegExp(`\\s\\^${lid}(?=\\s|$)`, "i"), "") : moved[0];
-        moved[0] = bare.replace(/^(\s*[-*+]\s+)\[[<-]\]\s+/, `$1[>] ${this.dayLink(date)} `);
+        moved[0] = bare.replace(/^(\s*[-*+]\s+)\[[^\]]\]\s+/, `$1[>] ${this.dayLink(date)} `);
         const without = [...lines.slice(0, block.from), ...lines.slice(block.to + 1)];
         const list = this.checklist(without);
         let at = list ? list.first : this.afterFrontmatter(without);

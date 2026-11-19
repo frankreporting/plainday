@@ -246,21 +246,20 @@ test("an ID with links typed after it is still the line's, and goes back to the 
     assert.equal(after, note("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]] ^E1", "\t- 4:30pm"));
 });
 
-test("a line marked with another box is left as it is", () => {
-    for (const box of ["x", "!", "/", " "]) {
-        const before = note(`- [${box}] 4:00pm\tPlanning with Quincy ^E1`, "\t- 4:30pm");
-        const { text: after, outcome } = write(before, at(17));
-        assert.equal(outcome, "left", box);
-        assert.equal(after, before, box);
+test("a line with a box of yours is kept current, its box as you set it (as before Plainday)", () => {
+    for (const box of ["x", "!", "/", "-"]) {
+        const { text: after, outcome } = write(note(`- [${box}] 4:00pm\tPlanning with Quincy ^E1`, "\t- 4:30pm"), at(17));
+        assert.equal(outcome, "updated", box);
+        assert.equal(after, note(`- [${box}] 5:00pm\tPlanning with Quincy ^E1`, "\t- 5:30pm"), box);
     }
 });
-
-test("[-] goes back to [<] when its event is in the calendar again", () => {
-    const { text: after, outcome } = write(note("- [-] 4:00pm\tPlanning ^E1", "\t- 4:00pm - 4:20pm"));
+test("a [-] the sync wrote goes back to [<] when its event is in the calendar again; one you set stays", () => {
+    const remembered = { key: "E1", date: "2026-09-16", canceled: true };
+    const { text: after, outcome } = write(note("- [-] 4:00pm\tPlanning ^E1", "\t- 4:00pm - 4:20pm"), event(), { remembered });
     assert.equal(outcome, "restored");
     assert.equal(after, note("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm", "\t- 4:00pm - 4:20pm"));
+    assert.equal(write(note("- [-] 4:00pm\tPlanning ^E1", "\t- 4:30pm")).outcome, "present", "one you set stays [-]");
 });
-
 test("ℹ️: a new line gets it when its event is free; after that the calendar's latest change wins, and yours stays in between", () => {
     const free = event({ availability: "free" });
     const was = (f) => ({ remembered: { key: "E1", date: "2026-09-16", free: f } });
@@ -354,9 +353,8 @@ test("a line from before IDs is taken over by its start and title, keeping what'
     const taken = write(note("- [<] 4:00pm\tPlanning ^E2", "\t- 4:30pm", "- [ ] Prepare", "\t- [<] 4:00pm\tPlanning", "\t\t- 4:30pm"));
     assert.equal(taken.outcome, "added");
     assert.match(taken.text, /- \[<\] 4:00pm\tPlanning \^E2\n\t- 4:30pm\n- \[<\] 4:00pm\tPlanning \^E1\n\t- 4:30pm\n- \[ \] Prepare/);
-    // Only the exact title: one that starts the same gets a line beside it, for you to delete
-    assert.equal(write(note("- [<] 4:00pm\tPlanning - Q3", "\t- 4:30pm")).text, note("- [<] 4:00pm\tPlanning - Q3", "\t- 4:30pm", "- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
-    // A line from before marked another way takes the ID and stays as it is
+    // The title, then words of yours: taken over the same way, the words kept
+    assert.equal(write(note("- [<] 4:00pm\tPlanning - Q3", "\t- 4:30pm")).text, note("- [<] 4:00pm\tPlanning - Q3 ^E1", "\t- 4:30pm"));    // A line from before marked another way takes the ID and stays as it is
     assert.equal(write(note("- [x] 4:00pm\tPlanning", "\t- 4:30pm")).text, note("- [x] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
 });
 
@@ -393,7 +391,7 @@ test("a moved line's part comes along: its ⭕, 🆓, log link, and what's under
     assert.equal(after, note("- [<] 4:00pm\tPlanning 🆓 [[Pinecone Studio|⭕]] [[2026-09-16 Planning|⋯]] ^E1", "\t- 4:30pm: bring the draft", "\t- a note"));
 });
 
-test("leaveIn: a moved line goes, or is forwarded when time entries or lines past a blank line are under it; [x] stays", () => {
+test("leaveIn: a moved line goes, or is forwarded when time entries or lines past a blank line are under it, whatever its box", () => {
     // `expect`: the line as the run read it, so one changed since stays
     const leave = (before, expect = []) => { const r = cs.runOps(unnamed(before), [{ kind: "leave", key: "E1", lid: lid("E1"), to: "2026-09-18", title: "Planning", expect: expect.map(unnamed) }]); return { text: named(r.text), outcome: r.outcomes[0].outcome }; };
     const read = text("- [<] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 4:30pm", "\t- a note");
@@ -408,8 +406,8 @@ test("leaveIn: a moved line goes, or is forwarded when time entries or lines pas
     assert.equal(fwd.text, note("- [<] 9:00am\tStandup", "- [<] 5:00pm\tDrinks", "- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:00pm - 4:20pm", "- [ ] A task"));
     const detached = leave(note("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm", "", "\t- 4:00pm - 4:45pm: billed"));
     assert.equal(detached.outcome, "forwarded");
-    const mine = note("- [x] 4:00pm\tPlanning ^E1", "\t- 4:30pm");
-    assert.equal(leave(mine).text, mine);
+    const mine = text("- [x] 4:00pm\tPlanning ^E1", "\t- 4:30pm");
+    assert.equal(leave(note(mine), [mine]).outcome, "moved", "a box of yours moves with it");
 });
 
 test("cancelIn: [<] turns [-] with what's under it kept; a line marked another way stays", () => {
@@ -561,20 +559,18 @@ test("run: ⭕ and a time entry survive a time change, and the report says to ch
     assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 5:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 5:30pm", "\t- 4:00pm - 4:30pm: 🆓"));
 });
 
-test("run: a deleted line comes back; a line marked [x] is left as it is when its event changes (2.9)", async () => {
+test("run: a deleted line comes back; a line marked [x] is kept current, and moves with its event, keeping its box (2.9)", async () => {
     const map = vault();
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), () => note());
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 added");
     assert.equal(body(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
     edit(map, day("2026-09-16"), (t) => t.replace("[<]", "[x]"));
-    const marked = map.get(day("2026-09-16"));
-    assert.equal(await sync(map, [at(17)]), "Calendar sync: nothing to change");
-    assert.equal(await sync(map, [moved()]), "Calendar sync: nothing to change", "nor moved");
-    assert.equal(map.get(day("2026-09-16")), marked);
-    assert.equal(map.has(day("2026-09-18")), false);
+    assert.equal(await sync(map, [at(17)]), "Calendar sync: 1 updated");
+    assert.equal(body(map.get(day("2026-09-16"))), text("- [x] 5:00pm\tPlanning ^E1", "\t- 5:30pm"));
+    assert.equal(await sync(map, [moved()]), "Calendar sync: 1 moved");
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [x] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
 });
-
 test("run: moved to another day, the line moves with your part and keeps its ID; with time entries it's forwarded, and the new line takes your links (2.7)", async () => {
     const map = vault();
     await sync(map, [event()]);
@@ -836,10 +832,10 @@ test("two lines the same under one event line both stay when it's rewritten; cop
 test("a line from before IDs goes to its own event: not to one whose title starts the same, not a [-] line, and a log's line only when one event has its title", () => {
     keys.add("E2");
     const before = note("- [<] 4:00pm\tPlanning review [[Pinecone Studio|⭕]]", "\t- 4:30pm", "\t- 4:00pm - 4:20pm");
-    const other = write(before, event());
-    assert.equal(other.outcome, "added");
-    assert.match(other.text, /- \[<\] 4:00pm\tPlanning review \[\[Pinecone Studio\|⭕\]\]\n/);
-    assert.equal(write(note("- [-] 4:00pm\tPlanning", "\t- 4:30pm")).outcome, "added", "a [-] line isn't taken");
+    assert.equal(write(before, event()).outcome, "adopted", "the title, then words of yours");
+    const day = [{ key: "E2", start: "4:00pm", title: "Planning review" }];
+    const shared = cs.runOps(unnamed(before), [{ kind: "event", key: "E1", lid: lid("E1"), event: event(), title: "Planning", lines: cs.lines(event()), day }], { cache: { lines: {} } });
+    assert.equal(shared.outcomes[0].outcome, "added", "not when another event at that time has that title");    assert.equal(write(note("- [-] 4:00pm\tPlanning", "\t- 4:30pm")).outcome, "added", "a [-] line isn't taken");
     const logLine = note("- [<] 1-1 [[2026-09-16 1-1|⋯]]");
     const two = cs.runOps(logLine, [{ kind: "event", key: "E1", lid: lid("E1"), event: event({ title: "1-1" }), title: "1-1", lines: cs.lines(event({ title: "1-1" })), day: [{ key: "E2", start: "10:00am", title: "1-1" }] }], { cache: { lines: {} }, free: new Map() });
     assert.equal(two.outcomes[0].outcome, "added", "two 1-1s that day: the log's line waits");
@@ -865,7 +861,7 @@ test("run: a canceled line with time entries is forwarded, [-] and all, when its
     assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning", "\t- 4:30pm", "\t- 4:00pm - 4:20pm"));
 });
 
-test("run: a numbered or mistyped time entry keeps a moved line behind, forwarded; so does a line of yours on a day where the event lands on a line you marked", async () => {
+test("run: a numbered or mistyped time entry keeps a moved line behind, forwarded; and a line moved onto its old line on the new day joins it, keeping that line's box", async () => {
     for (const entry of ["\t1. 4:00pm - 4:20pm", "\t- 4:00 - 4:20pm"]) {
         const map = vault();
         await sync(map, [event()]);
@@ -876,9 +872,9 @@ test("run: a numbered or mistyped time entry keeps a moved line behind, forwarde
     await sync(map, [event()]);
     edit(map, day("2026-09-16"), (t) => t.replace("\tPlanning ^E1\n\t- 4:30pm", "\tPlanning [[Pinecone Studio|⭕]] ^E1\n\t- 4:30pm: bring the draft"));
     map.set(day("2026-09-18"), note("- [x] 4:00pm\tPlanning", "\t- 4:30pm"));
-    assert.equal(await sync(map, [moved()]), "Calendar sync: 1 adopted, 1 forwarded");
-    assert.equal(body(map.get(day("2026-09-16"))), text("- [>] [[2026-09-18|9/18]] 4:00pm\tPlanning [[Pinecone Studio|⭕]]", "\t- 4:30pm: bring the draft"));
-    assert.equal(body(map.get(day("2026-09-18"))), text("- [x] 4:00pm\tPlanning ^E1", "\t- 4:30pm"));
+    assert.equal(await sync(map, [moved()]), "Calendar sync: 1 adopted, 1 moved");
+    assert.equal(body(map.get(day("2026-09-16"))), "");
+    assert.equal(body(map.get(day("2026-09-18"))), text("- [x] 4:00pm\tPlanning [[Pinecone Studio|⭕]] ^E1", "\t- 4:30pm: bring the draft"));
 });
 
 test("run: a copy on another day with different links: the event's line keeps its own, and the report says so", async () => {

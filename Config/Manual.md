@@ -151,7 +151,7 @@ Format: `- [<]`, the start time, **one tab character**, the title. Times are low
 - **The end line can take a note** after a colon, like a time entry: `- 1:30pm: 🆓 quick check-in, not billing it`. The sync keeps the note when the end time changes, and when the event moves to another day the note goes with it (or stays on the line when it's forwarded). A 🆓 on the event line itself travels with the event, like a ⭕.
 - **Multi-day events** appear only on their first day.
 - **ℹ️** among the links and marks at the end of an event line marks an event you're free during (Free in Google or Outlook; an iCloud event never gets it from the calendar, since iCloud's links don't say): not your time. The sync writes it on a new line when the calendar shows the event as free, and sets it to match whenever the calendar switches the event between free and busy (see *Calendar sync*). The time report never counts a free event and never checks it for overlaps.
-- **Didn't go?** Mark the event `[x]` or another box by hand: the report ignores anything but `[<]`, and the sync then leaves the line as it is. Not `[-]`: that's the sync's mark for an event gone from its calendar, and it turns back to `[<]` while the event is still there.
+- **Didn't go?** Mark the event `[-]` by hand: the report ignores anything but `[<]`, and the sync keeps the line current whatever its box.
 - A busy `[<]` event with no end line under it is listed under Problems once it has started ("has no end time under it, so it isn't counted"). One that ends when it starts counts for nothing, quietly. A timed event that ends on another day gets no end line from the sync, unless it only runs past midnight.
 
 ### Tasks and time tracking
@@ -496,7 +496,7 @@ A task sent out of a note has two lines: its source line, `[>]` in the note it w
 
 **Each event line ends in its event's ID** (`- [<] 9:30am⇥Kestrel standup [[Kestrel Outfitters 2026|⭕]] ^e-q7m2xk`): `e-` and six letters and digits worked out from the event itself, so the line is found on whatever day it is. The `e-` keeps it apart from a task's ID or a block link of yours. Obsidian shows it faintly at the end of the line, and *TrailingLinks* hides it until the cursor gets there. Leave it where it is: a link written after it is still read, and the ID goes back to the end the next time the sync writes the line. A forwarded line gives up its ID, since the event's line is on the new day.
 
-**Whose part of an event line is whose.** Plainday writes the box, the start, the title and the end time on the first line under it. Everything after the title, after that end time's colon, and on the other lines under it is yours, kept word for word (⇥ is a tab):
+**Whose part of an event line is whose.** Plainday writes the start, the title and the end time on the first line under it. Everything after the title, after that end time's colon, and on the other lines under it is yours, kept word for word (⇥ is a tab):
 
 ```
 - [<] 10:00am⇥Kestrel standup bring laptop ℹ️ 🆓 [[Kestrel Outfitters 2026|⭕]] [[2026-09-20 Kestrel standup|⋯]] ^e-q7m2xk
@@ -506,13 +506,13 @@ A task sent out of a note has two lines: its source line, `[>]` in the note it w
 
 | Part of the line | Whose | What the sync does |
 |---|---|---|
-| The box `[<]`, the start and the title | Plainday's | written from the calendar on every sync |
+| The start and the title | Plainday's | written from the calendar on every sync; a new line starts `[<]` |
 | The end time, on the first line under a timed event | Plainday's | written from the calendar on every sync; a note after its colon is yours |
 | `[-]` | Plainday's | written when the event is gone from its calendar; back to `[<]` when it returns |
 | Everything after the title: words, ⭕ and 🗃️ links, 🆓, ℹ️, the link to its log | yours | kept exactly as you wrote it, through every update and move |
 | ℹ️ (free time, not counted) | yours, and the calendar's when it changes | a new line gets it when the event is free; when the calendar switches the event between free and busy, the sync sets it to match; one you add or take off in between stays |
 | Every other line under it (time entries, notes) | yours | kept |
-| Any other box (`[x]`, `[!]`, `[/]`) | yours | the whole line is left as it is, and its event alone |
+| A box you set (`[x]`, `[-]`, `[!]`) | yours | kept as you set it; the line is kept current whatever its box. A `[-]` the sync wrote goes back to `[<]` if its event returns |
 | The ID | Plainday's | kept last |
 
 **In short:** don't edit an event's start or title, or the time on the line under it; write after the title, after that colon, or on the lines below.
@@ -947,7 +947,7 @@ Before *Sync calendars* read private links, the Mac read its calendars with a fe
 - **Event lines with no ID** are taken over on the first run when their start and title are exactly the event's, and given their IDs.
 - **Events changed or deleted since the Mac's fetcher last ran** aren't matched: one whose time or title changed gets a new line beside its old one, and one deleted keeps its line as `[<]`. Run *Sync calendars* right after the fetcher's last run to keep that window short, and delete what's left over by hand.
 - **The lines you'd deleted** come back at the first sync, since a deleted line no longer hides its event (see *Calendar sync*): mark one `[x]` instead, or decline its event.
-- **Lines you'd changed by hand** (a time or title) aren't taken over, and neither is a line with a block link of yours (`^x7k2p9`): the event gets a new line beside the old one, which you delete by hand. A line you'd marked with another box (`[x]`), with the event's start and title, takes the ID and is left as it is.
+- **Lines whose time or title you'd changed by hand** aren't taken over (words after the title are fine), and neither is a line with a block link of yours (`^x7k2p9`): the event gets a new line beside the old one, which you delete by hand. A line you'd marked with another box (`[x]`), with the event's start and title, takes the ID and keeps its box.
 - **Lines the sync had marked canceled** (`[-]`) are never taken over: an event that's back in the calendar gets a new line beside its old `[-]` one, which you delete by hand.
 - **Calendars you added before this release:** no device syncs them yet. Turn on *Sync calendars on this device* on the one that should.
 - **Recurring events' projects:** the first run on a device whose settings have none reads the `[[Project|⭕]]` links in the Calendar Sync note's `## Recurring events` once, into Plainday's settings. Editing the note changes nothing after that.
