@@ -506,6 +506,7 @@ export default class CalendarSync {
         // Each day's events by start and title, so a line from before IDs goes to the event it's for
         const onDay = new Map();
         for (const event of events.values()) {
+            await this.breathe();
             const h = this.head(this.lines(event)[0]);
             if (!onDay.has(event.date)) onDay.set(event.date, []);
             onDay.get(event.date).push({ key: event.key, start: h?.start, title: h?.title });
