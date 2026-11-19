@@ -275,7 +275,7 @@ test("toast: one notice for a run's new lines, with a View Error Logs link; none
     assert.deepEqual(plain(none.state.notices), [{ m: "No error log yet: the time report makes it, on the desktop" }]);
 });
 
-test("the calendar sync's section (OBS-275): a calendar by its name, a skipped event by its title, a held or skipped line at its daily note, each on this device; another device's lines stay", async () => {
+test("the calendar sync's section (OBS-275): a calendar by its name, a skipped event by its title, a skipped line at its daily note, each on this device; another device's lines stay", async () => {
     const h = harness({ text: "---\nid: 1\n---\n\n## Calendar sync\n\nUpdated 10/28 9:00am · 2 open\n\n- Link stopped working · Studio (on iPhone)\n- Held back changes · [[Calendar Sync]]\n" });
     const Sync = load("calendarSync.js", "CalendarSync", {
         plainday: { ErrorLog: h.log, Schedule: { dailyNotePath: (m) => `Days/${m.format("YYYY-MM-DD")}.md` } },
@@ -284,19 +284,19 @@ test("the calendar sync's section (OBS-275): a calendar by its name, a skipped e
     const report = {
         notSynced: [{ name: "Studio", problem: "dead" }, { name: "Home", problem: "unreachable" }],
         failedEvents: [{ title: "Book swap", calendar: "Home" }],
-        held: ["2026-11-20 Planning", "2026-11-20 Standup (not added)"], skipped: ["2026-11-21 Review: the line didn't land, will try again next run"],
+        skipped: ["2026-11-21 Review: the line didn't land, will try again next run"],
     };
     await new Sync().logProblems(report);
     assert.ok(h.state.text.includes([
-        "## Calendar sync", "", "Updated 10/29 9:14am · 7 open", "",
+        "## Calendar sync", "", "Updated 10/29 9:14am · 5 open", "",
         "- Link stopped working · Studio (on Mac)", "- Link stopped working · Studio (on iPhone)", "- Calendar not synced · Home (on Mac)",
-        "- Event skipped · Book swap (Home) (on Mac)", "- Held back changes (2) · [[2026-11-20]] (on Mac)", "- Skipped lines · [[2026-11-21]] (on Mac)",
+        "- Event skipped · Book swap (Home) (on Mac)", "- Skipped lines · [[2026-11-21]] (on Mac)",
     ].join("\n")), h.state.text);
     assert.doesNotMatch(h.state.text, /Calendar Sync\]\]/, "a line from before, about no device, goes");
     assert.equal(h.state.notices.length, 1);
-    assert.match(h.state.notices[0].m, /^Calendar sync: 6 new problems: Link stopped working \(Studio\), Calendar not synced \(Home\)/);
+    assert.match(h.state.notices[0].m, /^Calendar sync: 4 new problems: Link stopped working \(Studio\), Calendar not synced \(Home\)/);
     // A run with nothing to say keeps only the other device's line, with no toast
-    await new Sync().logProblems({ notSynced: [], failedEvents: [], held: [], skipped: [] });
+    await new Sync().logProblems({ notSynced: [], failedEvents: [], skipped: [] });
     assert.ok(h.state.text.includes("Updated 10/29 9:14am · 1 open\n\n- Link stopped working · Studio (on iPhone)\n"), h.state.text);
     assert.equal(h.state.notices.length, 1);
 });

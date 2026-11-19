@@ -883,7 +883,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", undefined]]],
         ], "accounts and calendars in alphabetical order, each saying when this device has no link");
         // A link the last Sync calendars found stopped working on this device says so (OBS-275)
-        plugin.app.saveLocalStorage("plainday-calendar-cache", { version: 1, dead: { studio0001: true } });
+        plugin.app.saveLocalStorage("plainday-calendar-cache", { version: 2, dead: { studio0001: true } });
         const dead = tab.getSettingDefinitions()[6].items[3].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
         assert.equal(dead.desc, "Link stopped working on this device: Edit, then paste a new one");
         plugin.app.saveLocalStorage("plainday-calendar-cache", null);
