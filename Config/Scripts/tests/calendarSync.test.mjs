@@ -467,6 +467,8 @@ test("run: canceled is marked [-] and reported; back in the calendar, it's [<] a
     assert.equal(ledger(map).events.E1, undefined);
     assert.equal(await sync(map, []), "Calendar sync: nothing to change");
 
+    // Back with no version to compare: a return once a second read, a while later, still has it
+    assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: nothing to change");
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 restored");
     assert.equal(plainBody(map.get(day("2026-09-16"))), text("- [<] 4:00pm\tPlanning", "\t- 4:00pm - 4:30pm"));
     assert.equal(await sync(map, [event({ start: "2026-09-16T17:00:00-04:00", end: "2026-09-16T17:30:00-04:00" })]), "Calendar sync: 1 updated");
@@ -479,6 +481,7 @@ test("run: a canceled line you deleted: the event, if it returns, is written afr
     await sync(map, []);
     await sync(map, []);
     edit(map, day("2026-09-16"), () => note());
+    await sync(map, [event()]);
     await sync(map, [event()]);
     assert.equal(ledger(map).canceled.E1, undefined);
     assert.equal(await sync(map, [event()]), "Calendar sync: 1 added");
@@ -767,6 +770,7 @@ test("run: a canceled line whose [-] you changed isn't reported restored, and a 
     await sync(lost, []);
     devices.get(lost).app.local.set("plainday-calendar-cache", saved);
     assert.equal(await sync(lost, []), "Calendar sync: 1 canceled");
+    await sync(lost, [event()]);
     assert.equal(await sync(lost, [event()]), "Calendar sync: 1 restored");
     assert.match(lost.get(day("2026-09-16")), /- \[<\] 4:00pm\tPlanning/);
 });

@@ -660,9 +660,11 @@ export default class CalendarSync {
             // Gone again from a calendar that read fine: a return that hadn't settled is forgotten
             if (!event) { if (read.has(entry.calendarId)) delete entry.backSince; continue; }
             events.delete(key);
-            // Back in a copy of the calendar no newer than the one it was canceled from: a provider's copies
-            // can lag, and alternate, so that's a return only once a later read, MISSING_MS on, still has it
-            if (entry.modified && this.modifiedOf(event) && this.modifiedOf(event) <= entry.modified) {
+            // Back in a copy of the calendar no newer than the one it was canceled from, or with no version
+            // to tell: a provider's copies can lag, and alternate, so that's a return only once a later read,
+            // MISSING_MS on, still has it
+            const newer = !!entry.modified && !!this.modifiedOf(event) && this.modifiedOf(event) > entry.modified;
+            if (!newer) {
                 if (!entry.backSince) entry.backSince = this.now();
                 if (this.now() - entry.backSince < CalendarSync.MISSING_MS) continue;
             }
