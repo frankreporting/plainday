@@ -315,6 +315,21 @@ test("finish: a note open in the editor gets its alias through the editor, so wh
     assert.equal(editor.getValue(), "---\naliases: 9/24/26 Thursday\n---\nTyped first");
 });
 
+test("finish: in a note just opened empty, with nothing typed yet, the cursor goes below the alias, where the next key lands", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    const file = madeBy(v, `${DAYS}/2026-10-04.md`, "");
+    v.open(`${DAYS}/2026-10-04.md`, 0, 0);
+    await finisher(v).onCreate(file);
+    assert.equal(v.app.workspace.activeLeaf.view.editor.getValue(), "---\naliases: 10/4/26 Sunday\n---\n");
+    assert.deepEqual({ ...v.placed() }, { line: 3, ch: 0 });
+    // One with text typed already keeps its cursor where the edit put it
+    const w = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    const typed = madeBy(w, `${DAYS}/2026-10-05.md`, "Typed");
+    w.open(`${DAYS}/2026-10-05.md`, 0, 5);
+    await finisher(w).onCreate(typed);
+    assert.equal(w.placed(), null);
+});
+
 test("finish: Templater's trigger is kept off an empty note a moment after it appears, unless Templater is writing it itself", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
     const { pending } = templaterOn(v);

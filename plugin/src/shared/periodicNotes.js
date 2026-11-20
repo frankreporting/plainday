@@ -189,17 +189,30 @@ export default class PeriodicNotes {
             new Notice(`${tpl.basename} holds Templater code and Templater is off, so the new ${target.kind} note was made without it.`);
         } else {
             const filled = this.fill(tplText, { ...target, name: file.basename });
-            await plainday.Schedule.rewrite(file, (text) => this.merge(text, filled));
+            await this.rewrite(file, (text) => this.merge(text, filled));
         }
     }
 
-    // Adds `alias` to the note's aliases when it isn't among them, through its editor when it's open, so
-    // what you're typing there stays where it is
+    // Adds `alias` to the note's aliases when it isn't among them
     async addAlias(file, alias) {
         if (!alias) return;
         const text = await app.vault.read(file);
         if (this.withAlias(text, alias) === text) return;
-        await plainday.Schedule.rewrite(file, (now) => this.withAlias(now, alias));
+        await this.rewrite(file, (now) => this.withAlias(now, alias));
+    }
+
+    // Writes through the note's editor when it's open (Schedule.rewrite), so what you're typing there stays
+    // where it is. A cursor at the very start of a note that had no properties stays above properties put
+    // there (CodeMirror keeps a cursor before what's inserted at it), so it goes below them, where you'd
+    // type: in a note just opened empty, that's where the next keystroke lands.
+    async rewrite(file, fn) {
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
+        const editor = view?.editor, cursor = editor?.getCursor();
+        const bare = editor && cursor.line === 0 && cursor.ch === 0 && !getFrontMatterInfo(editor.getValue()).exists;
+        await plainday.Schedule.rewrite(file, fn);
+        if (!bare) return;
+        const info = getFrontMatterInfo(editor.getValue());
+        if (info.exists) editor.setCursor(editor.offsetToPos(info.contentStart));
     }
 
     // `text` with `alias` among its aliases: properties of its own at the top when it has none, a line of
