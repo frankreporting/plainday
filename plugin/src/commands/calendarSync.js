@@ -161,7 +161,7 @@ export default class CalendarSync {
         // With no calendars, nothing goes over the network
         if (!calendars.length) return "No calendars to sync yet: add one in Settings → Plainday → Calendars";
         // One device writes the events, and Sync brings them to the others (OBS-275; several, OBS-161)
-        if (!settings.syncHere()) return "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars on this device, and keep it off on your other devices.";
+        if (!settings.syncHere()) return "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars using this device, and keep it off on your other devices.";
         const linked = calendars.filter((c) => c.on).map((calendar) => ({ calendar, link: settings.link(calendar.id) })).filter((c) => c.link);
         if (!linked.length) return "No calendar is switched on with a link on this device: see Settings → Plainday → Calendars";
         working();

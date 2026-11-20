@@ -68,6 +68,7 @@ class FakeEl {
     createDiv(o, cb) { return this.createEl("div", o, cb); }
     createSpan(o, cb) { return this.createEl("span", o, cb); }
     appendText(t) { this.text += t; }
+    prepend(e) { this.children = [e, ...this.children.filter((c) => c !== e)]; }
     setText(t) { this.text = t; }
     addClass(c) { this.classes.add(c); }
     hasClass(c) { return this.classes.has(c); }
@@ -102,6 +103,13 @@ class FakeButton {
     onClick(fn) { this.buttonEl.addEventListener("click", fn); return this; }
     setDisabled(d) { this.buttonEl.disabled = d; return this; }
 }
+// An icon button beside a field (the link's eye): its icon and tooltip, and a click
+class FakeExtraButton {
+    constructor(el) { this.extraSettingsEl = el.createEl("extra"); }
+    setIcon(i) { this.icon = i; return this; }
+    setTooltip(t) { this.tooltip = t; return this; }
+    onClick(fn) { this.extraSettingsEl.addEventListener("click", fn); return this; }
+}
 // As Obsidian's: setValue runs the change callback when the value changes
 class FakeToggle {
     constructor(el) { this.toggleEl = el.createEl("toggle"); }
@@ -135,6 +143,7 @@ class FakeSetting {
     addText(cb) { return this.add(FakeText, cb); }
     addTextArea(cb) { return this.add(FakeText, cb); }
     addButton(cb) { return this.add(FakeButton, cb); }
+    addExtraButton(cb) { return this.add(FakeExtraButton, cb); }
     addToggle(cb) { return this.add(FakeToggle, cb); }
     addDropdown(cb) { return this.add(FakeDropdown, cb); }
     button(text) { return this.components.find((c) => c instanceof FakeButton && c.buttonEl.text === text); }
@@ -195,7 +204,7 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const req = (id) => {
         if (id === "obsidian") {
             return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal: FakeModal, Setting, SettingGroup: FakeGroup,
-                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13 };
+                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13, setIcon: (el, name) => { el.icon = name; } };
         }
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
@@ -400,7 +409,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Calendars", ["Add calendar", "Sync range", "Sync calendars on this device", "Calendar list"]],
+            ["group", "Calendars", ["Add calendar", "Sync range", "Sync calendars using this device", "Calendar list"]],
             ["group", "Other", ["Error log note"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
@@ -870,7 +879,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Calendars", [
                 ["row", "Add calendar", undefined],
                 ["row", "Sync range", "How far ahead to write events into daily notes."],
-                ["row", "Sync calendars on this device", "Turn this on for one device only. It writes the events into your daily notes, and Sync brings them to your other devices."],
+                ["row", "Sync calendars using this device", "This setting is per-device. Only one device can be used to sync calendars."],
                 ["page", "Calendar list", undefined],
             ]],
             ["Other", [["row", "Error log note", undefined]]],
@@ -979,6 +988,13 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.ok(link.inputEl.hasClass("plainday-masked"), "masked by its style");
         assert.notEqual(link.inputEl.type, "password", "not a password, so no password manager offers to keep it");
         assert.equal(link.inputEl.attrs["data-1p-ignore"], "true");
+        // The eye shows the link to check it, and hides it again (Brian, 11/20)
+        const eye = dialog.settings().find((s) => s.name === "Private link").components.find((c) => c.extraSettingsEl);
+        assert.deepEqual([eye.icon, eye.tooltip], ["eye", "Show link"]);
+        eye.extraSettingsEl.fire("click");
+        assert.deepEqual([link.inputEl.hasClass("plainday-masked"), eye.icon, eye.tooltip], [false, "eye-off", "Hide link"]);
+        eye.extraSettingsEl.fire("click");
+        assert.deepEqual([link.inputEl.hasClass("plainday-masked"), eye.icon, eye.tooltip], [true, "eye", "Show link"]);
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(fake.focused, link.inputEl, "the cursor in the link field");
         // "Where to find it", in the link color, opens the help: the note on links first, then each
@@ -1166,8 +1182,12 @@ test("Settings → Plainday on an Obsidian before 1.13: display() draws the Cale
         plugin.tabs[0].display();
         // display() has no pages, so the calendar list's own sections follow its row, and Other comes last
         assert.deepEqual(fake.groups.slice(-3).map((g) => [g.heading, g.rows.map((r) => r.name)]),
-            [["Calendars", ["Add calendar", "Sync range", "Sync calendars on this device"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
+            [["Calendars", ["Add calendar", "Sync range", "Sync calendars using this device"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
         assert.equal(fake.groups.at(-2).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
+        // Sync calendars using this device: the "not synced" icon, then its description (Brian, 11/19)
+        const here = fake.groups.at(-3).rows[2].descEl;
+        assert.deepEqual([here.children[0].hasClass("plainday-not-synced"), here.children[0].icon, here.text],
+            [true, "refresh-cw-off", "This setting is per-device. Only one device can be used to sync calendars."]);
     } finally {
         plugin.onunload();
     }

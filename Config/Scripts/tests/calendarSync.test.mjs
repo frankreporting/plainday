@@ -1066,7 +1066,7 @@ test("run: on a device that isn't the one that syncs, Sync calendars says so, wr
     d.state.syncHere = false;
     const feed = stand(d.state).CalendarFeed;
     d.state.reads.cal = { events: [event()], failed: [] };
-    assert.equal(await load(d.app, d.state, { CalendarFeed: feed }).run(), "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars on this device, and keep it off on your other devices.");
+    assert.equal(await load(d.app, d.state, { CalendarFeed: feed }).run(), "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars using this device, and keep it off on your other devices.");
     assert.deepEqual(feed.loads, []);
     assert.equal(map.size, 0);
 });
