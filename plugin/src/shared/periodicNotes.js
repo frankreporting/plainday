@@ -168,6 +168,8 @@ export default class PeriodicNotes {
         if (file.path !== target.path) {
             if (!empty || app.vault.getFileByPath(target.path)) return "left";
             if (target.folder && !app.vault.getFolderByPath(target.folder)) await app.vault.createFolder(target.folder);
+            // Templater's trigger looks at the note by the path it's at when it looks, so the new one is held too
+            this.hold(target.path);
             await app.fileManager.renameFile(file, target.path);
         }
         if (empty) await this.applyTemplate(file, target);
@@ -299,11 +301,6 @@ export default class PeriodicNotes {
             this.holds.delete(path);
             pending.delete(path);
         }, PeriodicNotes.HOLD_MS));
-    }
-
-    // Whether Templater is still writing `path`, apart from Plainday's own hold on it
-    templaterBusy(path) {
-        return !!this.pending()?.has(path) && !this.holds.has(path);
     }
 
     // Templater's set of notes it's still writing, or null when Templater is off or has changed

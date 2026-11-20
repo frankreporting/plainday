@@ -10,15 +10,21 @@ export default class FinishPeriodicNotes {
     // - A note made just now: its creation time is within MADE_WITHIN_MS. A note Sync brings keeps the
     //   creation time it had on the other device, and a restored or copied-in note keeps its own, so they're
     //   left alone.
-    // - Templater's trigger for new notes would run Get Template on an empty one 300 ms after it appears, so
-    //   it's kept off every empty one, arrived or made here, that Templater isn't writing itself (a note
-    //   Navigator makes through Templater is). Get Template never sees a periodic note.
-    // - Done means SETTLE_MS have passed, past the trigger's look, and Templater isn't writing it, up to
-    //   GIVE_UP_MS. Templater combines what it writes with the note as it is then, so the alias stays.
+    // - Templater's trigger for new notes would run Get Template on an empty one 300 ms after it appears.
+    //   Get Template has no route for a periodic note, so its catch-all would give it `id` and `tags`: the
+    //   trigger is kept off every empty one, one that arrived included, unless Templater is writing it itself.
+    // - It's finished as soon as nothing else will write to it (Brian, 2026-11-20: the alias shouldn't
+    //   hesitate). HOLD_AFTER_MS after it appears, whatever made it has written what it writes in one go, and
+    //   Templater has started on it if it's making it from a template (Navigator's calendar with Templater
+    //   code does, through create_new_note_from_template). Then:
+    //   - Templater writing it: once it says it's done ("templater:new-note-from-template"), up to GIVE_UP_MS,
+    //     since a template can ask questions. Templater writes the whole note, so anything sooner would go.
+    //   - It holds Templater code: once Templater's trigger has run it ("templater:overwrite-file"), up to
+    //     TRIGGER_WAIT_MS; with the trigger off, the code stays and the note is left as it is.
+    //   - Otherwise at once, with the trigger kept off it, which would only read and write it again.
     static MADE_WITHIN_MS = 5000;
     static HOLD_AFTER_MS = 50;
-    static SETTLE_MS = 800;
-    static POLL_MS = 100;
+    static TRIGGER_WAIT_MS = 1000;
     static GIVE_UP_MS = 10000;
 
     async invoke() {
@@ -42,31 +48,50 @@ export default class FinishPeriodicNotes {
         } catch (e) {
             return null;
         }
-        // Get Template has no route for a periodic note, so its catch-all would give an empty one `id` and
-        // `tags`: Templater's trigger is kept off every empty one, one that arrived through Sync too
+        if (Math.abs(now - (file.stat?.ctime ?? 0)) <= FinishPeriodicNotes.MADE_WITHIN_MS) return this.later(file);
+        // One that arrived isn't finished, but an empty one is kept from Templater's trigger all the same
         if (file.stat?.size === 0) {
             setTimeout(() => {
                 if (!notes.pending()?.has(file.path)) notes.hold(file.path);
             }, FinishPeriodicNotes.HOLD_AFTER_MS);
         }
-        if (Math.abs(now - (file.stat?.ctime ?? 0)) > FinishPeriodicNotes.MADE_WITHIN_MS) return null;
-        return this.later(file);
+        return null;
     }
 
     async later(file) {
         const notes = plainday.PeriodicNotes;
-        const started = Date.now();
-        await FinishPeriodicNotes.sleep(FinishPeriodicNotes.SETTLE_MS);
-        while (notes.templaterBusy(file.path) && Date.now() - started < FinishPeriodicNotes.GIVE_UP_MS) {
-            await FinishPeriodicNotes.sleep(FinishPeriodicNotes.POLL_MS);
-        }
-        if (!plainday.plugin) return null;
+        await FinishPeriodicNotes.sleep(FinishPeriodicNotes.HOLD_AFTER_MS);
+        if (!plainday.plugin || !app.vault.getFileByPath(file.path)) return null;
         try {
+            if (notes.pending()?.has(file.path)) {
+                await this.templaterDone(file, "templater:new-note-from-template", FinishPeriodicNotes.GIVE_UP_MS);
+            } else if ((await app.vault.read(file)).includes("<%")) {
+                await this.templaterDone(file, "templater:overwrite-file", FinishPeriodicNotes.TRIGGER_WAIT_MS);
+            } else {
+                notes.hold(file.path);
+            }
+            if (!plainday.plugin) return null;
             return await notes.finish(file);
         } catch (e) {
             console.error(`FinishPeriodicNotes: couldn't finish ${file.path}`, e);
             return null;
         }
+    }
+
+    // Resolves when Templater says it has written `file` (its workspace event `name`), or after `ms`
+    templaterDone(file, name, ms) {
+        return new Promise((resolve) => {
+            let ref = null;
+            const done = () => {
+                clearTimeout(timer);
+                if (ref) app.workspace.offref(ref);
+                resolve();
+            };
+            const timer = setTimeout(done, ms);
+            ref = app.workspace.on(name, (e) => {
+                if (e?.file === file || e?.file?.path === file.path) done();
+            });
+        });
     }
 
     static sleep(ms) {
