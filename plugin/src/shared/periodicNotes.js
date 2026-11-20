@@ -151,9 +151,9 @@ export default class PeriodicNotes {
     }
 
     // A periodic note made some other way, once whatever made it is done (FinishPeriodicNotes). One made
-    // outside its folder with nothing but properties in it is moved into its folder, unless a note of that
-    // name is there already; one with nothing but properties gets that kind of note's template; then its
-    // alias, when it lacks it. Nothing already in the note changes. A note still holding Templater code
+    // outside its folder with nothing in it is moved into its folder, unless a note of that name is there
+    // already; one with nothing in it gets that kind of note's template (one with properties had its
+    // template run by whatever made it); then its alias, when it lacks it. Nothing already in the note changes. A note still holding Templater code
     // (Templater's trigger is off) is left as it is, and so is one renamed since to a name that isn't a
     // periodic note's. Returns what happened: "finished", "left" or null.
     async finish(file) {
@@ -164,7 +164,8 @@ export default class PeriodicNotes {
         const target = this.where(period.unit, period.date, rules);
         const text = await app.vault.read(file);
         if (text.includes("<%")) return "left";
-        const empty = this.bodyOf(text) === "";
+        // Nothing in it at all: whatever made it wrote no template (a note with properties had one run already)
+        const empty = text.trim() === "";
         if (file.path !== target.path) {
             if (!empty || app.vault.getFileByPath(target.path)) return "left";
             if (target.folder && !app.vault.getFolderByPath(target.folder)) await app.vault.createFolder(target.folder);
@@ -256,11 +257,6 @@ export default class PeriodicNotes {
         if (!info.exists) return { props: null, body: text };
         const props = this.read(info.frontmatter);
         return props ? { props, body: text.slice(info.contentStart) } : { props: null, body: text };
-    }
-
-    // The text below a note's properties, trimmed; the whole note when its properties don't read
-    bodyOf(text) {
-        return this.parts(text).body.trim();
     }
 
     read(yaml) {

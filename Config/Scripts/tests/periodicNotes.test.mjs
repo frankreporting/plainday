@@ -248,6 +248,14 @@ test("finish: a note Navigator makes in its folder from a template with content 
     assert.equal(v.notes()[`${DAYS}/2026-09-27.md`], "---\naliases: 9/27/26 Sunday\n---\n## Notes\n");
 });
 
+test("finish: one its maker filled with properties only (a template of only properties) isn't templated again", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Daily Note.md`]: "---\ncreated: {{date}}\n---\n" } });
+    templaterOn(v, () => { throw new Error("the template ran again"); });
+    const file = madeBy(v, `${DAYS}/2026-10-06.md`, "---\ncreated: 2026-10-06\n---\n");
+    assert.equal(await finisher(v).onCreate(file), "finished");
+    assert.equal(v.notes()[`${DAYS}/2026-10-06.md`], "---\naliases: 10/6/26 Tuesday\ncreated: 2026-10-06\n---\n");
+});
+
 test("finish: one with properties of its own gets the alias added to them", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
     const file = madeBy(v, `${DAYS}/2026-09-28.md`, "---\ntags: [daily]\n---\nMonday\n");

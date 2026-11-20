@@ -3327,10 +3327,11 @@ test("review (OBS-193): subtreeEnd keeps a comment indented under the task; task
 
 // ------------------------------------------------------------------ weeks from the week settings (OBS-91)
 
-// A TimeReport where the week settings name weeks `week` (DatePrompt.weekRules), on moment's stand-in
-const withWeeks = (week) => {
-    const plainday = { DatePrompt: { weekRules: () => ({ locale: "en", weekStart: 0, format: { week, month: "YYYY-MM", year: "YYYY" } }) } };
-    const T = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({ plainday, moment: momentOn("2026-09-16") }));
+// A TimeReport where the week settings name weeks `week` and months `month` (DatePrompt.weekRules), on moment's
+// stand-in, or on `moment`
+const withWeeks = (week, month = "YYYY-MM", moment = momentOn("2026-09-16")) => {
+    const plainday = { DatePrompt: { weekRules: () => ({ locale: "en", weekStart: 0, format: { week, month, year: "YYYY" } }) } };
+    const T = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({ plainday, moment }));
     return new T();
 };
 
@@ -3353,4 +3354,28 @@ test("weeks without the week settings (the Raycast timer, the private tests) are
     assert.equal(tr.calendar().plain, true);
     assert.equal(tr.weekKey("2026-09-13"), "2026w38");
     assert.equal(withWeeks("gggg[w]ww").calendar().plain, true, "the demo's settings take the same path");
+});
+
+test("a yearly note's month columns link the monthly notes by their names, and count the year's entries", () => {
+    const named = withWeeks("gggg[w]ww", "MMMM YYYY");
+    const model = named.build([note("2026-09-14", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am")], INDEX);
+    const year = named.render(model, { kind: "period", unit: "year", key: "2026" }, "s");
+    assert.ok(year.includes("[[September 2026\\|Sep]]"), year);
+    assert.ok(!year.includes("[[2026-09"), "not by a name the vault doesn't use");
+    assert.match(year.split("\n").find((l) => l.includes("**All**")), /1\.00/);
+});
+
+test("a week named by a pattern that doesn't read back still has its range (YYYY-[W]WW on 2027-01-01)", () => {
+    // moment's stand-in for the one pattern: the calendar year and the ISO week, which reads back as another week
+    const base = momentOn("2026-09-16");
+    const moment = (text, format, ...rest) => {
+        if (format === "YYYY-[W]WW") return { isValid: () => true, format: (f) => (f === "YYYY-[W]WW" ? text : "2027-12-27"), clone() { return this; }, startOf() { return this; } };
+        const m = base(text, format, ...rest);
+        return { ...m, locale: () => ({ ...m, format: (f) => (f === "YYYY-[W]WW" ? "2027-W53" : m.format(f)) }) };
+    };
+    Object.assign(moment, base);
+    const odd = withWeeks("YYYY-[W]WW", "YYYY-MM", moment);
+    const name = odd.periodOf("2027-01-01", "week");
+    assert.equal(name, "2027-W53");
+    assert.deepEqual(plain(odd.weekRange(name)), ["2026-12-28", "2027-01-03"], "the week it was made from, Monday first");
 });

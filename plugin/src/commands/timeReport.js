@@ -1673,6 +1673,10 @@ export default class TimeReport {
         if (name === undefined) {
             name = moment(date, "YYYY-MM-DD", true).locale(cal.rules.locale).format(cal.names[unit]);
             cal.memo.set(k, name);
+            // Its first day, for a pattern that doesn't read back as the period it was made from
+            // (YYYY-[W]WW names 2027-01-01 2027-W53)
+            const first = unit === "week" ? this.weekFirst(date) : unit === "month" ? `${date.slice(0, 7)}-01` : `${date.slice(0, 4)}-01-01`;
+            if (!cal.memo.get(`start|${unit}|${name}`)) cal.memo.set(`start|${unit}|${name}`, first);
         }
         return name;
     }
@@ -2180,14 +2184,20 @@ export default class TimeReport {
     // earned something by the hour (a row with no rate would be blank), and the flat fees earned that
     // year, each in the month it was earned; no Unassigned, and [] without them.
     yearTable(model, entries, scope, link, measure) {
-        const fees = measure === "earned" ? this.earnedFees(model).filter((f) => f.date.slice(0, 4) === scope.key) : [];
+        // The year by its first day, and each month by its date (YYYY-MM) and its note's name, as the week
+        // settings name them (OBS-91)
+        const year = (this.periodStartOf("year", scope.key) ?? `${scope.key}`).slice(0, 4);
+        const fees = measure === "earned" ? this.earnedFees(model).filter((f) => f.date.slice(0, 4) === year) : [];
         const earning = (p) => this.earnedFor(this.totals(entries.filter((e) => e.project === p), model.money), p, model) > 0;
         const projects = measure === "hours" ? this.ownProjects(entries)
             : [...new Set([...this.ownProjects(entries).filter(earning), ...fees.map((f) => f.project)])].sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
         if (measure === "earned" && !projects.length) return [];
         if (measure === "hours" && !entries.length) return ["No time entries."];
-        const months = TimeReport.SHORT_MONTHS.map((name, i) => ({ name, key: `${scope.key}-${String(i + 1).padStart(2, "0")}` }));
-        const head = ["Project", ...months.map(({ name, key }) => `[[${scope.linkTarget ? scope.linkTarget("month", key) : key}\\|${name}]]`), scope.key];
+        const months = TimeReport.SHORT_MONTHS.map((name, i) => {
+            const key = `${year}-${String(i + 1).padStart(2, "0")}`;
+            return { name, key, note: this.periodOf(`${key}-01`, "month") };
+        });
+        const head = ["Project", ...months.map(({ name, note }) => `[[${scope.linkTarget ? scope.linkTarget("month", note) : note}\\|${name}]]`), scope.key];
         const out = [];
         // A month's (or with `month` null, the year's) Earned: what the entries earned by the hour, and
         // the flat fees earned then (the project's, or every one on the All row)
