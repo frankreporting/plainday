@@ -30,7 +30,7 @@
 // A calendar's link is typed into a masked field, checked by downloading it once (CalendarFeed.check),
 // and kept only in this device's secret storage (Settings.storeLink): never in a setting, a notice or
 // the console. A link that fails isn't added, and the dialog says why, by the problem alone.
-import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, Setting, SettingGroup, TextAreaComponent, TextComponent } from "obsidian";
+import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, setIcon, Setting, SettingGroup, TextAreaComponent, TextComponent } from "obsidian";
 import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
@@ -317,6 +317,17 @@ class CalendarModal extends Modal {
         linkInput.inputEl.spellcheck = false;
         linkInput.inputEl.setAttribute("autocapitalize", "off");
         for (const ignore of ["data-1p-ignore", "data-lpignore", "data-bwignore"]) linkInput.inputEl.setAttribute(ignore, "true");
+        // The eye shows the link as it was typed or pasted, to check it, and hides it again (Brian, 11/20)
+        let shown = false;
+        linkSetting.addExtraButton((b) => {
+            const draw = () => b.setIcon(shown ? "eye-off" : "eye").setTooltip(shown ? "Hide link" : "Show link");
+            draw();
+            b.onClick(() => {
+                shown = !shown;
+                linkInput.inputEl.toggleClass("plainday-masked", !shown);
+                draw();
+            });
+        });
         // What the check says: "Checking the link…", or why the link fails
         const said = this.contentEl.createEl("p", { cls: "setting-item-description plainday-calendar-said" });
 
@@ -1118,6 +1129,17 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     }
 
     /**
+     * What a calendar's row says about its link on this device: nothing when it works, else what to do
+     * (the last Sync calendars that read it says whether it stopped working, OBS-275)
+     * @param {string} id
+     * @returns {string}
+     */
+    linkSaid(id) {
+        if (!plainday.Settings.link(id)) return "Add link on this device: Edit, then paste it";
+        return plainday.CalendarSync?.deadLink?.(id) ? "Link stopped working on this device: Edit, then paste a new one" : "";
+    }
+
+    /**
      * Calendars (OBS-282): Add calendar, whose description links to How to get the links, the sync range,
      * and the calendar list, a page of each account's calendars, accounts and calendars in alphabetical
      * order
@@ -1174,6 +1196,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     }),
                     row("Sync range", "How far ahead to write events into daily notes.",
                         (s) => s.addDropdown((d) => d.addOptions(ranges).setValue(settings.get().calendars.range).onChange((v) => { void store(s, "calendars", { range: v }); }))),
+                    // One device writes the events (OBS-275): kept on this device only, never in a copy, which
+                    // the icon before its description says (Brian, 11/19). Obsidian draws the description first.
+                    row("Sync calendars using this device", "This setting is per-device. Only one device can be used to sync calendars.", (s) => {
+                        const icon = s.descEl.createSpan({ cls: "plainday-not-synced", attr: { "aria-label": "Not synced between devices" } });
+                        setIcon(icon, "refresh-cw-off");
+                        s.descEl.prepend(icon);
+                        s.addToggle((t) => t.setValue(settings.syncHere()).onChange((on) => settings.setSyncHere(on)));
+                    }),
                     // The calendars, each account's, on a page of their own
                     {
                         ...row("Calendar list", "", () => {}),
@@ -1182,7 +1212,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                             displayValue: `${list.length} calendar${list.length === 1 ? "" : "s"}`,
                             sections: [...accounts].sort((a, b) => a[0].localeCompare(b[0])).map(([account, calendars]) => ({
                                 heading: account,
-                                rows: named(calendars).map(([c, name]) => row(name, settings.link(c.id) ? "" : "Add link on this device: Edit, then paste it", (s) => {
+                                rows: named(calendars).map(([c, name]) => row(name, this.linkSaid(c.id), (s) => {
                                     // Put back when its save fails, which runs onChange again: that turn is ignored
                                     let reverting = false;
                                     s.addToggle((t) => t.setValue(c.on).setTooltip("Sync this calendar").onChange((on) => {

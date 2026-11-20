@@ -1,907 +1,1186 @@
-import { moment, Notice } from "obsidian";
+import { moment, Notice, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class CalendarSync {
-    // Writes calendar events into daily notes and keeps them current: an event that moves, is
-    // renamed or is canceled updates the line the sync wrote (a canceled one is marked [-], kept as
-    // a record of what was planned, and back to [<] if the event returns). A line you've touched is yours,
-    // except for what you add on top of an event: ⭕ project links, a 🆓 and a link to its log after
-    // the title, a note after the end time's colon, and time entries under it. Those are kept
-    // through every update, and a moved event takes its links and 🆓 (not its time entries or the
-    // end line's note) to the new day. A ⭕ put after a recurring
-    // series in the Calendar Sync note reaches every upcoming line of that series. An event the
-    // calendar shows as free gets ℹ️ after its title (see FREE_MARK), kept current the same way.
-    // A log's line with no time, `- [<] Title [[log|⋯]]` (the Log template writes one when the
-    // calendar has no event for a meeting, OBS-10), is adopted when the event arrives and given
-    // its time, and a log a line links takes the line's times whenever the sync writes the line.
-    // An event links its log at the end, `Title [[log|⋯]]`, as a task links its note (OBS-57),
-    // after its ⭕ links, so the note link ends the line (OBS-90). Lines from before put the log
-    // link ahead of the ⭕, or wrap the title in it, `[[log|Title]]`; they're still read, and
-    // written the new way whenever the sync rewrites them.
+    // Writes calendar events into daily notes and keeps them current. A convention says which part of
+    // an event line is whose, so the sync never has to guess (OBS-275, Part 2 of OBS-231's plan, 11/19):
     //
-    // Three files, all in Config:
-    // - `calendar-events.json`   every calendar and event, written by the fetcher
-    //   (`Scripts/Calendar/fetchCalendar.swift` on this Mac; a Google fetcher could replace it)
-    // - `Calendar Sync.md`       the calendars you've ticked, and the last run's report
-    // - `calendar-sync.json`     which line the sync wrote for which event
-    // The two JSON files live beside the fetcher in `Scripts/Calendar`. They're deliberately
-    // not hidden: Obsidian Sync skips dotfiles, and the phone needs the events file.
+    //   - [<] 10:00am⇥Kestrel standup bring laptop ℹ️ [[Kestrel Outfitters 2026|⭕]] [[2026-09-16 Standup|⋯]] ^e-q7m2xk
+    //   ⇥- 10:20am: a note after the end time
+    //   ⇥- 10:00am - 10:20am
     //
-    // Run it after fetching: `obsidian command id=plainday:sync-calendars`.
-    // Notes are changed through app.vault.process, which reads and writes in one step, so this
-    // can't overwrite what you're typing. The ledger only ever claims a line the sync has seen
-    // in the note afterwards, so a write that doesn't land is retried rather than forgotten.
-    static EVENTS = "Config/Scripts/Calendar/calendar-events.json";
-    static LEDGER = "Config/Scripts/Calendar/calendar-sync.json";
-    static NOTE = "Config/Calendar Sync.md";
-    static MAX_REMOVALS = 10;   // a run that would remove or forward more than this does neither
-    static FETCHER = "Config/Scripts/Calendar/fetchCalendar.swift";
-    static FETCH_TIMEOUT_MS = 120000;
+    // - Plainday's: the box ([<], or [-] for an event gone from its calendar), the start, the title, and
+    //   the time on the first line under a timed event (its end). Written from the event on every run, so
+    //   a title or time edited by hand is written back, and a [-] goes back to [<] when its event returns.
+    // - Yours: everything after the title on the line (⭕ and 🗃️ links, 🆓, ℹ️, the log link, words), kept
+    //   exactly as you wrote it; anything after the end time's colon; every other line under it.
+    // - Where the title ends: this device remembers the title it last wrote on each line, and the event's
+    //   title as the calendar has it now does as well. A line that starts with neither (you edited the
+    //   title) has your part start at your first link or mark (⭕, 🗃️, 🆓, ℹ️, a note link), and the words
+    //   before it are written back as the title.
+    // - The end time is the first line under a timed event, a time alone or with a note after a colon;
+    //   when the first line is anything else, the end time is written above it. An all-day event, or one
+    //   ending on a later day (an evening that runs past midnight aside), has none, so nothing under it
+    //   is the sync's.
+    // - ℹ️ (free time, not counted): a new line gets it right after its title when the calendar says the
+    //   event is free. After that, the latest change wins: when the calendar switches the event between
+    //   free and busy, ℹ️ is set to match; one you add or take off in between stays.
+    // - The box is yours, as before Plainday: a new line gets [<], and the line is kept current whatever box
+    //   you give it. The sync marks [<] lines [-] when their event is gone, and puts back [<] on a line
+    //   it marked [-] when the event returns; a [-] you set yourself (a meeting you skipped) stays.
+    // - The ID, last: `^e-` and six letters and digits worked out from the event's key (its UID, with the
+    //   date it was due for one occurrence of a repeating event: lineId), so the line is found on any day
+    //   with nothing kept in the vault. The `e-` sets it apart from a task's ID or a block link.
+    //
+    // So a line you delete comes back on the next run, and a line moves with its event to another day,
+    // taking what's yours along; one with time entries under it is forwarded instead, and the new day's
+    // line takes your part of it. An event moved further ahead than the range has its line removed,
+    // unless time entries are under it, and comes back when its day is in range. A series split by a
+    // "this and future events" edit keeps its lines (handOver). A new line for a recurring series gets
+    // the series' ⭕ from the settings. Lines from before IDs (no ID at all) are taken over by their exact start and title, and a
+    // log's line with no time (`- [<] Title [[log|⋯]]`, the Log template writes one when the calendar has
+    // no event for a meeting, OBS-10) by its title. A log a line links takes the line's times (fillLog).
+    //
+    // Where the events come from: every calendar in Settings → Plainday → Calendars that's on and has a
+    // link on this device, downloaded and read by CalendarFeed. A calendar that's off, has no link here,
+    // or couldn't be read this time is left out of the run, its lines left as they are. Nothing here
+    // ever holds a calendar's link: a problem is said by the calendar's name. One device syncs (Settings'
+    // syncHere, Brian 11/18); several devices is OBS-161.
+    //
+    // What this device remembers, in its own local storage (CACHE, this vault's, never synced): for each
+    // line it has seen, its event and calendar (so a line whose event is gone from a calendar that read
+    // fine can be marked [-]), the start, title and end time it last wrote there, whether the calendar
+    // called the event free at the last sync, when it first read the event, and when a missing event was
+    // first missed (a provider's copy of a calendar can lag behind an event just added, so one first read
+    // less than MISSING_MS before is marked only when a second read, MISSING_MS on, still lacks it); and
+    // recurring series' titles. A device without it marks nothing canceled that it
+    // hasn't seen read before, and leaves every ℹ️ as it is.
+    //
+    // Notes are changed through app.vault.process, which reads and writes in one step, so this can't
+    // overwrite what you're typing.
+    static CACHE = "plainday-calendar-cache";
+    static CACHE_VERSION = 3;
+    // The last run's report on this device, for the window OBS-276 adds
+    static LAST = "plainday-calendar-last";
+    // The Calendar Sync note from before OBS-275, read once for recurring events' projects, and left
+    static OLD_NOTE = "Config/Calendar Sync.md";
+    // How long an event must stay gone, across two reads, before its line is marked canceled
+    static MISSING_MS = 10 * 60 * 1000;
+    // How long the sync works before it hands the app a turn (breathe)
+    static SLICE_MS = 5;
+    // An event line's ID: ID_PREFIX, then ID_LENGTH letters and digits, from ID_SPACE (36^6) values. One
+    // that another line of the note already uses steps to the next of ID_STEPS.
+    static ID_PREFIX = "e-";
+    static ID_LENGTH = 6;
+    static ID_SPACE = 2176782336;
+    static ID_STEPS = 3;
+    // A block ID ending a line, as Obsidian reads one (TaskIds.ID_AT_END)
+    static ID_AT_END = /\s\^([A-Za-z0-9-]+)\s*$/;
+    // What the summary and the error log say for a calendar that couldn't be synced, by the reader's
+    // problem (CalendarFeed.load)
+    static PROBLEMS = {
+        dead: "its link stopped working on this device",
+        unreachable: "couldn't be reached",
+        unreadable: "isn't a calendar any more, or came cut off",
+        slow: "took too long to read",
+    };
     // A time entry under an event, the way TimeReport reads one: `4:00pm - 4:30pm: note`, or a
     // running `4:00pm - `
     static ENTRY = /^\d{1,2}:\d{2}\s?[ap]m\s*[-–—]\s*(?:\d{1,2}:\d{2}\s?[ap]m)?\s*(?::.*)?$/i;
+    // A line under an event that may be time worked, as TimeReport reads one or lists it under Problems
+    // (a bullet or a number, then a time and a dash, a mistyped one included): a moved line with one
+    // stays behind, forwarded, on the day the time was worked
+    static ENTRYISH = /^\s+(?:[-*+]|\d+[.)])\s+\d{1,2}(?::\d{2})?\s?(?:[ap]m)?\s*[-–—]/i;
     // A ⭕ project link, or a 🗃️ area link (OBS-36), at the end of a title (a phone may add or
     // drop the U+FE0F)
-    static PROJECT_LINK = /\s*\[\[[^[\]|]+\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u;
+    static PROJECT_LINK = /\s*\[\[[^[\]|]+\|\s*(?:⭕|🗃)️?\s*\]\]$/u;
+    // Where your part of an event line starts when its title isn't one the sync knows (you edited it):
+    // your first ⭕, 🗃️ or note link (⋯, or a ↗ read alike, OBS-208), or 🆓 or ℹ️, with the space before it
+    static FIRST_MARK = /\s(?:\[\[[^[\]|]+\|\s*(?:⭕|🗃|⋯|↗)️?\s*\]\]|(?:🆓|ℹ)️?(?=\s|$))/u;
+    // Note links anywhere in your part of a line, and one ending the run of links and marks that ends it
+    static NOTE_LINKS = /\[\[[^[\]|]+\|\s*(?:⋯|↗)️?\s*\]\]/gu;
+    static RUN_END = /\s+(?:\[\[[^[\]|]+\|\s*(?:⭕|🗃|⋯|↗)️?\s*\]\]|(?:🆓|ℹ)️?)$/u;
     // A title wrapped in a link to its log, the way lines were written before OBS-57:
     // `[[2026-09-16 Planning|Planning]]`. CalNav reads titles with this too. Only a link to a
-    // log's name (its date first, LOG_NAME) is the event's log: a title wrapped in a link to
-    // anything else (a person, say) is a hand edit, which makes the line yours.
+    // log's name (its date first, LOG_NAME) is the event's log.
     static LOG_LINK = /^\[\[([^[\]|]+)(?:\|([^[\]]+))?\]\]$/;
     static LOG_NAME = /^\[\[(?:[^[\]|#]*\/)?\d{4}-\d{2}-\d{2} /;
     // A note link at the end of a line: an event's log, the way a task links its note (OBS-57).
     // ⋯ is written, and a ↗ is read alike (OBS-208); a phone may add or drop the U+FE0F after ↗. It
     // needs a space before it, so a title that is only a link keeps it.
     static NOTE_MARK = "⋯";
-    static NOTE_LINK = /\s+\[\[[^[\]|]+\|\s*(?:⋯|↗\uFE0F?)\s*\]\]$/u;
-    // ℹ️ after the title marks an event the calendar says you're free during (Show As: Free): not
-    // your time, so TimeReport never counts it or checks it for overlaps (OBS-47). The sync writes
-    // it on timed events, before any ⭕ links, and keeps it current with the calendar; an all-day
-    // event has no time to count, so it gets none. Tentative and unknown count as busy. A phone
-    // may leave out the U+FE0F. Whitespace before it, as TimeReport reads it, so a title that
-    // simply ends in the character isn't one.
+    static NOTE_LINK = /\s+\[\[[^[\]|]+\|\s*(?:⋯|↗️?)\s*\]\]$/u;
+    // ℹ️ after the title marks an event you're free during (Show As: Free): not your time, so TimeReport
+    // never counts it or checks it for overlaps (OBS-47). The sync writes it on timed events the
+    // calendar shows as free; an all-day event has no time to count, so it gets none. Tentative and
+    // unknown count as busy. A phone may leave out the U+FE0F. Whitespace before it, as TimeReport reads
+    // it, so a title that simply ends in the character isn't one.
     static FREE_MARK = "ℹ️";
     static FREE = /\s+ℹ️?$/u;
     // 🆓 after the title is yours: TimeReport reads it as "don't bill this event's time" (OBS-24).
-    // Kept through updates like a ⭕ link, and carried when the event moves. A phone may add U+FE0F.
+    // A phone may add U+FE0F.
     static NONBILLABLE_MARK = "🆓";
-    static NONBILLABLE = /\s+🆓\uFE0F?$/u;
+    static NONBILLABLE = /\s+🆓️?$/u;
     // The sync's end-time line under an event, and any note you've put after it with a colon
     // (`\t- 4:30pm: 🆓 not billing this`), which is kept when the end time changes
     static END_LINE = /^(\s*[-*+]\s+\d{1,2}:\d{2}\s?[ap]m)(\s*:.*)?$/i;
 
     async invoke() {
+        let working = null;
+        let said;
         try {
-            new Notice(await this.run());
+            said = await this.run({ working: () => { working = new Notice("Syncing calendars…", 0); } });
         } catch (e) {
             console.error("CalendarSync:", e);
-            new Notice(`Calendar sync failed: ${e.message}`);
+            said = `Calendar sync failed: ${e.message}`;
+        }
+        working?.hide();
+        new Notice(said);
+    }
+
+    // One sync at a time: a second one says so and does nothing. `working` is called once the run
+    // has calendars to download, for the notice that shows while it works.
+    async run({ working = () => {} } = {}) {
+        if (this.running) return "A calendar sync is already running";
+        this.running = true;
+        try {
+            return await this.runOnce(working);
+        } finally {
+            this.running = false;
         }
     }
 
-    async run() {
+    async runOnce(working) {
         // Until the one-time conversion has run, an event's 🗒️ log link isn't read (OBS-208): the sync
-        // would take the line for one you'd changed, or drop its ⭕ and log when the event moves. It
-        // waits, changing nothing, and the next run after the conversion picks everything up.
+        // would take it for part of the title and write the title back without it. It waits, changing
+        // nothing, and the next run after the conversion picks everything up.
         const old = await plainday.TimeReport?.oldMarksLeft?.();
         if (old) return `${old} line${old === 1 ? " in the daily notes still ends" : "s in the daily notes still end"} in a 🗒️ or 🔗 link, so the calendar sync waits for the one-time conversion: see the manual's Links at the end of a line`;
-        const fetchFailed = await this.fetchNow();
-        const feed = await this.readJson(CalendarSync.EVENTS);
-        if (!feed) return fetchFailed ? `Couldn't read your calendar: ${fetchFailed}` : "No calendar data yet — run the fetcher, then try again";
-        if (feed.error) return `The fetcher reported: ${feed.error}`;
-        if (!Array.isArray(feed.events) || !Array.isArray(feed.calendars)) return `${CalendarSync.EVENTS} isn't in the expected format`;
+        const settings = plainday.Settings;
+        const calendars = settings.get().calendars.list;
+        // With no calendars, nothing goes over the network
+        if (!calendars.length) return "No calendars to sync yet: add one in Settings → Plainday → Calendars";
+        // One device writes the events, and Sync brings them to the others (OBS-275; several, OBS-161)
+        if (!settings.syncHere()) return "This device doesn't sync calendars. To sync them here, turn on Settings → Plainday → Calendars → Sync calendars using this device, and keep it off on your other devices.";
+        const linked = calendars.filter((c) => c.on).map((calendar) => ({ calendar, link: settings.link(calendar.id) })).filter((c) => c.link);
+        if (!linked.length) return "No calendar is switched on with a link on this device: see Settings → Plainday → Calendars";
+        working();
 
-        const ledger = (await this.readJson(CalendarSync.LEDGER)) ?? { version: 1, updatedAt: null, events: {}, dismissed: {} };
-        ledger.canceled ??= {};   // added later: a ledger from before has none
-        // On a device that only receives the file through Sync, older data must not undo newer work
-        // Compared as instants: the stamps carry local offsets, and across a DST change or a
-        // change of timezone, string order calls newer data older
-        if (ledger.updatedAt && feed.generatedAt && Date.parse(feed.generatedAt) <= Date.parse(ledger.updatedAt)) {
-            return "Calendar data is older than the last sync — nothing to do";
+        const stats = { started: Date.now(), calendars: [] };
+        const probe = this.blockProbe();
+        const reader = plainday.CalendarFeed;
+        const range = reader.window(this.rangeDays());
+        const downloaded = performance.now();
+        // Downloaded and read at the same time; a link goes only to the reader, never into a result
+        const reads = await Promise.all(linked.map(async ({ calendar, link }) => ({ calendar, got: await reader.load(link, { calendar, window: range }) })));
+        stats.fetchMs = performance.now() - downloaded;
+        const cache = this.loadCache();
+        const report = this.newReport();
+        report.calendarCount = reads.length;
+        for (const { calendar, got } of reads) {
+            stats.calendars.push({ name: calendar.name, problem: got.problem ?? null, events: got.events?.length ?? 0, ...this.timings(got.stats) });
+            if (got.problem) {
+                report.notSynced.push({ id: calendar.id, name: calendar.name || "A calendar", problem: got.problem });
+                if (got.problem === "dead") cache.dead[calendar.id] = true;
+                continue;
+            }
+            delete cache.dead[calendar.id];
+            for (const f of got.failed ?? []) report.failedEvents.push({ calendarId: calendar.id, calendar: calendar.name || "a calendar", uid: String(f.uid ?? ""), title: String(f.title ?? "") || "(untitled)" });
         }
-        if (!feed.calendars.length) return "The fetch returned no calendars — nothing to do";
-
-        const selected = await this.selection(feed.calendars);
-        if (selected === null) return `Tick the calendars to sync in ${CalendarSync.NOTE}`;
-        if (!selected.size) return `No calendars ticked in ${CalendarSync.NOTE}`;
-        const series = await this.seriesProjects(feed, selected, ledger);
-
-        const report = await this.apply(feed, ledger, selected, series);
-        ledger.version = 1;
-        ledger.updatedAt = feed.generatedAt ?? new Date().toISOString();
-        await this.writeJson(CalendarSync.LEDGER, ledger);
-        await this.writeReport(report, feed);
+        const ok = reads.filter((r) => !r.got.problem);
+        if (ok.length) {
+            const feed = reader.feed(ok.map(({ calendar, got }) => ({ calendar, events: got.events ?? [] })), range);
+            // Events each calendar still has, outside the range: their lines aren't taken for canceled
+            feed.outside = new Set(ok.flatMap(({ calendar, got }) => (got.outside ?? []).map((key) => `${calendar.id}|${key}`)));
+            const selected = new Set(ok.map((r) => r.calendar.id));
+            await this.recurringFromNote();
+            await this.handOver(feed, selected, cache);
+            const applied = performance.now();
+            const series = await this.seriesProjects(feed, selected, cache);
+            await this.apply(feed, cache, selected, series, report);
+            stats.applyMs = performance.now() - applied;
+            stats.window = { start: feed.windowStart, end: feed.windowEnd };
+        }
+        // A link given a new one since this run began: not the one that stopped working (linkChanged)
+        for (const [id, at] of this.changedLinks ?? []) if (at >= stats.started) delete cache.dead[id];
+        this.saveCache(cache);
+        stats.longestBlockMs = probe.stop();
+        this.saveLast(report, stats);
         await this.logProblems(report);
-        const summary = this.summary(report);
-        return fetchFailed ? `${summary} — from the last fetch (${fetchFailed})` : summary;
+        return this.summary(report);
     }
 
-    // On the Mac this runs the fetcher itself, so the one command does the whole job and neither
-    // Raycast nor a shell script is needed. The phone has neither Node nor EventKit, so there the
-    // events file is whatever Sync last carried over. Returns null, or why the fetch failed.
-    async fetchNow() {
-        if (app.isMobile) return null;
-        let execFile;
-        try {
-            ({ execFile } = require("child_process"));
-        } catch (e) {
-            return "no way to run the fetcher on this device";
-        }
-        const root = app.vault.adapter.getBasePath?.() ?? app.vault.adapter.basePath;
-        if (!root) return "couldn't work out where the vault is";
-        const args = [`${root}/${CalendarSync.FETCHER}`, "--days", String(this.rangeDays()), "--out", `${root}/${CalendarSync.EVENTS}`];
-        return new Promise((resolve) => {
-            execFile("/usr/bin/swift", args, { timeout: CalendarSync.FETCH_TIMEOUT_MS }, (err, stdout, stderr) => {
-                if (!err) return resolve(null);
-                console.error("CalendarSync: the fetcher failed", err, stderr);
-                const said = String(stderr || err.message).trim().split("\n").pop() || "the fetcher failed";
-                resolve(said.slice(0, 200));
-            });
-        });
+    // The timings a read gives, rounded to tenths of a millisecond: the download, the read in the worker,
+    // and from the worker's start to its answer
+    timings(s = {}) {
+        const ms = (v) => (typeof v === "number" ? Math.round(v * 10) / 10 : null);
+        return { downloadMs: ms(s.downloadMs), readMs: ms(s.readMs), workerMs: ms(s.wallMs) };
     }
 
-    // How far ahead to sync: Settings → Plainday → Calendars → Sync range (OBS-282). The Calendar Sync
-    // note's `Sync range:` line was read into it once, and isn't read or written any more.
+    // The longest stretch the app was held up while the sync ran, for the speed budget: a timer that
+    // should fire every few milliseconds, and how late it was at worst. stop() gives that, in ms.
+    blockProbe(every = 4) {
+        let worst = 0, last = performance.now(), timer = null, stopped = false;
+        const tick = () => {
+            const now = performance.now();
+            worst = Math.max(worst, now - last - every);
+            last = now;
+            if (!stopped) timer = window.setTimeout(tick, every);
+        };
+        timer = window.setTimeout(tick, every);
+        return {
+            stop: () => {
+                stopped = true;
+                window.clearTimeout(timer);
+                tick();
+                return Math.round(Math.max(0, worst) * 10) / 10;
+            },
+        };
+    }
+
+    // How far ahead to sync: Settings → Plainday → Calendars → Sync range (OBS-282)
     rangeDays() {
         return plainday.Settings.rangeDays();
     }
 
-    // MARK: the calendars you've ticked
-
-    // Refreshes the Calendar Sync note from the fetched calendar list, keeping your ticks, and
-    // returns the ticked calendar ids. Returns null the first time, when nothing is ticked yet.
-    async selection(calendars) {
-        const file = app.vault.getFileByPath(CalendarSync.NOTE);
-        const before = file ? await app.vault.read(file) : null;
-        const ticked = this.tickedTitles(before ?? "");
-
-        const body = this.calendarSection(calendars, ticked);
-        const expected = before === null
-            ? this.newNote(body)
-            : this.replaceSection(before, "## Calendars", body);
-        let current = ticked;
-        if (expected !== before) {
-            // Re-read the ticks inside the write, so a tick you make while this runs isn't lost
-            await this.updateNote(CalendarSync.NOTE, (text) => {
-                if (text === null) return this.newNote(body);
-                current = this.tickedTitles(text);
-                return this.replaceSection(text, "## Calendars", this.calendarSection(calendars, current));
-            });
-        }
-        if (before === null) return null;
-
-        const wanted = new Set();
-        for (const calendar of calendars) {
-            if (current.has(this.calendarKey(calendar))) wanted.add(calendar.id);
-        }
-        return wanted;
+    // A calendar's link changed (Settings.storeLink): it's no longer the one that stopped working
+    linkChanged(id) {
+        // A run working now loaded the cache before this; it leaves this calendar's flag off when it saves
+        (this.changedLinks ??= new Map()).set(id, Date.now());
+        const cache = this.loadCache();
+        if (!cache.dead[id]) return;
+        delete cache.dead[id];
+        this.saveCache(cache);
     }
 
-    // "- [x] Home" under "### Personal" reads as account/title. Only the Calendars section counts.
-    tickedTitles(text) {
-        const ticked = new Set();
-        let account = null;
-        let inside = false;
-        for (const line of text.split("\n")) {
-            if (/^##\s/.test(line)) { inside = line.trim() === "## Calendars"; account = null; continue; }
-            if (!inside) continue;
-            const heading = line.match(/^###\s+(.*\S)\s*$/);
-            if (heading) { account = heading[1].trim(); continue; }
-            const box = line.match(/^\s*-\s+\[([ xX])\]\s+(.*\S)\s*$/);
-            if (box && account && box[1].toLowerCase() === "x") ticked.add(`${account}/${box[2].trim()}`);
+    // Whether a calendar's link stopped working on this device at the last sync that read it, for the
+    // settings panel
+    deadLink(id) {
+        return !!this.loadCache().dead[id];
+    }
+
+    // MARK: what this device remembers
+
+    // This device's cache (see the top): { version, lines: line ID → { key, uid, calendarId, date, title
+    // (the title the sync last wrote on the line), free (whether the calendar called the event free at
+    // the last sync that wrote it), start and end (the start and the end time it wrote, end false for
+    // none), seen (when it first read the event), goneSince (when its event was first missed) },
+    // seriesTitles: series ID → title, dead: calendar ID → true }. Anything that doesn't read starts
+    // afresh: the device is then one without the cache, which is safe.
+    loadCache() {
+        let raw;
+        try {
+            raw = app.loadLocalStorage?.(CalendarSync.CACHE) ?? null;
+            if (typeof raw === "string") raw = JSON.parse(raw);
+        } catch {
+            raw = null;
         }
-        return ticked;
-    }
-
-    // A calendar's title can carry stray spaces, and a ticked line in the note can't
-    calendarKey(calendar) {
-        return `${calendar.account.trim()}/${calendar.title.trim()}`;
-    }
-
-    calendarSection(calendars, ticked) {
-        const byAccount = new Map();
-        const push = (account, calendar) => {
-            if (!byAccount.has(account)) byAccount.set(account, []);
-            byAccount.get(account).push(calendar);
+        const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+        const r = obj(raw);
+        const fresh = r.version === CalendarSync.CACHE_VERSION;
+        const lines = {};
+        for (const [lid, m] of Object.entries(fresh ? obj(r.lines) : {})) {
+            if (m && typeof m === "object" && typeof m.key === "string" && typeof m.date === "string") lines[lid] = m;
+        }
+        return {
+            version: CalendarSync.CACHE_VERSION,
+            lines,
+            seriesTitles: fresh ? obj(r.seriesTitles) : {},
+            dead: fresh ? obj(r.dead) : {},
         };
-        for (const calendar of calendars) push(calendar.account.trim(), calendar);
-        // A calendar missing from this fetch keeps its line, so a partial fetch can't quietly
-        // undo what you've ticked
-        const present = new Set(calendars.map((c) => this.calendarKey(c)));
-        for (const key of ticked) {
-            if (present.has(key)) continue;
-            const cut = key.indexOf("/");
-            push(key.slice(0, cut), { account: key.slice(0, cut), title: key.slice(cut + 1), id: null });
-        }
-        const lines = [
-            "## Calendars",
-            "",
-            "Tick a calendar to sync it into daily notes. New calendars appear here unticked. Unticking one leaves the lines it already wrote alone.",
-            "",
-        ];
-        for (const [account, list] of [...byAccount].sort((a, b) => a[0].localeCompare(b[0]))) {
-            lines.push(`### ${account}`);
-            for (const calendar of list.sort((a, b) => a.title.localeCompare(b.title))) {
-                lines.push(`- [${ticked.has(this.calendarKey(calendar)) ? "x" : " "}] ${calendar.title.trim()}`);
-            }
-            lines.push("");
-        }
-        return lines.join("\n").trimEnd() + "\n";
     }
 
-    newNote(body) {
-        return `---\nid: ${moment().format("YYYYMMDDHHmmssSS")}\ntags: \n---\n\n${body}\n`;
+    saveCache(cache) {
+        app.saveLocalStorage?.(CalendarSync.CACHE, cache);
     }
 
-    // Replaces one "## Heading" section, keeping everything around it. A section that isn't there
-    // yet goes above the `before` heading, or at the end.
-    replaceSection(text, heading, body, before = null) {
-        const lines = text.split("\n");
-        const start = lines.findIndex((l) => l.trim() === heading);
-        const next = before === null ? -1 : lines.findIndex((l) => l.trim() === before);
-        if (start === -1 && next !== -1) return [...lines.slice(0, next), ...body.replace(/\n$/, "").split("\n"), "", ...lines.slice(next)].join("\n");
-        if (start === -1) return `${text.replace(/\s*$/, "")}\n\n${body}`;
-        let end = lines.length;
-        for (let i = start + 1; i < lines.length; i++) {
-            if (/^##\s+/.test(lines[i])) { end = i; break; }
+    // Forgets everything this device remembers (dev-vault.sh's done, OBS-61): the next run is a first one
+    forgetCache() {
+        app.saveLocalStorage?.(CalendarSync.CACHE, null);
+        app.saveLocalStorage?.(CalendarSync.LAST, null);
+    }
+
+    // The last run's report on this device, with its timings
+    saveLast(report, stats) {
+        const { failedEvents, notSynced, ...lists } = report;
+        app.saveLocalStorage?.(CalendarSync.LAST, { at: new Date().toISOString(), ...lists, notSynced, failedEvents, stats });
+    }
+
+    lastRun() {
+        try {
+            return app.loadLocalStorage?.(CalendarSync.LAST) ?? null;
+        } catch {
+            return null;
         }
-        return [...lines.slice(0, start), ...body.replace(/\n$/, "").split("\n"), "", ...lines.slice(end)].join("\n");
     }
 
     // MARK: projects for recurring series
 
-    // Refreshes the note's list of recurring series, keeping the ⭕ links you've put after them,
-    // and returns series ID -> { links, key } for the series that have one. The note lists a series
-    // by the title of its next occurrence; the ledger remembers that title by ID, so a series whose
-    // title changes (a birthday with an age in it, say) has its line renamed and keeps its project.
-    // Two series with the same title share a line.
-    async seriesProjects(feed, selected, ledger) {
-        const named = new Map();   // series ID -> title; the fetcher sorts events by start
+    // A "this and future events" edit gives the rest of a series a new ID: its occurrences vanish, and a
+    // new series appears in the same places. An occurrence this device remembers a line for, gone from a
+    // calendar read this time, and an occurrence of a repeating event it has no line for, on the same
+    // calendar, day, start and end, are the same meeting: the new one takes over the old one's line, and
+    // its series goes by the old one's title, so seriesProjects renames the series' project to it (as
+    // the sync did before Plainday). Only places where one of each pairs up.
+    async handOver(feed, selected, cache) {
+        const today = moment().format("YYYY-MM-DD");
+        const slot = (calendarId, date, start, end) => `${calendarId}|${date}|${start}|${end}`;
+        const read = new Set();
+        for (const event of feed.events) if (selected.has(event.calendarId) && event.status !== "canceled") read.add(`${event.calendarId}|${event.key}`);
+        // The occurrences this device has a line for that the calendars read no longer have: usually none,
+        // and then nothing else is looked at
+        const gone = new Map();
+        for (const [lid, m] of Object.entries(cache.lines)) {
+            if (m.key === m.uid || !m.start || !selected.has(m.calendarId) || read.has(`${m.calendarId}|${m.key}`)) continue;
+            const at = slot(m.calendarId, m.date, m.start, m.end);
+            gone.set(at, gone.has(at) ? null : lid);
+        }
+        if (!gone.size) return;
+        const known = new Set(Object.values(cache.lines).map((m) => m.key));
+        const places = new Set([...gone.keys()].map((at) => at.split("|").slice(0, 2).join("|")));
+        const fresh = new Map();
+        for (const event of feed.events) {
+            await this.breathe();
+            if (!event.recurring || !places.has(`${event.calendarId}|${event.date}`) || event.date < today || known.has(event.key) || !read.has(`${event.calendarId}|${event.key}`)) continue;
+            const lines = this.lines(event);
+            const at = slot(event.calendarId, event.date, this.head(lines[0])?.start, lines.length > 1 ? lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false);
+            fresh.set(at, fresh.has(at) ? null : event);
+        }
+        const titles = cache.seriesTitles ?? {};
+        for (const [at, lid] of gone) {
+            const event = fresh.get(at), old = lid && cache.lines[lid];
+            if (!old || !event || String(event.id) === old.uid) continue;
+            if (titles[old.uid] && !titles[event.id]) titles[event.id] = titles[old.uid];
+            const { goneSince: _, ...rest } = old;
+            cache.lines[lid] = { ...rest, key: event.key, uid: String(event.id) };
+        }
+        cache.seriesTitles = titles;
+    }
+
+    // Returns series ID -> { links, key } for the series that have projects in Plainday's settings
+    // (`calendars.recurring`: a series by the title of its next occurrence, with its ⭕ and 🗃️ links).
+    // This device's cache remembers that title by series ID, so a series whose title changes (a
+    // birthday with an age in it, say) has its entry renamed and keeps its project. Two series with the
+    // same title share an entry. A series' links go on a line when the sync first writes it. Choosing a
+    // series' projects in the panel comes with OBS-276; until then they're the ones the Calendar Sync
+    // note gave (recurringFromNote).
+    async seriesProjects(feed, selected, cache) {
+        const named = new Map();   // series ID -> title; the feed is sorted by start
         for (const event of feed.events) {
             if (event.recurring && selected.has(event.calendarId) && event.status !== "canceled" && !named.has(event.id)) {
                 named.set(event.id, this.title(event));
             }
         }
-        const file = app.vault.getFileByPath(CalendarSync.NOTE);
-        if (!file) return new Map();
-        const known = ledger.seriesTitles ?? {};
-        const titles = new Set(named.values());
+        const settings = plainday.Settings;
+        const list = settings.get().calendars.recurring ?? [];
+        const known = cache.seriesTitles ?? {};
         const renames = [];
         for (const [id, title] of named) {
-            // A title another series still has stays listed; the renamed series gets a copy of its line
+            // A title another series still has stays listed; the renamed series gets a copy of its entry
             if (!known[id] || known[id] === title) continue;
             // Shared when another series still goes by the old title: one that had it already (or
-            // is new), not one that has just been renamed to it; or one missing from this fetch
+            // is new), not one that has just been renamed to it; or one missing from this read
             const shared = [...named].some(([other, t]) => other !== id && t === known[id] && (known[other] ?? t) === t)
                 || Object.entries(known).some(([other, t]) => other !== id && !named.has(other) && t === known[id]);
             renames.push({ from: known[id], to: title, copy: shared });
         }
-        // A series split in two: the new part takes the old part's line, copied while the old
-        // part still has occurrences
-        const live = new Map();
-        for (const event of feed.events) {
-            if (selected.has(event.calendarId) && event.status !== "canceled" && !live.has(event.key)) live.set(event.key, event);
-        }
-        const split = new Set();
-        for (const { entry, event } of this.seriesSplits(ledger.events ?? {}, live)) {
-            const from = known[entry.id] ?? entry.title;
-            const to = named.get(event.id);
-            if (known[event.id] || split.has(event.id) || !to || from === to) continue;
-            split.add(event.id);
-            renames.push({ from, to, copy: named.has(entry.id) });
-        }
-        let mapping = new Map();
-        const refresh = (text) => {
-            const renamed = this.renameSeries(text, renames);
-            mapping = this.seriesMapping(renamed);
-            return this.replaceSection(renamed, "## Recurring events", this.seriesSection(renamed, titles), "## Last run");
-        };
-        const before = await app.vault.read(file);
-        // Re-read inside the write, so a link you add while this runs isn't lost
-        if (refresh(before) !== before) await this.updateNote(CalendarSync.NOTE, refresh);
+        const renamed = this.renameSeries(list, renames);
+        if (JSON.stringify(renamed) !== JSON.stringify(list)) await settings.set("calendars", { recurring: renamed });
+        const mapping = this.seriesMapping(renamed);
 
         const byId = new Map();
         for (const [id, title] of named) if (mapping.has(title)) byId.set(id, mapping.get(title));
-        // A series missing from this fetch is remembered while its line has a project
+        // A series missing from this read is remembered while its entry has a project
         const remembered = {};
         for (const [id, title] of Object.entries(known)) if (!named.has(id) && mapping.has(title)) remembered[id] = title;
-        ledger.seriesTitles = { ...remembered, ...Object.fromEntries(named) };
+        cache.seriesTitles = { ...remembered, ...Object.fromEntries(named) };
         return byId;
     }
 
-    // Calendar's "this and future events" edit gives the rest of a series a new ID: occurrences of
-    // the old series vanish and a new series appears on the same days. An occurrence the ledger has
-    // that's gone from `events`, and an occurrence of a repeating event the ledger doesn't know, on
-    // the same calendar, day, start and end, are the same event. Returns [{ key, entry, event }]
-    // for the ones that pair up one to one.
-    seriesSplits(ledgerEvents, events) {
-        const slot = (calendarId, date, lines) => `${calendarId}|${date}|${lines[0].split("\t")[0]}|${lines[1] ?? ""}`;
-        const gone = new Map();
-        const fresh = new Map();
-        for (const [key, entry] of Object.entries(ledgerEvents)) {
-            if (key === entry.id || events.has(key)) continue;   // not an occurrence, or still there
-            const at = slot(entry.calendarId, entry.date, entry.lines);
-            gone.set(at, gone.has(at) ? null : { key, entry });
-        }
-        for (const event of events.values()) {
-            if (!event.recurring || ledgerEvents[event.key]) continue;
-            const at = slot(event.calendarId, event.date, this.lines(event));
-            fresh.set(at, fresh.has(at) ? null : event);
-        }
-        const pairs = [];
-        for (const [at, old] of gone) {
-            const event = fresh.get(at);
-            if (old && event && event.id !== old.entry.id) pairs.push({ ...old, event });
-        }
-        return pairs;
-    }
-
-    // Renames lines in the Recurring events section. Each { from, to, copy } gives `to` the links
-    // `from` had before any rename this run (so chains and swaps come out right), and takes the
-    // `from` line away unless `copy` (another series still has that title) or another rename
-    // gives it a new project. A `to` line with links of its own keeps them, unless its series has
-    // been renamed away too.
-    renameSeries(text, renames) {
-        if (!renames.length) return text;
-        const lines = text.split("\n");
-        const start = lines.findIndex((l) => l.trim() === "## Recurring events");
-        if (start === -1) return text;
-        let end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
-        if (end === -1) end = lines.length;
-        const items = new Map();   // title -> { at, prefix, projects }, the first line for it
-        for (let i = start + 1; i < end; i++) {
-            const m = lines[i].match(/^(\s*[-*+]\s+)(.*\S)\s*$/);
-            if (!m) continue;
-            const { rest, projects } = this.splitProjects(m[2]);
-            if (!items.has(rest)) items.set(rest, { at: i, prefix: m[1], projects });
-        }
+    // Renames entries in the recurring list. Each { from, to, copy } gives `to` the links `from` had
+    // before any rename this run (so chains and swaps come out right), and takes the `from` entry
+    // away unless `copy` (another series still has that title) or another rename gives it a new
+    // project. A `to` entry with links of its own keeps them, unless its series has been renamed away
+    // too. A renamed series' new entry goes where its old one was.
+    renameSeries(list, renames) {
+        if (!renames.length) return list;
+        const items = new Map();   // title -> links, the first entry for it
+        for (const r of list) if (!items.has(r.title)) items.set(r.title, r.links);
         const vacated = new Set(renames.filter((r) => !r.copy).map((r) => r.from));
         const assign = new Map();   // title -> links it ends up with
-        const dropped = new Set();  // old lines whose links went to a new title
+        const dropped = new Set();  // old entries whose links went to a new title
         for (const { from, to, copy } of renames) {
             const source = items.get(from);
             if (!source || assign.has(to)) continue;
             const own = items.get(to);
-            if (own?.projects.length && !vacated.has(to)) continue;
-            assign.set(to, source.projects);
+            if (own?.length && !vacated.has(to)) continue;
+            assign.set(to, source);
             if (!copy) dropped.add(from);
         }
         const out = [];
         const placed = new Set();
-        const line = (prefix, title) => `${prefix}${[title, ...assign.get(title)].join(" ")}`;
-        for (let i = 0; i < lines.length; i++) {
-            if (i <= start || i >= end) { out.push(lines[i]); continue; }
-            const m = lines[i].match(/^(\s*[-*+]\s+)(.*\S)\s*$/);
-            const rest = m && this.splitProjects(m[2]).rest;
-            if (!m || items.get(rest)?.at !== i) { out.push(lines[i]); continue; }
-            if (assign.has(rest)) { out.push(line(m[1], rest)); placed.add(rest); }
-            else if (!dropped.has(rest)) out.push(lines[i]);
-            // A renamed series' new line goes where its old one was
+        for (const r of list) {
+            if (assign.has(r.title)) { if (!placed.has(r.title)) out.push({ title: r.title, links: assign.get(r.title) }); placed.add(r.title); }
+            else if (!dropped.has(r.title)) out.push(r);
             for (const { from, to } of renames) {
-                if (from !== rest || placed.has(to) || !assign.has(to) || items.has(to)) continue;
-                out.push(line(m[1], to));
+                if (from !== r.title || placed.has(to) || !assign.has(to) || items.has(to)) continue;
+                out.push({ title: to, links: assign.get(to) });
                 placed.add(to);
             }
         }
-        return out.join("\n");
+        return out;
     }
 
-    // "- Weekly sync [[Pinecone Studio|⭕]]" under "## Recurring events"
-    seriesMapping(text) {
+    // The recurring list as title -> { links, key }
+    seriesMapping(list) {
         const mapping = new Map();
+        for (const { title, links } of list) {
+            const all = [...new Set([...(mapping.get(title)?.links ?? []), ...links])];
+            mapping.set(title, { links: all, key: all.join(" ") });
+        }
+        return mapping;
+    }
+
+    // Once, on a device whose settings have no recurring list yet (saved before OBS-275): the ⭕ and 🗃️
+    // links after each series under the Calendar Sync note's `## Recurring events`, into Plainday's
+    // settings. The note isn't changed, and isn't read again.
+    async recurringFromNote() {
+        const settings = plainday.Settings;
+        if (settings.get().calendars.recurring !== null) return;
+        const file = app.vault.getFileByPath(CalendarSync.OLD_NOTE);
+        const text = file ? await app.vault.read(file) : "";
+        const list = [];
         let inside = false;
         for (const line of text.split("\n")) {
             if (/^##\s/.test(line)) { inside = line.trim() === "## Recurring events"; continue; }
             const item = inside && line.match(/^\s*[-*+]\s+(.*\S)\s*$/);
             if (!item) continue;
             const { rest, projects } = this.splitProjects(item[1]);
-            if (!projects.length || !rest) continue;
-            const links = [...new Set([...(mapping.get(rest)?.links ?? []), ...projects])];
-            mapping.set(rest, { links, key: links.join(" ") });
+            if (rest && projects.length) list.push({ title: rest, links: projects });
         }
-        return mapping;
+        await settings.set("calendars", { recurring: settings.recurringOf(list) ?? [] });
     }
 
-    // The section as you left it, with a line for each new series. Only a plain title whose series
-    // has left your calendars is taken out; anything with a link or a comment stays.
-    seriesSection(text, titles) {
-        const lines = text.split("\n");
-        const start = lines.findIndex((l) => l.trim() === "## Recurring events");
-        let kept = [
-            "",
-            "Put a project link after a series, like `[[Project|⭕]]`, and every upcoming line of it gets that link, unless the line has time entries, a log link or a ⭕ of its own. Take the link away and lines keep what they have.",
-        ];
-        if (start !== -1) {
-            let end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
-            if (end === -1) end = lines.length;
-            kept = lines.slice(start + 1, end);
+    // MARK: event line IDs
+
+    // A 53-bit hash of a string (cyrb53): the same on every device, for an event line's ID
+    static hash(text) {
+        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+        for (let i = 0; i < text.length; i++) {
+            const ch = text.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
         }
-        const listed = new Set();
-        kept = kept.filter((line) => {
-            const item = line.match(/^\s*[-*+]\s+(.*\S)\s*$/);
-            if (!item) return true;
-            const { rest, projects } = this.splitProjects(item[1]);
-            listed.add(rest);
-            return projects.length > 0 || titles.has(rest) || /\[\[|%%|<!--/.test(item[1]);
-        });
-        while (kept.length && kept[kept.length - 1].trim() === "") kept.pop();
-        const added = [...titles].filter((t) => !listed.has(t)).sort((a, b) => a.localeCompare(b));
-        if (added.length && kept.length && !/^\s*[-*+]\s/.test(kept[kept.length - 1])) kept.push("");
-        return ["## Recurring events", ...kept, ...added.map((t) => `- ${t}`)].join("\n") + "\n";
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+        h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+        h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return 4294967296 * (2097151 & h2) + (h1 >>> 0);
     }
 
-    // MARK: working out what each note needs
+    // An event's line ID from its key: `e-` and six letters and digits. `step` gives the next one, for an
+    // ID another line already uses (stepped the same way on every device).
+    lineId(key, step = 0) {
+        const n = CalendarSync.hash(step ? `${key}#${step}` : String(key)) % CalendarSync.ID_SPACE;
+        return CalendarSync.ID_PREFIX + n.toString(36).padStart(CalendarSync.ID_LENGTH, "0");
+    }
 
-    async apply(feed, ledger, selected, series = new Map()) {
-        const report = { added: [], adopted: [], updated: [], linked: [], restored: [], removed: [], canceled: [], forwarded: [], yours: [], held: [], skipped: [] };
-        const today = moment().startOf("day");
-        const upcoming = (date) => !moment(date, "YYYY-MM-DD", true).isBefore(today);
-        // Only days this fetch actually covered can say anything about their events: with a
-        // one-week range, everything past next week is simply unknown, not canceled
+    // The IDs an event's line can have, in the order they're tried
+    lineIds(key) {
+        return Array.from({ length: CalendarSync.ID_STEPS }, (_, i) => this.lineId(key, i));
+    }
+
+    // Where a line's block ID is: at its end, or ahead of links and marks typed after it (a ⭕, a note
+    // link, ℹ️ or 🆓), which Obsidian no longer reads as a block ID but the sync still does, so a line
+    // you or another tool added to after its ID is still found. { lid (lowercased), from, to } or null.
+    static ID_IN_RUN = /\s\^([A-Za-z0-9-]+)((?:\s+(?:\[\[[^[\]]*\]\]|ℹ️?|🆓️?))*)\s*$/u;
+
+    // The block ID a line ends with, or that sits ahead of links typed after it, lowercased, or null
+    lidOf(line) {
+        return String(line).match(CalendarSync.ID_IN_RUN)?.[1]?.toLowerCase() ?? null;
+    }
+
+    // The ID of an event line wherever it is in the line, even with words typed after it, or null: how
+    // the sync still finds a line you added to (it's yours then, and left as it is)
+    lidIn(line) {
+        const text = String(line);
+        if (!text.includes("^")) return null;
+        const run = this.lidOf(text);
+        if (run) return run;
+        let found = null;
+        for (const m of text.matchAll(/\s\^([A-Za-z0-9-]{1,32})(?=\s|$)/g)) found = m[1].toLowerCase();
+        return found;
+    }
+
+    // Whether a line's ID is where the sync writes it, last
+    lidAtEnd(line) {
+        return CalendarSync.ID_AT_END.test(line);
+    }
+
+    // A line without its block ID, wherever in the run that ends the line it is
+    bare(line) {
+        const m = String(line).match(CalendarSync.ID_IN_RUN);
+        return m ? String(line).slice(0, m.index) + m[2] : String(line);
+    }
+
+    // A line ending in ` ^lid`, in place of any ID it ends in; without one when `lid` is null
+    withLid(line, lid) {
+        const plain = this.bare(line).replace(/\s+$/, "");
+        return lid ? `${plain} ^${lid}` : plain;
+    }
+
+    // MARK: a run
+
+    // Plans this run and writes it: `feed` holds the events of the calendars read this time (`selected`),
+    // `cache` is this device's (loadCache), `series` the recurring events' projects, and `report`
+    // collects what happened (newReport; its failedEvents are the events the reader couldn't read).
+    async apply(feed, cache, selected, series = new Map(), report = this.newReport()) {
+        const today = moment().format("YYYY-MM-DD");
+        const upcoming = (date) => typeof date === "string" && date >= today;
+        // Only days this read covered can say anything about their events: with a one-week range,
+        // everything past next week is simply unknown, not canceled
         const covered = (date) => (!feed.windowStart || date >= feed.windowStart) && (!feed.windowEnd || date <= feed.windowEnd);
+        const read = new Set(feed.calendars.map((c) => c.id));
+        // An event the reader couldn't read: its line is left as it is, never taken for canceled
+        const unread = new Set((report.failedEvents ?? []).map((f) => `${f.calendarId}|${f.uid}`));
+        const outside = feed.outside ?? new Set();
 
         const events = new Map();
+        const inFeed = new Set();   // every event the calendars read have, whatever its day
         for (const event of feed.events) {
-            if (!selected.has(event.calendarId) || event.status === "canceled" || !upcoming(event.date)) continue;
-            if (!events.has(event.key)) events.set(event.key, event);
+            if (!selected.has(event.calendarId) || event.status === "canceled") continue;
+            inFeed.add(`${event.calendarId}|${event.key}`);
+            if (upcoming(event.date) && !events.has(event.key)) events.set(event.key, event);
         }
-
         // Days gone by are none of the sync's business any more
-        for (const [key, entry] of Object.entries(ledger.events)) if (!upcoming(entry.date)) delete ledger.events[key];
-        for (const [key, date] of Object.entries(ledger.dismissed)) if (!upcoming(date)) delete ledger.dismissed[key];
-        for (const [key, entry] of Object.entries(ledger.canceled)) if (!upcoming(entry.date)) delete ledger.canceled[key];
+        for (const [lid, m] of Object.entries(cache.lines)) if (!upcoming(m.date)) delete cache.lines[lid];
+
+        // Where each event line is now, by its ID: every day from today to the window's end, and any
+        // other day this device remembers a line on
+        const { where } = await this.lineIndex(today, feed.windowEnd ?? today, Object.values(cache.lines).map((m) => m.date));
+        const lids = await this.assignLids(events, cache, where);
+        const claimed = new Set(lids.values());
 
         const plan = new Map();   // date -> operations
         const add = (date, op) => { if (!plan.has(date)) plan.set(date, []); plan.get(date).push(op); };
-        const removals = [];
-
-        // The rest of a series split off in Calendar keeps its lines: renamed, not canceled and added
-        const splits = this.seriesSplits(ledger.events, events);
-        const handedOver = new Set(splits.map((s) => s.key));
-
-        for (const [key, entry] of Object.entries(ledger.events)) {
-            if (handedOver.has(key)) continue;
-            const event = events.get(key);
-            if (event) events.delete(key);   // handled here; whatever is left over is new
-            if (!event) {
-                // Only call it canceled when this run could have seen it: a calendar that was
-                // unticked, or missing from the fetch, tells us nothing about its events
-                if (!covered(entry.date) || !selected.has(entry.calendarId) || !feed.calendars.some((c) => c.id === entry.calendarId)) {
-                    add(entry.date, { kind: "verify", key, entry });
-                    continue;
-                }
-                removals.push({ kind: "cancel", key, entry });
+        // Each day's events by start and title, so a line from before IDs goes to the event it's for
+        const onDay = new Map();
+        for (const event of events.values()) {
+            await this.breathe();
+            const h = this.head(this.lines(event)[0]);
+            if (!onDay.has(event.date)) onDay.set(event.date, []);
+            onDay.get(event.date).push({ key: event.key, start: h?.start, title: h?.title });
+        }
+        // Each event read: its line on its day, written from the event with your part kept (writeEvent).
+        // Its line on another day moves to it with your part, or is forwarded (leaveIn).
+        for (const [key, event] of events) {
+            await this.breathe();
+            const lid = lids.get(key);
+            const others = (where.get(lid) ?? []).filter((d) => d !== event.date);
+            const title = this.title(event);
+            const carry = others.length ? await this.carryFrom(others, lid, this.recalled(cache.lines[lid], key, title)) : null;
+            const day = (onDay.get(event.date) ?? []).filter((e) => e.key !== key);
+            add(event.date, { kind: "event", key, lid, event, title, lines: this.lines(event), carry, day, series: event.recurring ? series.get(event.id) ?? null : null });
+            // What it found there: a line that's changed since stays, forwarded, rather than lose what's new
+            for (const date of others) add(date, { kind: "leave", key, lid, to: event.date, title, expect: (carry?.parts ?? []).filter((p) => p.date === date && !p.staying).map((p) => p.raw) });
+        }
+        // Lines whose event this run didn't read. One whose event its calendar now has further ahead than
+        // the range goes, and comes back when its day is in range (Brian, 11/19). One whose event is gone
+        // from a calendar that read fine, on a day the read covered and not skipped by the reader, is
+        // marked canceled: at once when this device first read the event at least MISSING_MS ago, else
+        // once a read MISSING_MS after the one that first missed it still lacks it (a provider's copy of a
+        // calendar can lag behind an event just added). Anything else (its calendar off, unread or
+        // skipped, or a line this device has no memory of) is left as it is.
+        for (const [lid, dates] of where) {
+            if (claimed.has(lid)) continue;
+            const m = cache.lines[lid];
+            if (!m) continue;
+            if (inFeed.has(`${m.calendarId}|${m.key}`)) { delete m.goneSince; continue; }
+            if (read.has(m.calendarId) && outside.has(`${m.calendarId}|${m.key}`)) {
+                for (const date of dates) add(date, { kind: "drop", key: m.key, lid, title: m.title });
                 continue;
             }
-            const lines = this.lines(event);
-            // Even an unchanged event is checked, so a line you deleted is noticed and one whose
-            // write never landed is written again
-            if (event.date === entry.date && this.same(lines, entry.lines)) add(entry.date, { kind: "verify", key, entry, event, lines });
-            else if (event.date !== entry.date) removals.push({ kind: "moveOut", key, entry, event, lines });
-            else add(entry.date, { kind: "replace", key, entry, event, lines });
-        }
-
-        for (const { key, entry, event } of splits) {
-            events.delete(event.key);
-            add(entry.date, { kind: "replace", key: event.key, entry: { ...entry, id: event.id }, event, lines: this.lines(event), handover: key });
-        }
-
-        // An event marked canceled that's back in the calendar (restored, or a fetch that missed
-        // it) gets its [<] back; the next run brings its line up to date
-        // (not in a held run, whose fetch isn't trusted)
-        const returning = [];
-        for (const [key, entry] of Object.entries(ledger.canceled)) {
-            const event = events.get(key);
-            if (!event || ledger.events[key]) continue;
-            events.delete(key);
-            returning.push({ kind: "restore", key, entry, event });
-        }
-
-        // One bad fetch shouldn't be able to strip a month of events out of the notes. Past the
-        // limit nothing is applied but the checks: a fetch that wants that many removals is
-        // exactly the one whose new events shouldn't be trusted either.
-        const holding = removals.length > CalendarSync.MAX_REMOVALS;
-        if (!holding) for (const op of returning) add(op.entry.date, op);
-        if (holding) {
-            report.held = removals.map((r) => `${r.entry.date} ${r.entry.title}`);
-            for (const event of events.values()) report.held.push(`${event.date} ${event.title} (not added)`);
-        } else {
-            for (const removal of removals) {
-                add(removal.entry.date, removal);
-                if (removal.kind === "moveOut") {
-                    removal.carry = await this.carryFor(removal.entry);
-                    add(removal.event.date, { kind: "insert", key: removal.key, event: removal.event, lines: removal.lines, move: true, carry: removal.carry });
-                }
+            const known = read.has(m.calendarId) && !unread.has(`${m.calendarId}|${m.uid}`) && dates.every(covered);
+            if (!known) continue;
+            const settled = typeof m.seen === "number" && this.now() - m.seen >= CalendarSync.MISSING_MS;
+            if (!settled) {
+                if (!m.goneSince) { m.goneSince = this.now(); continue; }
+                if (this.now() - m.goneSince < CalendarSync.MISSING_MS) continue;
             }
-            for (const [key, event] of events) {
-                if (ledger.dismissed[key]) continue;
-                add(event.date, { kind: "insert", key, event, lines: this.lines(event) });
-            }
-        }
-        // Series links go only on events this fetch has, and wait with everything else in a held run.
-        // An insert may find a line the sync marked canceled: an event deleted and made again.
-        for (const [date, ops] of plan) {
-            const canceled = Object.entries(ledger.canceled).filter(([key, entry]) => entry.date === date && !events.has(key));
-            for (const op of ops) {
-                op.series = !holding && op.event?.recurring ? series.get(op.event.id) ?? null : null;
-                if (op.kind === "insert") op.canceled = canceled;
-            }
+            for (const date of dates) add(date, { kind: "cancel", key: m.key, lid, title: m.title });
         }
 
-        // Inserts run first, so a move writes the new line before the old one goes. If the new
-        // line can't be written, the move's removal waits for the next run; if it landed without
-        // the old line's links, the old line is forwarded rather than removed.
-        const landed = new Map();
-        // Lines events took in the first pass, by date, so a cancel in the second can't take the
-        // line an event whose ID changed has just adopted
-        const taken = new Map();
-        const pass = async (wanted, first) => {
-            for (const [date] of [...plan].sort()) {
-                let ops = plan.get(date).filter(wanted);
+        // Each event's line first; then the lines it moved from, once its new line is in place, and the
+        // canceled ones. `wrote`: the sync's part of each event's line as it's written now (writeEvent),
+        // for the cache; `placed`: each event's line ID where its line is in place; `canceled`: the lines
+        // this run marked [-], remembered so their [<] comes back with their event; `done`: what each
+        // event's line came to (tell).
+        const ctx = { cache, wrote: new Map(), placed: new Map(), canceled: new Set(), done: [] };
+        const pass = async (wanted) => {
+            for (const date of [...plan.keys()].sort()) {
+                const ops = plan.get(date).filter(wanted);
                 if (!ops.length) continue;
-                // Inserts mustn't adopt a line another event still has
-                // (one whose event this fetch has: a line whose calendar went missing may be the one
-                // a new copy of its event should adopt)
-                if (first) ops = [...plan.get(date).filter((op) => ["verify", "replace", "restore"].includes(op.kind) && op.event).map((op) => ({ kind: "reserve", key: op.key, entry: op.entry })), ...ops];
+                await this.breathe();
                 try {
-                    await this.applyToNote(date, ops, ledger, report, landed, taken);
+                    await this.applyToNote(date, ops, ctx, report);
                 } catch (e) {
                     console.error(`CalendarSync: ${date}`, e);
                     report.skipped.push(`${date}: ${e.message}`);
                 }
             }
         };
-        await pass((op) => op.kind === "insert", true);
-        for (const ops of plan.values()) for (const op of ops) if (op.kind === "moveOut") op.landed = landed.get(op.key);
-        await pass((op) => op.kind !== "insert" && !(op.kind === "moveOut" && !landed.has(op.key)), false);
+        await pass((op) => op.kind === "event");
+        await this.tell(ctx.done, report);
+        const waiting = new Set();
+        for (const ops of plan.values()) {
+            for (const op of ops) {
+                if (op.kind !== "leave" || ctx.placed.has(op.key) || waiting.has(op.key)) continue;
+                waiting.add(op.key);
+                report.skipped.push(`${op.to} ${op.title}: couldn't write its line on its new day, so the old one stays where it is`);
+            }
+        }
+        await pass((op) => op.kind === "cancel" || op.kind === "drop" || (op.kind === "leave" && ctx.placed.has(op.key)));
+
+        // What this device remembers from here: each event line it has seen, and the lines of events gone
+        // from their calendars, which keep the time they were first missed. The title, free or busy and
+        // end time are what the sync wrote on the line: a line it didn't write (one you'd marked another
+        // way, or one that couldn't be written) keeps what was remembered of it.
+        const lines = {};
+        for (const [key, event] of events) {
+            const lid = ctx.placed.get(key) ?? (where.has(lids.get(key)) ? lids.get(key) : null);
+            if (!lid) continue;
+            const old = cache.lines[lid]?.key === key ? cache.lines[lid] : null;
+            const now = ctx.wrote.get(key) ?? old ?? {};
+            const m = { key, uid: String(event.id ?? ""), calendarId: event.calendarId, date: ctx.placed.has(key) ? event.date : where.get(lid)[0], seen: old?.seen ?? this.now() };
+            for (const k of ["title", "free", "end", "start"]) if (now[k] !== undefined) m[k] = now[k];
+            lines[lid] = m;
+        }
+        for (const [lid, dates] of where) if (!claimed.has(lid) && cache.lines[lid]) lines[lid] = { ...cache.lines[lid], date: dates[0], ...(ctx.canceled.has(lid) ? { canceled: true } : {}) };
+        cache.lines = lines;
         return report;
     }
 
-    // What a moved event's new line takes from the old one: its ⭕ links, and its log link if the
-    // old line will go (one with time entries stays behind, forwarded, and keeps the log link).
-    // Read from the note as it is now; the ledger's copy only when the note can't be read.
-    async carryFor(entry) {
-        let text;
-        try {
-            const file = app.vault.getFileByPath(this.dailyPath(entry.date));
-            if (!file) return { projects: [], log: null, nonbillable: false, series: entry.series };
-            text = await app.vault.read(file);
-        } catch (e) {
-            // A ledger from before OBS-57 may hold the log link in its old form
-            return { projects: entry.projects ?? [], log: this.noteLink(entry.log), nonbillable: entry.nonbillable ?? false, series: entry.series };
+    // Where each event line is, by its ID: { where: Map(lid → [dates, earliest first]), yours: the IDs
+    // on a line marked another way ([x], [!]) }, from the daily notes from `from` through `to` and on
+    // `also`. Read from the notes themselves, which are ahead of Obsidian's index right after a write.
+    // A forwarded line carries no ID.
+    async lineIndex(from, to, also = []) {
+        const days = new Set(also.filter((d) => typeof d === "string" && d >= from));
+        for (let d = from; d <= to; d = this.addDays(d, 1)) days.add(d);
+        const where = new Map();
+        for (const date of [...days].sort()) {
+            await this.breathe();
+            const file = app.vault.getFileByPath(this.dailyPath(date));
+            if (!file) continue;
+            const text = await (app.vault.cachedRead ?? app.vault.read).call(app.vault, file);
+            for (const raw of text.split("\n")) {
+                const line = raw.replace(/\r$/, "");
+                const lid = line.includes("^") && this.topEvent(line) ? this.lidIn(line) : null;
+                if (!lid) continue;
+                if (!where.has(lid)) where.set(lid, []);
+                const list = where.get(lid);
+                if (list[list.length - 1] !== date) list.push(date);
+            }
         }
-        const lines = text.split("\n");
-        const block = this.findBlock(lines, entry);
-        if (!block) return { projects: [], log: null, nonbillable: false, series: entry.series };
-        const own = lines.slice(block.from, block.to + 1);
-        const ann = this.detached(lines, block) ? null : this.annotations(own, entry.lines);
-        if (ann) return { projects: ann.projects, log: ann.entries ? null : ann.log, nonbillable: ann.nonbillable, series: entry.series };
-        // A line that's yours stays behind, but its ⭕ links and 🆓 still say what the event is for
-        const head = this.eventHead(own[0]);
-        return { projects: head?.projects ?? [], log: null, nonbillable: head?.nonbillable ?? false, series: entry.series };
+        return { where };
     }
 
-    async applyToNote(date, operations, ledger, report, landed, taken = new Map()) {
-        const path = this.dailyPath(date);
-        const wantsInsert = operations.some((op) => op.kind === "insert");
-        const file = app.vault.getFileByPath(path) ?? (wantsInsert ? await this.createDaily(date, path) : null);
-        if (!file) {
-            // The whole note is gone, so every line the sync wrote in it went with it
-            for (const op of operations) if (op.kind !== "reserve") await this.record({ op, outcome: "missing" }, [], ledger, report, landed);
-            return;
+    // YYYY-MM-DD, `n` days on
+    addDays(date, n) {
+        const [y, m, d] = date.split("-").map(Number);
+        const t = new Date(Date.UTC(y, m - 1, d + n));
+        return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+    }
+
+    // Each event's line ID: the one this device saw its line with, while a line still has it; else the
+    // first of its IDs a line already has (it may have stepped past a task's ID in its note), else its
+    // first. Two events in this run whose keys give one ID are told apart: the later key, in sorted
+    // order, steps on, the same on every device.
+    async assignLids(events, cache, where) {
+        const seen = new Map(Object.entries(cache.lines).map(([lid, m]) => [m.key, lid]));
+        const out = new Map(), used = new Set();
+        for (const key of [...events.keys()].sort()) {
+            await this.breathe();
+            const known = seen.get(key);
+            const first = this.lineId(key);
+            let lid;
+            if (known && where.has(known) && !used.has(known)) lid = known;
+            else if (where.has(first) && !used.has(first)) lid = first;
+            else {
+                const ids = this.lineIds(key);
+                lid = ids.find((id) => where.has(id) && !used.has(id)) ?? ids.find((id) => !used.has(id)) ?? ids[0];
+            }
+            used.add(lid);
+            out.set(key, lid);
         }
+        return out;
+    }
 
+    // What a moved event's lines on other days bring to its new line: { parts: [parseBlock's block, with
+    // its date, its text (raw) and whether it will stay behind, forwarded (staying), with what's under
+    // it, when it brings only your part of its line] }. `recall`: what this device remembers (recalled).
+    async carryFrom(dates, lid, recall = {}) {
+        const parts = [];
+        for (const date of dates) {
+            const file = app.vault.getFileByPath(this.dailyPath(date));
+            if (!file) continue;
+            const lines = (await app.vault.read(file)).split("\n").map((l) => l.replace(/\r$/, ""));
+            for (const at of this.blocksWith(lines, lid)) {
+                const raw = lines.slice(at.from, at.to + 1);
+                const block = this.parseBlock(raw, recall);
+                if (!block.head) continue;
+                const staying = this.staysBehind(lines, at, block);
+                parts.push({ ...(staying ? { head: block.head, groups: [], end: null } : block), date, raw: raw.join("\n"), staying });
+            }
+        }
+        return { parts };
+    }
+
+    // `ctx`: the run's { cache, wrote, placed } (apply)
+    async applyToNote(date, ops, ctx, report) {
+        const path = this.dailyPath(date);
+        let file = app.vault.getFileByPath(path);
+        if (!file) {
+            // Nothing to move or mark where there's no note; an event's line makes one
+            if (!ops.some((op) => op.kind === "event")) return;
+            file = await this.createDaily(date, path);
+        }
         const before = await app.vault.read(file);
-        // A pass over what's on disk decides whether anything needs writing at all, so a note
-        // that's already right isn't rewritten (which would churn through Sync every run)
-        const seed = taken.get(date);
-        const dry = this.runOps(before, operations, seed);
-        let outcomes = dry.outcomes;
+        // A pass over what's on disk decides whether anything needs writing at all, so a note that's
+        // already right isn't rewritten (which would churn through Sync every run)
+        let { text, outcomes } = this.runOps(before, ops, ctx);
         let after = before;
-
-        if (dry.text !== before) {
+        if (text !== before) {
             // Keep the folds you have: snapshot first, and let RefoldDailyNotes sort out the rest
             plainday.RefoldDailyNotes?.remember(file, before, this.currentFolds(file, before));
-            let written;
-            await app.vault.process(file, (text) => { written = this.runOps(text, operations, seed); return written.text; });
-            outcomes = written.outcomes;
+            await this.breathe();
+            // Worked out again only if the note changed since it was read (you typed in it meanwhile)
+            const read = before;
+            await app.vault.process(file, (now) => {
+                if (now !== read) ({ text, outcomes } = this.runOps(now, ops, ctx));
+                return text;
+            });
+            await this.breathe();
             after = await app.vault.read(file);   // read back what actually landed
             await plainday.RefoldDailyNotes?.refold(file, "open");
         }
-
-        const afterLines = after.split("\n");
+        const lines = after.split("\n").map((l) => l.replace(/\r$/, ""));
         for (const result of outcomes) {
-            if (result.took) {
-                if (!taken.has(date)) taken.set(date, new Map());
-                this.claim(taken.get(date), result.took);
-            }
-            await this.record(result, afterLines, ledger, report, landed);
+            await this.breathe();
+            await this.record(date, result, lines, ctx, report);
         }
     }
 
-    // Applies the operations to `text` in order, each seeing the one before it
-    runOps(text, operations, seed = new Map()) {
+    // Applies the operations to `text` in order, each seeing the one before it: { text, outcomes }
+    runOps(text, ops, ctx = { cache: { lines: {} } }) {
+        // A CRLF note is read without its CRs, and keeps them
+        const cr = String(text).includes("\r\n");
+        let lines = String(text).split("\n").map((l) => l.replace(/\r$/, ""));
         const outcomes = [];
-        const claimed = new Map(seed);
-        for (const op of operations) {
-            const result = this.applyOne(text, op, claimed, seed);
-            text = result.text;
-            const { text: _, ...rest } = result;
+        for (const op of ops) {
+            const result = op.kind === "event" ? this.writeEvent(lines, op, ctx) : op.kind === "leave" ? this.leaveIn(lines, op) : op.kind === "drop" ? this.dropIn(lines, op) : this.cancelIn(lines, op);
+            lines = result.lines;
+            const { lines: _, ...rest } = result;
             outcomes.push({ op, ...rest });
         }
-        return { text, outcomes };
+        return { text: lines.join(cr ? "\r\n" : "\n"), outcomes };
     }
 
-    // Returns { text, outcome, lines?, written?, ... }. `lines` is what the sync itself would write
-    // (what the ledger keeps); `written` is that with your additions put back. Outcomes: inserted,
-    // adopted, reinserted, replaced, linked (a series ⭕ added), present, removed, forwarded,
-    // canceled (marked [-]), restored, taken (another event has the line now), reserved, missing
-    // (the sync's line isn't there), yours (you changed it).
-    applyOne(text, op, claimed, seed = new Map()) {
-        const lines = text.split("\n");
-        if (op.kind === "reserve") {
-            const block = this.findBlock(lines, op.entry, claimed);
-            if (block) this.claim(claimed, lines[block.from]);
-            return { text, outcome: "reserved" };
+    // An event's line in a note, written from the event with your part kept (see the top): its copies
+    // here (two lines with its ID, copied by hand, say) become one, with everything under any of them;
+    // a moved line's part comes along (`op.carry`). With no line, a line from before IDs or a log's line
+    // with no time is taken over, else one is written, in time order, with a series' ⭕ (`op.series`).
+    // Returns { lines, outcome, lid, changed, differs, wrote }: outcome is added, adopted, updated,
+    // restored, merged, moved (written from its line on another day), present (as it was) or left
+    // (yours); wrote is what the sync's part of the line is now ({ title, free, end }), for the cache.
+    writeEvent(lines, op, ctx = {}) {
+        let found = this.blocksWith(lines, op.lid);
+        let adopted = false;
+        if (!found.length) {
+            const old = this.adoptable(lines, op.lines, op.day, op.title);
+            if (old) { found = [old]; adopted = true; }
         }
-        if (op.kind === "insert") {
-            // A moved event brings the old line's links; a series may add its ⭕
-            const carry = op.carry ?? { projects: [], log: null, nonbillable: false, series: undefined };
-            const links = carry.log ? null : this.seriesLinks(carry.projects, carry.series, op.series);
-            const written = this.decorate(op.lines, { projects: links ?? carry.projects, log: carry.log, nonbillable: carry.nonbillable });
-            const series = this.seriesApplied(carry.projects, carry.series, links, op.series);
-            const existing = this.findBlock(lines, { lines: op.lines }, claimed, true);
-            // A log's line with no time (the Log template wrote it before the sync had the event):
-            // written in the sync's shape with its log link, its 🆓, its ⭕ links and any a moved
-            // event or a series brings, and whatever sits under it kept below the end time. A line holds one
-            // log, so a moved event's other log link can't come along, and its old line stays.
-            const timeless = existing && this.logLine(lines[existing.from]);
-            if (timeless) {
-                const projects = [...new Set([...timeless.projects, ...(links ?? carry.projects)])];
-                const head = this.decorate(op.lines, { projects, log: timeless.log, nonbillable: timeless.nonbillable || carry.nonbillable });
-                const block = [...head, ...lines.slice(existing.from + 1, existing.to + 1)];
-                this.claim(claimed, block[0]);
-                return {
-                    text: [...lines.slice(0, existing.from), ...block, ...lines.slice(existing.to + 1)].join("\n"),
-                    outcome: "adopted", lines: op.lines, written: head, took: block[0], changed: ["time added"],
-                    series, droppedLog: !!carry.log && this.noteLink(carry.log) !== timeless.log,
-                };
-            }
-            if (!existing) {
-                this.claim(claimed, written[0]);
-                return { text: this.insert(lines, written), outcome: "inserted", lines: op.lines, written, series, took: written[0] };
-            }
-            // A line for this event is already there: adopt it rather than duplicate it.
-            // (A second event that would match the same line finds it claimed and inserts its own.)
-            // What's recorded is what the sync would write, so a block that differs from that by
-            // more than your additions counts as yours from then on.
-            // A line the sync marked canceled for an event that's been made again gets its [<] back
-            const revived = /^\s*[-*+]\s+\[-\]/.test(lines[existing.from])
-                && (op.canceled ?? []).find(([, entry]) => this.findBlock(lines, entry)?.from === existing.from);
-            let adopted = [...lines];
-            if (revived) adopted[existing.from] = lines[existing.from].replace(/^(\s*[-*+]\s+)\[-\]/, "$1[<]");
-            // A line in the sync's own shape (say, left by an event deleted and made again, or written
-            // before the sync knew free from busy) takes the event's end time and its free mark.
-            // Start and title already match, or it wouldn't have been found; a line with anything
-            // more than your additions stays as it is.
-            const changed = [];
-            const own = adopted.slice(existing.from, existing.to + 1);
-            // The end line as the sync wrote it, whatever note you've put after it
-            const end = own.findIndex((l, i) => i > 0 && this.indentWidth(l) === 4 && CalendarSync.END_LINE.test(l));
-            const bareEnd = end > 0 ? own[end].match(CalendarSync.END_LINE)[1] : null;
-            const free = this.eventHead(own[0])?.free ?? false;
-            if (op.lines.length > 1 && end > 0 && bareEnd !== op.lines[1]) changed.push("end time updated");
-            if (op.lines.length === 1 && end > 0) changed.push("end time removed");
-            if (op.lines.length > 1 && free !== this.isFree(op.lines[0])) changed.push(`now ${free ? "busy" : "free"}`);
-            if (changed.length && !this.detached(adopted, existing)) {
-                // The head as the sync would have written it with the line's own mark, so only the
-                // end time and the mark are what's updated. With no end line in the block (a time
-                // entry replaced it), the new one is still expected, so it isn't written back.
-                const ann = this.annotations(own, [this.markLine(op.lines[0], free), end > 0 ? bareEnd : op.lines[1]]);
-                const updated = ann && this.decorate(op.lines, ann);
-                if (updated) adopted = [...adopted.slice(0, existing.from), ...updated, ...adopted.slice(existing.to + 1)];
-                else changed.length = 0;
-            } else changed.length = 0;
-            const line = adopted[existing.from];
-            this.claim(claimed, line);
-            return {
-                text: revived || changed.length ? adopted.join("\n") : text,
-                outcome: "adopted", lines: op.lines, written, took: line, revived: revived?.[0], changed,
-            };
+        // What this device remembers of the line; nothing for a line taken over, which had no ID
+        const memory = adopted ? null : ctx.cache?.lines?.[op.lid] ?? null;
+        const recall = this.recalled(memory, op.key, op.title);
+        const copies = found.map((at) => ({ at, ...this.parseBlock(lines.slice(at.from, at.to + 1), recall) }));
+        // A line taken over steps past an ID another line of the note ends in, as a new line does
+        const lid = copies.length && !adopted ? op.lid : this.freeLid(lines, op.key, op.lid);
+        if (copies.some((c) => !c.head)) return { lines, outcome: "left" };
+        const sources = [...copies, ...(op.carry?.parts ?? [])];
+        // The box stays as you set it, on the line or the one it moved from; a [-] the sync wrote goes
+        // back to [<] now its event is here, and a forwarded line's new line starts [<]
+        const had = copies[0]?.head.box ?? (op.carry?.parts ?? []).find((p) => !p.staying)?.head.box ?? "<";
+        const box = had === "-" && memory?.canceled ? "<" : had;
+        const part = this.partOf(sources);
+        const start = this.head(op.lines[0])?.start;
+        const free = op.event ? op.event.availability === "free" : this.splitTail(op.lines[0].slice(op.lines[0].indexOf("\t") + 1)).free;
+        // A new line: the event's own (ℹ️ after the title when it's free) and a series' ⭕. A line already
+        // there: your part as you wrote it, with ℹ️ set to match when the calendar has switched a timed
+        // event between free and busy since the last sync that wrote the line (the latest change wins)
+        let tail = part.tail, flipped = null;
+        if (!sources.length) tail = op.series?.links?.length ? ` ${op.series.links.join(" ")}` : "";
+        else if (start !== "all day" && typeof memory?.free === "boolean" && memory.free !== free) {
+            flipped = free ? "free" : "busy";
+            tail = !free ? this.dropFree(tail) : this.hasFree(tail) ? tail : this.addFree(tail);
         }
+        const block = this.blockFor(op.lines, lid, { title: op.title, tail, box, fresh: !sources.length }, sources);
+        const wrote = { title: op.title, free, start, end: op.lines.length > 1 ? op.lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false };
 
-        const block = this.findBlock(lines, op.entry, claimed);
-        if (!block) {
-            // A line a run has seen in place and that's now gone was deleted by you. One that was
-            // never seen means the sync's own write didn't land, so write it again.
-            // A line a new event took over earlier this run (its ID changed, say) is that event's now
-            const any = (op.kind === "cancel" || (op.kind === "verify" && !op.event)) && this.findBlock(lines, op.entry);
-            if (any && seed.get(lines[any.from])) return { text, outcome: "taken" };
-            if (op.entry.confirmed || op.kind === "cancel" || op.kind === "restore") return { text, outcome: "missing" };
-            const fresh = op.lines ?? op.entry.lines;
-            const written = this.decorate(fresh, { projects: op.entry.projects ?? [], log: op.entry.log ?? null, nonbillable: op.entry.nonbillable ?? false }) ?? fresh;
-            this.claim(claimed, written[0]);
-            return { text: this.insert(lines, written), outcome: "reinserted", lines: fresh, written };
+        let out;
+        if (!copies.length) out = this.insert(lines, block).split("\n");
+        else {
+            out = [...lines];
+            for (const { at } of [...copies].reverse()) out.splice(at.from, at.to - at.from + 1);
+            const first = copies[0].at;
+            // Where it was, unless its time moved it among the day's events (lines of yours below a blank
+            // line under it would be left under another line, so it stays put then)
+            if (this.same(this.rank(block[0]), this.rank(lines[first.from])) || this.detached(lines, first)) out.splice(first.from, 0, ...block);
+            else out = this.insert(out, block).split("\n");
         }
-        const own = lines.slice(block.from, block.to + 1);
-        // Lines of yours past a blank line under it would be left under some other event
-        const detached = this.detached(lines, block);
-        const untouched = !detached && this.same(own, op.entry.lines);
-        const ann = detached ? null : this.annotations(own, op.entry.lines);
-        const without = [...lines.slice(0, block.from), ...lines.slice(block.to + 1)];
-        const keep = () => { this.claim(claimed, lines[block.from]); };
+        if (out.join("\n") === lines.join("\n")) return { lines, outcome: "present", lid, differs: part.differs, wrote };
 
-        if (op.kind === "verify") {
-            const links = ann && !ann.entries && !ann.log ? this.seriesLinks(ann.projects, op.entry.series, op.series) : null;
-            const written = links && this.decorate(op.entry.lines, { ...ann, projects: links });
-            if (written) {
-                this.claim(claimed, written[0]);
-                return {
-                    text: [...lines.slice(0, block.from), ...written, ...lines.slice(block.to + 1)].join("\n"),
-                    outcome: "linked", lines: op.entry.lines, written, series: op.series.key,
-                };
-            }
-            keep();
-            const series = ann ? this.seriesApplied(ann.projects, op.entry.series, null, op.series) : undefined;
-            return { text, outcome: "present", lines: own, found: this.eventHead(own[0]), series };
-        }
-        const remark = (from, to) => {
-            const line = lines[block.from].replace(new RegExp(`^(\\s*[-*+]\\s+)\\[${from}\\]`), `$1[${to}]`);
-            this.claim(claimed, line);
-            return { line, text: [...lines.slice(0, block.from), line, ...lines.slice(block.from + 1)].join("\n") };
-        };
-        if (op.kind === "cancel") {
-            // Kept as a record of what was planned, whatever you'd added to it; a line you've
-            // already marked some other way is left as it is
-            const { line, text: marked } = remark("<", "-");
-            // Already [-] (a run whose ledger write was lost): canceled all the same
-            if (line === lines[block.from] && !/^\s*[-*+]\s+\[-\]/.test(line)) return { text, outcome: "yours" };
-            return { text: marked, outcome: "canceled", marked: line };
-        }
-        if (op.kind === "restore") {
-            const { line, text: unmarked } = remark("-", "<");
-            // A line you've marked some other way is kept current again, but left as it is
-            return { text: unmarked, outcome: "restored", quiet: line === lines[block.from] };
-        }
-        if (op.kind === "moveOut") {
-            keep();
-            if (untouched) return { text: without.join("\n"), outcome: "removed" };
-            // A line with only links and a 🆓 goes, once the new day's line has those same ones.
-            // Anything more (time entries, a note on the end line), or links that didn't make it
-            // across, and it's forwarded.
-            const carried = op.carry && op.landed?.asIntended && ann && !ann.entries && !ann.endNote
-                && this.same(ann.projects, op.carry.projects) && this.noteLink(ann.log) === this.noteLink(op.carry.log)
-                && !!ann.nonbillable === !!op.carry.nonbillable;
-            return carried
-                ? { text: without.join("\n"), outcome: "removed" }
-                : { text: this.forward(lines, block, op.event.date), outcome: "forwarded" };
-        }
-        // replace: same day, new time or title
-        if (!untouched && !ann) { keep(); return { text, outcome: "yours" }; }
-        const base = ann ?? { projects: [], log: null };
-        const links = !base.entries && !base.log ? this.seriesLinks(base.projects, op.entry.series, op.series) : null;
-        const written = ann ? this.decorate(op.lines, { ...ann, projects: links ?? ann.projects }) : op.lines;
-        if (!written) { keep(); return { text, outcome: "yours" }; }
-        this.claim(claimed, written[0]);
         const changed = [];
-        // Time entries stay as you wrote them, so a new time is worth a look
-        if (ann?.entries && (op.lines[0].split("\t")[0] !== op.entry.lines[0].split("\t")[0] || op.lines[1] !== op.entry.lines[1])) changed.push("time changed; check its time entries");
-        const free = this.isFree(op.lines[0]);
-        if (free !== this.isFree(op.entry.lines[0])) changed.push(`now ${free ? "free" : "busy"}`);
-        return {
-            text: this.insert(without, written), outcome: "replaced", lines: op.lines, written, changed,
-            series: this.seriesApplied(base.projects, op.entry.series, links, op.series),
-        };
+        const was = copies[0];
+        if (adopted && !was.head.start) changed.push("time added");
+        else if (was && !adopted) {
+            const end = (op.lines[1] ?? "").replace(/^\s*[-*+]\s+/, "").toLowerCase() || null;
+            const timed = was.head.start !== start || (was.end?.time ?? null) !== end;
+            if (timed && sources.some((s) => s.entries)) changed.push("time changed; check its time entries");
+            if (flipped && this.hasFree(was.head.tail) !== this.hasFree(tail)) changed.push(`now ${flipped}`);
+        }
+        const outcome = adopted ? "adopted"
+            : copies.length > 1 ? "merged"
+                : !copies.length ? (sources.length ? "moved" : "added")
+                    : copies[0].head.box === "-" && box === "<" ? "restored" : "updated";
+        return { lines: out, outcome, lid, changed, differs: part.differs, wrote };
     }
 
-    async record(result, after, ledger, report, landed) {
-        const { op, outcome, lines } = result;
-        if (op.kind === "reserve") return;
-        const entry = op.entry;
-        const event = op.event;
-        const where = (date, title) => `${date} ${title}`;
+    // What this device remembers of a line, for reading it (parseBlock): the titles it may start with
+    // (the one the sync last wrote on it, then the event's own), whether it was written with no end time
+    // under it (endless), and the end time it was written with (endAt)
+    recalled(memory, key, title) {
+        const m = memory?.key === key ? memory : null;
+        return { titles: [...new Set([m?.title, title].filter(Boolean))], endless: m?.end === false, endAt: typeof m?.end === "string" ? m.end : null };
+    }
 
-        switch (outcome) {
-            case "inserted":
-            case "adopted":
-            case "replaced":
-            case "reinserted":
-            case "linked": {
-                const date = event?.date ?? entry.date;
-                const title = event?.title ?? entry.title;
-                const block = this.findBlock(after, { lines });
-                const wrote = block !== null;
-                if (!wrote && op.move) {
-                    report.skipped.push(`${where(date, title)}: couldn't write the moved line, so it stays where it is`);
-                    return;
-                }
-                const found = wrote ? this.eventHead(after[block.from]) : null;
-                if (wrote) {
-                    const intended = this.eventHead((result.written ?? lines)[0]);
-                    const asIntended = !result.droppedLog && !!found && !!intended
-                        && this.same(found.projects, intended.projects) && found.log === intended.log
-                        && !!found.nonbillable === !!intended.nonbillable;
-                    landed?.set(op.key, { asIntended });
-                }
-                // Carry forward what the ledger knew (a series ⭕ you took off stays off), then
-                // what the line says now
-                const prev = ledger.events[op.key] ?? entry ?? {};
-                const next = {
-                    id: event?.id ?? entry.id,
-                    calendarId: event?.calendarId ?? entry.calendarId,
-                    title, date, lines, confirmed: wrote,
-                };
-                const series = result.series ?? prev.series ?? op.carry?.series;
-                if (series !== undefined) next.series = series;
-                this.remember(next, found ?? { projects: prev.projects ?? [], log: prev.log ?? null, nonbillable: prev.nonbillable ?? false });
-                ledger.events[op.key] = next;
-                if (op.handover) delete ledger.events[op.handover];
-                if (wrote && result.revived) delete ledger.canceled[result.revived];
-                const changed = [...(result.changed ?? [])];
-                if (wrote && found?.log && await this.fillLog(found.log, lines, date)) changed.push("log times updated");
-                const said = changed.length ? `${where(date, title)} (${changed.join("; ")})` : where(date, title);
-                if (!wrote) report.skipped.push(`${where(date, title)}: the line didn't land, will try again next run`);
-                else if (outcome === "adopted") report.adopted.push(said);
-                else if (outcome === "replaced") report.updated.push(said);
-                else if (outcome === "linked") report.linked.push(where(date, title));
-                else if (outcome === "reinserted") report.added.push(`${where(date, title)} (written again)`);
-                else report.added.push(said);
-                return;
+    // A moved event's line on the day it left: it goes, its part of yours now on the new day's line, or
+    // it's forwarded there when time entries are under it (or lines of yours below a blank line), which
+    // stay with it. One that changed since the run read it (`op.expect`: you typed under it meanwhile)
+    // is forwarded too, so nothing new is lost. A line marked another way stays. `outcome`: moved,
+    // forwarded or gone (not there).
+    leaveIn(lines, op) {
+        let out = [...lines], outcome = "gone";
+        for (;;) {
+            const at = this.blocksWith(out, op.lid)[0];
+            if (!at) break;
+            const raw = out.slice(at.from, at.to + 1);
+            const block = this.parseBlock(raw);
+            if (this.staysBehind(out, at, block) || !(op.expect ?? []).includes(raw.join("\n"))) {
+                out = this.forward(out, at, op.to).split("\n");
+                outcome = "forwarded";
+            } else {
+                out.splice(at.from, at.to - at.from + 1);
+                if (outcome === "gone") outcome = "moved";
             }
-            case "present": {
-                const current = ledger.events[op.key];
-                if (!current) return;
-                if (!entry.confirmed) current.confirmed = true;
-                if (result.found) this.remember(current, result.found);
-                if (result.series !== undefined) current.series = result.series;
-                return;
-            }
-            case "canceled":
-                // Remembered, so the [-] can come off if the event returns; retried if the mark didn't land
-                if (!after.includes(result.marked)) {
-                    report.skipped.push(`${where(entry.date, entry.title)}: couldn't mark it canceled, will try again next run`);
-                    return;
-                }
-                report.canceled.push(where(entry.date, entry.title));
-                ledger.canceled[op.key] = entry;
-                delete ledger.events[op.key];
-                return;
-            case "restored":
-                if (!result.quiet) report.restored.push(where(entry.date, entry.title));
-                ledger.events[op.key] = { ...entry, confirmed: true };
-                delete ledger.canceled[op.key];
-                return;
-            case "taken":
-                delete ledger.events[op.key];
-                return;
-            case "missing":
-                // Only a line the sync had seen in place counts as one you deleted; a moved or
-                // retimed event writes itself afresh instead
-                if (entry.confirmed && (op.kind === "verify" || op.kind === "cancel")) {
-                    ledger.dismissed[op.key] = entry.date;
-                    report.yours.push(`${where(entry.date, entry.title)} — you deleted this one, so it won't come back`);
-                }
-                // A moved event's new line has already been recorded under the same key
-                if (ledger.events[op.key]?.date === entry.date) delete ledger.events[op.key];
-                if (op.handover) delete ledger.events[op.handover];
-                // A canceled line you deleted: the returning event is written afresh next run
-                if (op.kind === "restore") delete ledger.canceled[op.key];
-                return;
-            case "yours":
-                report.yours.push(op.kind === "cancel"
-                    ? `${where(entry.date, entry.title)} — canceled in your calendar; your line is marked otherwise, so it's left as it is`
-                    : `${where(entry.date, entry.title)} — changed in your calendar, but this line is yours`);
-                if (op.kind === "cancel") delete ledger.events[op.key];
-                // A split series' line that's yours: the new part's event owns it now
-                if (op.handover) { ledger.events[op.key] = { ...entry }; delete ledger.events[op.handover]; }
-                return;
-            case "removed":
-                report.removed.push(where(entry.date, entry.title));
-                return;
-            case "forwarded":
-                report.forwarded.push(`${entry.date} → ${event.date} ${entry.title}`);
-                return;
         }
+        return { lines: out, outcome };
+    }
+
+    // An event moved further ahead than the range: its line goes, with what's under it, and comes back
+    // when its day is in range. One with time entries under it stays as it is, since they're time worked
+    // there. A line marked another way stays. `outcome`: removed, or present (nothing to remove).
+    dropIn(lines, op) {
+        let out = [...lines], outcome = "present";
+        for (const at of this.blocksWith(lines, op.lid).reverse()) {
+            if (this.staysBehind(lines, at, this.parseBlock(lines.slice(at.from, at.to + 1)))) continue;
+            out.splice(at.from, at.to - at.from + 1);
+            outcome = "removed";
+        }
+        return { lines: out, outcome };
+    }
+
+    // A gone event's lines marked [-], kept as a record of what was planned, whatever is under them; a
+    // line marked another way stays. `outcome`: canceled, or present (nothing to mark).
+    cancelIn(lines, op) {
+        const out = [...lines];
+        let outcome = "present";
+        for (const at of this.blocksWith(out, op.lid)) {
+            const line = out[at.from].replace(/^([-*+]\s+)\[<\]/, "$1[-]");
+            if (line !== out[at.from]) { out[at.from] = line; outcome = "canceled"; }
+        }
+        return { lines: out, outcome };
+    }
+
+    // What one operation did, into the report; for an event, whether its line is in place (ctx.placed),
+    // and its log's times
+    async record(date, result, after, ctx, report) {
+        const { op, outcome } = result;
+        const at = `${date} ${op.title}`;
+        if (op.kind === "leave") {
+            if (outcome === "moved") report.moved.push(`${date} → ${op.to} ${op.title}`);
+            else if (outcome === "forwarded") report.forwarded.push(`${date} → ${op.to} ${op.title}`);
+            return;
+        }
+        if (op.kind === "cancel") {
+            if (outcome === "canceled") { report.canceled.push(at); ctx.canceled?.add(op.lid); }
+            return;
+        }
+        if (op.kind === "drop") {
+            if (outcome === "removed") report.removed.push(`${at} (moved past the sync range)`);
+            return;
+        }
+        if (outcome === "left") return;
+        const found = this.blocksWith(after, result.lid);
+        if (!found.length) {
+            report.skipped.push(`${at}: the line didn't land, will try again next run`);
+            return;
+        }
+        ctx.placed.set(op.key, result.lid);
+        if (result.wrote) ctx.wrote?.set(op.key, result.wrote);
+        // Said once every line is in place, when its log has its times (tell)
+        const head = this.parseHead(after[found[0].from], [op.title]);
+        ctx.done?.push({ date, at, op, result, log: head?.notes[0] ?? null });
+    }
+
+    // What an event's line came to, into the report, once its log (if one line alone links it) has the
+    // line's times. A log more than one event line links (one kept across a series' meetings, say)
+    // keeps its own: which line's times it should have would be a guess.
+    async tell(done, report) {
+        const links = new Map();
+        for (const d of done) if (d.log) links.set(d.log, (links.get(d.log) ?? 0) + 1);
+        for (const { date, at, op, result, log } of done) {
+            const { outcome } = result;
+            const changed = [...(result.changed ?? [])];
+            if (log && links.get(log) === 1 && await this.fillLog(log, op.lines, date)) changed.push("log times updated");
+            const said = changed.length ? `${at} (${changed.join("; ")})` : at;
+            if (outcome === "added") report.added.push(said);
+            else if (outcome === "adopted") report.adopted.push(said);
+            else if (outcome === "restored") report.restored.push(said);
+            else if (outcome === "merged") report.merged.push(result.differs ? `${said} — the copies had different links, so the first one's are kept` : said);
+            // A line written from its line on another day is said once, where it moved from (leaveIn)
+            else if (outcome === "updated" || (outcome === "present" && changed.length)) report.updated.push(said);
+            if (result.differs && outcome !== "merged") report.merged.push(`${at} — its line on another day had different links, so this one's are kept`);
+        }
+    }
+
+    // `want`, or the next of `key`'s IDs, when another line of the note that isn't an event line
+    // already ends in it
+    freeLid(lines, key, want) {
+        if (!lines.some((l) => l.includes(want))) return want;
+        const taken = new Set(lines.filter((l) => !this.head(l)).map((l) => this.lidOf(l)).filter(Boolean));
+        if (!taken.has(want)) return want;
+        return this.lineIds(key).find((id) => !taken.has(id)) ?? want;
+    }
+
+    // MARK: reading an event line
+
+    // The sync's own boxes: [<], and [-] for an event gone from its calendar. Any other is yours.
+    ours(box) {
+        return box === "<" || box === "-";
+    }
+
+    // Whether a moved event's line stays behind, forwarded: time entries are under it, or lines of
+    // yours below a blank line under it, which would be left under another line
+    staysBehind(lines, at, block) {
+        return block.entries || lines.slice(at.from + 1, at.to + 1).some((l) => CalendarSync.ENTRYISH.test(l)) || this.detached(lines, at);
+    }
+
+    // The blocks of the event lines whose ID is `lid`, in order: at the left edge, with the ID at the
+    // end or links or words typed after it
+    blocksWith(lines, lid) {
+        const out = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.includes(lid) || !this.topEvent(line) || this.lidIn(line) !== lid) continue;
+            const at = this.blockAt(lines, i);
+            out.push(at);
+            i = at.to;
+        }
+        return out;
+    }
+
+    // A line with no ID an event takes over (lines from before IDs): one with the start and title the
+    // sync writes, exactly; else a log's line with no time and the event's title, when no other event
+    // that day has it (`day`: [{ start, title }]). At the left edge only: a nested line is a subtask. Not
+    // a line marked [-] (a gone event's line isn't another's to take), and not one with any ID: an
+    // event's, a task's, or a block link of yours.
+    adoptable(lines, eventLines, day = [], title = null) {
+        const wanted = this.head(eventLines[0]);
+        if (!wanted) return null;
+        let same = null, log = null;
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (!/^[-*+]\s+\[(?!-)/.test(l) || this.lidIn(l)) continue;
+            if (l.includes("\t")) {
+                if (same !== null) continue;
+                const head = this.head(l);
+                // The event's title at the start, then anything of yours, as on every line (splitTitle); not a
+                // line whose title is another of that time's events'
+                const m = head && head.start === wanted.start && l.match(/\t(.*)$/);
+                if (m && this.splitTitle(this.bare(m[1]), [title ?? wanted.title]).title === (title ?? wanted.title) && !day.some((e) => e.start === head.start && e.title === head.title && head.title !== wanted.title)) same = i;
+            } else if (log === null && l.includes("[[") && this.logLine(l)?.shown === wanted.title) log = i;
+        }
+        if (same !== null) return this.blockAt(lines, same);
+        if (log !== null && !day.some((e) => e.title === wanted.title)) return this.blockAt(lines, log);
+        return null;
+    }
+
+    // An event line taken apart by whose part is whose (see the top): { box, start, title (the
+    // calendar's, as the line has it), tail (yours: everything after the title, as you wrote it, from the
+    // space before it, its ID left out), notes (its note links, as the sync writes them), free (an ℹ️ in
+    // your part), lid }, or null when it isn't one. `titles`: the titles the line may start with
+    // (splitTitle).
+    parseHead(line, titles = []) {
+        const lid = this.lidIn(line);
+        const text = lid ? String(line).replace(new RegExp(`\\s\\^${lid}(?=\\s|$)`, "i"), "") : String(line);
+        const m = text.match(/^\s*[-*+]\s+\[(.)\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
+        if (!m) return null;
+        const { title, tail } = this.splitTitle(m[3], titles);
+        return { box: m[1], start: m[2].toLowerCase(), title, tail, ...this.marksOf(tail), lid };
+    }
+
+    // Where the title ends in an event line's text after its tab: { title, tail }. When the text starts
+    // with one of `titles` (what the sync last wrote there, the event's own), followed by anything but a
+    // letter or digit (`Planning, bring laptop`; `Planning:`), everything after it is yours, exactly as
+    // typed. Otherwise your part starts at your first link or mark (FIRST_MARK),
+    // and the words before it are taken for the title. A title wrapped in a link to its log, from before
+    // OBS-57, reads as its title, and the log link goes last in your part, as the sync writes one.
+    splitTitle(text, titles = []) {
+        let body = String(text).trimEnd();
+        let log = "";
+        const wrapped = body.startsWith("[[") ? body.match(/^\[\[[^[\]]+\]\]/)?.[0] : null;
+        const parts = wrapped && CalendarSync.LOG_NAME.test(wrapped) ? wrapped.match(CalendarSync.LOG_LINK) : null;
+        if (parts) {
+            log = ` ${this.noteLink(wrapped)}`;
+            body = `${(parts[2] ?? parts[1]).trim()}${body.slice(wrapped.length)}`;
+        }
+        for (const t of titles) {
+            if (t && body.startsWith(t) && !/^[\p{L}\p{N}]/u.test(body.slice(t.length))) return { title: t, tail: body.slice(t.length) + log };
+        }
+        const at = body.search(CalendarSync.FIRST_MARK);
+        return at === -1 ? { title: body.trim(), tail: log } : { title: body.slice(0, at).trim(), tail: body.slice(at) + log };
+    }
+
+    // The note links and whether there's an ℹ️ in your part of a line
+    marksOf(tail) {
+        return { notes: [...String(tail).matchAll(CalendarSync.NOTE_LINKS)].map((m) => this.noteLink(m[0])), free: this.hasFree(tail) };
+    }
+
+    hasFree(tail) {
+        return /(?:^|\s)ℹ️?(?=\s|$)/u.test(String(tail));
+    }
+
+    // Your part of a line with every ℹ️ taken out
+    dropFree(tail) {
+        return String(tail).replace(/\s+ℹ️?(?=\s|$)/gu, "");
+    }
+
+    // Your part of a line with ℹ️ added at the start of the run of links and marks that ends it, after
+    // your last word: the time report reads ℹ️ only there (OBS-90), and on a line of links alone that's
+    // right after the title
+    addFree(tail) {
+        const text = String(tail);
+        let at = text.length;
+        for (let m; (m = text.slice(0, at).match(CalendarSync.RUN_END));) at = m.index;
+        return `${text.slice(0, at)} ${CalendarSync.FREE_MARK}${text.slice(at)}`;
+    }
+
+    // An event line's block taken apart: { head (parseHead, or a log's line with no time), groups: the
+    // lines under it but the end time, each with the lines nested under it, in order (a blank line goes
+    // with the group above it); end: { time, note (what follows the time: `: …`), line (as it was), under
+    // (lines nested under it) } or null; entries: whether time entries are under it }. `titles` and
+    // `endless` and `endAt` come from what this device remembers (recalled). The end time is the end
+    // time this device wrote there, on a line one tab in, alone or with a note after a colon, wherever it
+    // is among the lines under it (you may have typed a line above it); else the first line under a timed
+    // line, one tab in, holding a time alone or a time and a note. Under an all-day line, or one this
+    // device wrote with no end time, nothing is the sync's.
+    parseBlock(block, { titles = [], endless = false, endAt = null } = {}) {
+        let head = this.parseHead(block[0], titles);
+        if (!head) {
+            const log = this.logLine(block[0]);
+            if (log) head = { box: "<", start: null, title: log.shown, tail: log.tail, notes: [log.log], free: this.hasFree(log.tail), lid: null };
+        }
+        const groups = [];
+        let base = null;
+        for (const line of block.slice(1)) {
+            if (line.trim() === "") {
+                if (groups.length) groups[groups.length - 1].push(line);
+                else groups.push([line]);
+                continue;
+            }
+            const width = this.indentWidth(line);
+            if (base === null || width <= base) {
+                base ??= width;
+                groups.push([line]);
+            } else groups[groups.length - 1].push(line);
+        }
+        let end = null;
+        const first = groups.findIndex((g) => g[0].trim() !== "");
+        const timed = !!head?.start && head.start !== "all day" && !endless;
+        const endOf = (g) => (this.indentWidth(g[0]) === 4 ? g[0].match(CalendarSync.END_LINE) : null);
+        const timeOf = (m) => m[1].replace(/^\s*[-*+]\s+/, "").toLowerCase();
+        let at = timed && endAt ? groups.findIndex((g) => { const m = endOf(g); return m && timeOf(m) === endAt; }) : -1;
+        if (at === -1 && timed && first !== -1 && endOf(groups[first])) at = first;
+        if (at !== -1) {
+            const m = endOf(groups[at]);
+            const [line, ...under] = groups[at];
+            end = { time: timeOf(m), note: m[2] ?? "", line, under };
+            groups.splice(at, 1);
+        }
+        const entries = groups.some((g) => CalendarSync.ENTRY.test(g[0].match(/^\s+[-*+]\s+(.*)$/)?.[1]?.trim() ?? ""));
+        return { head, groups, end, entries };
+    }
+
+    // Your part of an event's line, from its copies in order: the first that has one. `differs` when
+    // another copy's is different.
+    partOf(sources) {
+        const norm = (t) => String(t ?? "").replace(/\s+/g, " ").trim();
+        const tail = sources.map((s) => s.head.tail ?? "").find((t) => norm(t)) ?? "";
+        return { tail, differs: sources.some((s) => norm(s.head.tail) && norm(s.head.tail) !== norm(tail)) };
+    }
+
+    // An event's block as the sync writes it: its line (`part`: the title and your part, or for a new
+    // line the event's own with a series' ⭕) with its ID last; the end time first under it, with the
+    // first note any copy had after its colon (another copy's different note goes under it as a line of
+    // its own); then what was under its copies, in order: a group under a later copy that's the same as
+    // one under an earlier copy is there once (two the same under one copy both stay). With no end time
+    // now (all day, or ending on a later day), an end line with a note stays as it was, and a bare one
+    // goes.
+    blockFor(eventLines, lid, part, sources) {
+        const first = eventLines[0];
+        const tab = first.indexOf("\t");
+        const tail = part.tail ?? "";
+        const box = (l) => l.replace(/^(\s*[-*+]\s+)\[<\]/, `$1[${part.box ?? "<"}]`);
+        const line = part.fresh ? `${first}${tail}` : box(`${first.slice(0, tab)}\t${part.title}${tail}`);
+        const groups = [], seen = new Set(), notes = [], noted = [], under = [];
+        const said = (n) => n.replace(/^\s*:?\s*/, "");
+        for (const s of sources) {
+            const mine = [];
+            for (const g of s.groups) if (!seen.has(g.join("\n"))) mine.push(g);
+            groups.push(...mine);
+            for (const g of mine) seen.add(g.join("\n"));
+            if (!s.end) continue;
+            for (const l of s.end.under) if (!under.includes(l)) under.push(l);
+            if (said(s.end.note) && !notes.some((n) => said(n) === said(s.end.note))) { notes.push(s.end.note); noted.push(s.end.line); }
+        }
+        const end = eventLines.length > 1
+            ? [eventLines[1] + (notes[0] ?? ""), ...notes.slice(1).map((n) => `\t- ${said(n)}`), ...under]
+            : [...noted, ...under];
+        return [`${line.trimEnd()} ^${lid}`, ...end, ...groups.flat()];
+    }
+
+    // Now, in ms (a test sets it)
+    now() {
+        return Date.now();
+    }
+
+    // Hands the app a turn once the sync has held it for SLICE_MS, so a long run never holds it up
+    // for more than that at a time
+    async breathe() {
+        if (performance.now() - (this.sliceAt ?? 0) < CalendarSync.SLICE_MS) return;
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+        this.sliceAt = performance.now();
     }
 
     // MARK: editing a note's first checklist
@@ -930,7 +1209,9 @@ export default class CalendarSync {
     // Where an event line sorts: all-day events first by title, then timed ones by time, then
     // event lines with no time (a log's line, see `timeless`), which nothing can order
     rank(line) {
-        const match = line.match(/^\s*[-*+]\s+\[[<-]\]\s+(?:(all day)|(\d{1,2}):(\d{2})\s?([ap]m))\t(.*)$/i);
+        // Most lines of a long note are neither: tell them cheaply
+        if (!line.includes("\t")) return line.includes("[<]") && this.timeless(line) ? [2, 0, ""] : null;
+        const match = this.bare(line).match(/^\s*[-*+]\s+\[[^\] ]\]\s+(?:(all day)|(\d{1,2}):(\d{2})\s?([ap]m))\t(.*)$/i);
         if (!match) return this.timeless(line) ? [2, 0, ""] : null;
         if (match[1]) return [0, 0, match[5].toLowerCase()];
         let hour = Number(match[2]) % 12;
@@ -947,6 +1228,12 @@ export default class CalendarSync {
     }
 
     insert(lines, block) {
+        // A note just made from a template that Templater hasn't run yet holds raw code (`<%`), which
+        // becomes its properties: above it, the events would end up above them (Schedule.placeInTopList)
+        if (/^\s*<%/.test(lines.join("\n"))) {
+            const body = lines.join("\n").replace(/\s+$/, "");
+            return `${body}\n${block.join("\n")}\n`;
+        }
         const rank = this.rank(block[0]);
         const list = this.checklist(lines);
         if (!list) {
@@ -969,15 +1256,19 @@ export default class CalendarSync {
             at = last + 1;
             i = last;
         }
+        at = this.pastDetached(lines, at);
         return [...lines.slice(0, at), ...block, ...lines.slice(at)].join("\n");
     }
 
     // Marks the block forwarded, links it to the day the event moved to, and drops it below the
-    // day's other events (the one place a daily note carries a date link at the front of a line)
+    // day's other events (the one place a daily note carries a date link at the front of a line). It
+    // gives up its ID: the event's line is on the other day now, and a [>] line with an ID would read
+    // as a sent task's.
     forward(lines, block, date) {
-        const alias = moment(date, "YYYY-MM-DD", true).format("M/D");
         const moved = lines.slice(block.from, block.to + 1);
-        moved[0] = moved[0].replace(/^(\s*[-*+]\s+)\[<\]\s+/, `$1[>] [[${date}|${alias}]] `);
+        const lid = this.lidIn(moved[0]);
+        const bare = lid ? this.withLid(moved[0], null).replace(new RegExp(`\\s\\^${lid}(?=\\s|$)`, "i"), "") : moved[0];
+        moved[0] = bare.replace(/^(\s*[-*+]\s+)\[[^\]]\]\s+/, `$1[>] ${this.dayLink(date)} `);
         const without = [...lines.slice(0, block.from), ...lines.slice(block.to + 1)];
         const list = this.checklist(without);
         let at = list ? list.first : this.afterFrontmatter(without);
@@ -989,43 +1280,36 @@ export default class CalendarSync {
                 at = last + 1;
             }
         }
+        at = this.pastDetached(without, at);
         return [...without.slice(0, at), ...moved, ...without.slice(at)].join("\n");
     }
 
-    // An entry's block: its exact first line, else an event line with the same start whose title
-    // reads the same (so a line with its log linked, either way, still matches), else, for an insert
-    // only (`timeless`), a log's line with no time and the same title. Never a claimed line.
-    findBlock(lines, entry, claimed = new Map(), timeless = false) {
-        const wanted = this.head(entry.lines[0]);
-        // Claims count how many lines of that exact text are already taken, so two events that
-        // render the same line each get their own
-        const pick = (test) => {
-            const skip = new Map(claimed);
-            for (let i = 0; i < lines.length; i++) {
-                if (!test(lines[i])) continue;
-                const left = skip.get(lines[i]) ?? 0;
-                if (left > 0) { skip.set(lines[i], left - 1); continue; }
-                return i;
-            }
-            return -1;
-        };
-        let from = pick((l) => l === entry.lines[0]);
-        if (from === -1 && wanted) {
-            const sameStart = (l) => this.head(l)?.start === wanted.start;
-            from = pick((l) => sameStart(l) && this.head(l).title === wanted.title);
-            if (from === -1) {
-                // A prefix match only when one line could possibly be meant, so "Standup"
-                // never adopts "Standup - Design review"
-                const near = lines.filter((l) => sameStart(l) && this.head(l).title.startsWith(wanted.title));
-                if (new Set(near).size === 1) from = pick((l) => l === near[0]);
-            }
-            // Only a line at the top level: one nested under a task belongs to that task
-            if (from === -1 && timeless) from = pick((l) => /^[-*+]/.test(l) && this.logLine(l)?.shown === wanted.title);
-        }
-        if (from === -1) return null;
+    // The block a line starts: it and the indented lines under it, and those below a blank line that
+    // are still indented (the time report reads them as the line's too), so they move with it
+    blockAt(lines, from) {
         let to = from;
-        while (to + 1 < lines.length && /^\s/.test(lines[to + 1]) && lines[to + 1].trim() !== "") to++;
-        return { from, to };
+        for (;;) {
+            while (to + 1 < lines.length && /^\s/.test(lines[to + 1]) && lines[to + 1].trim() !== "") to++;
+            const past = this.pastDetached(lines, to + 1);
+            if (past === to + 1) return { from, to };
+            to = past - 1;
+        }
+    }
+
+    // Where an insert at `at` goes so as not to come between a block and its lines below a blank line:
+    // past blank lines followed by indented ones, and those lines
+    pastDetached(lines, at) {
+        let k = at;
+        while (k < lines.length && lines[k].trim() === "") k++;
+        if (k === at || k >= lines.length || !/^\s+\S/.test(lines[k])) return at;
+        while (k < lines.length && /^\s+\S/.test(lines[k])) k++;
+        return this.pastDetached(lines, k);
+    }
+
+    // An event line where the sync writes them: at the left edge. A line in that shape nested under
+    // another is a subtask, never an event's (nesting decides what a line is)
+    topEvent(line) {
+        return /^[-*+]\s/.test(line) && !!this.head(line);
     }
 
     // Whether indented lines follow a block after a blank line: the block would end at the blank,
@@ -1040,7 +1324,7 @@ export default class CalendarSync {
     // marker counts: marking a line [!] or [x] annotates it, it doesn't delete it. ⭕ links, the
     // free mark and the log link after the title aren't part of it.
     head(line) {
-        const match = line.match(/^\s*[-*+]\s+\[.\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
+        const match = this.bare(line).match(/^\s*[-*+]\s+\[.\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
         if (!match) return null;
         return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2], true).rest) };
     }
@@ -1052,13 +1336,15 @@ export default class CalendarSync {
     }
 
     // A timeless line that links a log, at the end or (from before OBS-57) around its title, taken
-    // apart like eventHead: { log, shown, projects, free, nonbillable }. Null for any other line.
+    // apart: { log, shown, projects, free, nonbillable, tail (yours: everything after the title, the log
+    // link last) }. Null for any other line.
     logLine(line) {
         if (!this.timeless(line)) return null;
-        const { rest, projects, free, nonbillable, log } = this.splitTail(line.replace(/^\s*[-*+]\s+\[<\]\s+/, ""), true);
-        if (log) return { log: this.noteLink(log), shown: rest, projects, free, nonbillable };
+        const text = this.bare(line).replace(/^\s*[-*+]\s+\[<\]\s+/, "").trimEnd();
+        const { rest, projects, free, nonbillable, log } = this.splitTail(text, true);
+        if (log) return { log: this.noteLink(log), shown: rest, projects, free, nonbillable, tail: text.slice(rest.length) };
         const wrapped = CalendarSync.LOG_NAME.test(rest) && rest.match(CalendarSync.LOG_LINK);
-        return wrapped ? { log: this.noteLink(rest), shown: (wrapped[2] ?? wrapped[1]).trim(), projects, free, nonbillable } : null;
+        return wrapped ? { log: this.noteLink(rest), shown: (wrapped[2] ?? wrapped[1]).trim(), projects, free, nonbillable, tail: `${text.slice(rest.length)} ${this.noteLink(rest)}` } : null;
     }
 
     // MARK: what you add to an event line
@@ -1080,7 +1366,7 @@ export default class CalendarSync {
     // a mark keeps it. With `note`, a note link at the end comes off too, as `log` (the link as
     // written); without it, it stays in `rest`, which is how CalNav reads a line.
     splitTail(text, note = false) {
-        let rest = text.trimEnd();
+        let rest = this.bare(text).trimEnd();
         const projects = [];
         let free = false, nonbillable = false, log = null;
         for (;;) {
@@ -1104,114 +1390,6 @@ export default class CalendarSync {
         return target ? `[[${target}|${CalendarSync.NOTE_MARK}]]` : null;
     }
 
-    // Whether one of the sync's own lines carries the free mark
-    isFree(line) {
-        return this.splitTail(line.slice(line.indexOf("\t") + 1)).free;
-    }
-
-    // One of the sync's own lines, with the free mark or without it
-    markLine(line, free) {
-        const bare = line.replace(CalendarSync.FREE, "");
-        return free ? `${bare} ${CalendarSync.FREE_MARK}` : bare;
-    }
-
-    // An event line in the sync's own shape, taken apart: `- [<] <start>⇥<title> <ℹ️> <🆓> <⭕ links> <log link>`,
-    // with the log link before the ⭕ links as it was written before OBS-90, or from before OBS-57
-    // with the title wrapped in the log link. `shown` is the title as it
-    // reads, `log` the log link as the sync writes it (`[[log|⋯]]`, whichever form the line has),
-    // `free` whether it carries the mark, `nonbillable` whether you've put 🆓 on it, `trail` any
-    // whitespace at the end of the line. Null otherwise.
-    eventHead(line) {
-        const match = line.match(/^- \[<\] ([^\t]+)\t(.*?)(\s*)$/);
-        if (!match) return null;
-        const { rest, projects, free, nonbillable, log } = this.splitTail(match[2], true);
-        const wrapped = !log && CalendarSync.LOG_NAME.test(rest) && rest.match(CalendarSync.LOG_LINK);
-        return {
-            start: match[1], shown: wrapped ? (wrapped[2] ?? wrapped[1]).trim() : rest,
-            log: this.noteLink(log ?? (wrapped ? rest : null)), projects, free, nonbillable, trail: match[3],
-        };
-    }
-
-    // What you've added to a block the sync wrote as `synced`, if that's all you've changed: ⭕
-    // links, a 🆓, a link to its log (at the end, or around the title from before OBS-57), a note
-    // after the end time's colon, time entries
-    // (and the lines under them) beside or in place of the end time. `children` keeps the order
-    // under the event line. Null if the block has any other change, which makes it yours (the free
-    // mark is the sync's: taking it off, or adding it, counts as a change).
-    annotations(block, synced) {
-        const head = this.eventHead(block[0]);
-        if (!head || this.markLine(`- [<] ${head.start}\t${head.shown}`, head.free) !== synced[0]) return null;
-        const children = [];
-        let hasEnd = false, endNote = false;
-        let entryWidth = null;   // the indent of the time entry the next lines may sit under
-        for (const line of block.slice(1)) {
-            const width = this.indentWidth(line);
-            if (entryWidth !== null && width > entryWidth) { children[children.length - 1].lines.push(line); continue; }
-            entryWidth = null;
-            const end = synced.length > 1 && !hasEnd && line.match(CalendarSync.END_LINE);
-            if (end && end[1] === synced[1]) {
-                hasEnd = true;
-                endNote = !!end[2];
-                children.push({ kind: "end", suffix: end[2] ?? "" });
-                continue;
-            }
-            const bullet = line.match(/^\s+[-*+]\s+(.*)$/);
-            if (!bullet || !CalendarSync.ENTRY.test(bullet[1].trim())) return null;
-            entryWidth = width;
-            children.push({ kind: "entry", lines: [line] });
-        }
-        return { ...head, children, hasEnd, endNote, endExpected: synced.length > 1, entries: children.some((c) => c.kind === "entry") };
-    }
-
-    // The sync's lines for an event with your additions put back: the new start and title, the
-    // free mark as the sync's lines have it, your 🆓, the ⭕ links, the log link (`[[log|⋯]]`,
-    // whichever form it was in) last, as every note link ends its line (OBS-90), and the children in
-    // their order with the end time updated and its note kept. A rename changes only the title; the log keeps its name. Given only { projects,
-    // log, nonbillable } (a moved event, or a series), the links go on the sync's lines as they
-    // are. Null if the event has no end line any more (all day now) for a noted one to move to.
-    decorate(lines, ann) {
-        const lead = lines[0].slice(0, lines[0].indexOf("\t"));
-        const { rest: title, free } = this.splitTail(lines[0].slice(lines[0].indexOf("\t") + 1));
-        const marks = [...(free ? [CalendarSync.FREE_MARK] : []), ...(ann.nonbillable ? [CalendarSync.NONBILLABLE_MARK] : [])];
-        const log = ann.log ? [this.noteLink(ann.log)] : [];
-        const first = `${lead}\t${[title, ...marks, ...ann.projects, ...log].join(" ")}${ann.trail ?? ""}`;
-        const end = lines.slice(1);
-        if (!ann.children) return [first, ...end];
-        const out = [first];
-        if (!ann.endExpected) out.push(...end);   // it was an all-day event, with no end time to replace
-        for (const child of ann.children) {
-            if (child.kind !== "end") { out.push(...child.lines); continue; }
-            if (child.suffix && !end.length) return null;
-            out.push(...end.map((l, i) => (i === 0 ? l + child.suffix : l)));
-        }
-        return out;
-    }
-
-    // The ⭕ links a series mapping gives a line that has `projects` now, or null to leave them.
-    // `applied` is the mapping the line last got. A line gets a mapping once, so a ⭕ you take off
-    // stays off, and a changed mapping swaps only a link the sync put there.
-    seriesLinks(projects, applied, series) {
-        if (!series || applied === series.key) return null;
-        if (applied === undefined) return projects.length ? null : series.links;
-        return projects.join(" ") === applied ? series.links : null;
-    }
-
-    // What to remember about a series mapping for a line, or undefined to leave the ledger as is:
-    // its key when the sync just wrote `links`, or "!" + key when the line already had those links
-    // from you, which the sync then never adds back or swaps
-    seriesApplied(projects, applied, links, series) {
-        if (!series) return undefined;
-        if (links) return series.key;
-        return applied === undefined && projects.join(" ") === series.key ? `!${series.key}` : undefined;
-    }
-
-    // The links a ledger entry keeps, so a moved event can take them along
-    remember(entry, found) {
-        if (found.projects?.length) entry.projects = found.projects; else delete entry.projects;
-        if (found.log) entry.log = found.log; else delete entry.log;
-        if (found.nonbillable) entry.nonbillable = true; else delete entry.nonbillable;
-    }
-
     // Tabs count as four spaces
     indentWidth(line) {
         let width = 0;
@@ -1225,9 +1403,10 @@ export default class CalendarSync {
     }
 
     // A newline or tab in a title would break the line format, and nothing would match it again
-    // A title ending in ℹ️ or 🆓 would read as the marks, and the line would never match again
+    // A title ending in ℹ️ or 🆓 would read as the marks, or in ` ^v2` as a block ID, and the line
+    // would never read the same again
     title(event) {
-        return (event.title || "").replace(/\s+/g, " ").replace(/(?:\s+(?:🆓|ℹ)\uFE0F?)+$/u, "").trim() || "(untitled)";
+        return (event.title || "").replace(/\s+/g, " ").replace(/(?:\s+(?:(?:🆓|ℹ)\uFE0F?|\^[A-Za-z0-9-]+))+$/u, "").trim() || "(untitled)";
     }
 
     // A timed event the calendar shows as free gets the mark; an events file from before the
@@ -1236,6 +1415,15 @@ export default class CalendarSync {
     // reads as one span: otherwise its end's clock time would read as a span on the first day
     // (OBS-24), so it's listed as an event with no end time instead.
     lines(event) {
+        // Worked out once a run for each event: moment's formatting is the slow part
+        const memo = (this.linesMemo ??= new WeakMap());
+        if (typeof event === "object" && event && memo.has(event)) return [...memo.get(event)];
+        const out = this.renderLines(event);
+        if (typeof event === "object" && event) memo.set(event, out);
+        return [...out];
+    }
+
+    renderLines(event) {
         const title = this.title(event);
         if (event.allDay) return [`- [<] All day\t${title}`];
         const mark = event.availability === "free" ? ` ${CalendarSync.FREE_MARK}` : "";
@@ -1247,10 +1435,6 @@ export default class CalendarSync {
 
     time(iso) {
         return moment(iso).format("h:mma");
-    }
-
-    claim(claimed, line) {
-        claimed.set(line, (claimed.get(line) ?? 0) + 1);
     }
 
     same(a, b) {
@@ -1304,16 +1488,28 @@ export default class CalendarSync {
 
     // MARK: notes, files, folds
 
+    // A day's note, named and placed as Plainday names daily notes (Schedule.dailyNotePath: the Daily
+    // notes plugin's folder and format, or Notebook Navigator's, OBS-283), so a vault whose daily notes
+    // aren't named YYYY-MM-DD gets its events in its own notes (OBS-124)
     dailyPath(date) {
-        const { folder } = plainday.Schedule.dailyOpts();
-        return `${folder ? folder + "/" : ""}${date}.md`;
+        return plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true));
     }
 
     async createDaily(date, path) {
-        const { folder } = plainday.Schedule.dailyOpts();
+        const folder = path.split("/").slice(0, -1).join("/");
         if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
         const alias = moment(date, "YYYY-MM-DD", true).format("M/D/YY dddd");
         return app.vault.create(path, `---\naliases: ${alias}\n---\n`);
+    }
+
+    // The link a forwarded line carries to the day its event moved to: the note's name (its path when
+    // the name alone isn't enough), labelled M/D
+    dayLink(date) {
+        const path = this.dailyPath(date);
+        const name = path.split("/").pop().replace(/\.md$/, "");
+        const target = app.metadataCache?.getFirstLinkpathDest?.(name, "")?.path;
+        const text = !target || target === path ? name : path.replace(/\.md$/, "");
+        return `[[${text}|${moment(date, "YYYY-MM-DD", true).format("M/D")}]]`;
     }
 
     currentFolds(file, text) {
@@ -1323,70 +1519,66 @@ export default class CalendarSync {
         return view?.currentMode.getFoldInfo?.()?.folds ?? [];
     }
 
-    // Read through the adapter, which doesn't need Obsidian to have indexed the file yet
-    async readJson(path) {
-        if (!(await app.vault.adapter.exists(path))) return null;
-        const text = await app.vault.adapter.read(path);
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            throw new Error(`${path} isn't valid JSON`);
-        }
-    }
-
-    async writeJson(path, value) {
-        await app.vault.adapter.write(path, JSON.stringify(value, null, 2) + "\n");
-    }
-
-    // Read and write in one step, so a change you make while the sync runs isn't lost
-    async updateNote(path, transform) {
-        const file = app.vault.getFileByPath(path);
-        if (!file) { await app.vault.create(path, transform(null)); return; }
-        await app.vault.process(file, (text) => transform(text));
-    }
-
-
     // MARK: the report
 
-    async writeReport(report, feed) {
-        const when = moment(feed.generatedAt).format("YYYY-MM-DD h:mma");
-        const lines = ["## Last run", "", `Calendar read ${when}, covering ${feed.windowStart} to ${feed.windowEnd}.`, ""];
-        const section = (title, items) => {
-            if (!items.length) return;
-            lines.push(`**${title}**`, "");
-            for (const item of items) lines.push(`- ${item}`);
-            lines.push("");
+    newReport() {
+        return {
+            added: [], adopted: [], updated: [], restored: [], moved: [], forwarded: [], canceled: [], removed: [], merged: [], skipped: [],
+            // Calendars this run couldn't sync: [{ id, name, problem }]; events the reader couldn't read:
+            // [{ calendarId, calendar, uid, title }]
+            notSynced: [], failedEvents: [],
         };
-        section("Added", report.added);
-        section("Adopted lines already in your notes", report.adopted);
-        section("Updated", report.updated);
-        section("Project links added (recurring events)", report.linked);
-        section("Restored (back in your calendar)", report.restored);
-        section("Removed", report.removed);
-        section("Canceled (marked [-])", report.canceled);
-        section("Forwarded", report.forwarded);
-        section("Left for you", report.yours);
-        section(`Held back (more than ${CalendarSync.MAX_REMOVALS} removals in one run)`, report.held);
-        section("Skipped", report.skipped);
-        if (lines.length === 4) lines.push("No changes.", "");
-        if (!app.vault.getFileByPath(CalendarSync.NOTE)) return;
-        const body = lines.join("\n").trimEnd() + "\n";
-        await this.updateNote(CalendarSync.NOTE, (text) => this.replaceSection(text, "## Last run", body));
     }
 
-    // The error log's calendar section (OBS-218): changes held back and lines it couldn't write, which
-    // want you; the Last run report in the Calendar Sync note has the detail
+    // The error log's calendar section (OBS-218): a calendar whose link stopped working, or that
+    // couldn't be synced this time, by its name; an event the reader couldn't read, by its title and
+    // calendar, so you can find it; and lines it couldn't write, at their daily note. Each line names
+    // the device it's about, since a link is on one device and each device reads for itself: a run
+    // writes this device's lines and keeps the other devices' as they are. The log's own rule toasts
+    // only what's new, so a calendar that keeps failing says so once. Never a link: a calendar is named.
     async logProblems(report) {
         const log = plainday.ErrorLog;
         if (!log) return;
         try {
-            const name = CalendarSync.NOTE.split("/").pop().replace(/\.md$/, "");
-            const at = { link: `[[${name}]]`, name };
-            const groups = log.group([...report.held.map(() => ({ kind: "Held back changes", ...at })), ...report.skipped.map(() => ({ kind: "Skipped lines", ...at }))]);
-            log.toast("Calendar sync", await log.write("Calendar sync", groups, { create: !app.isMobile }));
+            const on = ` (on ${this.deviceName()})`;
+            const items = [];
+            const mine = (kind, link, name) => items.push({ kind, link: `${link}${on}`, name });
+            for (const c of report.notSynced) mine(c.problem === "dead" ? "Link stopped working" : "Calendar not synced", c.name, c.name);
+            for (const e of report.failedEvents) {
+                const name = `${e.title} (${e.calendar})`;
+                mine("Event skipped", name, name);
+            }
+            for (const k of report.skipped) {
+                const date = String(k).slice(0, 10);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+                const name = this.dailyPath(date).split("/").pop().replace(/\.md$/, "");
+                mine("Skipped lines", `[[${name}]]`, name);
+            }
+            // The other devices' lines, as the log has them
+            const file = app.vault.getFileByPath(log.path());
+            const had = file ? log.sections(await app.vault.read(file)).get("Calendar sync")?.lines ?? new Map() : new Map();
+            for (const [key, count] of had) {
+                const cut = key.indexOf(" · ");
+                const kind = key.slice(0, cut), link = key.slice(cut + 3);
+                const device = link.match(/ \(on ([^()]+)\)$/);
+                if (!device || ` (on ${device[1]})` === on) continue;
+                for (let i = 0; i < count; i++) items.push({ kind, link, name: link });
+            }
+            // The log is made only when there's something to put in it, and only on a desktop
+            log.toast("Calendar sync", await log.write("Calendar sync", log.group(items), { create: !app.isMobile && items.length > 0 }));
         } catch (e) {
             console.error("CalendarSync: couldn't update the error log", e);
         }
+    }
+
+    // What this device is called in the error log, until OBS-276 lets you name it
+    deviceName() {
+        if (Platform?.isIosApp) return Platform.isTablet ? "iPad" : "iPhone";
+        if (Platform?.isAndroidApp) return Platform.isTablet ? "Android tablet" : "Android phone";
+        if (Platform?.isMacOS) return "Mac";
+        if (Platform?.isWin) return "Windows";
+        if (Platform?.isLinux) return "Linux";
+        return "this device";
     }
 
     summary(report) {
@@ -1394,15 +1586,19 @@ export default class CalendarSync {
             report.added.length && `${report.added.length} added`,
             report.adopted.length && `${report.adopted.length} adopted`,
             report.updated.length && `${report.updated.length} updated`,
-            report.linked.length && `${report.linked.length} linked`,
             report.restored.length && `${report.restored.length} restored`,
-            report.removed.length && `${report.removed.length} removed`,
-            report.canceled.length && `${report.canceled.length} canceled`,
+            report.moved.length && `${report.moved.length} moved`,
             report.forwarded.length && `${report.forwarded.length} forwarded`,
-            report.yours.length && `${report.yours.length} left for you`,
-            report.held.length && `${report.held.length} held back`,
+            report.canceled.length && `${report.canceled.length} canceled`,
+            report.removed.length && `${report.removed.length} removed`,
+            report.merged.length && `${report.merged.length} doubled line${report.merged.length === 1 ? "" : "s"} merged`,
             report.skipped.length && `${report.skipped.length} skipped`,
         ].filter(Boolean);
-        return counts.length ? `Calendar sync: ${counts.join(", ")}` : "Calendar sync: nothing to change";
+        const none = report.notSynced.length > 0 && report.notSynced.length === report.calendarCount;
+        const head = none ? "Calendar sync: nothing synced" : counts.length ? `Calendar sync: ${counts.join(", ")}` : "Calendar sync: nothing to change";
+        const notes = [];
+        if (report.notSynced.length) notes.push(`Not synced: ${report.notSynced.map((c) => `${c.name} (${CalendarSync.PROBLEMS[c.problem] ?? "couldn't be read"})`).join(", ")}`);
+        if (report.failedEvents.length) notes.push(`${report.failedEvents.length} event${report.failedEvents.length === 1 ? "" : "s"} skipped, which the calendar sync can't read: see the error log`);
+        return [head, ...notes].join(". ");
     }
 }

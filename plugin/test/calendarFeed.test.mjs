@@ -145,8 +145,10 @@ for (const day of ["2026-03-05", "2026-11-12"]) {
         assert.deepEqual(plain(by("Catalog shoot")), {
             key: "catalog-shoot@example.com", id: "catalog-shoot@example.com", calendarId: "cal-studio", calendar: "Studio", account: "Google",
             title: "Catalog shoot", date: d(4), start: `${d(4)}T00:00:00${offset(4, 0)}`, end: `${d(5)}T23:59:59${offset(5, 23)}`,
-            endsSameDay: false, allDay: true, recurring: false, status: "confirmed", availability: "free",
+            endsSameDay: false, allDay: true, recurring: false, status: "confirmed", availability: "free", modified: null,
         });
+        // An event's LAST-MODIFIED, which the sync compares across reads (OBS-275)
+        assert.equal(by("Kestrel standup").modified, Date.UTC(2026, 0, 1, 12));
         // In March, 1am on day 3 is the hour before the clocks change
         assert.equal(by("Late launch").end, `${d(3)}T01:00:00${offset(3, 1)}`);
         assert.equal(by("Late launch").endsSameDay, false);
@@ -441,7 +443,7 @@ test("the events file: every calendar's events, sorted, in the shape the Mac's f
     const starts = file.events.map((e) => Date.parse(e.start));
     assert.deepEqual(starts, [...starts].sort((a, b) => a - b));
     assert.equal(file.events.length, reads.studio.events.length + reads.home.events.length + reads.library.events.length);
-    assert.deepEqual(plain(Object.keys(file.events[0]).sort()), ["account", "allDay", "calendar", "calendarId", "date", "end", "endsSameDay", "id", "key", "recurring", "start", "status", "title", "availability"].sort());
+    assert.deepEqual(plain(Object.keys(file.events[0]).sort()), ["account", "allDay", "calendar", "calendarId", "date", "end", "endsSameDay", "id", "key", "modified", "recurring", "start", "status", "title", "availability"].sort());
 });
 
 // A calendar whose events are given as lines, with New York's zone and any other zone lines

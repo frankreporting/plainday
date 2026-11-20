@@ -140,6 +140,8 @@ test("blockId: strict takes only an ID of six letters or digits, the one that's 
     assert.ok(TrailingLinks.blockId("- [ ] Book it ^K3x9M2", { strict: true }), "either case");
     assert.equal(TrailingLinks.blockId("- [ ] Book it ^3", { strict: true }), null, "a typed ^3 stays text");
     assert.equal(TrailingLinks.blockId("- [ ] Book it ^Ab3-x9", { strict: true }), null, "a hand-made ID with a dash");
+    assert.ok(TrailingLinks.blockId("- [<] 9:00am\tStandup [[Kestrel Outfitters 2026|⭕]] ^e-q7m2xk", { strict: true }), "an event line's ID (OBS-275)");
+    assert.equal(TrailingLinks.blockId("- [ ] Book it ^e-q7m2", { strict: true }), null, "only with six after the e-");
     assert.ok(TrailingLinks.blockId("- [ ] Book it ^Ab3-x9"), "but any ID ends the search for the run");
     const spaced = "- [ ] Book it ^k3x9m2  ";
     assert.deepEqual(plain(TrailingLinks.blockId(spaced, { strict: true })), { from: at(spaced, " ^"), to: spaced.length - 2 }, "spaces after it aren't part of it");
@@ -154,6 +156,11 @@ test("textEnd: where the text stops, ahead of the links and the ID (OBS-221)", (
     assert.equal(TrailingLinks.textEnd(id), at(id, " ^"), "an ID and no links");
     const event = "- [<] 10:00am\tKickoff call ℹ️ [[Kickoff call|⋯]] [[Kestrel|⭕]]";
     assert.equal(TrailingLinks.textEnd(event), at(event, " [[Kickoff"), "an event line");
+    // An event line ends in its event's ID since OBS-275: the text ends before the ⭕, the ℹ️ is text
+    const synced = "- [<] 9:30am\tKestrel standup ℹ️ [[Kestrel Outfitters 2026|⭕]] ^q7m2xk";
+    assert.equal(TrailingLinks.textEnd(synced), at(synced, " [[Kestrel"), "a synced event line, ⭕ and ID");
+    const bare = "- [<] 9:30am\tKestrel standup ^q7m2xk";
+    assert.equal(TrailingLinks.textEnd(bare), at(bare, " ^"), "a synced event line with only its ID");
 });
 
 test("textEnd: a line with nothing trailing has none, so End is left to Obsidian (OBS-221)", () => {

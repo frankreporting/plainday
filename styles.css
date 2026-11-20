@@ -32,6 +32,19 @@
     -webkit-text-security: disc;
 }
 
+/* Settings → Plainday → Calendars: the "not synced" icon in front of Sync calendars using this device's
+   description, at the size of the text */
+.plainday-not-synced {
+    display: inline-flex;
+    vertical-align: text-bottom;
+    margin-inline-end: var(--size-4-1);
+}
+
+.plainday-not-synced svg {
+    width: var(--icon-xs);
+    height: var(--icon-xs);
+}
+
 /* Settings → Plainday → Add calendar and Edit: "Where to find it", in the link color, so it reads as a link
    in a setting's muted description */
 .plainday-link {

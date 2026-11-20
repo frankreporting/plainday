@@ -220,6 +220,21 @@ test("check: a task whose lines agree has nothing to say", () => {
     assert.deepEqual(run([{ ...SRC, text: SRC.text.replace("[>]", "[x]") }, { ...OPEN, text: OPEN.text.replace("[ ]", "[x]") }]), [], "done, and the forward date names the day");
     assert.deepEqual(run([{ path: "days/2026-10-07.md", kind: "day", text: "- [>] Call [[Kestrel|⭕]] ^q1w2e3" }, { path: "days/2026-10-08.md", kind: "day", text: "- [/] Call [[Kestrel|⭕]] ^q1w2e3" }]), [], "only daily lines, no source");
 });
+test("an event line is never a task's, whatever ID it ends in: check, gather, setForwardIn and reopenIn pass it by (OBS-275)", async () => {
+    // An event line's ID is worked out from its event; one that met a task's ID by chance stays out of it
+    const EVENT = { path: "days/2026-10-08.md", kind: "day", text: "- [<] 9:30am\tKestrel standup [[Kestrel|⭕]] ^k3x9m2\n- [-] 10:00am\tOld call ^k3x9m2\n- [>] [[2026-10-09|10/9]] 11:00am\tMoved ^k3x9m2" };
+    assert.deepEqual(run([SRC, OPEN, { ...EVENT, path: "days/2026-10-07.md" }]), [], "no second open line, no twice, no forward to check");
+    assert.equal(TaskIds.isEvent("- [<] All day\tCatalog shoot ^abc123"), true);
+    assert.equal(TaskIds.isEvent("- [ ] 9:30 call with Ana ^abc123"), false, "a task that starts with a time, no tab");
+    const reopened = TaskIds.reopenIn("- [-] 10:00am\tOld call ^k3x9m2\n- [x] Book it ^k3x9m2", "k3x9m2");
+    assert.equal(reopened.text, "- [-] 10:00am\tOld call ^k3x9m2\n- [>] Book it ^k3x9m2");
+    const forwarded = TaskIds.setForwardIn("- [-] 10:00am\tOld call ^k3x9m2", "k3x9m2", "[[2026-10-09#^k3x9m2|10/9]]");
+    assert.equal(forwarded.changed, false);
+    const v = standIn({ notes: { "Reference/Planner/days/2026-09-17.md": "- [<] 9:30am\tKestrel standup ^k3x9m2\n- [ ] Book it [[Kestrel|⭕]] ^k3x9m2\n" } });
+    const lines = await v.plainday.TaskIds.gather("k3x9m2");
+    assert.deepEqual(plain(lines.map((l) => l.line)), [1]);
+});
+
 test("map and gatherMany: one pass for a command, notes in the system only, task IDs only (OBS-225)", async () => {
     const DAY = "Reference/Planner/days/2026-09-17.md", P = "Projects/Kestrel/Kestrel.md", NOTE = "Reference/People/Rafe.md", MINE = "Projects/Kestrel/Mine.md";
     const v = standIn({ notes: {

@@ -19,8 +19,10 @@ export default class Settings {
     //     `plainday-calendar-<this vault's key>-<its id>` (link(), storeLink()), so it's never in a note,
     //     Plainday's data file, the console or a notice. The vault's key, random and kept in this vault's
     //     own local storage (vaultKey()), keeps two vaults apart on a phone, where Obsidian keeps one
-    //     secret storage for every vault. Until OBS-275, nothing syncs from the list; Sync calendars reads
-    //     only the range from here.
+    //     secret storage for every vault. Sync calendars syncs every calendar that's on and has a link on
+    //     this device (OBS-275). `recurring` is recurring events' projects, [{ title, links }]: the ⭕ and
+    //     🗃️ links each series' upcoming lines get (recurringOf), null until Sync calendars has read the old
+    //     Calendar Sync note's `## Recurring events` once.
     //   - folders (OBS-283): where projects and areas live (`projects`), where Plainday puts a note it
     //     makes before the note has a project (`inbox`, Plainday's own: Obsidian's Default location for
     //     new notes decides where notes you make go), where finished projects go (`archive`), the
@@ -50,7 +52,7 @@ export default class Settings {
     // Settings.md and Config/Table Settings.md once (readOldNotes), saves what they held, and says so.
     // From then on the notes are never read again; they're left for you to delete. Likewise the
     // `Sync range:` line of Config/Calendar Sync.md, on a device whose settings have no calendars yet
-    // (saved before OBS-282); the note itself stays in use for the calendars until OBS-275. A data file that's
+    // (saved before OBS-282), and its `## Recurring events`, which Sync calendars reads once (OBS-275). A data file that's
     // there but doesn't read (a write cut off, a sync conflict) isn't "no settings": Plainday says so,
     // uses the defaults, and leaves the file alone until you change a setting or paste your settings.
     //
@@ -80,6 +82,8 @@ export default class Settings {
     // secret storage's names must be
     static ID = /^[a-z0-9]{1,32}$/;
     static SECRET_PREFIX = "plainday-calendar-";
+    // A recurring event's project or area link, as its lines get it: `[[Kestrel Outfitters 2026|⭕]]`
+    static SERIES_LINK = /^\[\[[^[\]|]+\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u;
     // An email address, as much as the reader needs: something@something, with no spaces, and no / or
     // : so no link is ever taken for one
     static ADDRESS = /^[^\s@,;<>()"/:]+@[^\s@,;<>()"/:]+$/;
@@ -90,6 +94,8 @@ export default class Settings {
     // Where this vault keeps its key for the names of its secrets (app.saveLocalStorage: this vault's,
     // on this device)
     static VAULT_KEY = "plainday-calendar-key";
+    // Whether this device syncs calendars (syncHere), in this vault's local storage on this device
+    static SYNC_HERE = "plainday-calendar-sync-here";
     // The system's folders in a new vault (OBS-283), which are the folders the system always used, so a
     // vault from before changes nothing. TimeReport keeps a copy for where Plainday isn't loaded (the
     // Raycast timer, the private tests), which settings.test.mjs holds to this one.
@@ -138,13 +144,15 @@ export default class Settings {
 
     // ---------------------------------------------------------------- pure
 
+    /** @typedef {{ title: string, links: string[] }} Recurring */
+
     /**
      * Every setting at its default: what a new vault starts with
      * @returns {{
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean },
-     *   calendars: { range: string, list: Calendar[] },
+     *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
      *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
      *   templates: { week: string, month: string, year: string, task: string, log: string },
      * }}
@@ -155,7 +163,7 @@ export default class Settings {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true },
-            calendars: { range: Settings.DEFAULT_RANGE, list: [] },
+            calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
             folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
             templates: { week: "", month: "", year: "", task: "", log: "" },
         };
@@ -282,6 +290,7 @@ export default class Settings {
             out.calendars.list.push({ id, name: this.linkFree(cal.name), account: this.linkFree(cal.account),
                 address: this.addressOf(cal.address).address, on: typeof cal.on === "boolean" ? cal.on : true });
         }
+        out.calendars.recurring = this.recurringOf(calendars.recurring);
         return out;
     }
 
@@ -509,6 +518,29 @@ export default class Settings {
     }
 
     /**
+     * Recurring events' projects (OBS-275): [{ title, links }], each series by its title, with the ⭕ project
+     * and 🗃️ area links its upcoming lines get, as `## Recurring events` in the Calendar Sync note had
+     * them; one entry a title, the links of two merged. Null when it was never set: settings saved before
+     * OBS-275, whose Calendar Sync note Sync calendars reads once. Only links of that shape are kept, so no
+     * calendar link can reach the data file this way.
+     * @param {unknown} v
+     * @returns {Recurring[] | null}
+     */
+    recurringOf(v) {
+        if (!Array.isArray(v)) return null;
+        /** @type {Map<string, string[]>} */
+        const byTitle = new Map();
+        for (const item of v) {
+            const r = typeof item === "object" && item !== null ? /** @type {Record<string, unknown>} */ (item) : {};
+            const title = typeof r.title === "string" ? r.title.replace(/\s+/g, " ").trim() : "";
+            const links = (Array.isArray(r.links) ? r.links : []).filter((l) => typeof l === "string" && Settings.SERIES_LINK.test(l.trim()) && !Settings.LINKISH.test(l)).map((l) => l.trim());
+            if (!title || !links.length) continue;
+            byTitle.set(title, [...new Set([...(byTitle.get(title) ?? []), ...links])]);
+        }
+        return [...byTitle].map(([title, links]) => ({ title, links }));
+    }
+
+    /**
      * A calendar in the list, by its ID
      * @param {string} id
      * @returns {Calendar | null}
@@ -528,6 +560,22 @@ export default class Settings {
         const key = this.randomId(8);
         app.saveLocalStorage(Settings.VAULT_KEY, key);
         return key;
+    }
+
+    /**
+     * Whether this device is the one that syncs calendars (OBS-275): one device writes events into the
+     * daily notes, and Sync brings them to the others. Kept in this vault's local storage on this device,
+     * so a copy of the settings never carries it. Off until it's turned on, or until a calendar is added
+     * here to an empty list.
+     * @returns {boolean}
+     */
+    syncHere() {
+        return app.loadLocalStorage?.(Settings.SYNC_HERE) === true;
+    }
+
+    /** @param {boolean} on */
+    setSyncHere(on) {
+        app.saveLocalStorage?.(Settings.SYNC_HERE, on ? true : null);
     }
 
     // What names a calendar's link in this device's secret storage: this vault's, by its ID
@@ -552,6 +600,8 @@ export default class Settings {
     storeLink(id, link) {
         if (!app.secretStorage) throw new Error("This version of Obsidian has no secret storage");
         app.secretStorage.setSecret(this.secretId(id), String(link).trim());
+        // A new link isn't the one that stopped working (OBS-275)
+        plainday.CalendarSync?.linkChanged?.(id);
     }
 
     /**
@@ -635,6 +685,7 @@ export default class Settings {
      * @returns {Promise<Calendar>}
      */
     async addCalendar({ name, account = "", address = "", link }) {
+        const first = !this.data.calendars.list.length;
         const id = this.newId();
         this.storeLink(id, link);
         /** @type {Calendar} */
@@ -647,6 +698,8 @@ export default class Settings {
             this.forgetLink(id);
             throw e;
         }
+        // The device you add your first calendar on is the one that syncs them (OBS-275)
+        if (first) this.setSyncHere(true);
         return calendar;
     }
 
@@ -949,6 +1002,8 @@ export default class Settings {
         const before = this.data;
         const next = this.pasted(copy);
         if (!withCalendars) next.calendars = JSON.parse(JSON.stringify(before.calendars));
+        // A copy from before recurring events were in the settings keeps this device's (OBS-275)
+        else if (next.calendars.recurring === null) next.calendars.recurring = before.calendars.recurring;
         this.data = next;
         try {
             await this.save();
@@ -993,11 +1048,14 @@ export default class Settings {
         const dropped = this.foldersDropped(given, next);
         const kept = dropped ? this.pasted(this.normalize(this.withFolders(given, this.folders()))) : next;
         if (dropped && keep) kept.calendars = this.data.calendars;
+        // The same for recurring events' projects, from a device on the release before them (OBS-275)
+        const keepRecurring = raw !== null && kept.calendars.recurring === null && this.data.calendars.recurring !== null;
+        if (keepRecurring) kept.calendars.recurring = this.data.calendars.recurring;
         this.data = kept;
         if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
         // save() sets both flags once the write lands; until then they stay as they were, so a write
         // that fails can't let the next reload take the defaults over this device's (OBS-283)
-        if (keep || keepFolders || dropped) await this.save();
+        if (keep || keepFolders || dropped || keepRecurring) await this.save();
         else { this.calendarsSaved = nowCalendars; this.foldersSaved = nowFolders; }
         await plainday.ListCursor?.invoke();
     }

@@ -20,7 +20,8 @@
   },
   "calendars": {
     "range": "2 months",
-    "list": []
+    "list": [],
+    "recurring": null
   },
   "folders": {
     "projects": "Projects",

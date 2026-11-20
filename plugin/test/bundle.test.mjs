@@ -68,6 +68,7 @@ class FakeEl {
     createDiv(o, cb) { return this.createEl("div", o, cb); }
     createSpan(o, cb) { return this.createEl("span", o, cb); }
     appendText(t) { this.text += t; }
+    prepend(e) { this.children = [e, ...this.children.filter((c) => c !== e)]; }
     setText(t) { this.text = t; }
     addClass(c) { this.classes.add(c); }
     hasClass(c) { return this.classes.has(c); }
@@ -102,6 +103,13 @@ class FakeButton {
     onClick(fn) { this.buttonEl.addEventListener("click", fn); return this; }
     setDisabled(d) { this.buttonEl.disabled = d; return this; }
 }
+// An icon button beside a field (the link's eye): its icon and tooltip, and a click
+class FakeExtraButton {
+    constructor(el) { this.extraSettingsEl = el.createEl("extra"); }
+    setIcon(i) { this.icon = i; return this; }
+    setTooltip(t) { this.tooltip = t; return this; }
+    onClick(fn) { this.extraSettingsEl.addEventListener("click", fn); return this; }
+}
 // As Obsidian's: setValue runs the change callback when the value changes
 class FakeToggle {
     constructor(el) { this.toggleEl = el.createEl("toggle"); }
@@ -135,6 +143,7 @@ class FakeSetting {
     addText(cb) { return this.add(FakeText, cb); }
     addTextArea(cb) { return this.add(FakeText, cb); }
     addButton(cb) { return this.add(FakeButton, cb); }
+    addExtraButton(cb) { return this.add(FakeExtraButton, cb); }
     addToggle(cb) { return this.add(FakeToggle, cb); }
     addDropdown(cb) { return this.add(FakeDropdown, cb); }
     button(text) { return this.components.find((c) => c instanceof FakeButton && c.buttonEl.text === text); }
@@ -195,7 +204,7 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const req = (id) => {
         if (id === "obsidian") {
             return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal: FakeModal, Setting, SettingGroup: FakeGroup,
-                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13 };
+                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13, setIcon: (el, name) => { el.icon = name; } };
         }
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
@@ -400,7 +409,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
-            ["group", "Calendars", ["Add calendar", "Sync range", "Calendar list"]],
+            ["group", "Calendars", ["Add calendar", "Sync range", "Sync calendars using this device", "Calendar list"]],
             ["group", "Other", ["Error log note"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
@@ -870,17 +879,23 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Calendars", [
                 ["row", "Add calendar", undefined],
                 ["row", "Sync range", "How far ahead to write events into daily notes."],
+                ["row", "Sync calendars using this device", "This setting is per-device. Only one device can be used to sync calendars."],
                 ["page", "Calendar list", undefined],
             ]],
             ["Other", [["row", "Error log note", undefined]]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
-        const page = defs[6].items[2];
+        const page = defs[6].items[3];
         assert.deepEqual([page.displayValue, page.visible()], ["3 calendars", true]);
         assert.deepEqual(page.items.map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
             ["Work", [["Home", "Add link on this device: Edit, then paste it"], ["Studio", undefined]]],
         ], "accounts and calendars in alphabetical order, each saying when this device has no link");
+        // A link the last Sync calendars found stopped working on this device says so (OBS-275)
+        plugin.app.saveLocalStorage("plainday-calendar-cache", { version: 3, dead: { studio0001: true } });
+        const dead = tab.getSettingDefinitions()[6].items[3].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
+        assert.equal(dead.desc, "Link stopped working on this device: Edit, then paste a new one");
+        plugin.app.saveLocalStorage("plainday-calendar-cache", null);
         const item = (group, name) => groupsOf(defs).find((g) => g.heading === group).items.find((i) => i.name === name);
 
         // The range: the seven choices, saved as chosen
@@ -926,7 +941,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
 
         // With none left: no calendar list
         for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
-        assert.equal(tab.getSettingDefinitions()[6].items[2].visible(), false);
+        assert.equal(tab.getSettingDefinitions()[6].items[3].visible(), false);
     } finally {
         plugin.onunload();
     }
@@ -973,6 +988,13 @@ test("Add calendar: the link checked once, then its name, account and your addre
         assert.ok(link.inputEl.hasClass("plainday-masked"), "masked by its style");
         assert.notEqual(link.inputEl.type, "password", "not a password, so no password manager offers to keep it");
         assert.equal(link.inputEl.attrs["data-1p-ignore"], "true");
+        // The eye shows the link to check it, and hides it again (Brian, 11/20)
+        const eye = dialog.settings().find((s) => s.name === "Private link").components.find((c) => c.extraSettingsEl);
+        assert.deepEqual([eye.icon, eye.tooltip], ["eye", "Show link"]);
+        eye.extraSettingsEl.fire("click");
+        assert.deepEqual([link.inputEl.hasClass("plainday-masked"), eye.icon, eye.tooltip], [false, "eye-off", "Hide link"]);
+        eye.extraSettingsEl.fire("click");
+        assert.deepEqual([link.inputEl.hasClass("plainday-masked"), eye.icon, eye.tooltip], [true, "eye", "Show link"]);
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(fake.focused, link.inputEl, "the cursor in the link field");
         // "Where to find it", in the link color, opens the help: the note on links first, then each
@@ -1136,7 +1158,7 @@ test("Edit: a name typed while a new link is checked is the one saved; repeated 
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs[6].items[2].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs[6].items[3].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");
@@ -1160,8 +1182,12 @@ test("Settings → Plainday on an Obsidian before 1.13: display() draws the Cale
         plugin.tabs[0].display();
         // display() has no pages, so the calendar list's own sections follow its row, and Other comes last
         assert.deepEqual(fake.groups.slice(-3).map((g) => [g.heading, g.rows.map((r) => r.name)]),
-            [["Calendars", ["Add calendar", "Sync range"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
+            [["Calendars", ["Add calendar", "Sync range", "Sync calendars using this device"]], ["Work", ["Studio"]], ["Other", ["Error log note"]]]);
         assert.equal(fake.groups.at(-2).rows[0].descEl.text, "Add link on this device: Edit, then paste it");
+        // Sync calendars using this device: the "not synced" icon, then its description (Brian, 11/19)
+        const here = fake.groups.at(-3).rows[2].descEl;
+        assert.deepEqual([here.children[0].hasClass("plainday-not-synced"), here.children[0].icon, here.text],
+            [true, "refresh-cw-off", "This setting is per-device. Only one device can be used to sync calendars."]);
     } finally {
         plugin.onunload();
     }
