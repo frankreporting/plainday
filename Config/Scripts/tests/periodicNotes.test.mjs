@@ -284,8 +284,13 @@ test("finish: a note with text made outside its folder isn't moved", async () =>
 
 test("finish: a note that arrives with an old creation time (Sync), and one not named like a periodic note, are left alone", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    const { pending } = templaterOn(v);
+    const timers = [];
+    v.globals.setTimeout = (fn, ms) => { timers.push(fn); return timers.length; };
     const f = finisher(v);
     assert.equal(f.onCreate(madeBy(v, `${DAYS}/2026-09-29.md`, "", 3 * 864e5)), null);
+    for (const t of timers.splice(0)) t();
+    assert.ok(pending.has(`${DAYS}/2026-09-29.md`), "an empty one is still kept from Templater's trigger, whose Get Template has no periodic route");
     assert.equal(f.onCreate(madeBy(v, "Inbox/2026-09-23 Kickoff call.md", "")), null);
     assert.equal(f.onCreate(madeBy(v, "Inbox/Untitled.md", "")), null);
     assert.equal(v.notes()[`${DAYS}/2026-09-29.md`], "");

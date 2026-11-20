@@ -11,7 +11,7 @@ export default class FinishPeriodicNotes {
     //   creation time it had on the other device, and a restored or copied-in note keeps its own, so they're
     //   left alone.
     // - Templater's trigger for new notes would run Get Template on an empty one 300 ms after it appears, so
-    //   it's kept off one that's still empty a moment later and that Templater isn't writing itself (a note
+    //   it's kept off every empty one, arrived or made here, that Templater isn't writing itself (a note
     //   Navigator makes through Templater is). Get Template never sees a periodic note.
     // - Done means SETTLE_MS have passed, past the trigger's look, and Templater isn't writing it, up to
     //   GIVE_UP_MS. Templater combines what it writes with the note as it is then, so the alias stays.
@@ -37,17 +37,19 @@ export default class FinishPeriodicNotes {
         if (!plainday.plugin || file?.extension !== "md") return null;
         const notes = plainday.PeriodicNotes;
         if (!notes || notes.making.has(file.path)) return null;
-        if (Math.abs(now - (file.stat?.ctime ?? 0)) > FinishPeriodicNotes.MADE_WITHIN_MS) return null;
         try {
             if (!notes.periodOfName(file.basename)) return null;
         } catch (e) {
             return null;
         }
+        // Get Template has no route for a periodic note, so its catch-all would give an empty one `id` and
+        // `tags`: Templater's trigger is kept off every empty one, one that arrived through Sync too
         if (file.stat?.size === 0) {
             setTimeout(() => {
                 if (!notes.pending()?.has(file.path)) notes.hold(file.path);
             }, FinishPeriodicNotes.HOLD_AFTER_MS);
         }
+        if (Math.abs(now - (file.stat?.ctime ?? 0)) > FinishPeriodicNotes.MADE_WITHIN_MS) return null;
         return this.later(file);
     }
 
