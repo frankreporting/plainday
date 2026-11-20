@@ -4,6 +4,7 @@
 // STARTUP, one after the other, in that order. CI checks that this folder holds exactly the classes
 // STARTUP names, each listed in CLASSES (.github/ci/checkScripts.mjs).
 import CheckOff from "./checkOff.js";
+import FinishPeriodicNotes from "./finishPeriodicNotes.js";
 import ListCursor from "./listCursor.js";
 import MoveToProjectMenu from "./moveToProjectMenu.js";
 import NewNoteGuard from "./newNoteGuard.js";
@@ -13,12 +14,13 @@ import TimeReportOnStartup from "./timeReportOnStartup.js";
 import TrailingLinks from "./trailingLinks.js";
 
 export const CLASSES = {
-    CheckOff, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TimeReportOnStartup, TrailingLinks,
+    CheckOff, FinishPeriodicNotes, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TimeReportOnStartup, TrailingLinks,
 };
 
 // Run once the layout is ready, one after the other, in this order
 export const STARTUP = [
     "NewNoteGuard",
+    "FinishPeriodicNotes",
     "SyncArea",
     "RefoldOnOpen",
     "MoveToProjectMenu",

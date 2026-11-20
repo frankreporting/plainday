@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withFolders } from "./standInVault.mjs";
+import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withFolders, YAML } from "./standInVault.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
 // Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn) and the
@@ -80,14 +80,16 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
         },
     };
     const plainday = {};
-    const context = vm.createContext({ MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
+    const context = vm.createContext({ ...YAML, MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
     const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {
         Settings: make("settings", "Settings"),
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
-        TaskIds: make("taskIds", "TaskIds"), CalendarSync: make("calendarSync", "CalendarSync"),
+        TaskIds: make("taskIds", "TaskIds"), CalendarSync: make("calendarSync", "CalendarSync"), PeriodicNotes: make("periodicNotes", "PeriodicNotes"),
     });
+    // New notes with no properties, as these tests expect (periodicNotes.test.mjs checks the aliases)
+    plainday.PeriodicNotes.alias = () => null;
     plainday.TaskIds.freshId = () => "k3x9m2";
     let prompt = null;
     plainday.DatePrompt.open = (title, onPick, opts) => { prompt = { onPick, opts }; return {}; };
@@ -193,9 +195,9 @@ test("placeInTopList: with no list at the top, a task starts one right under the
     assert.deepEqual(placed(["Some text", ""]).lines, [TASK, "", "Some text", ""]);
 });
 
-test("placeInTopList: a note fresh from the Daily Note template, its code not yet run, takes the task after the code (OBS-280)", () => {
-    const template = fs.readFileSync("Config/Templates/Daily Note.md", "utf8");
-    assert.match(template, /^<%/, "the template opens with its code");
+test("placeInTopList: a note fresh from a template with Templater code, its code not yet run, takes the task after the code (OBS-280)", () => {
+    // As the Daily Note template was before OBS-120; a template of another plugin's can still leave such a note
+    const template = "<%*\nconst displayDate = (f) => tp.date.now(f, 0, tp.file.title, \"YYYY-MM-DD\")\ntR+=\"---\\n\"\ntR+=\"aliases: \" + displayDate(\"M/D/YY dddd\") + \"\\n\"\ntR+=\"---\"\n%>";
     const r = Schedule.placeInTopList(template, [TASK]);
     assert.equal(r.content, `${template.replace(/\s+$/, "")}\n${TASK}\n`);
     const head = template.replace(/\s+$/, "").split("\n").length;
@@ -497,7 +499,8 @@ test("sentLine (rule 13, OBS-208): its own note's project, else the source's, fi
 });
 
 test("Schedule: ISO weekly notes (GGGG-[W]WW): a week's name is that week, labeled from its Monday", async () => {
-    const ISO = { ...NN, calendarCustomWeekPattern: "[weeks]/GGGG-[W]WW" };
+    // Notebook Navigator names the weekly notes only as their source (OBS-120)
+    const ISO = { ...NN, calendarIntegrationMode: "notebook-navigator", calendarCustomWeekPattern: "[weeks]/GGGG-[W]WW" };
     const { opts } = await scheduleIn({ notes: { [DAY]: DAY_TEXT }, open: DAY, at: 4, nn: ISO });
     assert.deepEqual({ ...opts.name("2026-W41") }, { date: "2026-10-05", unit: "week" }, "not the Sunday before, in week 40");
     const r = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT }, open: PROJECT, at: 3, nn: ISO, pick: (dp) => dp.result("2026-10-07", "week") });

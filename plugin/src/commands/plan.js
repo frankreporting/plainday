@@ -1,5 +1,5 @@
 import { DropdownComponent, MarkdownView, Modal, moment, Notice } from "obsidian";
-import { app } from "../host.js";
+import { app, plainday } from "../host.js";
 
 export default class Plan {
     // A single day is the note you're already on, so the range starts at two.
@@ -110,37 +110,8 @@ export default class Plan {
         return inFolder && moment(file.basename, format, true).isValid();
     }
 
+    // The day's note, made if it isn't there, as every periodic note is made (PeriodicNotes.ensure)
     async ensureDailyNote(m) {
-        const path = this.dailyNotePath(m);
-        const existing = app.vault.getFileByPath(path);
-        if (existing) return existing;
-
-        const { folder, template } = this.dailyOpts();
-        if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        const file = await app.vault.create(path, "");
-
-        // The Daily Note template is Templater code, so it has to be run, not copied
-        if (!template) return file;
-        const tpl = app.vault.getFileByPath(template.endsWith(".md") ? template : `${template}.md`);
-        const templater = app.plugins.getPlugin("templater-obsidian")?.templater;
-        if (tpl && templater) {
-            await templater.write_template_to_file(tpl, file);
-            this.holdOffTemplater(file.path);
-        } else if (tpl) {
-            new Notice("Templater unavailable — created a blank daily note");
-        }
-        return file;
-    }
-
-    // Templater's trigger for new notes waits 300ms, then runs Get Template on a new note whose body
-    // is empty and that it no longer lists as in progress. A note just made from its template is only
-    // frontmatter, and write_template_to_file takes it off that list when it's done, so it would be
-    // templated again, through the editor once it's open, pulling the cursor to the top. Call this
-    // right after the template ran to keep it listed a while longer, as the Log template does (OBS-57).
-    holdOffTemplater(path) {
-        const pending = app.plugins?.plugins?.["templater-obsidian"]?.templater?.files_with_pending_templates;
-        if (!pending) return;
-        pending.add(path);
-        setTimeout(() => pending.delete(path), 1500);
+        return plainday.PeriodicNotes.ensure("day", m.format("YYYY-MM-DD"));
     }
 }

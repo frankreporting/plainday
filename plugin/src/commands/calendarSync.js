@@ -743,7 +743,7 @@ export default class CalendarSync {
         if (!file) {
             // Nothing to move or mark where there's no note; an event's line makes one
             if (!ops.some((op) => op.kind === "event")) return;
-            file = await this.createDaily(date, path);
+            file = await this.createDaily(date);
         }
         const before = await app.vault.read(file);
         // A pass over what's on disk decides whether anything needs writing at all, so a note that's
@@ -1495,11 +1495,10 @@ export default class CalendarSync {
         return plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true));
     }
 
-    async createDaily(date, path) {
-        const folder = path.split("/").slice(0, -1).join("/");
-        if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        const alias = moment(date, "YYYY-MM-DD", true).format("M/D/YY dddd");
-        return app.vault.create(path, `---\naliases: ${alias}\n---\n`);
+    // A day's note for an event's line, made as every periodic note is made (PeriodicNotes.ensure): its alias,
+    // then its template
+    async createDaily(date) {
+        return plainday.PeriodicNotes.ensure("day", date);
     }
 
     // The link a forwarded line carries to the day its event moved to: the note's name (its path when

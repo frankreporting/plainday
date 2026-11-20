@@ -285,13 +285,15 @@ const PLANNER = "Reference/Planner";
 const loadJump = ({ nn, language = "en", current = "en" } = {}) => {
     const moment = jumpMoment(current, { en: 0, "en-gb": 1, "en-au": 1, de: 1, fr: 1 });
     const plainday = {
-        Plan: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
+        Schedule: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
         TimeReport: { periodFolders: () => ({ week: `${PLANNER}/weeks`, month: `${PLANNER}/months`, year: `${PLANNER}/years` }) },
     };
     const ctx = vm.createContext({ moment, getLanguage: () => language, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, plainday });
     plainday.DatePrompt = new (vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", ctx))();
     const JumpToDate = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", ctx);
-    return { j: new JumpToDate(), dp: plainday.DatePrompt };
+    plainday.JumpToDate = new JumpToDate();
+    plainday.PeriodicNotes = new (vm.runInContext(classScript("periodicNotes.js") + "\n;PeriodicNotes", ctx))();
+    return { j: plainday.JumpToDate, dp: plainday.DatePrompt };
 };
 const NN_PATTERNS = { calendarCustomWeekPattern: "[weeks]/gggg[w]ww", calendarCustomMonthPattern: "[months]/YYYY-MM", calendarCustomYearPattern: "[years]/YYYY" };
 
@@ -317,23 +319,6 @@ test("JumpToDate: where each kind of date's note is, named in the user's locale"
     assert.equal(t("2026-10-04", "week"), `${PLANNER}/weeks/2026-10-04|en-gb|gggg[w]ww.md | weekly | the week starting 9/28/26`);
     assert.equal(t("2026-10-01", "month"), `${PLANNER}/months/2026-10-01|en-gb|YYYY-MM.md | monthly | October 2026`);
     assert.equal(t("2027-01-01", "year"), `${PLANNER}/years/2027-01-01|en-gb|YYYY.md | yearly | 2027`);
-});
-
-test("a note just made from its template stays listed as in progress, so Templater's trigger leaves it alone", () => {
-    const pending = new Set(), timers = [];
-    const ctx = vm.createContext({
-        app: { plugins: { plugins: { "templater-obsidian": { templater: { files_with_pending_templates: pending } } } } },
-        setTimeout: (fn, ms) => timers.push([fn, ms]),
-    });
-    const Plan = vm.runInContext(classScript("plan.js") + "\n;Plan", ctx);
-    new Plan().holdOffTemplater(`${PLANNER}/weeks/2026w41.md`);
-    assert.deepEqual([...pending], [`${PLANNER}/weeks/2026w41.md`]);
-    assert.ok(timers[0][1] > 300, "longer than the trigger's 300ms wait");
-    timers[0][0]();
-    assert.deepEqual([...pending], []);
-    // Without Templater, nothing to do
-    const bare = vm.createContext({ app: { plugins: { plugins: {} } }, setTimeout });
-    new (vm.runInContext(classScript("plan.js") + "\n;Plan", bare))().holdOffTemplater("x.md");
 });
 
 test("the warm-up reads a few words once per session, and a failure in it is harmless", () => {

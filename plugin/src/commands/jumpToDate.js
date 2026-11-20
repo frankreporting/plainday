@@ -8,8 +8,8 @@ export default class JumpToDate {
     // Command: type a date and open its note (OBS-89). A day opens its daily note; this, next or last
     // week, month or year opens the weekly, monthly or yearly note, and so does a note's own name
     // (2026w40, 2026-10). Weeks and names follow the user's settings (DatePrompt.weekRules). ⌘Enter
-    // opens it in a split to the right. A note that doesn't exist yet is created from its template,
-    // after asking.
+    // opens it in a split to the right. A note that doesn't exist yet is made after asking, as every
+    // periodic note is made (PeriodicNotes.ensure).
     async invoke() {
         const rules = plainday.DatePrompt.weekRules();
         plainday.DatePrompt.open("Jump to", async (result, modal, event) => {
@@ -121,47 +121,20 @@ export default class JumpToDate {
         return moment(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
     }
 
-    // The note a date opens: { path, name, kind, when, result }
+    // The note a date opens: { path, name, kind, when, result }, where PeriodicNotes puts it. CalNav calls
+    // this and create() from outside (RAY-68), so both keep their arguments and results.
     target(result, rules) {
-        const { unit, m } = result;
+        const { unit, date } = result;
         const when = plainday.DatePrompt.spell(result, rules.weekStart);
-        if (unit === "day") {
-            const path = plainday.Plan.dailyNotePath(m);
-            return { path, name: path.split("/").pop().replace(/\.md$/, ""), kind: "daily", when, result };
-        }
-        const name = this.periodName(result, rules);
-        const kind = { week: "weekly", month: "monthly", year: "yearly" }[unit];
-        return { path: `${plainday.TimeReport.periodFolders()[unit]}/${name}.md`, name, kind, when, result };
+        const { path, name, kind } = plainday.PeriodicNotes.where(unit, date, rules);
+        return { path, name, kind, when, result };
     }
 
-    // A new daily note goes through Plan, which runs the Daily Note template; a weekly, monthly or
-    // yearly note gets its template from Settings → Plainday → Note templates, else the one Notebook
-    // Navigator's calendar uses, or the one named after it (templateFor).
-    // Templater's own trigger then leaves it alone (Plan.holdOffTemplater). With no template to run, the
-    // trigger fills it as it would any new note.
+    // The note made, as every periodic note is (PeriodicNotes.ensure): in its folder, with its alias, then
+    // its template
     async create(target) {
-        const { unit, m } = target.result;
-        if (unit === "day") return plainday.Plan.ensureDailyNote(m);
-        const folder = target.path.slice(0, target.path.lastIndexOf("/"));
-        if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        const tpl = this.templateFor(unit);
-        const templater = app.plugins.getPlugin("templater-obsidian")?.templater;
-        const file = await app.vault.create(target.path, "");
-        if (tpl && templater) {
-            await templater.write_template_to_file(tpl, file);
-            plainday.Plan.holdOffTemplater(file.path);
-        } else if (tpl) {
-            new Notice("Templater unavailable — created a blank note");
-        }
-        // A template that files the note itself (the Weekly Note template moves it into its folder)
-        // can disagree with the folder set for it, or with Notebook Navigator's pattern; then the next
-        // jump wouldn't find it
-        if (file.path !== target.path) {
-            const navigator = plainday.Settings?.periodicSource?.() === "notebook-navigator";
-            const where = navigator ? "Notebook Navigator's pattern puts it" : `Settings → Plainday → Periodic notes puts ${target.kind} notes`;
-            new Notice(`The ${target.kind} note's template moved it to ${file.parent?.path ?? "/"}, but ${where} in ${folder}. Make them agree, or the next jump won't find it.`, 0);
-        }
-        return file;
+        const { unit, date } = target.result;
+        return plainday.PeriodicNotes.ensure(unit, date);
     }
 
     // A weekly, monthly or yearly note's template: the one Settings → Plainday → Note templates names

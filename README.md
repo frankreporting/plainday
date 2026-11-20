@@ -77,14 +77,10 @@ Every note inside an area or project has a `parent` property linking the folder 
 
 ## Creating notes: the title picks the template
 
-New notes run `Get Template.md`, which picks a template from the title you type:
+New notes run `Get Template.md`, which picks a template from the title you type. A title that's a date (`2026-09-15`, `2026w38`, `2026-09`, `2026`) isn't routed there: Plainday files that note in its folder and gives it its alias (`9/15/26 Tuesday`, `Week of 9/13/26`, `September 2026`), as it does every daily, weekly, monthly and yearly note (the manual's *The periodic notes*).
 
 | Title | Template | Result |
 | --- | --- | --- |
-| `2026-09-15` | Daily Note | Moved to `Planner/days`, alias `9/15/26 Tuesday` |
-| `2026w38` | Weekly Note | Moved to `Planner/weeks`, alias `Week of 9/13/26` |
-| `2026-09` | Monthly Note | Moved to `Planner/months`, alias `September 2026` |
-| `2026` | Yearly Note | Moved to `Planner/years` |
 | `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Log note: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *Add project link* or *Move to project*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|⋯]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!task Draft the proposal` | Task | Task note in `Inbox`, to be filed later with *Move to project*; dates are dropped from the title |
 | `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *Move to project*; dates become `start`/`due` |

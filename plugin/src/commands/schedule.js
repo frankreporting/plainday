@@ -294,7 +294,7 @@ export default class Schedule {
                 const text = linktext();
                 return text === label ? `[[${text}]]` : `[[${text}|${label}]]`;
             },
-            ensure: async () => app.vault.getFileByPath(target.path) ?? jump.create(target),
+            ensure: async () => app.vault.getFileByPath(target.path) ?? plainday.PeriodicNotes.ensure(unit, result.date),
         };
     }
 
@@ -830,17 +830,14 @@ export default class Schedule {
         return tags.some(t => t === "#area" || t.startsWith("#area/"));
     }
 
+    // The day's note at `path` (dailyNotePath), made if it isn't there, as every periodic note is made
+    // (PeriodicNotes.ensure). The Log template calls it for a log's day.
     async ensureDailyNote(path) {
-        let file = app.vault.getFileByPath(path);
+        const file = app.vault.getFileByPath(path);
         if (file) return file;
-        const { folder, template } = this.dailyOpts();
-        if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        let content = "";
-        if (template) {
-            const tpl = app.vault.getFileByPath(template.endsWith(".md") ? template : `${template}.md`);
-            if (tpl) content = await app.vault.read(tpl);
-        }
-        return app.vault.create(path, content);
+        const m = moment(path.split("/").pop().replace(/\.md$/, ""), this.dailyOpts().format, true);
+        if (!m.isValid()) throw new Error(`${path} isn't named like a daily note`);
+        return plainday.PeriodicNotes.ensure("day", m.format("YYYY-MM-DD"));
     }
 
     // Puts the lines into a day's, a week's, a month's or a year's note (placeInTopList), and returns the new
@@ -864,9 +861,10 @@ export default class Schedule {
     // starts with its heading or its `%% time:start %%` marker) isn't it. With no top list, the lines start
     // one right under the properties, above whatever the note holds, set off from it by a blank line unless
     // one is there already, as the calendar sync does with an event; a note they end ends with a line break.
-    // A note just made from the Daily Note template still opens with the template's code (`<%`), which
-    // Templater turns into the properties a moment later; above it, the lines would end up above the
-    // properties, so they go at the end, after the code, as the Log template's line does (recordEvent.js).
+    // A note another plugin has just made from a template with Templater code in it still opens with the
+    // code (`<%`), which Templater turns into the properties a moment later; above it, the lines would end
+    // up above the properties, so they go at the end, after the code, as the Log template's line does
+    // (recordEvent.js). Plainday's own new notes never hold template code (PeriodicNotes, OBS-120).
     // A CRLF note keeps its line endings. Returns { content, at, count, item }: the new content, the line
     // the insert starts at, how many lines it adds, and the line of the first one moved there.
     static placeInTopList(content, newLines) {

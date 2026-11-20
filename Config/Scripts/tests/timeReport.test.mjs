@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { standIn, PLANNER } from "./standInVault.mjs";
+import { standIn, PLANNER, momentOn } from "./standInVault.mjs";
 import { compactWriter } from "./tables.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
 
@@ -1922,14 +1922,10 @@ test("periodic review: report text can't carry Templater syntax into a synced no
     assert.ok(!block.includes("<%"), block);
 });
 
-test("periodic notes: new notes get the templates' frontmatter, and a block the next run finds", () => {
-    assert.equal(tr.periodFrontmatter("week", "2026w37"), "---\naliases: Week of 9/6/26\n---\n");
-    assert.equal(tr.periodFrontmatter("week", "2027w01"), "---\naliases: Week of 12/27/26\n---\n");
-    assert.equal(tr.periodFrontmatter("month", "2026-05"), "---\naliases: May 2026\n---\n");
-    assert.equal(tr.periodFrontmatter("year", "2026"), "");
+test("periodic notes: a new note's block is one the next run finds (periodicNotes.test.mjs makes the note)", () => {
     const model = tr.build([note("2026-09-07", "- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am")], INDEX);
     const block = tr.render(model, { kind: "period", unit: "week", key: "2026w37" }, "s");
-    const content = `${tr.periodFrontmatter("week", "2026w37")}## Time report\n\n${block}\n`;
+    const content = `---\naliases: Week of 9/6/26\n---\n\n## Time report\n\n${block}\n`;
     // Refreshing it later replaces just that block, and an unchanged block isn't rewritten
     assert.ok(tr.sameBlock(content, tr.render(model, { kind: "period", unit: "week", key: "2026w37" }, "later")));
     const plan = tr.placeBlock(content, block);
@@ -3327,4 +3323,34 @@ test("subtreeEnd: a comment-only line inside a task's sub-bullets is skipped lik
 test("review (OBS-193): subtreeEnd keeps a comment indented under the task; taskChoices still leaves out a checkbox under a loose entry", () => {
     assert.equal(tr.subtreeEnd(["- [ ] T", "\t- a", "\t%% c %%", "- [ ] N"], 0), 2);
     assert.deepEqual(plain(tr.taskChoices(["- 9:00am - 10:00am: loose entry", "\t- [ ] follow up on it", "- [ ] Real task"])).map((c) => c.label), ["Real task"]);
+});
+
+// ------------------------------------------------------------------ weeks from the week settings (OBS-91)
+
+// A TimeReport where the week settings name weeks `week` (DatePrompt.weekRules), on moment's stand-in
+const withWeeks = (week) => {
+    const plainday = { DatePrompt: { weekRules: () => ({ locale: "en", weekStart: 0, format: { week, month: "YYYY-MM", year: "YYYY" } }) } };
+    const T = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({ plainday, moment: momentOn("2026-09-16") }));
+    return new T();
+};
+
+test("ISO weekly notes (GGGG-[W]WW): entries go in Monday-to-Sunday weeks, with Monday-to-Sunday columns, and none are skipped", () => {
+    const iso = withWeeks("GGGG-[W]WW");
+    const lines = () => `- [x] Charts [[Orchard Lane Web 2026|⭕]]\n\t- 9:00am - 10:00am`;
+    const model = iso.build(["2026-09-13", "2026-09-14", "2026-09-20", "2026-09-21"].map((d) => note(d, lines())), INDEX);
+    assert.deepEqual(plain(iso.periodsWithEntries(model).week), ["2026-W37", "2026-W38", "2026-W39"], "Sunday 9/13 ends week 37");
+    assert.deepEqual(plain(iso.weekRange("2026-W38")), ["2026-09-14", "2026-09-20"]);
+    const week = iso.render(model, { kind: "period", unit: "week", key: "2026-W38" }, "s");
+    const heads = [...week.matchAll(/\[\[\d{4}-\d{2}-\d{2}\\\|(\w{3} \d+\/\d+)\]\]/g)].map((m) => m[1]);
+    assert.deepEqual(heads.slice(0, 7), ["Mon 9/14", "Tue 9/15", "Wed 9/16", "Thu 9/17", "Fri 9/18", "Sat 9/19", "Sun 9/20"]);
+    const month = iso.render(model, { kind: "period", unit: "month", key: "2026-09" }, "s");
+    const weeks = [...month.matchAll(/\[\[(2026-W\d\d)\\\|([\d/-]+)\]\]/g)].map((m) => `${m[1]} ${m[2]}`);
+    assert.deepEqual(weeks, ["2026-W36 8/31-9/6", "2026-W37 9/7-9/13", "2026-W38 9/14-9/20", "2026-W39 9/21-9/27", "2026-W40 9/28-10/4"]);
+    assert.equal(iso.periodStartOf("week", "2026w38"), null, "a name in another pattern isn't a week's");
+});
+
+test("weeks without the week settings (the Raycast timer, the private tests) are Sunday weeks named gggg[w]ww", () => {
+    assert.equal(tr.calendar().plain, true);
+    assert.equal(tr.weekKey("2026-09-13"), "2026w38");
+    assert.equal(withWeeks("gggg[w]ww").calendar().plain, true, "the demo's settings take the same path");
 });

@@ -17,8 +17,9 @@ export default class TimeReport {
     //     (monthly), then Earned, the billed projects' money, and its Problems;
     //   - each yearly note (years/): an Hours table and an Earned table, a row per project and a
     //     column per month (headers link to the monthly notes), and Problems.
-    // On the desktop, missing periodic notes are created first. Weeks run Sunday to Saturday, the
-    // same weeks Notebook Navigator names gggg[w]ww.
+    // On the desktop, missing periodic notes are created first (PeriodicNotes.ensure). Weeks, and the
+    // weekly, monthly and yearly notes' names, follow the week settings, as Jump to date and Schedule
+    // name them (calendar(), OBS-91): Sunday to Saturday and gggg[w]ww in the demo.
     // Each report sits between %% time:start %% and %% time:end %%; running it again replaces only
     // that block, and only when the numbers changed (the "Updated" line says when they last did). Summaries
     // only, except the timesheet notes, which hold entry-by-entry detail. Projects in Archive count like
@@ -1275,6 +1276,8 @@ export default class TimeReport {
     // that haven't ended yet are left out, and don't overlap anything; without it everything counts.
     // `checked` is every note whose lines the own-note check reads (taskNotes), `notes` by default.
     build(notes, index, { now = null, checked = notes } = {}) {
+        // The week settings are read again for each report
+        this.cal = null;
         const entries = [];
         const billed = [];       // the entries as Billing read them before OBS-213, for matching billed rows (see below)
         const events = [];       // every timed event line
@@ -1603,9 +1606,49 @@ export default class TimeReport {
 
     // ---------------------------------------------------------------- periods
 
-    // The Sunday-to-Saturday week a date falls in, named like moment's gggg[w]ww in the "en" locale
-    // (week 1 is the week with January 1st), e.g. 2026-09-13 → 2026w38, 2026-12-27 → 2027w01
+    // How weeks are counted and the weekly, monthly and yearly notes named (OBS-91): the week settings
+    // (DatePrompt.weekRules), as Jump to date, Schedule and PeriodicNotes name them, read once per report
+    // (build resets it). Weeks start on the settings' first day, or on Monday for an ISO week pattern
+    // (GGGG-[W]WW). Where Plainday isn't loaded (the Raycast timer, the private tests), and in a vault whose
+    // weeks are English Sunday weeks named gggg[w]ww, YYYY-MM and YYYY (`plain`), the names are worked out
+    // here, without moment. { rules, names, weekStart, plain, memo }
+    static NAMES = { week: "gggg[w]ww", month: "YYYY-MM", year: "YYYY" };
+    calendar() {
+        if (this.cal) return this.cal;
+        const read = (fn, fallback) => {
+            try {
+                return fn() ?? fallback;
+            } catch {
+                return fallback;
+            }
+        };
+        const rules = read(() => plainday?.DatePrompt?.weekRules?.(), null);
+        const names = rules?.format ?? TimeReport.NAMES;
+        const iso = /[GW]/.test(String(names.week).replace(/\[[^\]]*\]/g, ""));
+        const weekStart = iso ? 1 : rules?.weekStart ?? 0;
+        // English weeks: week 1 is the week with January 1st
+        const doy = rules ? read(() => moment.localeData(rules.locale).firstDayOfYear?.(), 6) : 6;
+        const same = Object.keys(TimeReport.NAMES).every((u) => names[u] === TimeReport.NAMES[u]);
+        const plain = !rules || typeof moment !== "function" || (same && weekStart === 0 && doy === 6);
+        this.cal = { rules, names, weekStart, plain, memo: new Map() };
+        return this.cal;
+    }
+
+    // The first day of the week a date is in, by the week settings
+    weekFirst(date) {
+        const n = Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
+        const first = n - (new Date(n * 864e5).getUTCDay() - this.calendar().weekStart + 7) % 7;
+        return new Date(first * 864e5).toISOString().slice(0, 10);
+    }
+
+    // The name of the week a date falls in, as its weekly note is named: 2026-09-13 → 2026w38, and
+    // 2026-12-27 → 2027w01 in the demo (English weeks: week 1 is the week with January 1st)
     weekKey(date) {
+        return this.periodOf(date, "week");
+    }
+
+    // English Sunday weeks named gggg[w]ww, worked out without moment
+    plainWeekKey(date) {
         const [y, m, d] = date.split("-").map(Number);
         const day = Date.UTC(y, m - 1, d) / 864e5;
         const dow = (n) => new Date(n * 864e5).getUTCDay();
@@ -1621,11 +1664,48 @@ export default class TimeReport {
         return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
     }
 
+    // The name of the week's, month's or year's note a date falls in
     periodOf(date, unit) {
-        return unit === "week" ? this.weekKey(date) : unit === "month" ? date.slice(0, 7) : date.slice(0, 4);
+        const cal = this.calendar();
+        if (cal.plain) return unit === "week" ? this.plainWeekKey(date) : unit === "month" ? date.slice(0, 7) : date.slice(0, 4);
+        const k = `${unit}|${date}`;
+        let name = cal.memo.get(k);
+        if (name === undefined) {
+            name = moment(date, "YYYY-MM-DD", true).locale(cal.rules.locale).format(cal.names[unit]);
+            cal.memo.set(k, name);
+        }
+        return name;
     }
 
-    static PERIOD_NAME = { week: /^\d{4}w\d{2}$/, month: /^\d{4}-\d{2}$/, year: /^\d{4}$/ };
+    // The first day (YYYY-MM-DD) of the week, month or year a note's name stands for, or null when the
+    // name isn't one
+    periodStartOf(unit, name) {
+        const cal = this.calendar();
+        if (cal.plain) {
+            if (unit === "week") return /^\d{4}w\d{2}$/.test(name) ? this.plainWeekRange(name)[0] : null;
+            if (unit === "month") return /^\d{4}-(?:0[1-9]|1[0-2])$/.test(name) ? `${name}-01` : null;
+            return /^\d{4}$/.test(name) ? `${name}-01-01` : null;
+        }
+        const k = `start|${unit}|${name}`;
+        if (cal.memo.has(k)) return cal.memo.get(k);
+        let start = null;
+        try {
+            const m = moment(name, cal.names[unit], cal.rules.locale, true);
+            if (m.isValid() && m.format(cal.names[unit]) === name) {
+                // A week's name reads as a day in that week: its first by the week settings
+                start = unit === "week" ? this.weekFirst(m.format("YYYY-MM-DD")) : m.clone().startOf(unit).format("YYYY-MM-DD");
+            }
+        } catch {
+            start = null;
+        }
+        cal.memo.set(k, start);
+        return start;
+    }
+
+    // Periods' names, oldest first
+    byStart(unit, names) {
+        return [...names].sort((a, b) => String(this.periodStartOf(unit, a)).localeCompare(String(this.periodStartOf(unit, b))));
+    }
 
     // Every week, month and year that has at least one entry, or a flat fee earned in it:
     // { week: [...], month: [...], year: [...] }
@@ -1634,7 +1714,7 @@ export default class TimeReport {
         // Time that isn't counted (Problems say why) has a period too, though nothing else may be in it
         const dates = [...model.entries.map((e) => e.date), ...(model.disputed ?? []).map((e) => e.date), ...this.earnedFees(model).map((f) => f.date)];
         for (const unit of ["week", "month", "year"]) {
-            out[unit] = [...new Set(dates.map((d) => this.periodOf(d, unit)))].sort();
+            out[unit] = this.byStart(unit, new Set(dates.map((d) => this.periodOf(d, unit))));
         }
         return out;
     }
@@ -1646,22 +1726,20 @@ export default class TimeReport {
             .map(([project, m]) => ({ project, date: m.earned, cents: Math.round(m.fee * 100) }));
     }
 
-    // First and last day (YYYY-MM-DD) of a week key, for its title
+    // First and last day (YYYY-MM-DD) of a week by its name, for its title
     weekRange(key) {
+        if (this.calendar().plain) return this.plainWeekRange(key);
+        const start = this.periodStartOf("week", key);
+        const n = Date.UTC(+start.slice(0, 4), +start.slice(5, 7) - 1, +start.slice(8, 10)) / 864e5;
+        return [start, new Date((n + 6) * 864e5).toISOString().slice(0, 10)];
+    }
+
+    plainWeekRange(key) {
         const weekYear = +key.slice(0, 4), week = +key.slice(5);
         const jan1 = Date.UTC(weekYear, 0, 1) / 864e5;
         const start = jan1 - new Date(jan1 * 864e5).getUTCDay() + (week - 1) * 7;
         const iso = (n) => new Date(n * 864e5).toISOString().slice(0, 10);
         return [iso(start), iso(start + 6)];
-    }
-
-    // Frontmatter for a new periodic note: the same aliases the Weekly Note and Monthly Note templates
-    // write ("Week of 9/13/26", "September 2026"); the Yearly Note template writes none. Keep in step
-    // with those templates.
-    periodFrontmatter(unit, key) {
-        if (unit === "week") return `---\naliases: Week of ${this.shortDate(this.weekRange(key)[0])}\n---\n`;
-        if (unit === "month") return `---\naliases: ${this.monthTitle(key)}\n---\n`;
-        return "";
     }
 
     // Where a project's timesheet note goes when it has none yet: beside the project's note
@@ -1989,11 +2067,11 @@ export default class TimeReport {
     reportUnit(model, path, entries) {
         if (model.areas?.has(path)) return "month";
         const dates = entries.map((e) => e.date).sort();
-        const sunday = (date) => {
-            const n = Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
-            return n - new Date(n * 864e5).getUTCDay();
+        const first = (date) => {
+            const d = this.weekFirst(date);
+            return Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
         };
-        return (sunday(dates.at(-1)) - sunday(dates[0])) / 7 + 1 <= TimeReport.WEEKS_MAX ? "week" : "month";
+        return (first(dates.at(-1)) - first(dates[0])) / 7 + 1 <= TimeReport.WEEKS_MAX ? "week" : "month";
     }
 
     // The rows of a By Week or By Month table, newest first: [{ label, list }]. A week links its weekly
@@ -2006,17 +2084,25 @@ export default class TimeReport {
             return t === label ? `[[${t}]]` : `[[${t}\\|${label}]]`;
         };
         const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
-        const keyOf = unit === "week" ? (d) => this.weekKey(d) : (() => {
-            const year = entries.reduce((y, e) => (e.date.slice(0, 4) > y ? e.date.slice(0, 4) : y), "");
-            return (d) => (d.slice(0, 4) === year ? d.slice(0, 7) : d.slice(0, 4));
-        })();
-        return [...new Set(entries.map((e) => keyOf(e.date)))].sort().reverse().map((key) => {
-            const list = entries.filter((e) => keyOf(e.date) === key);
-            if (unit === "week") {
+        // Each row's period: { unit, key (its note's name), start (its first day) }
+        const year = entries.reduce((y, e) => (e.date.slice(0, 4) > y ? e.date.slice(0, 4) : y), "");
+        const periodOf = (d) => {
+            const u = unit === "week" ? "week" : d.slice(0, 4) === year ? "month" : "year";
+            const start = u === "week" ? this.weekFirst(d) : u === "month" ? `${d.slice(0, 7)}-01` : `${d.slice(0, 4)}-01-01`;
+            return { unit: u, key: this.periodOf(d, u), start };
+        };
+        const rows = new Map();
+        for (const e of entries) {
+            const p = periodOf(e.date);
+            if (!rows.has(p.start)) rows.set(p.start, { ...p, list: [] });
+            rows.get(p.start).list.push(e);
+        }
+        return [...rows.values()].sort((a, b) => b.start.localeCompare(a.start)).map(({ unit: u, key, start, list }) => {
+            if (u === "week") {
                 const [from, to] = this.weekRange(key);
                 return { label: linked("week", key, `${md(from)}-${md(to)}`), list };
             }
-            return { label: key.length === 4 ? linked("year", key, key) : linked("month", key, this.monthTitle(key)), list };
+            return { label: u === "year" ? linked("year", key, key) : linked("month", key, this.monthTitle(start.slice(0, 7))), list };
         });
     }
 
@@ -2145,8 +2231,8 @@ export default class TimeReport {
         return this.table(head, this.numberAlign(head.length), out);
     }
 
-    // A weekly note's breakdown by day: a column per day of the week, headed "Sun 9/6" with a link to
-    // that daily note, then the week
+    // A weekly note's breakdown by day: a column per day of the week, from its first day, headed "Sun 9/6"
+    // with a link to that daily note, then the week
     weekDaysTable(model, entries, scope, link) {
         const [from] = this.weekRange(scope.key);
         const start = Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10)) / 864e5;
@@ -2155,11 +2241,11 @@ export default class TimeReport {
         return this.hoursGrid(model, entries, columns, "Week", link);
     }
 
-    // A monthly note's breakdown by week: a column per Sunday-to-Saturday week that overlaps the
-    // month, headed "8/30-9/5" with a link to that weekly note, then the month. A week that straddles
+    // A monthly note's breakdown by week: a column per week that overlaps the month, by the week
+    // settings, headed "8/30-9/5" with a link to that weekly note, then the month. A week that straddles
     // two months counts only this month's days here, so the Month column matches the summary.
     monthWeeksTable(model, entries, scope, link) {
-        const [y, m] = scope.key.split("-").map(Number);
+        const [y, m] = this.periodStartOf("month", scope.key).split("-").map(Number);
         const first = Date.UTC(y, m - 1, 1) / 864e5, last = Date.UTC(y, m, 0) / 864e5;
         const weeks = [];
         for (let n = first; n <= last; n++) {
@@ -3416,17 +3502,7 @@ export default class TimeReport {
     // (2026w38, 2026-09, 2026), else read with the vault's formats where DatePrompt and moment are
     // loaded; null when it can't be read
     periodStart(path, unit) {
-        const name = this.basename(path);
-        if (unit === "week" && TimeReport.PERIOD_NAME.week.test(name)) return this.weekRange(name)[0];
-        if (unit === "month" && TimeReport.PERIOD_NAME.month.test(name)) return `${name}-01`;
-        if (unit === "year" && TimeReport.PERIOD_NAME.year.test(name)) return `${name}-01-01`;
-        try {
-            const rules = plainday?.DatePrompt?.weekRules?.();
-            const m = rules ? moment?.(name, rules.format[unit], rules.locale, true) : null;
-            return m?.isValid() ? m.format("YYYY-MM-DD") : null;
-        } catch {
-            return null;
-        }
+        return this.periodStartOf(unit, this.basename(path));
     }
 
     // Today, YYYY-MM-DD, by moment where it's loaded
@@ -3585,21 +3661,13 @@ export default class TimeReport {
         const created = [], broken = [], trouble = [];
         let canCreate = create;
 
-        // Weekly notes only while Obsidian names weeks the way weekKey does (Sunday-start weeks)
-        const units = ["week", "month", "year"];
-        const probe = ["2026-01-01", "2026-12-27", moment().format("YYYY-MM-DD")];
-        if (probe.some((d) => moment(d, "YYYY-MM-DD").format("gggg[w]ww") !== this.weekKey(d))) {
-            units.shift();
-            trouble.push("weekly notes skipped: Obsidian's weeks no longer start on Sunday, so week names wouldn't match");
-        }
-
-        for (const unit of units) {
+        for (const unit of ["week", "month", "year"]) {
             const folder = folders[unit];
             const keys = new Set(wanted[unit]);
             for (const f of app.vault.getMarkdownFiles()) {
-                if (f.parent?.path === folder && TimeReport.PERIOD_NAME[unit].test(f.basename) && this.hasBlock(await this.textOf(f))) keys.add(f.basename);
+                if (f.parent?.path === folder && this.periodStartOf(unit, f.basename) && this.hasBlock(await this.textOf(f))) keys.add(f.basename);
             }
-            for (const key of [...keys].sort()) {
+            for (const key of this.byStart(unit, keys)) {
                 const path = `${folder}/${key}.md`;
                 let file = app.vault.getFileByPath(path);
                 let isNew = false;
@@ -3631,22 +3699,17 @@ export default class TimeReport {
         return { updated, created, broken, trouble };
     }
 
-    // Creates the note with its frontmatter and report in one write. A note that already has content
-    // when it's created isn't templated again by Templater's file-creation rule, so nothing races the
-    // write (running Get Template here let Templater's own handler template the note a second time,
-    // overlapping the next note: wrong aliases, lost frontmatter). Returns { file } or { error }.
+    // Makes the note as every periodic note is made (PeriodicNotes.ensure: its alias, then its template),
+    // then puts the report below whatever it holds, under its heading. Returns { file } or { error }.
     async createPeriodNote(path, unit, key, block) {
         const folder = path.slice(0, path.lastIndexOf("/"));
-        if (!app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-        const frontmatter = this.periodFrontmatter(unit, key);
-        const file = await app.vault.create(path, `${frontmatter}${frontmatter ? "\n" : ""}${TimeReport.HEADING}\n\n${block}\n`);
-        // Give any file-creation handler its moment, then make sure the note is still where it belongs
-        await new Promise((r) => setTimeout(r, 1000));
-        const here = app.vault.getFileByPath(path);
-        if (!here) {
-            return { error: `no more periodic notes created: something moved ${key} out of ${folder}` };
-        }
-        return { file: here };
+        const notes = plainday?.PeriodicNotes;
+        const start = this.periodStartOf(unit, key);
+        if (!notes || !start) return { error: `no more periodic notes created: ${key} couldn't be made` };
+        const file = await notes.ensure(unit, start);
+        if (file.path !== path) return { error: `no more periodic notes created: ${key}'s template moved it out of ${folder}` };
+        await app.vault.process(file, (text) => `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text.trim() ? "\n" : ""}${TimeReport.HEADING}\n\n${block}\n`);
+        return { file };
     }
 
     appIndex() {

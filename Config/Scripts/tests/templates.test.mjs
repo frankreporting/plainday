@@ -48,3 +48,13 @@ test("templates: every template Templater's settings name exists, and so do its 
         assert.ok(exists(settings[key]) && fs.statSync(path.join(ROOT, settings[key])).isDirectory(), `${key}: ${settings[key]} isn't a folder`);
     }
 });
+
+// ------------------------------------------------------------------ periodic notes (OBS-120)
+
+test("templates: the four periodic templates are empty, and Get Template routes no periodic note", () => {
+    for (const name of ["Daily Note", "Weekly Note", "Monthly Note", "Yearly Note"]) {
+        assert.equal(fs.readFileSync(path.join(ROOT, TEMPLATES, `${name}.md`), "utf8"), "", `${name} is empty: Plainday writes the folder and alias`);
+    }
+    const get = fs.readFileSync(path.join(ROOT, TEMPLATES, "Get Template.md"), "utf8");
+    for (const name of ["Daily Note", "Weekly Note", "Monthly Note", "Yearly Note"]) assert.ok(!get.includes(`[[${name}]]`), `Get Template includes [[${name}]]`);
+});

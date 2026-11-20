@@ -13,23 +13,9 @@ if (tp.config.run_mode === 2 && !window.newNoteGuardMadeHere?.has(tp.config.targ
 	new Notice(why, 10000);
 	throw new Error(why);
 }
-if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(tp.file.title)) {
-	let dailyNote = await tp.file.include("[[Daily Note]]");
-	tR += dailyNote;
-} 
-else if (/^[0-9]{4}-[0-9]{2}$/.test(tp.file.title)) {
-	let monthlyNote = await tp.file.include("[[Monthly Note]]");
-	tR += monthlyNote;
-} 
-else if (/^[0-9]{4}$/.test(tp.file.title)) {
-	let yearlyNote = await tp.file.include("[[Yearly Note]]");
-	tR += yearlyNote;
-} 
-else if (/^[0-9]{4}w[0-9]{2}$/.test(tp.file.title)) {
-	let weeklyNote = await tp.file.include("[[Weekly Note]]");
-	tR += weeklyNote;
-} 
-else if (/!today/.test(tp.file.title)) {
+// The daily, weekly, monthly and yearly notes aren't routed here: Plainday makes and finishes them, and
+// keeps this trigger off them (FinishPeriodicNotes, OBS-120)
+if (/!today/.test(tp.file.title)) {
 	let log = await tp.file.include("[[Log]]");
 	tR += log;
 }

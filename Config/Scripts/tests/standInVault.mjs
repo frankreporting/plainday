@@ -53,7 +53,9 @@ export const enSunday = (name) => { const jan1 = `${name.slice(0, 4)}-01-01`; re
 // Enough of moment for these scripts, on `today`, in English (weeks start on Sunday), checked against
 // Obsidian's own: a note's name parses strictly to its period's first day (an ISO week's Monday), a
 // date formats as any of the names, and startOf("week") goes back to Sunday, as it does in English
-export const NAMES = { "YYYY-MM-DD": /^\d{4}-\d{2}-\d{2}$/, "gggg[w]ww": /^\d{4}w\d{2}$/, "GGGG-[W]WW": /^\d{4}-W\d{2}$/, "YYYY-MM": /^\d{4}-(?:0[1-9]|1[0-2])$/, YYYY: /^\d{4}$/ };
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const short = (date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8))}/${date.slice(2, 4)}`;
+export const NAMES = { "DD-MM-YYYY": /^\d{2}-\d{2}-\d{4}$/, "YYYY-MM-DD": /^\d{4}-\d{2}-\d{2}$/, "gggg[w]ww": /^\d{4}w\d{2}$/, "GGGG-[W]WW": /^\d{4}-W\d{2}$/, "YYYY-MM": /^\d{4}-(?:0[1-9]|1[0-2])$/, YYYY: /^\d{4}$/ };
 export const momentOn = (today) => {
     const make = (date, valid = true) => ({
         isValid: () => valid,
@@ -62,18 +64,29 @@ export const momentOn = (today) => {
         clone: () => make(date, valid),
         startOf: (unit) => make({ week: plus(date, -dow(date)), isoWeek: plus(date, -((dow(date) + 6) % 7)), month: `${date.slice(0, 7)}-01`, year: `${date.slice(0, 4)}-01-01` }[unit] ?? date, valid),
         year: () => Number(date.slice(0, 4)),
-        format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`, "ddd M/D": `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dow(date)]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}` })[f] ?? assert.fail(`format ${f}`),
+        format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`, "ddd M/D": `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dow(date)]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`,
+            // The aliases PeriodicNotes writes (OBS-120)
+            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
     });
     const moment = (text, format) => {
         if (text === undefined) return make(today);
         if (!NAMES[format]?.test(text)) return make(null, false);
-        return make({ "gggg[w]ww": () => enSunday(text), "GGGG-[W]WW": () => isoMonday(text), "YYYY-MM": () => `${text}-01`, YYYY: () => `${text}-01-01` }[format]?.() ?? text);
+        return make({ "gggg[w]ww": () => enSunday(text), "GGGG-[W]WW": () => isoMonday(text), "YYYY-MM": () => `${text}-01`, YYYY: () => `${text}-01-01`, "DD-MM-YYYY": () => `${text.slice(6)}-${text.slice(3, 5)}-${text.slice(0, 2)}` }[format]?.() ?? text);
     };
     moment.locale = () => "en";
     moment.locales = () => ["en"];
     moment.localeData = () => ({ firstDayOfWeek: () => 0, months: () => MONTHS, monthsShort: () => SHORT });
     return moment;
 };
+// Obsidian's getFrontMatterInfo, parseYaml (as the metadata cache reads properties) and stringifyYaml (a list as
+// `- item` lines), as far as properties go
+const frontMatter = (text) => {
+    const m = text.match(/^---\r?\n(?:([\s\S]*?)\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/);
+    return m ? { exists: true, frontmatter: m[1] === undefined ? "" : `${m[1]}\n`, from: m[0].indexOf("\n") + 1, to: m[0].length - m[0].match(/---[^\S\r\n]*(?:\r?\n|$)$/)[0].length, contentStart: m[0].length } : { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
+};
+export const YAML = { getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter, stringifyYaml: (props) => stringifyYaml(props) };
+export const stringifyYaml = (props) => Object.entries(props).map(([k, v]) => (Array.isArray(v) ? `${k}:\n${v.map((x) => `  - ${x}`).join("\n")}` : `${k}: ${v ?? ""}`)).join("\n") + "\n";
+
 // The metadata cache Obsidian keeps for a note, as far as the scripts read it: frontmatter (tags,
 // status, parent), list items with their checkbox and block ID, every block ID (on a list item or any
 // other line) by its lowercased ID, and its links, whose displayText is a link's alias, or else its text
@@ -99,6 +112,8 @@ export const parseCache = (text) => {
                 }
             // A YAML list item, indented or not, as the demo's notes write `tags:` then `- project`
             } else if (key === "tags" && /^\s*-\s+/.test(l)) frontmatter.tags.push(l.replace(/^\s*-\s+/, "").trim());
+            // An alias list, as PeriodicNotes and Templater write one (OBS-120)
+            else if (key === "aliases" && /^\s*-\s+/.test(l)) frontmatter.aliases = [].concat(frontmatter.aliases || [], l.replace(/^\s*-\s+/, "").trim());
         }
         start = end + 1;
     }
@@ -128,7 +143,9 @@ export const parseCache = (text) => {
 // the previous command's writes. create and process write disk and live text together; process
 // replaces the open note's editor text, so unsaved editor edits are lost as in a real conflict.
 // create throws on an existing path; a folder exists once a note lives under it or it was created.
-export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null, folders: setFolders = {} }) {
+// `aliases`: new periodic notes get their aliases (PeriodicNotes, OBS-120); without it they're made with no
+// properties, as the stand-in made them before, so the tests about lines keep their line numbers.
+export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null, folders: setFolders = {}, aliases = false }) {
     const vault = new Map(Object.entries(notes));
     const folders = new Map();
     const root = { path: "/", name: "", children: [], isRoot: () => true, parent: null };
@@ -281,9 +298,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         },
     };
     // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
-    const frontMatter = (text) => { const m = text.match(/^---\r?\n([\s\S]*?)\r?\n?---/); return m ? { exists: true, frontmatter: `${m[1]}\n` } : { exists: false, frontmatter: "" }; };
     // What the class files import from Obsidian, by name, as the context's globals (plugin/classShape.mjs)
-    const obsidian = { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter };
+    const obsidian = { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, ...YAML };
     const plainday = {};
     // MutationObserver for CheckOff's watch on Task Status's menu: `observers` lets a test say a dialog opened or closed
     const observers = [];
@@ -301,9 +317,11 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
+        PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"),
         CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
+    if (!aliases) plainday.PeriodicNotes.alias = () => null;
     // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's
     Object.assign(plainday.Settings.get().folders, setFolders);
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);
