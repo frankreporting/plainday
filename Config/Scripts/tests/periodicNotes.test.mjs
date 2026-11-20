@@ -226,11 +226,6 @@ const finisher = (v) => {
     v.plainday.plugin = {};
     const F = vm.runInContext(`${src("finishPeriodicNotes")}\n;FinishPeriodicNotes`, v.globals);
     F.sleep = async () => {};
-    const listeners = new Set();
-    v.app.workspace.on = (name, fn) => { const ref = { name, fn }; listeners.add(ref); return ref; };
-    v.app.workspace.offref = (ref) => listeners.delete(ref);
-    v.fire = (name, file) => { for (const l of [...listeners]) if (l.name === name) l.fn({ file }); };
-    v.listening = () => listeners.size;
     return new F();
 };
 // A note as another plugin or Obsidian makes it: its text, made `ago` ms before now
@@ -240,36 +235,19 @@ const madeBy = (v, path, text, ago = 50) => {
     file.stat = { ctime: Date.now() - ago, size: text.length };
     return file;
 };
+// Another note opens (`opened`, or none): what each waiting note's finish did
+const leave = async (f, opened = null) => Promise.all(f.onOpen(opened));
 
-test("finish: a note Navigator makes in its folder from a template with content gets its alias, and keeps the content", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const file = madeBy(v, `${DAYS}/2026-09-27.md`, "## Notes\n");
-    assert.equal(await finisher(v).onCreate(file), "finished");
-    assert.equal(v.notes()[`${DAYS}/2026-09-27.md`], "---\naliases: 9/27/26 Sunday\n---\n## Notes\n");
-});
+// ------------------------------------------------------------------ made blank: finished at once
 
-test("finish: one its maker filled with properties only (a template of only properties) isn't templated again", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Daily Note.md`]: "---\ncreated: {{date}}\n---\n" } });
-    templaterOn(v, () => { throw new Error("the template ran again"); });
-    const file = madeBy(v, `${DAYS}/2026-10-06.md`, "---\ncreated: 2026-10-06\n---\n");
-    assert.equal(await finisher(v).onCreate(file), "finished");
-    assert.equal(v.notes()[`${DAYS}/2026-10-06.md`], "---\naliases: 10/6/26 Tuesday\ncreated: 2026-10-06\n---\n");
-});
-
-test("finish: one with properties of its own gets the alias added to them", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const file = madeBy(v, `${DAYS}/2026-09-28.md`, "---\ntags: [daily]\n---\nMonday\n");
-    await finisher(v).onCreate(file);
-    assert.equal(v.notes()[`${DAYS}/2026-09-28.md`], "---\naliases: 9/28/26 Monday\ntags: [daily]\n---\nMonday\n");
-});
-
-test("finish: an empty note made elsewhere (a click on a link to a missing day) is filed in its folder, with its alias", async () => {
+test("finish: an empty note made elsewhere (a click on a link to a missing day) is filed in its folder at once, with its alias, held from Templater's trigger at both paths", async () => {
     const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, "Inbox/Note.md": "[[2026-09-13]]\n" } });
-    const file = madeBy(v, "2026-09-13.md", "");
-    await finisher(v).onCreate(file);
+    const { pending } = templaterOn(v);
+    assert.equal(await finisher(v).onCreate(madeBy(v, "2026-09-13.md", "")), "finished");
     assert.equal(v.notes()["2026-09-13.md"], undefined);
     assert.equal(v.notes()[`${DAYS}/2026-09-13.md`], "---\naliases: 9/13/26 Sunday\n---\n");
     assert.equal(v.notes()["Inbox/Note.md"], "[[2026-09-13]]\n", "the link still finds it");
+    assert.ok(pending.has("2026-09-13.md") && pending.has(`${DAYS}/2026-09-13.md`), "the trigger looks by the path the note is at when it looks");
 });
 
 test("finish: a new note titled like a week, in the Inbox, is filed in the weeks folder", async () => {
@@ -278,7 +256,7 @@ test("finish: a new note titled like a week, in the Inbox, is filed in the weeks
     assert.equal(v.notes()[`${WEEKS}/2026w41.md`], "---\naliases: Week of 10/4/26\n---\n");
 });
 
-test("finish: an empty note made elsewhere gets that kind of note's template too", async () => {
+test("finish: an empty note gets that kind of note's template too", async () => {
     const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Yearly Note.md`]: "## Goals\n" } });
     await finisher(v).onCreate(madeBy(v, "Projects/2028.md", ""));
     assert.equal(v.notes()[`${YEARS}/2028.md`], "## Goals\n");
@@ -291,43 +269,9 @@ test("finish: one whose folder has a note of that name already stays where it wa
     assert.equal(v.notes()[`${YEARS}/2026.md`], "## The year\n");
 });
 
-test("finish: a note with text made outside its folder isn't moved", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    assert.equal(await finisher(v).onCreate(madeBy(v, "Projects/2026-10.md", "Budget\n")), "left");
-    assert.equal(v.notes()["Projects/2026-10.md"], "Budget\n");
-});
-
-test("finish: a note that arrives with an old creation time (Sync), and one not named like a periodic note, are left alone", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const { pending } = templaterOn(v);
-    const timers = [];
-    v.globals.setTimeout = (fn, ms) => { timers.push(fn); return timers.length; };
-    const f = finisher(v);
-    assert.equal(f.onCreate(madeBy(v, `${DAYS}/2026-09-29.md`, "", 3 * 864e5)), null);
-    for (const t of timers.splice(0)) t();
-    assert.ok(pending.has(`${DAYS}/2026-09-29.md`), "an empty one is still kept from Templater's trigger, whose Get Template has no periodic route");
-    assert.equal(f.onCreate(madeBy(v, "Inbox/2026-09-23 Kickoff call.md", "")), null);
-    assert.equal(f.onCreate(madeBy(v, "Inbox/Untitled.md", "")), null);
-    assert.equal(v.notes()[`${DAYS}/2026-09-29.md`], "");
-});
-
-test("finish: a note Plainday is making is left to it, and one still holding Templater code is left as it is", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const n = v.plainday.PeriodicNotes, f = finisher(v);
-    n.making.set(`${DAYS}/2026-09-30.md`, Promise.resolve(null));
-    assert.equal(f.onCreate(madeBy(v, `${DAYS}/2026-09-30.md`, "")), null);
-    // Templater's trigger off: no run comes, and after TRIGGER_WAIT_MS the note is left with its code
-    const timers = [];
-    v.globals.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
-    const done = f.onCreate(madeBy(v, `${DAYS}/2026-10-01.md`, "<% tp.date.now() %>\n"));
-    await new Promise((r) => setImmediate(r));
-    timers.find((t) => t.ms === 1000).fn();
-    assert.equal(await done, "left");
-    assert.equal(v.notes()[`${DAYS}/2026-10-01.md`], "<% tp.date.now() %>\n");
-});
-
 test("finish: a note open in the editor gets its alias through the editor, so what you typed stays below it", async () => {
-    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    // The editor saves a moment later (`lag`), as Obsidian's does, so the note is still blank on disk
+    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES, lag: true });
     const file = madeBy(v, `${DAYS}/2026-09-24.md`, "");
     v.open(`${DAYS}/2026-09-24.md`, 0, 0);
     const editor = v.app.workspace.activeLeaf.view.editor;
@@ -351,46 +295,99 @@ test("finish: in a note just opened empty, with nothing typed yet, the cursor go
     assert.equal(w.placed(), null);
 });
 
-test("finish: at once, with Templater's trigger kept off it, when Templater isn't writing the note", async () => {
+// ------------------------------------------------------------------ written into by its maker: its alias when you leave it
+
+test("finish: a note Navigator writes from a template with content is left alone while it's made, and gets its alias when you leave it", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const { pending } = templaterOn(v);
+    templaterOn(v, () => { throw new Error("a template ran on it"); });
     const f = finisher(v);
-    assert.equal(await f.onCreate(madeBy(v, "Inbox/2026-10-02.md", "")), "finished");
-    assert.ok(pending.has("Inbox/2026-10-02.md") && pending.has(`${DAYS}/2026-10-02.md`), "held from the trigger, which would run Get Template on it, at both paths: it looks by the path the note is at");
-    assert.equal(v.notes()[`${DAYS}/2026-10-02.md`], "---\naliases: 10/2/26 Friday\n---\n");
-    // One with text, as Navigator writes a built-in template, is held too: the trigger would only write it again
-    await f.onCreate(madeBy(v, `${DAYS}/2026-10-10.md`, "## Notes\n"));
-    assert.ok(pending.has(`${DAYS}/2026-10-10.md`));
+    const file = madeBy(v, `${DAYS}/2026-09-27.md`, "## Notes\n");
+    assert.equal(await f.onCreate(file), "waiting");
+    assert.equal(v.notes()[`${DAYS}/2026-09-27.md`], "## Notes\n", "nothing written while it's made");
+    assert.deepEqual(await leave(f, file), [], "its own opening isn't leaving it");
+    assert.deepEqual(await leave(f), ["finished"]);
+    assert.equal(v.notes()[`${DAYS}/2026-09-27.md`], "---\naliases: 9/27/26 Sunday\n---\n## Notes\n");
+    assert.deepEqual(await leave(f), [], "once");
 });
 
-test("finish: a note Templater is making from a template waits for Templater's own write, then gets its alias", async () => {
+test("finish: a template of only properties isn't run again, and the note doesn't wait on NewNoteGuard's hold (review round 3)", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Daily Note.md`]: "---\ncreated: {{date}}\n---\n" } });
+    const { pending } = templaterOn(v, () => { throw new Error("the template ran again"); });
+    const f = finisher(v);
+    const file = madeBy(v, `${DAYS}/2026-10-06.md`, "---\ncreated: 2026-10-06\n---\n");
+    pending.add(file.path);    // NewNoteGuard holds a note that has properties and nothing below them
+    assert.equal(await f.onCreate(file), "waiting");
+    assert.deepEqual(await leave(f), ["later"], "left while still listed: at the next leave");
+    pending.delete(file.path);
+    assert.deepEqual(await leave(f), ["finished"]);
+    assert.equal(v.notes()[`${DAYS}/2026-10-06.md`], "---\naliases: 10/6/26 Tuesday\ncreated: 2026-10-06\n---\n");
+});
+
+test("finish: one with properties of its own gets the alias added to them, when you leave it", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    const { pending } = templaterOn(v);
+    const f = finisher(v);
+    await f.onCreate(madeBy(v, `${DAYS}/2026-09-28.md`, "---\ntags: [daily]\n---\nMonday\n"));
+    await leave(f);
+    assert.equal(v.notes()[`${DAYS}/2026-09-28.md`], "---\naliases: 9/28/26 Monday\ntags: [daily]\n---\nMonday\n");
+});
+
+test("finish: a note Templater is making from a template gets its alias when you leave it after Templater is done, and its template isn't run again", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Daily Note.md`]: "<% tp.date.now(\"dddd\") %>\n" } });
+    const { pending, written } = templaterOn(v);
     const f = finisher(v);
     // As create_new_note_from_template makes one (Navigator's calendar with Templater code): empty, listed as in progress
     const file = madeBy(v, `${DAYS}/2026-10-03.md`, "");
     pending.add(file.path);
-    const done = f.onCreate(file);
-    await new Promise((r) => setImmediate(r));
+    assert.equal(await f.onCreate(file), "waiting");
     assert.equal(v.notes()[`${DAYS}/2026-10-03.md`], "", "nothing written while Templater is writing it");
-    assert.equal(v.listening(), 1);
     await v.app.vault.process(file, () => "Saturday\n");
-    v.fire("templater:new-note-from-template", file);
-    assert.equal(await done, "finished");
+    pending.delete(file.path);
+    assert.deepEqual(await leave(f), ["finished"]);
     assert.equal(v.notes()[`${DAYS}/2026-10-03.md`], "---\naliases: 10/3/26 Saturday\n---\nSaturday\n");
-    assert.equal(v.listening(), 0, "the listener is gone");
+    assert.deepEqual(written, [], "Plainday ran no template on it");
 });
 
-test("finish: a note holding Templater code waits for Templater's trigger to run it", async () => {
+test("finish: a note holding Templater code gets its alias only once the code has run; with the trigger off, never", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
-    templaterOn(v);
     const f = finisher(v);
-    // As the Daily notes plugin writes a template with Templater code, for the trigger to run
     const file = madeBy(v, `${DAYS}/2026-10-11.md`, "<% tp.date.now(\"dddd\") %>\n");
-    const done = f.onCreate(file);
-    await new Promise((r) => setImmediate(r));
-    await v.app.vault.process(file, () => "Sunday\n");
-    v.fire("templater:overwrite-file", file);
-    assert.equal(await done, "finished");
+    assert.equal(await f.onCreate(file), "waiting");
+    assert.deepEqual(await leave(f), ["later"]);
+    assert.deepEqual(await leave(f), ["later"], "the trigger off: it waits, and nothing changes");
+    assert.equal(v.notes()[`${DAYS}/2026-10-11.md`], "<% tp.date.now(\"dddd\") %>\n");
+    await v.app.vault.process(file, () => "Sunday\n");    // the trigger ran it
+    assert.deepEqual(await leave(f), ["finished"]);
     assert.equal(v.notes()[`${DAYS}/2026-10-11.md`], "---\naliases: 10/11/26 Sunday\n---\nSunday\n");
+});
+
+test("finish: a note with text made outside its folder isn't moved, and gets no alias: it isn't a periodic note", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    const f = finisher(v);
+    assert.equal(await f.onCreate(madeBy(v, "Projects/2026-10.md", "Budget\n")), "waiting");
+    assert.deepEqual(await leave(f), ["left"]);
+    assert.equal(v.notes()["Projects/2026-10.md"], "Budget\n");
+});
+
+// ------------------------------------------------------------------ not finished
+
+test("finish: a note that arrives with an old creation time (Sync), and one not named like a periodic note, are left alone", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    const { pending } = templaterOn(v);
+    const timers = [];
+    v.globals.setTimeout = (fn, ms) => { timers.push(fn); return timers.length; };
+    const f = finisher(v);
+    assert.equal(f.onCreate(madeBy(v, `${DAYS}/2026-09-29.md`, "", 3 * 864e5)), null);
+    for (const t of timers.splice(0)) t();
+    assert.ok(pending.has(`${DAYS}/2026-09-29.md`), "an empty one is still kept from Templater's trigger, whose Get Template has no periodic route");
+    assert.equal(f.onCreate(madeBy(v, `${DAYS}/2026-09-30.md`, "## From the phone\n", 3 * 864e5)), null);
+    assert.deepEqual(await leave(f), [], "one with text isn't waiting either");
+    assert.equal(f.onCreate(madeBy(v, "Inbox/2026-09-23 Kickoff call.md", "")), null);
+    assert.equal(f.onCreate(madeBy(v, "Inbox/Untitled.md", "")), null);
+    assert.equal(v.notes()[`${DAYS}/2026-09-29.md`], "");
+});
+
+test("finish: a note Plainday is making is left to it", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
+    v.plainday.PeriodicNotes.making.set(`${DAYS}/2026-09-30.md`, Promise.resolve(null));
+    assert.equal(finisher(v).onCreate(madeBy(v, `${DAYS}/2026-09-30.md`, "")), null);
 });
