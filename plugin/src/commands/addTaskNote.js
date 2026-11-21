@@ -77,7 +77,7 @@ export default class AddTaskNote {
     // after the cursor. With only whitespace after the cursor, insert an empty link to type a name into. On a
     // line that already has a ⋯, that note's ⋯ goes on the task's other lines (spread). A new note is filed in
     // the line's project, or waits in Inbox. A note of that name already there is settled (attach).
-    // On an event line (`- [<]`), link a event log named with the daily note's date and the event's title
+    // On an event line (`- [<]`), link a event log named with the daily note's day and the event's title
     // (the selection, or the text after its time), at the end of the line like a task's note (OBS-57), and
     // make the log right away, as a task's note is made (see makeLog).
     async invoke() {
@@ -901,8 +901,8 @@ export default class AddTaskNote {
         const { editor, source, at, lineText, cursor } = line;
         const change = plainday.TaskChange;
         const date = this.dailyNoteDate();
-        const logName = `${date} ${this.fileName(name)}`;
-        const fresh = this.eventLine(lineText, name, date);
+        const logName = plainday.EventLog.nameFor(date, name);
+        const fresh = this.eventLine(lineText, logName);
         if (fresh.error) {
             new Notice(fresh.error);
             return;
@@ -943,17 +943,16 @@ export default class AddTaskNote {
             await plainday.EventLog.make({ date, title });
         } catch (e) {
             console.error("AddTaskNote: couldn't make the log", e);
-            new Notice(`Couldn't make the log "${date} ${this.fileName(title)}": click its link to make it`);
+            new Notice(`Couldn't make the log "${plainday.EventLog.nameFor(date, title)}": click its link to make it`);
         }
     }
 
-    // The event line with a link to its event log, `[[date name|⋯]]` (or `[[linktext|⋯]]`): at
-    // the end, after the title, its ℹ️ or 🆓 and any ⭕ or 🗃️ links, so the note link ends the line
-    // (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
-    eventLine(lineText, name, date, linktext = null) {
+    // The event line with a link to its event log, `[[linktext|⋯]]` (the log's name, EventLog.nameFor, or
+    // a path): at the end, after the title, its ℹ️ or 🆓 and any ⭕ or 🗃️ links, so the note link ends
+    // the line (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
+    eventLine(lineText, linktext) {
         if (this.linksLog(lineText)) return { error: "This event already links a log" };
-        const link = linktext ? `[[${linktext}|${AddTaskNote.NOTE_MARK}]]` : this.eventLink(date, this.fileName(name));
-        return this.endWith(lineText, link);
+        return this.endWith(lineText, `[[${linktext}|${AddTaskNote.NOTE_MARK}]]`);
     }
 
     // Whether an event line links a log already: a note link, or its title wrapped in a dated link
@@ -982,21 +981,17 @@ export default class AddTaskNote {
         return /^\S/.test(followedBy) ? " " : "";
     }
 
-    // "Event name" → "[[2026-05-31 Event name|⋯]]"
-    eventLink(date, name) {
-        return `[[${date} ${name}|${AddTaskNote.NOTE_MARK}]]`;
-    }
-
     // The column right after a line's checkbox and the space that follows it: "- [ ] |Task"
     afterCheckbox(lineText) {
         const match = lineText.match(AddTaskNote.CHECKBOX);
         return match ? match[0].length : 0;
     }
 
-    // Date from the active note's title (e.g. "2026-05-31"), falling back to today
+    // The day of the daily note open now, read by its name as every link to a day is (OBS-297, OBS-300), else
+    // today: YYYY-MM-DD
     dailyNoteDate() {
-        const name = app.workspace.getActiveFile()?.basename ?? "";
-        const match = name.match(/\d{4}-\d{2}-\d{2}/);
-        return match ? match[0] : moment().format("YYYY-MM-DD");
+        const file = app.workspace.getActiveFile();
+        const period = file ? plainday.PeriodicNotes.periodOfName(file.basename) : null;
+        return period?.unit === "day" ? period.date : moment().format("YYYY-MM-DD");
     }
 }

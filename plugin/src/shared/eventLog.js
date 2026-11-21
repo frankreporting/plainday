@@ -2,18 +2,18 @@ import { MarkdownView, moment, normalizePath, Notice, stringifyYaml } from "obsi
 import { app, plainday } from "../host.js";
 
 export default class EventLog {
-    // Event logs, made in code (OBS-122), as the Log template made them before: a log is named for its day and its
-    // event's title ("2026-09-17 Kestrel standup"), filed in the `›logs` folder of the project or area its event line's
-    // ⭕ or 🗃️ names (else the Inbox), and its event line in the daily note links it. Plainday writes the properties
-    // its code reads, in one write (noteText); then the Log template, when it has anything in it, adds its own.
+    // Event logs, made in code (OBS-122), as the Log template made them before: a log is named with its day, spelled
+    // the way the daily notes are named (OBS-300), and its event's title ("2026-09-17 Kestrel standup" in the demo,
+    // "17-09-2026 Kestrel standup" where daily notes are named DD-MM-YYYY), filed in the `›logs` folder of the project
+    // or area its event line's ⭕ or 🗃️ names (else the Inbox), and its event line in the daily note links it.
+    // Plainday writes the properties its code reads, in one write (noteText); then the Log template, when it has
+    // anything in it, adds its own.
     // - make(): the one maker, for Add note on an event line, New event log and CalNav (openLog)
     // - finish(): a note an event line's ⋯ links, made blank some other way (a click on the link), FinishLinkedLogs
     // - recordEvent() and eventTimes(): the event line and its times, moved here from the Log template's two
     //   Templater scripts as they were
     // The properties Plainday writes, whose values win over a template's (Settings.WRITES.log warns about a clash)
     static OWN = ["parent", "date", "time", "endTime", "who"];
-    // A log's name: its day, a space, its title
-    static NAME = /^(\d{4}-\d{2}-\d{2}) (.+)$/;
 
     constructor() {
         // The logs being made now, by name: a second call for the same log gets the first one's, and FinishLinkedLogs
@@ -21,9 +21,25 @@ export default class EventLog {
         this.making = new Map();
     }
 
-    // A log's name for `title` on `date` (YYYY-MM-DD): the title cleaned as AddTaskNote cleans a note's name
+    // A log's name for `title` on `date` (YYYY-MM-DD): the day's name, as its daily note is named (OBS-300), a space,
+    // and the title cleaned as AddTaskNote cleans a note's name
     nameFor(date, title) {
-        return `${date} ${plainday.AddTaskNote.fileName(title)}`;
+        return `${plainday.PeriodicNotes.where("day", date).name} ${plainday.AddTaskNote.fileName(title)}`;
+    }
+
+    // A log's day and title, read from its name: { date (YYYY-MM-DD), title }, or null when the name doesn't start
+    // with a day's name, as the daily notes are named, a space and a title (OBS-300). The day is the part before the
+    // first space that reads as one, so a day's name with spaces in it ("17 September 2026") reads too.
+    dayOf(name) {
+        name = String(name ?? "");
+        const read = plainday.PeriodicNotes.reader();
+        for (let at = name.indexOf(" "); at > 0; at = name.indexOf(" ", at + 1)) {
+            const title = name.slice(at + 1);
+            if (!title.trim()) return null;
+            const period = read(name.slice(0, at));
+            if (period?.unit === "day") return { date: period.date, title };
+        }
+        return null;
     }
 
     // Makes the log for `title` on `date` (YYYY-MM-DD) without opening it, or finds the one of that name: resolves to
@@ -33,7 +49,7 @@ export default class EventLog {
     async make({ date, title, name = null, time = "" }) {
         title = String(title ?? "").trim();
         name ??= this.nameFor(date, title);
-        if (!plainday.AddTaskNote.fileName(title) || name.length <= 11) {
+        if (!plainday.AddTaskNote.fileName(title) || !name.trim()) {
             new Notice("No title to name the log");
             return null;
         }
@@ -48,16 +64,15 @@ export default class EventLog {
     // A note an event line's ⋯ links, made blank just now some other way (FinishLinkedLogs): it becomes that log, filled
     // and filed as make() would make it. Returns "finished", or null when no event line links it or it isn't blank.
     async finish(file) {
-        const m = file?.basename.match(EventLog.NAME);
-        if (!m || this.making.has(file.basename)) return null;
-        const day = moment(m[1], "YYYY-MM-DD", true);
-        const daily = day.isValid() ? app.vault.getFileByPath(plainday.Schedule.dailyNotePath(day)) : null;
+        const named = file ? this.dayOf(file.basename) : null;
+        if (!named || this.making.has(file.basename)) return null;
+        const daily = app.vault.getFileByPath(plainday.Schedule.dailyNotePath(moment(named.date, "YYYY-MM-DD", true)));
         if (!daily) return null;
-        const { outcome } = this.recordEvent(await this.textOf(daily), { log: file.basename, title: m[2] });
+        const { outcome } = this.recordEvent(await this.textOf(daily), { log: file.basename, title: named.title });
         if (outcome !== "present" || (await app.vault.read(file)).trim() !== "") return null;
         // Templater's trigger looks 300 ms after a note appears, and Get Template would give this one the Empty Note
         plainday.PeriodicNotes.hold(file.path);
-        const run = this.build({ date: m[1], title: m[2], name: file.basename, into: file });
+        const run = this.build({ date: named.date, title: named.title, name: file.basename, into: file });
         this.making.set(file.basename, run.finally(() => this.making.delete(file.basename)));
         return (await run) ? "finished" : null;
     }
@@ -187,7 +202,8 @@ export default class EventLog {
             }
         }
 
-        const own = { alias: `${day.isValid() ? day.format("M/D/YY") : date} ${name.slice(11)}`, parent, date, time: times?.time ?? "", endTime: times?.endTime ?? "", who: "" };
+        // Its alias: the day as Plainday writes dates, then the log's name without its day
+        const own = { alias: `${day.isValid() ? day.format("M/D/YY") : date} ${this.dayOf(name)?.title ?? name}`, parent, date, time: times?.time ?? "", endTime: times?.endTime ?? "", who: "" };
         return this.write({ name, folder, own, into });
     }
 

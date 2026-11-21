@@ -37,7 +37,7 @@ function vault({ patterns = null, daily = { format: "YYYY-MM-DD", folder: "Refer
     };
     const plainday = {};
     const context = vm.createContext({ moment, Notice: class {}, MarkdownView: class {}, getAllTags: () => [], getLanguage: () => "en", app, plainday, URL });
-    for (const [key, file, cls] of [["Settings", "settings"], ["Schedule", "schedule"], ["DatePrompt", "datePrompt"], ["JumpToDate", "jumpToDate"], ["TimeReport", "timeReport"], ["PeriodicNotes", "periodicNotes"]]) {
+    for (const [key, file, cls] of [["Settings", "settings"], ["Schedule", "schedule"], ["DatePrompt", "datePrompt"], ["JumpToDate", "jumpToDate"], ["TimeReport", "timeReport"], ["PeriodicNotes", "periodicNotes"], ["AddTaskNote", "addTaskNote"], ["EventLog", "eventLog"]]) {
         plainday[key] = new (loadClass(`${file}.js`, context))();
     }
     return { plainday, navigator, app };
@@ -83,6 +83,22 @@ test("under the Daily notes plugin, the daily notes' own format", () => {
     const read = plainday.PeriodicNotes.reader();
     assert.deepEqual(plain(read("17.09.2026")), { unit: "day", date: "2026-09-17" });
     assert.deepEqual(plain(read("2026w39")), { unit: "week", date: "2026-09-20" }, "Plainday's own week names");
+});
+
+test("a log's name: the day's name as the daily notes are named, then the title; read back the same way, a day's name with spaces too (OBS-300)", () => {
+    for (const [format, name] of [["YYYY-MM-DD", "2026-09-17"], ["DD-MM-YYYY", "17-09-2026"], ["M-D-YY", "9-17-26"], ["D MMMM YYYY", "17 September 2026"]]) {
+        const log = vault({ daily: { format, folder: "Reference/Planner/days" } }).plainday.EventLog;
+        assert.equal(log.nameFor("2026-09-17", "Sync: Q3 plan"), `${name} Sync - Q3 plan`, format);
+        assert.deepEqual(plain(log.dayOf(`${name} Kestrel standup`)), { date: "2026-09-17", title: "Kestrel standup" }, format);
+        assert.deepEqual(plain(log.dayOf(`${name} 2026 budget`)), { date: "2026-09-17", title: "2026 budget" }, `${format}: the first day's name`);
+        assert.deepEqual(plain(log.dayOf(`${name} X`)), { date: "2026-09-17", title: "X" }, `${format}: a short name`);
+        for (const other of [name, `${name} `, "Kestrel standup", ""]) assert.equal(log.dayOf(other), null, `${format}: "${other}"`);
+    }
+    const dd = vault({ daily: { format: "DD-MM-YYYY", folder: "Reference/Planner/days" } }).plainday.EventLog;
+    assert.equal(dd.dayOf("2026-09-17 Kestrel standup"), null, "another vault's spelling");
+    // A week's, a month's or a year's name isn't a day's
+    const demo = vault().plainday.EventLog;
+    for (const other of ["2026w38 Review", "2026-09 Review", "2026 Planning"]) assert.equal(demo.dayOf(other), null, other);
 });
 
 test("the time report's default reads the demo's names exactly as the reader does under the demo's settings", () => {

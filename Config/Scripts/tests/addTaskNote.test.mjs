@@ -8,7 +8,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER, withFolders, momentOn, YAML as STAND_IN_YAML } from "./standInVault.mjs";
 import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
-import { periodicNames } from "./dayNames.mjs";
+import { periodicNames, plainName } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
 // `plainday` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
@@ -111,23 +111,23 @@ test("target: on an event line the time is skipped and the title is used", () =>
 });
 
 test("eventLine: the log link ends the line, after the title, its marks and any ⭕ or 🗃️ links (OBS-57, OBS-90)", () => {
-    assert.equal(add.eventLine("- [<] 9:00am\tStandup", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
-    assert.equal(add.eventLine("- [<] 9:00am\tStandup   ", "Standup", "2026-09-14"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
-    assert.equal(add.eventLine("- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]]", "Delivery window", "2026-09-14"),
+    assert.equal(add.eventLine("- [<] 9:00am\tStandup", "2026-09-14 Standup"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
+    assert.equal(add.eventLine("- [<] 9:00am\tStandup   ", "2026-09-14 Standup"), "- [<] 9:00am\tStandup [[2026-09-14 Standup|⋯]]");
+    assert.equal(add.eventLine("- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]]", "2026-09-14 Delivery window"),
         "- [<] 2:00pm\tDelivery window ℹ️ 🆓 [[Hawk Ledger|⭕]] [[Home|🗃️]] [[2026-09-14 Delivery window|⋯]]");
-    assert.equal(add.eventLine("\t- [<] All day\tOffsite [[Hawk Ledger|⭕]]", "Offsite", "2026-09-14"),
+    assert.equal(add.eventLine("\t- [<] All day\tOffsite [[Hawk Ledger|⭕]]", "2026-09-14 Offsite"),
         "\t- [<] All day\tOffsite [[Hawk Ledger|⭕]] [[2026-09-14 Offsite|⋯]]");
     // A selected name names the log; the link still goes at the end
-    assert.equal(add.eventLine("- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]]", "Weekly sync", "2026-09-14"),
+    assert.equal(add.eventLine("- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]]", "2026-09-14 Weekly sync"),
         "- [<] 1:00pm\tWeekly sync with the studio [[Hawk Ledger|⭕]] [[2026-09-14 Weekly sync|⋯]]");
     // A person linked in the title stays in the title
-    assert.equal(add.eventLine("- [<] 1:00pm\tLunch with [[Rafe Oakes]]", "Lunch with", "2026-09-14"), "- [<] 1:00pm\tLunch with [[Rafe Oakes]] [[2026-09-14 Lunch with|⋯]]");
+    assert.equal(add.eventLine("- [<] 1:00pm\tLunch with [[Rafe Oakes]]", "2026-09-14 Lunch with"), "- [<] 1:00pm\tLunch with [[Rafe Oakes]] [[2026-09-14 Lunch with|⋯]]");
     // An existing log's link text (a path, when its name isn't unique)
-    assert.equal(add.eventLine("- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]]", "Standup", "2026-09-14", "Projects/Hawk/logs/2026-09-14 Standup"),
+    assert.equal(add.eventLine("- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]]", "Projects/Hawk/logs/2026-09-14 Standup"),
         "- [<] 1:00pm\tStandup [[Hawk Ledger|⭕]] [[Projects/Hawk/logs/2026-09-14 Standup|⋯]]");
     // Already linked, either way: nothing to add
-    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\tStandup [[2026-09-14 Standup|⋯]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
-    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", "Standup", "2026-09-14") }, { error: "This event already links a log" });
+    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\tStandup [[2026-09-14 Standup|⋯]]", "2026-09-14 Standup") }, { error: "This event already links a log" });
+    assert.deepEqual({ ...add.eventLine("- [<] 1:00pm\t[[2026-09-14 Standup|Standup]]", "2026-09-14 Standup") }, { error: "This event already links a log" });
 });
 
 test("withHome: the project or area link goes before the note links that end the line, replacing the ones given (OBS-90)", () => {
@@ -179,11 +179,6 @@ test("withOwn: the ⋯ goes ahead of a ↗ and an ID, after the ⭕; a line with
     assert.equal(add.withOwn("- [<] 1:30pm\tKickoff ℹ️ [[Hawk Ledger|⭕]]", N), `- [<] 1:30pm\tKickoff ℹ️ [[Hawk Ledger|⭕]] ${N}`);
     const has = "- [ ] Plan it [[Other|⋯]] ^k3x9m2";
     assert.equal(add.withOwn(has, N), has);
-});
-
-test("eventLink: a event log named with the day's date, as a ⋯ note link; blank, it waits for the name", () => {
-    assert.equal(add.eventLink("2026-09-16", "Weekly sync"), "[[2026-09-16 Weekly sync|⋯]]");
-    assert.equal(add.eventLink("2026-09-16", ""), "[[2026-09-16 |⋯]]");
 });
 
 test("isEvent: only `[<]` lines, and the checkbox pattern matches every status", () => {
@@ -488,7 +483,8 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
 });
 
 // A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a EventLog that records what
-// it's asked to make
+// it's asked to make and names a log as it does in a vault whose days are named YYYY-MM-DD (the real one, in
+// other formats too, is in eventLog.test.mjs)
 const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {}) => {
     const calls = [];
     let text = line, cursor = null;
@@ -519,7 +515,10 @@ const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {})
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
     const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
-        app, plainday: withFolders({ DueDate: new DueDate(), EventLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); } } }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+        app, plainday: withFolders({
+            DueDate: new DueDate(), PeriodicNotes: { periodOfName: plainName },
+            EventLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); }, nameFor: (date, title) => `${date} ${add.fileName(title)}` },
+        }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -560,7 +559,7 @@ test("invoke on an event line makes the log right away, without Templater, after
     assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|⋯]]")).calls, ["notice: This event already links a log"]);
 });
 
-test("an event time with nothing after it is a line with no title; a title a file can't be named after makes a log name that works (fix round 4)", () => {
+test("an event time with nothing after it is a line with no title; a title a file can't be named after makes a log name that works (fix round 4)", async () => {
     const t = (line, ch) => JSON.parse(JSON.stringify(add.target(line, ch)));
     for (const line of ["- [<] 4:00pm", "- [<] 4:00pm ", "- [<] 4:00pm\t", "- [<] All day"]) {
         for (const ch of [line.length, 7]) assert.deepEqual(t(line, ch), { error: "This event has no title to name its log" }, `${line} at ${ch}`);
@@ -571,7 +570,7 @@ test("an event time with nothing after it is a line with no title; a title a fil
     assert.equal(add.fileName('Review "final" #2 [draft]?'), "Review final 2 draft");
     assert.equal(add.fileName("Plain title"), "Plain title");
     // The title on the line stays as the calendar wrote it; only the log's name changes
-    assert.equal(add.eventLine("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", "Sync: Q3 plan", "2026-09-14"),
+    assert.equal((await invokeOn("- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]]", { paths: HAWK })).text,
         "- [<] 1:30pm\tSync: Q3 plan [[Hawk Ledger|⭕]] [[2026-09-14 Sync - Q3 plan|⋯]]");
 });
 

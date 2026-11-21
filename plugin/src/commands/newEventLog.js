@@ -17,11 +17,9 @@ export default class NewEventLog {
         if (made) await plainday.EventLog.open(made.file);
     }
 
-    // The day of the daily note open now, read by its name as every link to a day is (OBS-297), else today: YYYY-MM-DD
+    // The day of the daily note open now, else today, as Add note takes it: YYYY-MM-DD
     day() {
-        const file = app.workspace.getActiveFile();
-        const period = file ? plainday.PeriodicNotes.periodOfName(file.basename) : null;
-        return period?.unit === "day" ? period.date : moment().format("YYYY-MM-DD");
+        return plainday.AddTaskNote.dailyNoteDate();
     }
 
     // The day in the box, in words: Today, Tomorrow or Yesterday, else "Sat 11/21/26", the way Plainday writes a date

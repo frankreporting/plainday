@@ -5,13 +5,12 @@ export default class FinishLinkedLogs {
     // that name, which becomes the log at once (EventLog.finish): Plainday's properties, the Log template, and filed
     // in the `›logs` folder of the project or area the line names, else the Inbox. Only what's a fact, as
     // FinishPeriodicNotes does (Brian, 2026-11-20): a note made on this device in the last MADE_WITHIN_MS, named with
-    // a day and a title, still blank and not being written by Templater HOLD_AFTER_MS later, which an event line in
-    // that day's note links with its ⋯. Any other note is left to whatever made it: a note made from the quick
-    // switcher with no event line linking it, a log CalNav or another plugin makes, one that arrives through Sync.
+    // a day, spelled as the daily notes are named (EventLog.dayOf, OBS-300), and a title, still blank and not being
+    // written by Templater HOLD_AFTER_MS later, which an event line in that day's note links with its ⋯. Any other
+    // note is left to whatever made it: a note made from the quick switcher with no event line linking it, a log
+    // CalNav or another plugin makes, one that arrives through Sync.
     static MADE_WITHIN_MS = 5000;
     static HOLD_AFTER_MS = 50;
-    // A log's name: a day, then a title
-    static NAME = /^\d{4}-\d{2}-\d{2} \S/;
 
     async invoke() {
         // The handle lives on window, so a second run undoes the first (as NewNoteGuard does)
@@ -26,9 +25,9 @@ export default class FinishLinkedLogs {
 
     onCreate(file, now = Date.now()) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
-        if (!plainday.plugin || file?.extension !== "md" || !FinishLinkedLogs.NAME.test(file.basename)) return null;
-        if (plainday.EventLog?.making.has(file.basename)) return null;
+        if (!plainday.plugin || file?.extension !== "md") return null;
         if (file.stat?.size !== 0 || Math.abs(now - (file.stat?.ctime ?? 0)) > FinishLinkedLogs.MADE_WITHIN_MS) return null;
+        if (!plainday.EventLog || plainday.EventLog.making.has(file.basename) || !plainday.EventLog.dayOf(file.basename)) return null;
         return this.later(file);
     }
 
