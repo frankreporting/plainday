@@ -11,6 +11,8 @@ export default class NewMeetingLog {
         const date = this.day();
         const title = await this.ask(date);
         if (!title) return;
+        // The daily note open now is saved first, so a line added to it on disk doesn't meet unsaved typing
+        await app.workspace.activeLeaf?.view?.save?.();
         const made = await plainday.MeetingLog.make({ date, title });
         if (made) await plainday.MeetingLog.open(made.file);
     }
