@@ -286,7 +286,7 @@ Updated 9/16 9:00pm · 3 open
 - **The order:** billing first, then time entries, then projects' settings, then tasks; within a kind, by note name, so daily notes go by date.
 - **A toast** after a run that finds a line the log didn't have, or more of one, names the new lines (the first three) and links the log. Startup's run shows it too. A Problem already in the log doesn't toast again. A line with several new ones says how many: `Bad formatting ×3 (2026-09-16)`.
 - **Not listed:** time with no project, which the reports count but errands have on purpose. A Problem about a line, or a note's `parent`, is listed once, under the note it's in.
-- **Its own to each vault:** only the desktop creates the note, and a phone updates it when it's there. Git ignores it, and *Update Obsidian PM* never installs it.
+- **Its own to each vault:** only the desktop creates the note, and a phone updates it when it's there. Git ignores it, so the repository never carries one into another vault.
 
 #### Timesheets
 
@@ -620,7 +620,7 @@ One folder for every invoice is the better choice: invoices are business records
 - **Billing doesn't care where an invoice is.** Invoices are found by their `invoice` tag anywhere in the vault, `Archive` included, and each knows its project from its `parent` link. So nothing is billed twice, numbering continues, *Mark paid* works wherever the note sits, and the time report lists an invoice's changes wherever it's filed.
 - **Moving your invoices into the folder** by hand, once you've chosen it, breaks nothing. Changing the invoice folder moves nothing: new invoices go to the new one.
 - **Name the folder `Invoices`,** without a number in front, like `Reference/Invoices`. Then the base, `Invoices.base`, has the folder's name, which is what makes a file a folder's note in Notebook Navigator (a base counts). Clicking the folder opens the base. The `Projects` folder and `Projects.base` work the same way.
-- **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. *Update Obsidian PM* puts it there, and moves it when the invoice folder changes. Until you choose one, it stays in `Config/Bases/`. See *Update Obsidian PM* for how its updates arrive.
+- **The Invoices base** goes in the same folder (`Invoices.base`, beside the invoices), so it opens as a file: from the Quick Switcher or the file list, with its views, sorting and filters on the keyboard. The demo's is in `Reference/Invoices/`; copy it beside your own invoices. Nothing installs or moves it, so the views, sorting and filters you give it stay yours.
 
 ### The note
 
@@ -839,17 +839,6 @@ Opens the error log (the note *Settings → Plainday → Folders* names: `Config
 
 On a project note, makes a draft invoice from its unbilled time through a date you pick. On a flat-fee project, which can't be invoiced yet, it asks when the fee was earned and sets `earned` on its note, so the time report counts it (see *Making one*). On an invoice note, rebuilds it, checks it for changes, or marks it sent, paid or canceled. It never invoices an archived project, rebuilds or checks its invoices, or sets its `earned`: it says the project is archived. See *Invoices*.
 
-### Update Obsidian PM
-
-Installs the system from a local clone of the repository into the vault it runs in. See the README. It also puts the two bases where they open as files:
-
-- **`Projects/Projects.base`** beside the projects, the `Projects` folder's note in Notebook Navigator: an *Active* view (anything not Done, Canceled or On Hold) and an *Inactive* one, each grouped by status.
-- **`Invoices.base`** beside the invoices, in the invoice folder *Settings → Plainday* names (see *Where invoices live*), else in `Config/Bases/`. When the invoice folder changes, the next update moves it there as it is, with any sorting or filters you added. While a file is in the folder's way, or on a computer with no invoice folder chosen once the base has a place, the base stays where it is and the update says why.
-
-**`Config/Invoice Settings.md` and `Config/Table Settings.md`**, from before *Settings → Plainday*, are yours: an update never installs, changes, lists or removes them (see *Vaults from before*).
-
-**A base saves your view changes into its file:** sorting, filters, column widths. So once you've used a base, an update sees it as changed by you and leaves it alone: it's listed under *Changed in this vault*. To take a new version from the repository, turn on *Take the repository's version* in the update's dialog; your copy of a file outside `Config` goes to the vault's trash first, so you can copy a view back from it.
-
 ### Startup scripts
 
 These run on their own when Obsidian starts, one after the other once the vault's layout is ready, and again whenever Plainday is reloaded:
@@ -881,7 +870,7 @@ Where Plainday finds and files notes. Every command reads them from here. **Chan
 - **Inbox:** where Plainday puts a note it makes before the note has a project, `Inbox` as it comes: *Add note* on a line with no ⭕ or 🗃️ makes its task note or log there, and it waits there, still counted, until *Move to project* or *Add project link* files it (*Convert to project* starts its note there for a moment too). It's Plainday's own: notes you make yourself go where Obsidian's *Default location for new notes* says, which Plainday doesn't read or change.
 - **Archive:** finished projects, which no command works on, `Archive` as it comes.
 - Each of the three is a folder, not the top of the vault, outside `Config`, and none is inside another, nor holds the daily notes' folder or the weekly, monthly or yearly notes' folders, nor sits inside one: one that breaks this is refused, with a line under the field that says why ("it's inside Projects"). The archive can't hold the invoice folder either. A folder is taken as the vault spells it, folder by folder (`projects/clients` is `Projects/Clients`), and a path that names a note rather than a folder is refused. A folder whose name holds `[`, `]`, `#` or `^` is refused too, since Plainday writes links to the notes it files and those characters break a link. Each field's list offers only what that field would take; leaving the field while the list is open takes the highlighted row only when you chose it — the highlight has moved off the first row, or the row starts with what you typed — so the row Obsidian highlights by itself never replaces what you typed. Messages name the folders as you've set them: with Projects set to `Work` and the Inbox to `Waiting`, *Due date* says a note "isn't in Work or Waiting".
-- **Not yet:** the templates in `Config/Templates/` still name the folders as they come (the Task, Log, Project and Area templates file into `Projects/` and the `Inbox`), until those notes are made in code. In a vault that uses them, changing a folder before then splits new notes between the two. *Update Obsidian PM* still installs `Projects.base` into `Projects/`, and CalNav's *Open Log Note* still files a new log in `Inbox`.
+- **Not yet:** the templates in `Config/Templates/` still name the folders as they come (the Task, Log, Project and Area templates file into `Projects/` and the `Inbox`), until those notes are made in code. In a vault that uses them, changing a folder before then splits new notes between the two. CalNav's *Open Log Note* still files a new log in `Inbox`.
 
 #### Periodic notes
 
@@ -949,7 +938,7 @@ Plugin settings stay on the device unless Obsidian Sync carries installed commun
 
 - **Folders:** each device files notes in its own folders, so two with different *Folders* split new notes between them, and each one's commands and reports leave out what's in the other's. Paste again after changing a folder.
 - **Tables:** two computers with different *Freeze* settings rewrite the reports' tables back and forth, each time either one runs the time report.
-- **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it. *Update Obsidian PM* on a computer with none chosen leaves the Invoices base where it is.
+- **Invoices:** each device files new invoices in its own invoice folder, and one with none chosen asks for it.
 - **Numbers:** each device remembers the last number it gave, so a number could repeat only if an invoice is deleted on one device and the next is made on the other before a paste.
 - **Calendar links** are never synced, even when Sync carries Plainday's settings: each device keeps its own, and *Paste* is how they get there.
 
@@ -961,7 +950,6 @@ Before *Settings → Plainday*, your invoice details were in `Config/Invoice Set
 - **A value that doesn't read** (a `folder` of `../x`, a `last_number` of `abc`) starts from its default, and the notice names it. A freeze over 9 is 9, and the notice says so.
 - **A blank `folder`,** which filed each invoice in its project's `invoices/` folder, leaves the invoice folder unchosen: *Invoice* asks you to choose one before the next invoice. The invoices already in a project's folder still count.
 - **A device with neither note** writes nothing and starts from the defaults, so a note Sync brings later is still read at the next start. Once you've deleted the notes, *Paste* brings the rest.
-- *Update Obsidian PM* never installs, changes or removes either note.
 
 The calendar sync's range was the `Sync range:` line of `Config/Calendar Sync.md`. On a device whose settings have no calendars yet (a new one, or one whose settings were saved before the Calendars section came), the first load reads that line once and says so: "Plainday moved your calendar sync range, 3 weeks, into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars." A line that doesn't read starts from 2 months, and the notice names it. On a device with no settings saved at all, the range is used but saved only with the invoice and table settings, with the notice, or with your first change, without it, so a data file Sync is still bringing isn't written over. A settings file Sync brings from a device on the release before, which has no calendars, keeps this device's calendars and range, and is written again with them. Editing that line changes nothing.
 
@@ -974,7 +962,7 @@ Before *Sync calendars* read private links, the Mac read its calendars with a fe
 - **Lines the sync had marked canceled** (`[-]`) are never taken over: an event that's back in the calendar gets a new line beside its old `[-]` one, which you delete by hand.
 - **Calendars you added before this release:** no device syncs them yet. Turn on *Sync calendars using this device* on the one that should.
 - **Recurring events' projects:** the first run on a device whose settings have none reads the `[[Project|⭕]]` links in the Calendar Sync note's `## Recurring events` once, into Plainday's settings. Editing the note changes nothing after that.
-- **Nothing else is read:** the calendars are the ones you add in *Settings → Plainday → Calendars*, and `calendar-sync.json` and `calendar-events.json` aren't read at all. Delete them, and the note once the first sync has read its recurring projects. *Update Obsidian PM* removes `fetchCalendar.swift` and `sync-calendar.sh`; a launchd job that ran the script needs taking out (`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/<its name>.plist`).
+- **Nothing else is read:** the calendars are the ones you add in *Settings → Plainday → Calendars*, and `calendar-sync.json` and `calendar-events.json` aren't read at all. Delete them, and the note once the first sync has read its recurring projects. Delete `fetchCalendar.swift` and `sync-calendar.sh` too, if `Config/Scripts/Calendar/` still has them; a launchd job that ran the script needs taking out (`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/<its name>.plist`).
 
 The folders as they come are the ones the system always used, so a vault from before needs nothing read: its notes stay where they are, and the error log stays `Config/Error Log.md` while the setting is blank. A settings file Sync brings from a device on the release before, which has no folders, keeps this device's folders and templates, and is written again with them. A settings file whose Projects, Inbox and Archive don't hold together (edited by hand, or two devices' changes merged) is read with the folders as they come at the start, and with this device's own when Sync brings it, with a notice either way.
 
@@ -1002,5 +990,6 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 Changes go through pull requests from a git worktree, and are tested one at a time in a clone of the repository opened as its own vault, with `Config/Scripts/dev-vault.sh`. The tests run with `node --test "Config/Scripts/tests/*.test.mjs"` from the vault root. `CLAUDE.md` has the workflow and the privacy rule; the README has the tests and CI.
 
+- **A vault that uses the system takes its files from a clone,** outside Obsidian: `node Config/Scripts/update-vault.mjs --vault <folder>` from the clone copies the templates, the Templater scripts, the bases in `Config/`, this manual, the README and `CLAUDE.md` from the clone's `main` (see the README's *Using it for your own notes*). It leaves a file you've changed as it is, and never removes one; `--dry-run` shows what it would do. Plainday itself comes through BRAT, or the community directory once it's listed.
 - **Plainday is built from the scripts:** `npm run build`, in a worktree, bundles every class file in `plugin/src/commands/`, `startup/` and `shared/` with the plugin's own code in `plugin/src/` into `main.js`, and `npm test` tests the bundle. A saved script changes nothing in a vault running Plainday until it's built and the plugin reloaded; `dev-vault.sh test` does both for the dev vault. npm never runs in a folder Obsidian opens as a vault.
 - **Testing the calendar sync:** the repository holds no real calendar. `node plugin/test/calendarFeeds.mjs serve`, in a worktree, serves invented calendars (Studio, Home, Library and Big) on this computer; add their links in a test vault's settings. `plainday.CalendarSync.forgetCache()` by `eval` makes a device forget what it remembers, so the next run is a first one.

@@ -253,7 +253,7 @@ test("each command in the list is added with its id, name and icon, and runs its
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
         assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
-        assert.equal(plugin.commands.length, 15);
+        assert.equal(plugin.commands.length, 14);
         for (const c of plugin.commands) {
             assert.match(c.id, /^[a-z]+(-[a-z]+)*$/, "ids are lower case with hyphens, without the plugin's id");
             // An icon name from Obsidian's set (OBS-263): without one, the phone's toolbar draws a question mark
@@ -1227,7 +1227,7 @@ test("no CustomJS hook or customJS is left in the bundle", () => {
     for (const p of [/["'`]customjs["'`]/, /\.customjs\b/, /\bcustomJS\b/]) {
         assert.doesNotMatch(text, p);
     }
-    assert.doesNotMatch(text, /disablePlugin|enablePlugin/, "UpdateObsidianPM's offer to reload CustomJS is left out");
+    assert.doesNotMatch(text, /disablePlugin|enablePlugin/, "nothing offers to reload CustomJS");
 });
 
 test("the bundle names no folder on the machine that built it, so a build anywhere matches the release (OBS-230)", () => {
@@ -1386,7 +1386,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 36);
+    assert.equal(classFiles.length, 35);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

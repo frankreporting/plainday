@@ -9,14 +9,6 @@
       "count": 1
     }
   },
-  "plugin/src/commands/updateObsidianPM.js": {
-    "no-useless-assignment": {
-      "count": 1
-    },
-    "obsidianmd/no-static-styles-assignment": {
-      "count": 2
-    }
-  },
   "plugin/src/shared/datePrompt.js": {
     "obsidianmd/no-static-styles-assignment": {
       "count": 3

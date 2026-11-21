@@ -27,12 +27,11 @@ import Schedule from "./schedule.js";
 import DueDate from "./setDueDate.js";
 import TimeReport from "./timeReport.js";
 import ToggleTimeEntry from "./toggleTimeEntry.js";
-import UpdateObsidianPM from "./updateObsidianPM.js";
 import ViewErrorLogs from "./viewErrorLogs.js";
 
 export const CLASSES = {
     AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, NewEventLog, Plan,
-    Schedule, TimeReport, ToggleTimeEntry, UpdateObsidianPM, ViewErrorLogs,
+    Schedule, TimeReport, ToggleTimeEntry, ViewErrorLogs,
 };
 
 export const COMMANDS = [
@@ -50,6 +49,4 @@ export const COMMANDS = [
     { id: "invoice", name: "Invoice", script: "Invoice", icon: "receipt" },
     { id: "view-error-logs", name: "View error logs", script: "ViewErrorLogs", icon: "triangle-alert" },
     { id: "sync-calendars", name: "Sync calendars", script: "CalendarSync", icon: "calendar-sync" },
-    // Until OBS-201 replaces it with an install script
-    { id: "update-obsidian-pm", name: "Update Obsidian PM", script: "UpdateObsidianPM", icon: "download" },
 ];

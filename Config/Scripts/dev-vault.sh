@@ -18,8 +18,8 @@
 #       editor, synced event lines), removes the plan note and the lock, and returns to main,
 #       pulled. Refused while `git status --porcelain` still prints anything. The reload it ends
 #       with can set the startup report writing again, so it waits for the tree to settle and
-#       restores once more: the next thing to read this clone is UpdateObsidianPM, which refuses
-#       to install from a tree that isn't clean.
+#       restores once more: the next `test` refuses a tree that isn't clean, and a sample note the
+#       app rewrote would otherwise wait there to be committed by mistake.
 #   dev-vault.sh status
 #       The lock, HEAD, whether Plainday is on, and what's changed.
 #
