@@ -1,4 +1,4 @@
-import { ButtonComponent, FuzzySuggestModal, Modal, moment, normalizePath, Notice } from "obsidian";
+import { ButtonComponent, FuzzySuggestModal, Modal, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class AddTaskNote {
@@ -67,11 +67,11 @@ export default class AddTaskNote {
     // An event title wrapped in a link to its log, the way lines were written before OBS-57, and the way a
     // meeting line in the form used before August 2025 (no bullet, its time first) was (OBS-193)
     static LOG_TITLE = /^\s*(?:[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?|(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
-    // The parent picked in advance for the one note being created ({ path, parent }), read by the
-    // Task and Log templates (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
+    // The parent picked in advance for the one log being created ({ path, parent }), read by the Log
+    // template (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
     static preset = null;
 
-    // On a task line: link the task's note, making it first through the Task template when there isn't one,
+    // On a task line: link the task's note, making it first when there isn't one (createTaskNote),
     // and put its ⋯ on every line of the task, ahead of any ↗ (rule 8). The cursor stays where it was.
     // The name is the selected text or, with nothing selected, the task's text, as long as some text comes
     // after the cursor. With only whitespace after the cursor, insert an empty link to type a name into. On a
@@ -186,9 +186,9 @@ export default class AddTaskNote {
 
     // The task's line once it links its note: `span` of its text gives way to the name without its dates, and
     // every line of the task takes the ⋯. `text` is what names the note; a date in it is the task's due date,
-    // not part of its name, so the note is looked up without it, and a new one is made through the Task
-    // template from the name with the dates after it, so the template can set `due` and the name keeps no
-    // doubled space where a date was. The note's name is that name cleaned for a file name (fileName), so a
+    // not part of its name, so the note is looked up without it, and a new one is made (createTaskNote) from
+    // the name with the dates after it, so the last can be its `due` (the line's 🚩 wins) and the name keeps
+    // no doubled space where a date was. The note's name is that name cleaned for a file name (fileName), so a
     // colon doesn't stop it; the line keeps the name as typed. Settling on a project is a project change
     // (rule 9): a new note is made only once the question and the refusal are past.
     async linkTask(line, text, span, { selected = false } = {}) {
@@ -230,16 +230,17 @@ export default class AddTaskNote {
         if (existing) done = await this.attach(line, existing, found, each(existing, existing.path), name);
         else {
             const home = this.homeOf(line, found);
-            // The template takes the dates off the title for the note's name and keeps the last as its due date
+            // createTaskNote takes the dates off the title for the note's name and keeps the last as its `due`,
+            // unless the line has a 🚩
             const newName = named ? this.freshName(noteName, home) : noteName;
             const title = [newName, ...(name.match(AddTaskNote.DATE) ? [] : text.match(AddTaskNote.DATE) ?? [])].join(" ");
             // With no project the note waits in the Inbox, which a line naming a project is warned about
             const adds = home ? null : { path: `${this.stagingFolder()}/${newName}.md`, basename: newName };
             const make = async () => {
-                note = await this.createTaskNote(title, home);
+                note = await this.createTaskNote(title, home, this.flagDay(lineText));
                 if (!note) return false;
                 // No notice for the note itself: the ⋯ on the line shows it's there
-                // The template took a moment; don't write into a line that changed in the meantime
+                // Making it took a moment; don't write into a line that changed in the meantime
                 if (editor.getLine(at) === lineText) return true;
                 new Notice(`${note.basename} is ready, but the line changed, so it wasn't linked`);
                 return false;
@@ -369,9 +370,9 @@ export default class AddTaskNote {
         return plainday.Settings.get().templates[kind] || plainday.Settings.defaultTemplatePath(kind);
     }
 
-    // Where a new task note or log is made before its template files it: the Inbox, as Settings →
-    // Plainday → Folders has it (OBS-283). A note still there afterwards is unfiled: its line named no
-    // project, so it waits there until AddProjectLink or MoveToProject files it (OBS-55).
+    // The Inbox, as Settings → Plainday → Folders has it (OBS-283): where a task note whose line names no
+    // project is made, and a new log before its template files it. A note there is unfiled: it waits until
+    // AddProjectLink or MoveToProject files it (OBS-55).
     stagingFolder() {
         return plainday.Settings.folders().inbox;
     }
@@ -678,9 +679,9 @@ export default class AddTaskNote {
         return lineText.slice(0, head) + body.trim();
     }
 
-    // For the Task and Log templates: the parent picked in advance for the note at `path`, once. Any
-    // other note, a second ask, or Raycast's "inbox" gets null, and the template files the note in
-    // Inbox.
+    // For the Log template: the parent picked in advance for the note at `path`, once. Any other note, a
+    // second ask, or Raycast's "inbox" gets null, and the template files the note in Inbox. Task notes
+    // don't need it since Plainday makes them (OBS-121); an older Task template still in a vault gets null.
     takePresetParent(path) {
         const preset = AddTaskNote.preset;
         if (!preset || preset.path !== path) return null;
@@ -694,36 +695,117 @@ export default class AddTaskNote {
         return name || text.trim();
     }
 
-    // Runs the Task template on a new note named `name` without opening it. With `parent` (a project
-    // or area note), the template files it there; without, it stays in Inbox, unfiled. Resolves to the
-    // note once the template has filed it, or null when it couldn't be made. The name is cleaned for a file
-    // name first (fileName), whoever calls.
-    async createTaskNote(title, parent = null) {
-        const name = this.fileName(title);
+    // Makes the task note for `title` (the task's name, with any dates after it) without opening it (OBS-121):
+    // in the folder of `parent` (a project or area note), else in the Inbox, unfiled. Its name is the title
+    // without its dates, cleaned for a file name (fileName), whoever calls. Plainday writes the properties it
+    // reads in one go: `tags: task`, `parent` (a link to `parent`, or empty) and `due` (`due`, the day the line's
+    // 🚩 links, else the title's last date, or empty). Then the Task template adds its own (taskTemplate), when
+    // there is one. A note of that name anywhere is refused: Obsidian resolves a shared name to the shortest
+    // path, so the new note could take over the other one's links. Resolves to the note, or null when it
+    // couldn't be made.
+    async createTaskNote(title, parent = null, due = null) {
+        const name = this.fileName(this.withoutDates(title));
         if (!name) {
             new Notice("No task text to name the note");
             return null;
         }
-        const templater = app.plugins.plugins["templater-obsidian"]?.templater;
-        const template = app.vault.getFileByPath(this.templatePath("task"));
-        if (!templater || !template) {
-            new Notice("Can't create the note: Templater or the Task template is missing");
+        const lower = name.toLowerCase();
+        if (app.vault.getMarkdownFiles().some((f) => f.basename.toLowerCase() === lower)) {
+            new Notice(`A note named "${name}" already exists, so no task note was made: open that one, or give this one another name`, 10000);
             return null;
         }
-        // Templater names the note with this same call, so the path matches the note it creates
-        const path = app.vault.getAvailablePath(normalizePath(`${this.stagingFolder()}/${name}`), "md");
-        AddTaskNote.preset = parent ? { path, parent } : null;
+        const folder = parent ? parent.parent?.path ?? "" : this.stagingFolder();
+        const path = normalizePath(folder && folder !== "/" ? `${folder}/${name}.md` : `${name}.md`);
+        const own = { parent: parent ? this.parentLink(parent, path) : "", due: due ?? title.match(AddTaskNote.DATE)?.at(-1) ?? "" };
+        const notes = plainday.PeriodicNotes;
+        const tpl = app.vault.getFileByPath(this.templatePath("task"));
+        const tplText = tpl ? await app.vault.read(tpl) : "";
+        const templater = tplText.trim() ? notes.templater() : null;
+        // Without Templater, the template's text goes in with Plainday's properties, in the one write
+        let text = this.taskNoteText(own), unused = false;
+        if (tplText.trim() && !templater) {
+            if (tplText.includes("<%")) unused = true;
+            else text = this.withTaskTemplate(text, notes.fill(tplText, { name, start: moment().format("YYYY-MM-DD") }), own);
+        }
+        try {
+            if (folder && folder !== "/" && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
+        } catch (e) {
+            if (!app.vault.getFolderByPath(folder)) throw e;
+        }
+        // Templater's trigger is kept off the note from before it's there, so Get Template never runs on it
+        notes.hold(path);
         let note;
         try {
-            note = await templater.create_new_note_from_template(template, this.stagingFolder(), name, false);
-        } finally {
-            AddTaskNote.preset = null;
-        }
-        if (!note) {
+            note = await app.vault.create(path, text);
+        } catch (e) {
+            console.error("AddTaskNote: couldn't make the task note", e);
             new Notice(`Couldn't create a note named "${name}"`);
             return null;
         }
+        if (templater) await this.taskTemplate(templater, tpl, note, own);
+        if (unused) new Notice(`${tpl.basename} holds Templater code and Templater is off, so the new task note was made without it.`);
         return note;
+    }
+
+    // The Task template run on the new note through Templater, which adds the template's properties to Plainday's,
+    // and its text after them. A `parent` or `due` the template sets gives way to Plainday's, which the time
+    // report and Due date read; a `tags` it sets is combined with Plainday's.
+    async taskTemplate(templater, tpl, note, own) {
+        const notes = plainday.PeriodicNotes;
+        await templater.write_template_to_file(tpl, note);
+        // Templater lets go of the note when it's done; the trigger mustn't take it then
+        notes.hold(note.path);
+        const front = notes.parts(await app.vault.read(note)).props ?? {};
+        const same = (key) => String(front[key] ?? "") === own[key];
+        const tagged = [].concat(front.tags ?? []).some((t) => String(t).toLowerCase() === "task");
+        if (same("parent") && same("due") && tagged) return;
+        await app.fileManager.processFrontMatter(note, (f) => {
+            for (const key of ["parent", "due"]) f[key] = own[key] || null;
+            const tags = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
+            if (!tags.some((t) => String(t).toLowerCase() === "task")) f.tags = ["task", ...tags];
+        });
+    }
+
+    // A new task note's text, `own` its `parent` (a link, or "") and `due` (YYYY-MM-DD, or ""): Plainday's
+    // properties in the order the Task template wrote them, then `extra` (a template's other properties), then
+    // `body`
+    taskNoteText(own, { tags = ["task"], extra = {}, body = "" } = {}) {
+        const scalar = (v) => plainday.PeriodicNotes.scalar(String(v));
+        const lines = ["---", "tags:", ...tags.map((t) => `  - ${scalar(t)}`), own.parent ? `parent: ${JSON.stringify(own.parent)}` : "parent:", own.due ? `due: ${own.due}` : "due:"];
+        const more = Object.keys(extra).length ? stringifyYaml(extra) : "";
+        return `${lines.join("\n")}\n${more}---\n${body}`;
+    }
+
+    // `text` with a template's text, `filled`, added, without Templater: the properties combined as
+    // PeriodicNotes.merge combines them, Plainday's `parent` and `due` kept, and `task` among the tags
+    withTaskTemplate(text, filled, own) {
+        const notes = plainday.PeriodicNotes;
+        const { props, body } = notes.parts(notes.merge(text, filled));
+        const extra = { ...props };
+        const tags = [...new Set(["task", ...[].concat(extra.tags ?? []).filter((t) => t !== null && t !== "").map(String)])];
+        for (const key of ["tags", "parent", "due"]) delete extra[key];
+        return this.taskNoteText(own, { tags, extra, body });
+    }
+
+    // A task note's `parent`, as SyncArea writes it: the project or area note by its link text from the note
+    // at `path`, with its first alias as the label
+    parentLink(parent, path) {
+        const linktext = app.metadataCache.fileToLinktext(parent, path, true);
+        const alias = [].concat(app.metadataCache.getFileCache(parent)?.frontmatter?.aliases ?? [])[0];
+        return alias ? `[[${linktext}|${alias}]]` : `[[${linktext}]]`;
+    }
+
+    // The day the line's 🚩 links, YYYY-MM-DD, or null: a new task note's `due` (OBS-66), read as the time report
+    // reads a 🚩, by its note's name (OBS-297). With two, the first, as Due date replaces it.
+    flagDay(lineText) {
+        const tr = plainday.TimeReport;
+        if (!tr) return null;
+        const read = tr.reader();
+        for (const link of tr.lineLinks(tr.classify(lineText).body ?? lineText, read).due) {
+            const day = read(link.target);
+            if (day?.unit === "day") return day.date;
+        }
+        return null;
     }
 
     // With nothing selected, what to link:

@@ -999,7 +999,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         };
 
         // The Task and Log templates AddTaskNote runs (OBS-283). Their names are what they make, and
-        // their default is the path the command had written into it.
+        // their default is the path the command had written into it. A task note's is optional (OBS-121).
         /** @type {Record<"task" | "log", string>} */
         const made = { task: "Task note", log: "Log" };
         /** @param {"task" | "log"} kind */
@@ -1014,7 +1014,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             placeholder: () => settings.defaultTemplatePath(kind),
             note: (value) => {
                 const path = value || settings.defaultTemplatePath(kind);
-                if (missingNote(path)) return `“${path}” isn't in the vault, so Add note has nothing to make a ${made[kind].toLowerCase()} from.`;
+                // A task note is made without one (OBS-121); a log still needs its template
+                if (missingNote(path)) return kind === "task" ? `“${path}” isn't in the vault, so task notes are made without a template.` : `“${path}” isn't in the vault, so Add note has nothing to make a ${made[kind].toLowerCase()} from.`;
                 const file = this.app.vault.getFileByPath(path);
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[kind] ?? []);

@@ -120,10 +120,11 @@ export default class Settings {
     static NEW_ERROR_LOG = "Plainday error log.md";
     // The properties Plainday writes itself into each kind of note it makes, which a template's own
     // would give way to (Settings → Plainday → Note templates warns). Weekly and monthly notes get their
-    // alias (PeriodicNotes, OBS-120), yearly notes nothing. List properties are combined with a template's,
-    // not replaced, so they never warn.
+    // alias (PeriodicNotes, OBS-120), yearly notes nothing, task notes their tag, `parent` and `due`
+    // (AddTaskNote.createTaskNote, OBS-121). List properties are combined with a template's, not replaced,
+    // so they never warn.
     /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log", string[]>>} */
-    static WRITES = { week: ["aliases"], month: ["aliases"], year: [] };
+    static WRITES = { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"] };
     static COMBINED = ["tags", "aliases"];
     // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
     // Sync brings such a file
