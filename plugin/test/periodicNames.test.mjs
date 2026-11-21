@@ -15,6 +15,9 @@ const require = createRequire(import.meta.url);
 const moment = require("moment");
 for (const l of ["de", "fr", "en-gb"]) require(`moment/locale/${l}`);
 moment.locale("en");
+// Reading a name back fills what it leaves out from today, so the tests run on a day of their own
+const TODAY = new Date(2026, 10, 20, 12).getTime();
+moment.now = () => TODAY;
 const LOCALES = ["en", "de", "fr", "en-gb"];
 // What a class gives back was made in its own context, whose objects compare as different kinds to
 // strict equality: compared as plain data
@@ -130,6 +133,16 @@ test("the warning names the format, where it's set, the name it gives a note and
     assert.match(month.nameWarning("month", "en"), /names the note for September 2026 `09`, which doesn't give the year\. .*the year and month, such as `YYYY-MM`\./);
     const days = vault({ daily: { format: "DD" }, periodic: "daily-notes" });
     assert.match(days.nameWarning("day", "en"), /`30`, which doesn't give the year or the month\./);
+    // In September only the year is wrong; in February a 30th doesn't read at all. Either way, the
+    // note named is 2026's 9/30
+    for (const [day, said] of [[new Date(2026, 8, 12), /names the note for 9\/30\/2026 `30`, which doesn't give the year\./], [new Date(2027, 1, 10), /names the note for 9\/30\/2026 `30`, which Plainday can't read as a day\./]]) {
+        moment.now = () => day.getTime();
+        try {
+            assert.match(days.nameWarning("day", "en"), said);
+        } finally {
+            moment.now = () => TODAY;
+        }
+    }
 });
 
 test("days are checked in moment's language, weeks, months and years in the week settings'", () => {

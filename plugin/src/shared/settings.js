@@ -415,11 +415,16 @@ export default class Settings {
             return unit === "day" ? en.format("M/D/YYYY") : unit === "week" ? `the week of ${en.format("M/D/YYYY")}`
                 : unit === "month" ? en.format("MMMM YYYY") : en.format("YYYY");
         };
+        // A name that fails on 9/30 of another year is said with 2026's 9/30, a name the user knows
+        const example = moment([2026, 8, 30]).locale(locale);
         let what;
-        if (!back) what = `names the note for ${period(date)} \`${as}\`, which Plainday can't read as a ${unit}`;
-        else if (date.month() === 8) {
+        if (!back) {
+            const [at, named] = date.month() === 8 ? [example, example.format(name)] : [date, as];
+            what = `names the note for ${period(at)} \`${named}\`, which Plainday can't read as a ${unit}`;
+        } else if (date.month() === 8) {
             // 9/30 of another year read back as a 9/30 (its week, its month) of this year or another
-            // month: the name leaves out what differs. Said with this year's note, a name the user knows.
+            // month: the name leaves out what differs, which moment filled in from today. So a name
+            // with only the day (`DD`) says "the year or the month", or only "the year" in September.
             /** @type {[boolean, string][]} */
             const parts = unit === "week"
                 ? [[iso ? back.isoWeekYear() !== date.isoWeekYear() : back.weekYear() !== date.weekYear(), "the year"],
@@ -428,8 +433,7 @@ export default class Settings {
                     [unit === "day" && back.date() !== date.date(), "the day"]];
             const missing = parts.filter(([differs]) => differs).map(([, part]) => part);
             const list = missing.length > 1 ? `${missing.slice(0, -1).join(", ")} or ${missing.at(-1)}` : missing[0] ?? "the whole date";
-            const example = moment([2026, 8, 30]).locale(locale);
-            what = `names the note for ${period(example)} \`${example.format(name)}\`, which doesn't give ${list}`;
+            what =`names the note for ${period(example)} \`${example.format(name)}\`, which doesn't give ${list}`;
         }
         // Only around New Year: a week's name with the calendar year (YYYY[w]ww) names the week that
         // starts a year by the year before
