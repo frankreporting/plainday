@@ -138,6 +138,7 @@ test("a run with a record adds, updates, leaves yours and the dropped as they ar
         ".obsidian/daily-notes.json": '{"folder":"mine"}\n',
         ".obsidian/plugins/templater-obsidian/data.json": '{"templates_folder":"v1"}\n',
         "Work/Invoices/Invoices.base": "invoices base v1, where the command placed it\n",
+        "Config/Bases/Invoices.base": "invoices base v1, where the command kept it with no invoice folder\n",
         "A real note.md": "mine\n",
     };
     const v = vault(t, old, {
@@ -148,6 +149,7 @@ test("a run with a record adds, updates, leaves yours and the dropped as they ar
         "Projects/Projects.base": sha1("projects base v1\n"),
         "Reference/Invoices/Invoices.base": sha1("invoices base v1\n"),
         "Work/Invoices/Invoices.base": sha1("invoices base v1, where the command placed it\n"),
+        "Config/Bases/Invoices.base": sha1("invoices base v1, where the command kept it with no invoice folder\n"),
         ".obsidian/daily-notes.json": sha1('{"folder":"v1"}\n'),
         ".obsidian/plugins/templater-obsidian/data.json": sha1('{"templates_folder":"v1"}\n'),
     });
@@ -166,7 +168,7 @@ test("a run with a record adds, updates, leaves yours and the dropped as they ar
     assert.equal(read(v, "Config/Scripts/Templater/folderLook.js"), "folder look v1\n");
     assert.equal(read(v, "Config/Templates/Log.md"), "my own log template\n", "yours is left as it is");
     assert.equal(read(v, "Config/Templates/Dropped.md"), "dropped template\n", "a dropped file stays");
-    for (const p of [...FOUR, "Work/Invoices/Invoices.base", "A real note.md"]) assert.equal(read(v, p), old[p], `${p} byte for byte as before`);
+    for (const p of [...FOUR, "Work/Invoices/Invoices.base", "Config/Bases/Invoices.base", "A real note.md"]) assert.equal(read(v, p), old[p], `${p} byte for byte as before`);
     for (const p of ["Welcome.md", "manifest.json", "Config/Scripts/dev-vault.sh", "Config/Scripts/update-vault.mjs", "Config/Scripts/tests/timeReport.test.mjs", "plugin/src/commands/timeReport.js"]) {
         assert.equal(exists(v, p), false, `${p} never installed`);
     }
@@ -176,7 +178,7 @@ test("a run with a record adds, updates, leaves yours and the dropped as they ar
     assert.match(real.out, /Added: 4\n {2}CLAUDE\.md\n {2}Config\/Scripts\/Templater\/folderLook\.js\n {2}Config\/Templates\/Area\.md\n {2}README\.md\n/);
     assert.match(real.out, /Updated: 1\n {2}Config\/Templates\/Task\.md\n/);
     assert.match(real.out, /Dropped by the repository, left in the vault as yours: 1\n {2}Config\/Templates\/Dropped\.md\n/);
-    for (const p of [...FOUR, "Work/Invoices/Invoices.base"]) assert.equal(real.out.includes(p), false, `${p} isn't listed`);
+    for (const p of [...FOUR, "Work/Invoices/Invoices.base", "Config/Bases/Invoices.base"]) assert.equal(real.out.includes(p), false, `${p} isn't listed`);
     assert.match(real.out, /Copied 5 files; 1 already up to date\./);
 
     const rec = record(v);
@@ -286,4 +288,18 @@ test("a write that fails stops there, and the record says what landed", (t) => {
     assert.equal(again.status, 0, again.err);
     assert.equal(record(v).failed, undefined);
     assert.equal(read(v, "README.md"), "readme v2\n");
+});
+
+test("a vault file that's there but can't be read stops the run, and is never replaced", (t) => {
+    if (process.getuid?.() === 0) return t.skip("root reads anything");
+    const c = clone(t);
+    const v = vault(t, { "Config/Templates/Task.md": "an edit that can't be read right now\n" }, {});
+    const file = path.join(v, "Config/Templates/Task.md");
+    fs.chmodSync(file, 0o000);
+    const r = run(c.dir, v);
+    assert.equal(r.status, 1);
+    assert.match(r.err, /couldn't read Config\/Templates\/Task\.md in the vault/);
+    fs.chmodSync(file, 0o644);
+    assert.equal(read(v, "Config/Templates/Task.md"), "an edit that can't be read right now\n");
+    assert.equal(exists(v, "README.md"), false, "nothing was written");
 });

@@ -47,6 +47,9 @@ const INCLUDE = ["Config/", "README.md", "CLAUDE.md"];
 // in plugin/src/, outside `Config/`, and the demo's own notes; dev-vault.sh drives the clone as a test
 // vault; and this script runs from the clone.
 const EXCLUDE = ["Config/Scripts/tests/", "Config/Scripts/dev-vault.sh", "Config/Scripts/update-vault.mjs"];
+// Where the command kept the Invoices base before a vault chose an invoice folder: in the record, it's
+// the base the vault uses, not a file the repository dropped
+const RETIRED = ["Config/Bases/Invoices.base"];
 
 const matches = (list, p) => list.some((x) => (x.endsWith("/") ? p.startsWith(x) : p === x));
 export const installs = (p) => matches(INCLUDE, p) && !matches(EXCLUDE, p);
@@ -73,7 +76,7 @@ export function plan(source, vault, record = new Map(), onMain = new Set(source.
         else out.yours.push(p);
     }
     for (const [p] of sorted(record)) {
-        if (!source.has(p) && !onMain.has(p) && installs(p) && vault.has(p)) out.dropped.push(p);
+        if (!source.has(p) && !onMain.has(p) && installs(p) && !RETIRED.includes(p) && vault.has(p)) out.dropped.push(p);
     }
     return out;
 }
@@ -126,11 +129,16 @@ function put(vault, rel, data) {
     }
 }
 
+// A vault file's bytes, or undefined when there's none. One that's there but can't be read (no
+// permission, a cloud file not downloaded) stops the run, so it's never taken for missing and replaced.
 function readFile(vault, rel) {
+    const full = path.join(vault, rel);
     try {
-        const full = path.join(vault, rel);
         return fs.statSync(full).isFile() ? fs.readFileSync(full) : undefined;
-    } catch { return undefined; }
+    } catch (e) {
+        if (e?.code === "ENOENT" || e?.code === "ENOTDIR") return undefined;
+        fail(`couldn't read ${rel} in the vault (${e?.code ?? e}), so nothing was written`);
+    }
 }
 
 // Every blob main has: Map(path → Buffer). Symlinks and submodules aren't files to copy.
