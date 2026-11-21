@@ -201,9 +201,9 @@ test("Billed entries: rows that aren't plainly a date row or an entry under one 
     const twice = billing.readBilled([...billing.billedLines(ROWS().slice(0, 1), tr, name), "", ...billing.billedLines(ROWS().slice(1), tr, name)].join("\n"), tr);
     assert.equal(twice.both, true);
     assert.equal(twice.rows.length, 3);
-    assert.deepEqual(plain(billing.readBilled("# no table here", tr)), { rows: [], bad: [], found: false, head: false, both: false });
+    assert.deepEqual(plain(billing.readBilled("# no table here", tr)), { rows: [], bad: [], labeled: [], found: false, head: false, both: false });
     // The heading with no table under it: found, so the invoice is a Problem rather than unbilled
-    assert.deepEqual(plain(billing.readBilled("## Billed entries\n\nGone.", tr)), { rows: [], bad: [], found: true, head: false, both: false });
+    assert.deepEqual(plain(billing.readBilled("## Billed entries\n\nGone.", tr)), { rows: [], bad: [], labeled: [], found: true, head: false, both: false });
 });
 
 test("Billed entries: the callout of invoices made before OBS-145 still reads, reformatted too; a bad row is set aside", () => {

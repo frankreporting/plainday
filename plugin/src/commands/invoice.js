@@ -359,9 +359,11 @@ export default class Invoice {
         return end === -1 ? { front: "", body: String(text) } : { front: lines.slice(0, end + 1).join(nl), body: lines.slice(end + 1).join(nl) };
     }
 
-    // What the check says about an invoice: Billing.changes, as list items
+    // What the check says about an invoice: Billing.changes, as list items, each daily note linked by its name
+    // (TimeReport.dayLinks, OBS-298)
     changeItems(result, tr) {
-        const when = (r) => `[[${r.date}|${tr.shortDate(r.date)}]] ${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`;
+        const day = tr.dayLinks();
+        const when = (r) => `[[${day(r.date)}|${tr.shortDate(r.date)}]] ${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`;
         const now = (c) => ({
             times: `now ${tr.formatTime(c.entry?.start)} - ${tr.formatTime(c.entry?.end)}`,
             free: "now 🆓",
@@ -369,7 +371,7 @@ export default class Invoice {
             project: `now on [[${tr.basename(c.entry?.project ?? "")}]]`,
             disputed: "now on a line with two projects, so it isn't counted",
             subtask: "now under a nested task, so it isn't counted",
-            gone: `but now it's missing from [[${c.row.date}|the daily note]]; put it back there to settle it`,
+            gone: `but now it's missing from [[${day(c.row.date)}|the daily note]]; put it back there to settle it`,
             wording: "reads differently now (not a change in what's billed)",
         })[c.kind];
         return [
@@ -384,7 +386,9 @@ export default class Invoice {
     // `others: false` leaves out another project's missing rows: the confirmation warns about them, as
     // the time being billed may be one, but a draft's note is no place for another client's invoice.
     beforeSendingItems(sel, tr, { others = true } = {}) {
-        const when = (e) => `[[${e.date}|${tr.shortDate(e.date)}]] ${tr.formatTime(e.start)} - ${tr.formatTime(e.end)}`;
+        // Each daily note linked by its name (TimeReport.dayLinks, OBS-298)
+        const day = tr.dayLinks();
+        const when = (e) => `[[${day(e.date)}|${tr.shortDate(e.date)}]] ${tr.formatTime(e.start)} - ${tr.formatTime(e.end)}`;
         const why = {
             changed: (h) => `overlaps ${tr.formatTime(h.row.start)} - ${tr.formatTime(h.row.end)}, billed on [[${h.invoice.name}]]`,
             duplicate: () => "repeats another entry at the same times",
@@ -393,13 +397,13 @@ export default class Invoice {
         const whose = ({ invoice, change }) => change.row.projectPath ?? invoice.project;
         const other = (c) => c.change.kind === "gone" && !!whose(c) && !sel.scope?.has(whose(c));
         const gone = (c) => {
-            const line = tr.invoiceProblem(c, (p) => `[[${tr.basename(p)}]]`).replace(/^- /, "");
+            const line = tr.invoiceProblem(c, (p) => `[[${tr.basename(p)}]]`, day).replace(/^- /, "");
             return other(c) ? `${tr.basename(whose(c))}'s ${line}` : line;
         };
         return [
             // A Problem on a line in a week's, month's or year's note links that note, as the reports do, with the
             // report's opening words and quoted title where it has them (OBS-233)
-            ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `${p.lead ? `${p.lead} ` : ""}${p.note ? `[[${p.note.replace(/\.md$/, "")}|${tr.basename(p.note)}]]` : `[[${p.date}|${tr.shortDate(p.date)}]]`} line ${p.line}: \`${String(p.title ?? p.text).replace(/`/g, "'")}\` ${p.message}`),
+            ...sel.problems.filter((p) => tr.changesBilling(p)).map((p) => `${p.lead ? `${p.lead} ` : ""}${p.note ? `[[${p.note.replace(/\.md$/, "")}|${tr.basename(p.note)}]]` : `[[${day(p.date)}|${tr.shortDate(p.date)}]]`} line ${p.line}: \`${String(p.title ?? p.text).replace(/`/g, "'")}\` ${p.message}`),
             ...sel.changed.filter((c) => others || !other(c)).map((c) => (c.change.kind === "gone" ? gone(c) : `${when(c.change.row)} on [[${c.invoice.name}]] changed since it was billed (${c.change.kind})`)),
             ...sel.heldBack.map((h) => `Held back: ${when(h.entry)} ${why[h.why](h)}`),
         ];

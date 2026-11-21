@@ -1674,6 +1674,36 @@ export default class TimeReport {
         return this.runRead ?? plainday?.PeriodicNotes?.reader?.() ?? TimeReport.plainName;
     }
 
+    // The link text for a day's note, the other way round (OBS-298): `link(date)`, YYYY-MM-DD in, gives the name
+    // the daily notes' format gives that day (PeriodicNotes.where), or its path when another note has that name, as
+    // Schedule and DueDate link a day. The one a run took when it began (refresh, currentModel), else a new one,
+    // which counts the vault's note names once, the first time it's asked: a writer takes one for all its links.
+    // Where Plainday isn't loaded (the Raycast timer, the demo's render, the tests), the date itself, the demo's name.
+    dayLinks() {
+        return this.runName ?? this.newDayLinks();
+    }
+
+    newDayLinks() {
+        const notes = plainday?.PeriodicNotes;
+        if (!notes?.where) return (date) => date;
+        const seen = new Map();
+        let names = null;
+        return (date) => {
+            let out = seen.get(date);
+            if (out === undefined) {
+                const { path, name } = notes.where("day", date);
+                if (!names) {
+                    names = new Map();
+                    for (const f of app.vault.getMarkdownFiles()) names.set(f.basename.toLowerCase(), (names.get(f.basename.toLowerCase()) ?? 0) + 1);
+                }
+                const own = app.vault.getFileByPath(path) ? 1 : 0;
+                out = (names.get(name.toLowerCase()) ?? 0) - own > 0 ? path.replace(/\.md$/, "") : name;
+                seen.set(date, out);
+            }
+            return out;
+        };
+    }
+
     // The names read where Plainday isn't loaded (the Raycast timer, the demo's render, the private tests),
     // the demo's own, worked out without moment: a day YYYY-MM-DD, a week gggg[w]ww (English Sunday weeks),
     // a month YYYY-MM and a year YYYY. A name of another shape isn't a periodic note's.
@@ -2329,12 +2359,13 @@ export default class TimeReport {
     }
 
     // A weekly note's breakdown by day: a column per day of the week, from its first day, headed "Sun 9/6"
-    // with a link to that daily note, then the week
+    // with a link to that daily note, by its name (dayLinks), then the week
     weekDaysTable(model, entries, scope, link) {
         const [from] = this.weekRange(scope.key);
         const start = Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10)) / 864e5;
         const days = Array.from({ length: 7 }, (_, i) => new Date((start + i) * 864e5).toISOString().slice(0, 10));
-        const columns = days.map((d) => ({ head: `[[${d}\\|${this.dayName(d).slice(0, 3)} ${+d.slice(5, 7)}/${+d.slice(8, 10)}]]`, match: (e) => e.date === d }));
+        const day = this.dayLinks();
+        const columns = days.map((d) => ({ head: `[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${+d.slice(5, 7)}/${+d.slice(8, 10)}]]`, match: (e) => e.date === d }));
         return this.hoursGrid(model, entries, columns, "Week", link);
     }
 
@@ -2362,6 +2393,8 @@ export default class TimeReport {
     // lines says "This project note" rather than naming the note twice (Brian, OBS-233's test round)
     problemLines(model, problems, projectProblems, entries, link, here = null) {
         const out = [];
+        // A daily note's link, by its name (OBS-298)
+        const day = this.dayLinks();
         const quote = (text) => {
             const chars = Array.from(text);
             const t = chars.length > TimeReport.QUOTE_MAX ? chars.slice(0, TimeReport.QUOTE_MAX - 1).join("").trimEnd() + "…" : text;
@@ -2375,22 +2408,22 @@ export default class TimeReport {
         projectProblems = projectProblems.filter(first);
         for (const p of problems) {
             // A task Problem on a note that isn't a daily note links that note (addTaskProblems)
-            const at = p.note ? `[[${p.note.replace(/\.md$/, "")}|${this.basename(p.note)}]]` : `[[${p.date}|${this.shortDate(p.date)}]]`;
+            const at = p.note ? `[[${p.note.replace(/\.md$/, "")}|${this.basename(p.note)}]]` : `[[${day(p.date)}|${this.shortDate(p.date)}]]`;
             out.push(`- ${p.lead ? `${p.lead} ` : ""}${at} line ${p.line}: \`${quote(p.title ?? p.text)}\` ${p.message}`);
         }
         // Both of a line's projects, or an invoice's, can be in one report: said once
         const once = (line) => { if (!out.includes(line)) out.push(line); };
         for (const p of projectProblems) {
             if (p.noProject) {
-                once(this.invoiceProblem(p, link));
+                once(this.invoiceProblem(p, link, day));
                 continue;
             }
             if (p.invoice || p.twice) {
-                out.push(this.invoiceProblem(p, link));
+                out.push(this.invoiceProblem(p, link, day));
                 continue;
             }
             if (p.conflict) {
-                once(this.conflictLine(p.conflict, link, quote));
+                once(this.conflictLine(p.conflict, link, quote, day));
                 continue;
             }
             if (p.kind === "parent") {
@@ -2416,9 +2449,10 @@ export default class TimeReport {
         return `[[${path.replace(/\.md$/, "")}|${this.basename(path)}]]`;
     }
 
-    // What's wrong with a line in a periodic note (ownNoteProblems), and what to do about it
-    conflictLine(c, link, quote) {
-        const at = `${c.kind === "day" ? `[[${c.date}|${this.shortDate(c.date)}]]` : this.noteLink(c.path)} line ${c.line}: \`${quote(c.text)}\``;
+    // What's wrong with a line in a periodic note (ownNoteProblems), and what to do about it. `day` names a daily
+    // note's link (dayLinks).
+    conflictLine(c, link, quote, day = this.dayLinks()) {
+        const at = `${c.kind === "day" ? `[[${day(c.date)}|${this.shortDate(c.date)}]]` : this.noteLink(c.path)} line ${c.line}: \`${quote(c.text)}\``;
         if (c.links) return `- ${at} names ${c.links.map(link).join(" and ")}, so its time isn't counted on either; take the wrong link off`;
         const [kind, it] = c.event ? ["log", "log"] : ["task note", "note"];
         if (c.inbox) return `- ${at} links ${link(c.lineProject)}, but its ${kind} ${this.noteLink(c.note)} waits in ${this.inboxWords()}; run AddProjectLink on the line, or MoveToProject on the ${it}`;
@@ -2435,10 +2469,11 @@ export default class TimeReport {
 
     // A billed entry that changed since its invoice was made, or an entry on two invoices (OBS-5). A
     // draft's change ends "rebuild it", since Rebuild fixes it. A timesheet adds an `overlap` (an entry
-    // that overlaps billed time) of its own (OBS-143), which Rebuild doesn't fix.
-    invoiceProblem(p, link) {
+    // that overlaps billed time) of its own (OBS-143), which Rebuild doesn't fix. `day` names a daily note's link
+    // (dayLinks).
+    invoiceProblem(p, link, day = this.dayLinks()) {
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
-        const when = (r) => `[[${r.date}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
+        const when = (r) => `[[${day(r.date)}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
         if (p.twice) {
             const [a, b] = p.twice.invoices;
             return a === b ? `- ${when(p.twice.row)} is on [[${a.name}]] twice`
@@ -2456,8 +2491,8 @@ export default class TimeReport {
             : c.kind === "project" ? `now on ${link(c.entry.project)}`
             : c.kind === "disputed" ? "now on a line with two projects, so it isn't counted"
             : c.kind === "subtask" ? "now under a nested task, so it isn't counted"
-            : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${c.entry.date}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
-            : `but now it's missing from [[${c.row.date}|the daily note]]`;
+            : c.kind === "overlap" ? `and ${c.entry.date === c.row.date ? "" : `[[${day(c.entry.date)}|${this.shortDate(c.entry.date)}]] `}${this.formatTime(c.entry.start)} - ${this.formatTime(c.entry.end)} overlaps it`
+            : `but now it's missing from [[${day(c.row.date)}|the daily note]]`;
         const at = c.kind === "gone" ? this.missingRow(c.row) : when(c.row);
         // An archived project's draft can't be rebuilt: Invoice never bills its time (OBS-213). A
         // missing entry is settled by putting it back as billed.
@@ -2601,6 +2636,7 @@ export default class TimeReport {
         const billable = entries.some((e) => e.billable), free = entries.some((e) => !e.billable);
         const marks = billing || free || entries.some((e) => flagged.has(e));
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const day = this.dayLinks();
         const standing = this.sheetStanding(model);
         // An entry's { mark, invoice, hourly }: hourly when an hourly invoice can bill it
         const status = (e) => {
@@ -2620,7 +2656,7 @@ export default class TimeReport {
             const each = list.map(status);
             const kind = (want) => list.filter((e) => e.billable === want);
             const sum = (want) => (kind(want).length ? `**${hours(kind(want))}**` : "");
-            rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${d}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]**`, ...(project ? [""] : []),
+            rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]**`, ...(project ? [""] : []),
                 ...split(sum(true), sum(false)), "", "", ...(billing ? [""] : [])]);
             for (const [k, e] of list.entries()) {
                 const { mark, invoice } = each[k];
@@ -3384,6 +3420,9 @@ export default class TimeReport {
         this.schedule = plainday.Schedule;
         this.runRead = null;
         this.runRead = this.reader();
+        // and the day notes' names it links, the other way round (OBS-298)
+        this.runName = null;
+        this.runName = this.dayLinks();
         const billing = plainday.Billing;
         const errorLog = plainday.ErrorLog;
         const working = quiet ? null : new Notice("Building the time report…", 0);
@@ -3459,6 +3498,7 @@ export default class TimeReport {
         } finally {
             working?.hide();
             this.runRead = null;
+            this.runName = null;
             window.timeReportRunning = false;
         }
     }
@@ -3503,17 +3543,12 @@ export default class TimeReport {
         return [...byPath.values()];
     }
 
-    // A daily note's date, for one the report's list doesn't hold: its name read with the Daily notes
-    // format, not taken from the name as it is. The name itself where Schedule or moment isn't loaded.
+    // A daily note's date, for one the report's list doesn't hold: its name read as a day's (reader), not taken
+    // from the name as it is; the name itself when it doesn't read as one
     dailyDate(path) {
         const name = this.basename(path);
-        try {
-            const format = plainday?.Schedule?.dailyOpts?.().format;
-            const m = format ? moment?.(name, format, true) : null;
-            return m?.isValid() ? m.format("YYYY-MM-DD") : name;
-        } catch {
-            return name;
-        }
+        const day = this.reader()(name);
+        return day?.unit === "day" ? day.date : name;
     }
 
     // A task's lines that disagree (OBS-181), as Problems: TaskIds.check over `notes` (taskNotes); then
@@ -3619,7 +3654,9 @@ export default class TimeReport {
 
     // What a Problem says about line `l` of a task check's result `v`
     taskProblemText(v, l, index) {
-        const name = (p) => (/^\d{4}-\d{2}-\d{2}$/.test(this.basename(p)) ? this.shortDate(this.basename(p)) : this.basename(p));
+        // A daily note's line shows its day, read by the note's name (OBS-298)
+        const read = this.reader();
+        const name = (p) => { const day = read(this.basename(p)); return day?.unit === "day" ? this.shortDate(day.date) : this.basename(p); };
         const ref = (o) => `[[${this.basename(o.path)}|${name(o.path)}]] line ${o.line + 1}`;
         const others = v.lines.filter((o) => o !== l).map(ref).join(", ");
         switch (v.rule) {
@@ -3666,9 +3703,13 @@ export default class TimeReport {
     // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
     // when it started (refresh, OBS-41) passes them in.
     async currentModel({ index = this.appIndex(), schedule = plainday.Schedule, billing = plainday.Billing } = {}) {
-        // A command's model (Invoice) is a run of its own: it reads names with one reader too
+        // A command's model (Invoice) is a run of its own: it reads names with one reader too, and names days
+        // with one namer
         const own = !this.runRead;
-        if (own) this.runRead = this.reader();
+        if (own) {
+            this.runRead = this.reader();
+            this.runName = this.dayLinks();
+        }
         try {
             const clock = moment();
             const daily = await this.readDailyNotes(schedule);
@@ -3681,7 +3722,10 @@ export default class TimeReport {
             model.tables = this.tableDefault();
             return { model, index };
         } finally {
-            if (own) this.runRead = null;
+            if (own) {
+                this.runRead = null;
+                this.runName = null;
+            }
         }
     }
 
