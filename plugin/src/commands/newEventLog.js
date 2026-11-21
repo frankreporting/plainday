@@ -24,12 +24,12 @@ export default class NewEventLog {
         return period?.unit === "day" ? period.date : moment().format("YYYY-MM-DD");
     }
 
-    // The day in the box, in words: Today, Tomorrow or Yesterday, else "Sat. 11/21/26", the way Plainday writes a date
+    // The day in the box, in words: Today, Tomorrow or Yesterday, else "Sat 11/21/26", the way Plainday writes a date
     // elsewhere (a log's alias, a day note's)
     when(date, today = moment().format("YYYY-MM-DD")) {
         const day = moment(date, "YYYY-MM-DD", true);
         const words = { 0: "Today", 1: "Tomorrow", "-1": "Yesterday" }[day.diff(moment(today, "YYYY-MM-DD", true), "days")];
-        return words ?? day.locale(plainday.DatePrompt.weekRules().locale).format("ddd. M/D/YY");
+        return words ?? day.locale(plainday.DatePrompt.weekRules().locale).format("ddd M/D/YY");
     }
 
     // The title typed, trimmed, or null when it's empty or the box is closed
@@ -43,7 +43,7 @@ export default class NewEventLog {
                 onOpen() { requestAnimationFrame(() => input.inputEl.focus()); }
             })(app);
             modal.titleEl.setText("New event log");
-            modal.contentEl.createEl("p", { text: `When: ${this.when(date)}` });
+            modal.contentEl.createEl("p", { text: this.when(date) });
             const input = new TextComponent(modal.contentEl).setPlaceholder("Event title");
             input.inputEl.addClass("plainday-wide-input");
             const make = () => {

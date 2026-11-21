@@ -759,7 +759,7 @@ Links a line to a note of its own, of one of two kinds: a **task note** for a ta
 
 ### New event log
 
-Asks for an event's title (*When:* says the day: *Today*, *Yesterday*, or a date such as *Sat. 11/21/26*) and makes its log on the day of the daily note you're in, or else today, then opens it with the cursor in its body (see *Log notes*). The day's event line of that title gets the ⋯; with none, `- [<] Title [[log|⋯]]` is added after the day's events. A log of that name already there opens instead.
+Asks for an event's title (the box shows the day: *Today*, *Yesterday*, or a date such as *Sat 11/21/26*) and makes its log on the day of the daily note you're in, or else today, then opens it with the cursor in its body (see *Log notes*). The day's event line of that title gets the ⋯; with none, `- [<] Title [[log|⋯]]` is added after the day's events. A log of that name already there opens instead.
 
 ### Add project link (`⌥⌘P`)
 

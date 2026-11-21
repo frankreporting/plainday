@@ -68,7 +68,7 @@ export const momentOn = (today) => {
         diff: (other, unit) => (unit === "days" ? (utc(date) - utc(other.date)) / 864e5 : assert.fail(`diff ${unit}`)),
         format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`, "ddd M/D": `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dow(date)]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`,
             // The aliases PeriodicNotes writes (OBS-120)
-            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "ddd. M/D/YY": `${DAY_NAMES[dow(date)].slice(0, 3)}. ${short(date)}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
+            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "ddd M/D/YY": `${DAY_NAMES[dow(date)].slice(0, 3)} ${short(date)}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
     });
     const moment = (text, format) => {
         if (text === undefined) return make(today);

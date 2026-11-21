@@ -201,5 +201,5 @@ test("New event log: the day of the daily note you're in, else today; the title 
     assert.equal(opened.length, 1, "nothing typed, nothing made");
     // The box says the day in words near today, else as Plainday writes dates
     assert.deepEqual(["2026-09-16", "2026-09-17", "2026-09-15", "2026-11-21"].map((d) => cmd.when(d, "2026-09-16")),
-        ["Today", "Tomorrow", "Yesterday", "Sat. 11/21/26"]);
+        ["Today", "Tomorrow", "Yesterday", "Sat 11/21/26"]);
 });
