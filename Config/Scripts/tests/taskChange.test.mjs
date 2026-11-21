@@ -822,7 +822,7 @@ scenario("a fresh note named apart is found again: the task's next line, or a ru
     assert.deepEqual(named(v), [ARCHIVED, FRESH]);
     // The line changes while the template runs: the note is made but not linked, and running it again links it
     v = standIn({ notes, open: day("2026-09-15"), at: 0, lag });
-    const helper = v.plainday.AddTaskNote, make = helper.createTaskNote, editor = v.app.workspace.activeLeaf.view.editor;
+    const helper = v.plainday.AddTaskNote, make = helper.createTaskNote.bind(helper), editor = v.app.workspace.activeLeaf.view.editor;
     let once = true;
     helper.createTaskNote = async (...a) => {
         const note = await make(...a);

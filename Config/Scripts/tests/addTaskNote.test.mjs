@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { standIn, PLANNER, withFolders } from "./standInVault.mjs";
+import { standIn, PLANNER, withFolders, momentOn, YAML as STAND_IN_YAML } from "./standInVault.mjs";
 import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
 import { periodicNames } from "./dayNames.mjs";
 
@@ -47,29 +47,10 @@ test("withoutDates: a date in the task text is its due date, not part of the nam
     assert.equal(add.withoutDates("2026-09-30 A"), "A");
 });
 
-test("the Task template keeps the name's last date as due, and still drops dates from the name", () => {
+test("the Task template holds only its `id`: Plainday writes the rest itself, and files the note (OBS-121)", () => {
     const template = fs.readFileSync(new URL("../../Templates/Task.md", here), "utf8");
-    const rxDates = /[0-9]{4}-[0-9]{2}-[0-9]{2}/g;
-    // The template's own date lines, run against sample titles
-    const line = (re) => template.split("\n").find((l) => re.test(l));
-    const dueLine = line(/^const due = /);
-    assert.ok(dueLine, "template computes due");
-    const dueFor = (title) => { const dates = title.match(rxDates); return eval(dueLine.replace(/^const due = /, "")); };
-    assert.equal(dueFor("2026-09-30 Renew the domain"), "2026-09-30");
-    assert.equal(dueFor("2026-10-01 File it 2026-10-15"), "2026-10-15");
-    assert.equal(dueFor("Call the printer"), null);
-    assert.ok(template.includes('tR += "due: " + (due ? due : "") + "\\n";'), "template writes due into the frontmatter");
-    assert.ok(/replaceAll\(rxDates, ""\)/.test(template), "template still strips dates from the note's name");
-    // It writes the picked project or area as `parent` (`area` before OBS-175), before moving the note,
-    // in the Log template's format
-    assert.ok(template.includes('tR += "parent: " + parentLink + "\\n";'), "template writes parent");
-    assert.ok(template.indexOf('tR += "parent: "') < template.indexOf("await tp.file.move("), "parent is written before the move");
-    assert.ok(!/tR \+= "area: /.test(template), "and no area");
-    assert.ok(template.includes('"\\"[[" + pickedFile.basename + "|" + parentAlias + "]]\\""'), "same [[Project|alias]] form as the Log template");
-    // With no project from the command, the note goes to Inbox, as a log does (OBS-36), never at the vault root
-    assert.match(template, /const inbox = "Inbox";/);
-    assert.ok(template.indexOf("const inbox") > template.indexOf("} else {"), "only when the command named no project");
-    assert.ok(template.includes('tp.file.path(true) != target + ".md"'), "a note already in the Inbox isn't moved onto itself");
+    assert.equal(template, '---\nid: <% tp.date.now("YYYYMMDDHHmmssSS") %>\n---\n');
+    assert.doesNotMatch(template, /takePresetParent|showNewNote|tp\.file\.move|parent|due/, "no code that files the note or writes Plainday's properties");
 });
 
 test("target: with nothing selected, text after the cursor means use the line's text; only whitespace means a blank link", () => {
@@ -282,27 +263,19 @@ test("takePresetParent: the parent goes only to the note it was picked for, and 
     assert.equal(AddTaskNote.preset, null, "used up");
 });
 
-test("OBS-55: no template asks for a project; the Task and Log templates take one only from the command", () => {
+test("Get Template has no !task route: task notes come from a task line, with Add note (OBS-121)", () => {
+    const route = fs.readFileSync(new URL("../../Templates/Get Template.md", here), "utf8");
+    assert.doesNotMatch(route, /\/!task\/|\[\[Task\]\]/, "no route by title, and the Task template isn't included");
+    assert.match(route, /tp\.file\.include\("\[\[Empty Note\]\]"\)/, "a title starting !task gets the Empty Note template, like any other");
+});
+
+test("OBS-55: no template asks for a project; the Log template takes one only from the command", () => {
     const read = (name) => fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
     for (const name of ["Task", "Log", "Project", "Area"]) {
         const template = read(name);
         assert.doesNotMatch(template, /tp\.system\.suggester|tp\.user\.pickParent|FuzzySuggestModal/, `${name} shows no menu`);
     }
     assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
-    // The Task template's parent is the command's preset, or none (Inbox), with or without Plainday
-    const task = read("Task");
-    const line = task.split("\n").find((l) => /^const pickedFile = /.test(l));
-    assert.ok(line, "the Task template sets pickedFile in one line");
-    const expr = line.replace(/^const pickedFile = /, "").replace(/;$/, "");
-    const pickedFor = (plainday, path) => vm.runInNewContext(expr, { plainday, tp: { config: { target_file: { path } } } });
-    const tasks = { takePresetParent: (p) => (p === "Inbox/Order toner.md" ? "PROJECT" : null) };
-    assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Order toner.md"), "PROJECT");
-    assert.equal(pickedFor({ AddTaskNote: tasks }, "Inbox/Other.md"), null);
-    assert.equal(pickedFor({}, "Inbox/Order toner.md"), null, "without AddTaskNote");
-    assert.equal(vm.runInNewContext(`typeof plainday !== "undefined" ? 1 : 0`, {}), 0);
-    assert.equal(vm.runInNewContext(expr, { tp: { config: { target_file: { path: "x" } } } }), null, "without Plainday");
-    // CustomJS's global isn't read any more (OBS-257)
-    assert.equal(vm.runInNewContext(expr, { customJS: { AddTaskNote: tasks }, tp: { config: { target_file: { path: "Inbox/Order toner.md" } } } }), null, "not from customJS");
     // The Log template: the line's one live home first, then the command's preset (Raycast's Inbox is null)
     const log = read("Log");
     const presetLine = log.split("\n").find((l) => /^const preset = /.test(l));
@@ -325,15 +298,14 @@ test("OBS-55: no template asks for a project; the Task and Log templates take on
     assert.match(read("Project"), /tR \+= "parent: \\n";/, "a new project's parent is empty until it's filed");
 });
 
-test("OBS-55: a new project, area or Inbox task note never takes a name another note already has", () => {
-    for (const name of ["Project", "Area", "Task"]) {
+test("OBS-55: a new project or area never takes a name another note already has (a task note: createTaskNote's tests)", () => {
+    for (const name of ["Project", "Area"]) {
         const template = fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
         const check = template.indexOf("f.basename.toLowerCase() ===");
         assert.ok(check > 0, `${name} checks for a note of that name anywhere`);
         assert.match(template.slice(check - 120, check), /f !== tp\.config\.target_file/, `${name}: not counting itself`);
         assert.match(template.slice(check, check + 400), /new Notice\(why, 10000\);\s*throw new Error\(why\)/, `${name}: says so and stops`);
-        const move = name === "Task" ? "await tp.file.move(target)" : "await tp.file.move(";
-        assert.ok(check < template.indexOf(move), `${name}: before the move`);
+        assert.ok(check < template.indexOf("await tp.file.move("), `${name}: before the move`);
     }
     // The Area template's "🗃️.Name" titles give the plain name, not a URL-encoded one
     const area = fs.readFileSync(new URL("../../Templates/Area.md", here), "utf8");
@@ -655,29 +627,157 @@ test("one place for the logs folder's name: the Log template and every other scr
     }
 });
 
-test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote and Schedule alike", async () => {
-    // A fake app: Templater makes the note in Inbox and leaves it there, as it does when the line names no project
-    const trashed = [], notices = [];
-    const note = { path: "Inbox/Order toner.md", basename: "Order toner", parent: { path: "Inbox" } };
-    const ctx = vm.createContext({
-        app: {
-            plugins: { plugins: { "templater-obsidian": { templater: { create_new_note_from_template: async () => note } } } },
-            vault: { getFileByPath: () => ({ path: AddTaskNote.TASK_TEMPLATE }), getAvailablePath: (p, ext) => `${p}.${ext}` },
-            fileManager: { trashFile: async (f) => trashed.push(f.path) },
+// A fake app for createTaskNote (OBS-121): the vault's notes by path, the writes it gets in order, and Templater,
+// on or off, which merges a template's properties into the note's as Templater 2 does (merge_template_output)
+const taskNoteApp = ({ notes = {}, templates = {}, templater = false, aliases = {} } = {}) => {
+    const files = new Map(), calls = [], notices = [], folders = new Set(["Projects/Home"]);
+    const fileOf = (path) => {
+        if (!files.has(path)) {
+            const at = path.lastIndexOf("/");
+            files.set(path, { path, basename: path.slice(at + 1).replace(/\.md$/, ""), parent: { path: at < 0 ? "/" : path.slice(0, at) } });
+        }
+        return files.get(path);
+    };
+    const text = new Map(Object.entries({ ...notes, ...templates }));
+    for (const p of text.keys()) fileOf(p);
+    // Properties written back as Obsidian's stringifyYaml writes them: a link quoted, an empty value bare
+    const dump = (props) => Object.entries(props).map(([k, v]) => (Array.isArray(v) ? `${k}:\n${v.map((x) => `  - ${x}`).join("\n")}`
+        : v === null || v === undefined || v === "" ? `${k}:` : /^[[{"'!&*#?|>@%-]|: /.test(String(v)) ? `${k}: ${JSON.stringify(v)}` : `${k}: ${v}`)).join("\n") + "\n";
+    const YAML = { ...STAND_IN_YAML, stringifyYaml: dump };
+    const app = {
+        vault: {
+            getMarkdownFiles: () => [...text.keys()].map(fileOf),
+            getFileByPath: (p) => (text.has(p) ? fileOf(p) : null),
+            getFolderByPath: (p) => (folders.has(p) || [...text.keys()].some((k) => k.startsWith(`${p}/`)) ? { path: p } : null),
+            createFolder: async (p) => { calls.push(`folder ${p}`); folders.add(p); },
+            create: async (p, t) => { if (text.has(p)) throw new Error("File already exists."); calls.push(`create ${p}`); text.set(p, t); return fileOf(p); },
+            read: async (f) => text.get(f.path),
         },
-        normalizePath: (p) => p,
-        Notice: class { constructor(m) { notices.push(m); } },
-        plainday: withFolders({}),
-    });
+        metadataCache: {
+            fileToLinktext: (f) => f.basename,
+            getFileCache: (f) => ({ frontmatter: aliases[f.path] ? { aliases: aliases[f.path] } : {} }),
+        },
+        fileManager: {
+            processFrontMatter: async (f, fn) => {
+                calls.push(`properties ${f.path}`);
+                const info = YAML.getFrontMatterInfo(text.get(f.path));
+                const props = YAML.parseYaml(info.frontmatter) ?? {};
+                fn(props);
+                text.set(f.path, `---\n${YAML.stringifyYaml(props)}---\n${text.get(f.path).slice(info.contentStart)}`);
+            },
+        },
+        plugins: { getPlugin: (id) => (id === "templater-obsidian" && templater ? { templater: {
+            write_template_to_file: async (tpl, f) => {
+                calls.push(`template ${tpl.path} on ${f.path}`);
+                const parse = (t) => { const i = YAML.getFrontMatterInfo(t); return { props: i.exists ? YAML.parseYaml(i.frontmatter) ?? {} : {}, body: t.slice(i.contentStart) }; };
+                const note = parse(text.get(f.path)), tpl2 = parse(templater(text.get(tpl.path)));
+                for (const [k, v] of Object.entries(tpl2.props)) {
+                    if (!(k in note.props)) note.props[k] = v;
+                    else if (Array.isArray(note.props[k]) || Array.isArray(v)) note.props[k] = [...new Set([...[].concat(note.props[k]), ...[].concat(v)])];
+                    else if (v !== null && v !== "") note.props[k] = v;
+                }
+                text.set(f.path, `---\n${YAML.stringifyYaml(note.props)}---\n${note.body}${tpl2.body}`);
+            },
+        } } : null) },
+    };
+    const ctx = vm.createContext({ app, normalizePath: (p) => p, moment: momentOn("2026-09-16"), stringifyYaml: YAML.stringifyYaml, console: { error: () => {} }, Notice: class { constructor(m) { notices.push(m); } }, plainday: withFolders({}) });
+    const PeriodicNotes = vm.runInContext(classScript("periodicNotes.js") + "\n;PeriodicNotes", vm.createContext({ app, plainday: {}, moment: momentOn("2026-09-16"), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, ...YAML }));
+    ctx.plainday.PeriodicNotes = new PeriodicNotes();
     const Fresh = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx);
-    const fresh = new Fresh();
-    assert.equal(await fresh.createTaskNote("Order toner"), note, "kept, unfiled");
-    assert.deepEqual(trashed, [], "never trashed");
-    assert.deepEqual(notices, []);
-    // A note the template filed in the line's project is the result too
-    const filed = { ...note, path: "Projects/Home/Order toner.md", parent: { path: "Projects/Home" } };
-    ctx.app.plugins.plugins["templater-obsidian"].templater.create_new_note_from_template = async () => filed;
-    assert.equal(await fresh.createTaskNote("Order toner"), filed);
+    return { add: new Fresh(), text: (p) => text.get(p), calls, notices, home: fileOf("Projects/Home/Home.md") };
+};
+
+test("createTaskNote makes the note straight where it goes, with tags, parent and due in one write, and no Task template needed (OBS-121)", async () => {
+    // A project's note: in its folder, its parent linked by name and first alias; the title's last date is `due`
+    let f = taskNoteApp({ notes: { "Projects/Home/Home.md": "" }, aliases: { "Projects/Home/Home.md": ["🗃️.Home"] } });
+    const note = await f.add.createTaskNote("Order toner 2026-09-25 2026-09-30", f.home);
+    assert.equal(note.path, "Projects/Home/Order toner.md");
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md"], "made once, where it goes: no move, no second write");
+    assert.equal(f.text(note.path), '---\ntags:\n  - task\nparent: "[[Home|🗃️.Home]]"\ndue: 2026-09-30\n---\n');
+    assert.deepEqual(f.notices, [], "no notice: the ⋯ on the line shows it's there");
+    // No project: the Inbox, made if it isn't there, with an empty parent and due to fill in
+    f = taskNoteApp();
+    assert.equal((await f.add.createTaskNote("Order toner")).path, "Inbox/Order toner.md");
+    assert.deepEqual(f.calls, ["folder Inbox", "create Inbox/Order toner.md"]);
+    assert.equal(f.text("Inbox/Order toner.md"), "---\ntags:\n  - task\nparent:\ndue:\n---\n");
+    // The line's 🚩 is the `due`, over a date in the name (OBS-66)
+    f = taskNoteApp();
+    await f.add.createTaskNote("Order toner 2026-09-25", null, "2026-10-02");
+    assert.match(f.text("Inbox/Order toner.md"), /\ndue: 2026-10-02\n/);
+    // A project note with no alias: its name alone, as SyncArea writes it
+    f = taskNoteApp({ notes: { "Projects/Home/Home.md": "" } });
+    await f.add.createTaskNote("Order toner", f.home);
+    assert.match(f.text("Projects/Home/Order toner.md"), /\nparent: "\[\[Home\]\]"\n/);
+});
+
+test("createTaskNote cleans the name for any caller and leaves its dates off; a name with nothing left, or one another note has, makes nothing (OBS-111, OBS-121)", async () => {
+    let f = taskNoteApp();
+    const note = await f.add.createTaskNote("Fix #12: order form 2026-09-25");
+    assert.equal(note.basename, "Fix 12 - order form");
+    assert.match(f.text(note.path), /\ndue: 2026-09-25\n/, "the date is its `due`, not part of its name");
+    f = taskNoteApp();
+    assert.equal(await f.add.createTaskNote("???"), null);
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.notices, ["No task text to name the note"]);
+    // A note of that name anywhere, in any case: Obsidian would resolve the shared name to the shorter path
+    f = taskNoteApp({ notes: { "Reference/order TONER.md": "" } });
+    assert.equal(await f.add.createTaskNote("Order toner"), null);
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.notices, ['A note named "Order toner" already exists, so no task note was made: open that one, or give this one another name']);
+});
+
+test("the Task template, when there is one: through Templater it adds its properties, and Plainday's parent and due stay; without Templater a plain one is filled in, one with Templater code is skipped (OBS-121)", async () => {
+    const TPL = "Config/Templates/Task.md", home = { "Projects/Home/Home.md": "" };
+    // Templater on: the repository's template adds its `id`; Plainday's properties are as it wrote them
+    const repo = fs.readFileSync(new URL("../../Templates/Task.md", here), "utf8");
+    const run = (t) => t.replace(/<% tp\.date\.now\("YYYYMMDDHHmmssSS"\) %>/, "2026091612000000");
+    let f = taskNoteApp({ notes: home, templates: { [TPL]: repo }, templater: run });
+    await f.add.createTaskNote("Order toner 2026-09-30", f.home);
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md", `template ${TPL} on Projects/Home/Order toner.md`], "nothing put back: the template sets none of Plainday's");
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\nparent: "[[Home]]"\ndue: 2026-09-30\nid: 2026091612000000\n---\n');
+    // A template that sets parent and due, and a tag: Plainday's parent and due are put back, the tags combined
+    const theirs = '---\ntags: [work]\nparent: "[[Somewhere]]"\ndue: 2027-01-01\nstatus: To Do\n---\nNotes\n';
+    f = taskNoteApp({ notes: home, templates: { [TPL]: theirs }, templater: (t) => t });
+    await f.add.createTaskNote("Order toner", f.home);
+    const made = f.text("Projects/Home/Order toner.md");
+    assert.match(made, /\nparent: "?\[\[Home\]\]"?\n/);
+    assert.match(made, /\ndue:\s*\n/, "Plainday's empty due, not the template's");
+    assert.match(made, /tags:\n  - task\n  - work\n/);
+    assert.match(made, /\nstatus: To Do\n/);
+    assert.ok(made.endsWith("---\nNotes\n"));
+    assert.deepEqual(f.notices, []);
+    // Templater off, a plain template: its properties and text go in with Plainday's, in the one write
+    const plain = "---\nstatus: To Do\ntags: [work]\nparent: \"[[Somewhere]]\"\n---\nMade {{date}} for {{title}}\n";
+    f = taskNoteApp({ notes: home, templates: { [TPL]: plain } });
+    await f.add.createTaskNote("Order toner", f.home);
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md"]);
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\n  - work\nparent: "[[Home]]"\ndue:\nstatus: To Do\n---\nMade 2026-09-16 for Order toner\n');
+    assert.deepEqual(f.notices, []);
+    // Templater off, a template with Templater code: skipped, with a notice; the note has Plainday's properties
+    f = taskNoteApp({ notes: home, templates: { [TPL]: repo } });
+    await f.add.createTaskNote("Order toner", f.home);
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\nparent: "[[Home]]"\ndue:\n---\n');
+    assert.deepEqual(f.notices, ["Task holds Templater code and Templater is off, so the new task note was made without it."]);
+    // No template, or an empty one: Plainday's properties only, and no notice, Templater on or off
+    for (const templates of [{}, { [TPL]: "" }]) {
+        for (const templater of [false, (t) => t]) {
+            f = taskNoteApp({ notes: home, templates, templater });
+            await f.add.createTaskNote("Order toner", f.home);
+            assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md"]);
+            assert.deepEqual(f.notices, []);
+        }
+    }
+});
+
+test("flagDay: the day a line's first 🚩 links, by its note's name, or null (OBS-66)", () => {
+    const tr = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: { PeriodicNotes: periodicNames(), TimeReport: new tr() } })))();
+    assert.equal(helper.flagDay("- [ ] Update the invoice [[2026-09-30|🚩 9/30]]"), "2026-09-30");
+    assert.equal(helper.flagDay("- [ ] Update it [[Days/2026-09-30|🚩 9/30]] [[Home|⭕]] [[Update it|⋯]] ^k3x9m2"), "2026-09-30", "among the other links, by its path's name");
+    assert.equal(helper.flagDay("- [ ] A [[2026-09-30|🚩 9/30]] [[2026-10-02|🚩 10/2]]"), "2026-09-30", "the first");
+    assert.equal(helper.flagDay("- [ ] Update it 2026-09-30"), null, "a date in the text is the name's");
+    assert.equal(helper.flagDay("- [ ] Update it [[Launch plan|🚩 9/30]]"), null, "a 🚩 on a note that isn't a day's");
+    assert.equal(helper.flagDay("- [ ] Update it"), null);
 });
 
 test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so the ⭕ is still found (OBS-185)", () => {
@@ -723,30 +823,7 @@ test("fileName: one cleanup for a task note's name and a log's; a time keeps the
     }
 });
 
-test("createTaskNote cleans the name for any caller, before Templater sees it; a name with nothing left makes nothing (OBS-111)", async () => {
-    const asked = [], notices = [];
-    const ctx = vm.createContext({
-        app: {
-            plugins: { plugins: { "templater-obsidian": { templater: { create_new_note_from_template: async (t, folder, name) => { asked.push({ folder, name }); return { path: `${folder}/${name}.md`, basename: name }; } } } } },
-            vault: { getFileByPath: () => ({ path: AddTaskNote.TASK_TEMPLATE }), getAvailablePath: (p, ext) => { asked.push({ path: `${p}.${ext}` }); return `${p}.${ext}`; } },
-        },
-        normalizePath: (p) => p,
-        Notice: class { constructor(m) { notices.push(m); } },
-        plainday: withFolders({}),
-    });
-    const fresh = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx))();
-    const note = await fresh.createTaskNote("Fix #12: order form 2026-09-25");
-    assert.equal(note.basename, "Fix 12 - order form 2026-09-25", "the date stays for the template, which makes it `due`");
-    assert.deepEqual(asked, [{ path: "Inbox/Fix 12 - order form 2026-09-25.md" }, { folder: "Inbox", name: "Fix 12 - order form 2026-09-25" }]);
-    assert.deepEqual(notices, []);
-    asked.length = 0;
-    assert.equal(await fresh.createTaskNote("???"), null);
-    assert.deepEqual(asked, [], "Templater isn't asked");
-    assert.deepEqual(notices, ["No task text to name the note"]);
-});
-
-// A colon and the other characters a file name can't hold, through Add note on the stand-in vault, whose
-// Templater refuses such a name the way the real one does (OBS-111)
+// A colon and the other characters a file name can't hold, through Add note on the stand-in vault (OBS-111)
 const PROJECT = "---\ntags: [project]\n---\n", NEW = "Projects/New/New.md";
 const day = (d) => `${PLANNER}/days/${d}.md`;
 const lineIn = (v, path, text) => v.notes()[path].split("\n").find((l) => l.includes(text));
@@ -788,14 +865,38 @@ for (const lag of [false, true]) {
         assert.deepEqual(v.problems(), []);
     });
 
-    test(`a # and a date: the # and the colon stay on the line, the date comes off it, and the template gets the date for \`due\` (OBS-111)${also}`, async () => {
+    test(`a # and a date: the # and the colon stay on the line, the date comes off it, and becomes the note's \`due\` (OBS-111)${also}`, async () => {
         const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-18")]: "- [ ] Fix #12: order form 2026-09-25 [[New|⭕]]\n" }, open: day("2026-09-18"), at: 0, lag });
-        const helper = v.plainday.AddTaskNote, make = helper.createTaskNote, titles = [];
-        helper.createTaskNote = async (title, parent) => { titles.push(title); return make(title, parent); };
+        const helper = v.plainday.AddTaskNote, make = helper.createTaskNote.bind(helper), titles = [];
+        helper.createTaskNote = async (title, parent, due) => { titles.push(title); return make(title, parent, due); };
         await v.addTaskNote();
         assert.deepEqual(titles, ["Fix 12 - order form 2026-09-25"]);
-        assert.ok(v.notes()["Projects/New/Fix 12 - order form.md"]);
+        assert.match(v.notes()["Projects/New/Fix 12 - order form.md"], /\ndue: 2026-09-25\n/);
         assert.equal(lineIn(v, day("2026-09-18"), "Fix"), "- [ ] Fix #12: order form [[New|⭕]] [[Fix 12 - order form|⋯]]");
+    });
+
+    test(`a 🚩 on the line is the new note's \`due\`, over a date in the name; with neither, \`due\` is empty (OBS-66, OBS-121)${also}`, async () => {
+        const notes = { [NEW]: PROJECT, [day("2026-09-16")]: "- [ ] Update the invoice [[2026-09-30|🚩 9/30]]\n- [ ] Order banner stand 2026-10-02 [[2026-09-30|🚩 9/30]] [[New|⭕]]\n- [ ] Book the venue\n" };
+        const v = standIn({ notes, open: day("2026-09-16"), at: 0, lag });
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-16"), "invoice"), "- [ ] Update the invoice [[2026-09-30|🚩 9/30]] [[Update the invoice|⋯]]");
+        assert.equal(v.notes()["Inbox/Update the invoice.md"], "---\ntags:\n  - task\nparent:\ndue: 2026-09-30\n---\n");
+        v.open(day("2026-09-16"), 1);
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-16"), "banner"), "- [ ] Order banner stand [[2026-09-30|🚩 9/30]] [[New|⭕]] [[Order banner stand|⋯]]");
+        assert.equal(v.notes()["Projects/New/Order banner stand.md"], '---\ntags:\n  - task\nparent: "[[New]]"\ndue: 2026-09-30\n---\n', "the 🚩 wins over the date in the name");
+        v.open(day("2026-09-16"), 2);
+        await v.addTaskNote();
+        assert.equal(v.notes()["Inbox/Book the venue.md"], "---\ntags:\n  - task\nparent:\ndue:\n---\n");
+        assert.deepEqual(v.notices, []);
+    });
+
+    test(`a date in the name, with no 🚩: it comes off the line and the note's name, and is the note's \`due\` (OBS-121)${also}`, async () => {
+        const v = standIn({ notes: { [NEW]: PROJECT, [day("2026-09-18")]: "- [ ] Order banner stand 2026-09-30 [[New|⭕]]\n" }, open: day("2026-09-18"), at: 0, lag });
+        await v.addTaskNote();
+        assert.equal(lineIn(v, day("2026-09-18"), "banner"), "- [ ] Order banner stand [[New|⭕]] [[Order banner stand|⋯]]");
+        assert.equal(v.notes()["Projects/New/Order banner stand.md"], '---\ntags:\n  - task\nparent: "[[New]]"\ndue: 2026-09-30\n---\n');
+        assert.deepEqual(notesIn(v, "Inbox/"), [], "made straight in the project, never in the Inbox");
     });
 
     test(`a selection with a colon names the note cleaned and stays as typed; the cursor goes to its end (OBS-111)${also}`, async () => {

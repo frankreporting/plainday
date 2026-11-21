@@ -1,4 +1,5 @@
-// Called at the end of the Area, Log, Project and Task templates as tp.user.showNewNote(tp).
+// Called at the end of the Area, Log and Project templates as tp.user.showNewNote(tp). (The Task template
+// stopped calling it with OBS-121: Plainday makes a task note with its properties, without opening it.)
 // Once Templater has written the note, if it's the note open in front of you:
 // - redraws its properties panel. After those templates' move or rename, Obsidian's
 //   panel misses Templater's write and stays empty in Live Preview (the note itself is fine,

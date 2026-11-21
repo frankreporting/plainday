@@ -299,7 +299,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     // `plugins` as the scripts ask it; Templater stands in below, where the notes it makes are made
     // What the class files import from Obsidian, by name, as the context's globals (plugin/classShape.mjs)
-    const obsidian = { MarkdownView: class {}, getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, ...YAML };
+    const obsidian = { MarkdownView: class {}, normalizePath: (p) => p.replace(/\/+/g, "/").replace(/^\/|\/$/g, ""), getAllTags: (cache) => (cache?.frontmatter?.tags ?? []).map((t) => `#${t}`), getLanguage: () => "en", Platform: { isDesktop: true }, ...YAML };
     const plainday = {};
     // MutationObserver for CheckOff's watch on Task Status's menu: `observers` lets a test say a dialog opened or closed
     const observers = [];
@@ -330,20 +330,9 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         covers = { lines: days(weighed.lines), time: days(weighed.days.map((d) => d.l)), stops: days(weighed.stops.map((d) => d.l)) };
         try { return await ask(weighed, ...rest); } finally { covers = null; }
     };
-    // Templater's part: a task note or log made where the Task and Log templates would put it
+    // Templater's part: a log made where the Log template would put it. A task note is made by the code itself
+    // (AddTaskNote.createTaskNote, OBS-121), in a vault with no Task template and no Templater.
     const made2 = (path, text) => { put(path, text); return fileOf(path); };
-    plainday.AddTaskNote.createTaskNote = async (name, parent = null) => {
-        // Templater can't make a file whose name holds a character Obsidian refuses (OBS-111): on a Mac, `\ / :`
-        // ("Couldn't create md file", seen in the app 2026-11-12), and on Windows `* " < > | ?` too. It says so,
-        // and there's no note
-        if (/[*"\\/<>:|?]/.test(name)) {
-            notices.push(`Couldn't create a note named "${name}"`);
-            return null;
-        }
-        // As the Task template names it: its dates and "!task" taken off and the ends trimmed, spaces left as they are
-        const title = name.replaceAll(/[0-9]{4}-[0-9]{2}-[0-9]{2}/g, "").replace("!task", "").trim() || name;
-        return made2(`${parent ? parent.parent.path : "Inbox"}/${title}.md`, `---\ntags: [task]\n${parent ? `parent: "[[${parent.basename}]]"\n` : ""}---\n`);
-    };
     plainday.AddTaskNote.makeLog = async (name) => {
         if (app.metadataCache.getFirstLinkpathDest(name)) return;
         made2(`Inbox/${name}.md`, "---\ntags: [log]\n---\n");

@@ -873,6 +873,10 @@ test("Settings → Plainday → Note templates: the Task note and Log templates,
         assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
         // The Log's default isn't in this vault, so it says Add note has nothing to make one from
         assert.match(draw("Log").warning(), /^“Templates\/Log\.md” isn't in the vault/);
+        // A task note is made without one (OBS-121), so a missing Task template only says so
+        files.delete(task.path);
+        assert.equal(draw("Task note").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
+        files.set(task.path, task);
         t.type("Templates/My task");
         t.leave();
         await new Promise((r) => setTimeout(r, 0));
