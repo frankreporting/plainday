@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, Notice, parseYaml } from "obsidian";
+import { getFrontMatterInfo, moment, Notice, parseYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class Settings {
@@ -345,6 +345,103 @@ export default class Settings {
         const format = at < 0 ? pattern : pattern.slice(at + 1);
         const template = typeof nn[`calendarCustom${key}Template`] === "string" ? String(nn[`calendarCustom${key}Template`]) : "";
         return { folder: [base, dir].filter(Boolean).join("/"), format, template };
+    }
+
+    // ---------------------------------------------------------------- periodic note names (OBS-299)
+
+    /**
+     * The format that names `unit`'s notes, as it's set, and whether Notebook Navigator's calendar sets
+     * it: its pattern as typed, folders included, when it owns them and has one, even one Plainday can't
+     * follow (navigatorNote reads that as none); otherwise, for the daily notes, the Daily notes
+     * plugin's format. Null for the weekly, monthly and yearly notes Plainday names itself, which work.
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @returns {{ format: string, navigator: boolean } | null}
+     */
+    periodicFormat(unit) {
+        const nn = this.periodicSource() === "notebook-navigator" ? this.navigatorCalendar() : null;
+        const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
+        const pattern = typeof nn?.[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]).trim() : "";
+        if (pattern) return { format: pattern, navigator: true };
+        return unit === "day" ? { format: plainday.Schedule.dailyOpts({ asPlugin: true }).format, navigator: false } : null;
+    }
+
+    /**
+     * Whether a format's names give a note's whole date on their own, as Plainday needs while it reads a
+     * note's date from its name alone. Only the name is read: the part after the format's last `/`;
+     * folders before it are OBS-310's. 9/30 of 1970 and of 2067, and each day from 12/28 to 1/4 at three
+     * year-ends (2026, 1970 and 2067, inside moment's window for two-digit years), is named, then read
+     * back strictly: the names work when each reads back as the same day, week (ISO when the name
+     * counts by GGGG or WW, as JumpToDate.isoWeeks has it), month or year. Null when they do; else the
+     * first that doesn't, its name, and what that read back as (null when it doesn't read).
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @param {string} format
+     * @param {string} locale the language the names are in
+     * @returns {{ name: string, iso: boolean, date: import("moment").Moment, as: string, back: import("moment").Moment | null } | null}
+     */
+    nameProblem(unit, format, locale) {
+        const name = format.slice(format.lastIndexOf("/") + 1);
+        const iso = unit === "week" && /[GW]/.test(name.replace(/\[[^\]]*\]/g, ""));
+        const at = (y, m, d) => moment([y, m, d]).locale(locale);
+        const dates = [at(1970, 8, 30), at(2067, 8, 30),
+            ...[2026, 1970, 2067].flatMap((y) => Array.from({ length: 8 }, (_, i) => at(y, 11, 28).add(i, "days")))];
+        for (const date of dates) {
+            const as = date.format(name);
+            const back = moment(as, name, locale, true);
+            if (!back.isValid()) return { name, iso, date, as, back: null };
+            if (!back.isSame(date, iso ? "isoWeek" : unit)) return { name, iso, date, as, back };
+        }
+        return null;
+    }
+
+    /**
+     * The line under a periodic notes row whose names don't give the whole date (nameProblem), or "":
+     * the format and where it's set, the name it gives a note and what that leaves out, and what
+     * Plainday needs. Days are named in moment's language, as Schedule.dailyNotePath names them; weeks,
+     * months and years in the week settings' (DatePrompt.weekRules), as JumpToDate.periodName does.
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @param {string} [locale]
+     * @returns {string}
+     */
+    nameWarning(unit, locale = unit === "day" ? moment.locale() : plainday.DatePrompt.weekRules().locale) {
+        const set = this.periodicFormat(unit);
+        const problem = set && this.nameProblem(unit, set.format, locale);
+        if (!set || !problem) return "";
+        const { name, iso, date, as, back } = problem;
+        const head = set.navigator ? `Notebook Navigator's ${unit} pattern, \`${set.format}\`,` : `\`${set.format}\`, set in Settings → Daily notes,`;
+        // What a note is for, in plain English: 9/30/2026, the week of 9/30/2026, September 2026, 2026
+        /** @param {import("moment").Moment} m */
+        const period = (m) => {
+            const en = moment(m).locale("en");
+            return unit === "day" ? en.format("M/D/YYYY") : unit === "week" ? `the week of ${en.format("M/D/YYYY")}`
+                : unit === "month" ? en.format("MMMM YYYY") : en.format("YYYY");
+        };
+        let what;
+        if (!back) what = `names the note for ${period(date)} \`${as}\`, which Plainday can't read as a ${unit}`;
+        else if (date.month() === 8) {
+            // 9/30 of another year read back as a 9/30 (its week, its month) of this year or another
+            // month: the name leaves out what differs. Said with this year's note, a name the user knows.
+            /** @type {[boolean, string][]} */
+            const parts = unit === "week"
+                ? [[iso ? back.isoWeekYear() !== date.isoWeekYear() : back.weekYear() !== date.weekYear(), "the year"],
+                    [iso ? back.isoWeek() !== date.isoWeek() : back.week() !== date.week(), "the week"]]
+                : [[back.year() !== date.year(), "the year"], [unit !== "year" && back.month() !== date.month(), "the month"],
+                    [unit === "day" && back.date() !== date.date(), "the day"]];
+            const missing = parts.filter(([differs]) => differs).map(([, part]) => part);
+            const list = missing.length > 1 ? `${missing.slice(0, -1).join(", ")} or ${missing.at(-1)}` : missing[0] ?? "the whole date";
+            const example = moment([2026, 8, 30]).locale(locale);
+            what = `names the note for ${period(example)} \`${example.format(name)}\`, which doesn't give ${list}`;
+        }
+        // Only around New Year: a week's name with the calendar year (YYYY[w]ww) names the week that
+        // starts a year by the year before
+        else what = `names the note for ${period(date)} \`${as}\`, which Plainday reads as ${period(back)}`;
+        const needs = {
+            day: "the year, month and day, such as `YYYY-MM-DD`",
+            week: `the week's year and number, such as \`${iso ? "GGGG-[W]WW" : "gggg[w]ww"}\``,
+            month: "the year and month, such as `YYYY-MM`",
+            year: "the year, such as `YYYY`",
+        }[unit];
+        const change = set.navigator ? " Change it in Settings → Notebook Navigator → Calendar." : "";
+        return `${head} ${what}. For now, Plainday reads a note's date from its name alone, so the name needs ${needs}.${change}`;
     }
 
     /**

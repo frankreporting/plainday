@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { build, check, ROOT, SRC, workerPlugin, workerSource } from "../esbuild.config.mjs";
@@ -18,6 +19,8 @@ import { classFiles as listClassFiles, parse, readIndex, shapeProblems } from ".
 // The indexes import the class files, which import Obsidian's module, which only Obsidian has, so
 // they're read the way CI reads them
 const { COMMANDS, STARTUP } = { ...readIndex("commands").exports, ...readIndex("startup").exports };
+// Obsidian's moment, the real one, which the panel's periodic notes rows name dates with (OBS-299)
+const moment = createRequire(import.meta.url)("moment");
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "plainday-bundle-"));
 process.on("exit", () => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -204,7 +207,7 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const req = (id) => {
         if (id === "obsidian") {
             return { Plugin, Notice, PluginSettingTab, AbstractInputSuggest, Modal: FakeModal, Setting, SettingGroup: FakeGroup,
-                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13, setIcon: (el, name) => { el.icon = name; } };
+                TextComponent: FakeText, ButtonComponent: FakeButton, TextAreaComponent: FakeText, requireApiVersion: () => api13, setIcon: (el, name) => { el.icon = name; }, moment };
         }
         if (CODEMIRROR[id]) return CODEMIRROR[id];
         throw new Error(`unexpected require(${id}) while loading`);
@@ -370,7 +373,9 @@ function standInSetting() {
             },
             createSpan({ text }) { links[`span ${text}`] = null; },
         },
-        descEl: { text: "", createDiv: () => ({ setText: (t) => warnings.push(t), toggleClass: () => {} }), empty() { this.text = ""; }, appendText(t) { this.text += t; } },
+        // `lines`: each line made under the text with its class and text, { cls, text }, until it's emptied
+        descEl: { text: "", lines: [], createDiv(o) { const line = { cls: o?.cls ?? "", text: o?.text ?? "", setText: (t) => warnings.push(t), toggleClass: () => {} }; this.lines.push(line); return line; },
+            empty() { this.text = ""; this.lines = []; }, appendText(t) { this.text += t; } },
         addText(cb) { cb(control); return this; }, addTextArea(cb) { cb(control); return this; }, addDropdown(cb) { cb(control); return this; },
         addToggle(cb) { cb(control); return this; },
         // Each button its own, by its text: { text, click, warning }
@@ -812,6 +817,21 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.match(draw("Daily notes").descEl.text, /^`Planner\/days`, named `YYYY-MM-DD`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Weekly note").descEl.text, /^`T\/Week\.md`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Monthly note").descEl.text, /^None\. Set in Notebook Navigator\.$/, "a calendar with no template of its own");
+        // A folder row whose notes' names don't give their whole date says so, in a line under its text
+        // (OBS-299); the demo's patterns do, and a template row isn't checked
+        const warnings = (setting) => setting.descEl.lines.filter((l) => l.cls === "mod-warning").map((l) => l.text);
+        for (const name of ["Daily notes", "Weekly notes", "Monthly notes", "Yearly notes"]) assert.deepEqual(warnings(draw(name)), [], name);
+        NAVIGATOR.calendarCustomWeekPattern = "gggg/[W]ww";
+        try {
+            const bad = draw("Weekly notes");
+            assert.match(bad.descEl.text, /so they sit beside the daily notes\.$/, "the row's own text, as before");
+            assert.equal(warnings(bad).length, 1);
+            assert.match(warnings(bad)[0], /^Notebook Navigator's week pattern, `gggg\/\[W\]ww`, names the note for the week of 9\/30\/2026 `W40`, which doesn't give the year\./);
+            assert.equal(warnings(draw("Weekly notes")).length, 1, "a redraw keeps one line");
+            assert.deepEqual(warnings(draw("Weekly note")), [], "a template row isn't checked");
+        } finally {
+            NAVIGATOR.calendarCustomWeekPattern = "[weeks]/gggg[w]ww";
+        }
         // The template Jump to date and Schedule make a new note from is Navigator's own, and nothing else:
         // not Plainday's setting, not Templater's folder
         assert.equal(window.plainday.JumpToDate.templateFor("week")?.path ?? null, null, "its template isn't in this vault, so none");

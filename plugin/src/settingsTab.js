@@ -23,7 +23,8 @@
 // Folders: Projects, the Inbox and the archive, each a real folder, none inside another; the daily
 // notes' folder and name, shown from the Daily notes plugin, which keeps them; the weekly, monthly and
 // yearly notes' folders, and the error log note, blank for what Plainday did before, which the
-// placeholder shows. Note templates: the daily note's, shown the same way, and the weekly, monthly and
+// placeholder shows. A periodic notes row whose names don't give a note's whole date says so (OBS-299).
+// Note templates: the daily note's, shown the same way, and the weekly, monthly and
 // yearly notes', each with a line when the template sets a property Plainday writes itself. Changing a
 // folder moves no notes.
 //
@@ -1028,6 +1029,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // A row that only says where a note goes and who decides: used for the daily notes, and for every
         // periodic note in the Notebook Navigator source. When Navigator has no pattern Plainday can
         // follow for a unit, the row says what decides instead, rather than crediting Navigator (OBS-283).
+        // A folder row also warns when its notes' names don't give their whole date (Settings.nameWarning).
         /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
         const shown = (name, unit, part) => row(name, "", (s) => {
             const nn = navigator() ? settings.navigatorNote(unit) : null;
@@ -1044,6 +1046,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
             s.descEl.empty();
             s.descEl.appendText(`${shownValue}${named}. ${where}.`);
+            // A folder row whose notes' names don't give their whole date says so, in a line of its own
+            // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
+            const warning = part === "folder" ? settings.nameWarning(unit) : "";
+            if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
         });
 
         /** @returns {Section[]} */
