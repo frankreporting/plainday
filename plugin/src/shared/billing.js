@@ -95,16 +95,18 @@ export default class Billing {
 
     // The Billed entries section for `rows` ({ date, start, end, minutes, billed, cents, project (a
     // path), task, note }): the heading, then a bold row per date with the day's hours, and that day's
-    // entries under it without the date, oldest first. `linkText(path)` is the link text for a project.
+    // entries under it without the date, oldest first. `linkText(path)` is the link text for a project;
+    // a date row links its day's note by its name (TimeReport.dayLinks, OBS-298).
     // Task and note are defused, so text quoted from a daily note can't open a comment in the invoice.
     billedLines(rows, tr, linkText) {
         const t = (s) => this.tableText(tr.defuse(s));
         const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const link = tr.dayLinks();
         const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end);
         const out = [];
         for (const date of new Set(sorted.map((r) => r.date))) {
             const day = sorted.filter((r) => r.date === date);
-            out.push([`**[[${date}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
+            out.push([`**[[${link(date)}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
             for (const r of day) {
                 out.push(["", `${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`, r.project ? `[[${linkText(r.project)}]]` : "",
                     t(r.task), t(r.note), (r.cents / 100).toFixed(2), tr.hours(r.billed)]);
@@ -114,15 +116,17 @@ export default class Billing {
         return [Billing.HEADING, "", ...tr.table(Billing.HEAD, [null, null, null, null, null, "right", "right"], out)];
     }
 
-    // The rows of an invoice's Billed entries: { rows, bad: [{ line, text }], found, head, both }. `head`
-    // says whether the column names were there, and `both` that the note has two tables (two sections,
-    // or the section and an old callout), whose rows all count. `project` comes back as link text, to
-    // resolve with index.linkDest from the invoice's path.
+    // The rows of an invoice's Billed entries: { rows, bad: [{ line, text }], labeled, found, head, both }.
+    // `labeled` lists the date rows whose label shows another day than the one they link: [{ line, text, date,
+    // shows }] (dayOf). `head` says whether the column names were there, and `both` that the note has two tables
+    // (two sections, or the section and an old callout), whose rows all count. `project` comes back as link
+    // text, to resolve with index.linkDest from the invoice's path.
     readBilled(text, tr) {
         const lines = String(text ?? "").split(/\r?\n/);
-        const section = this.readSection(lines, tr), callout = this.readCallout(lines, tr);
+        const read = tr.reader();
+        const section = this.readSection(lines, tr, read), callout = this.readCallout(lines, tr, read);
         return {
-            rows: [...section.rows, ...callout.rows], bad: [...section.bad, ...callout.bad],
+            rows: [...section.rows, ...callout.rows], bad: [...section.bad, ...callout.bad], labeled: [...section.labeled, ...callout.labeled],
             found: section.found || callout.found,
             head: (section.found || callout.found) && (!section.found || section.head) && (!callout.found || callout.head),
             both: (section.found && callout.found) || section.again,
@@ -134,6 +138,18 @@ export default class Billing {
         return /^##\s+billed entries\s*$/i.test(String(line).trim());
     }
 
+    // The day a date row's first cell links (OBS-298): its first link's name, or its path's last part, read as a
+    // day's note by the vault's formats (`read`, TimeReport.reader), whatever its label says. { date, shows }:
+    // `shows` the month and day its label shows when that's another day ("8/27", TimeReport.labelDay), else
+    // null; a label without a month and day isn't compared. Null when the first link isn't a day's note's.
+    dayOf(cell, tr, read) {
+        const m = String(cell ?? "").match(/\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/);
+        const day = m ? read(m[1]) : null;
+        if (day?.unit !== "day") return null;
+        const shows = tr.constructor.labelDay(m[2]);
+        return { date: day.date, shows: shows && shows !== `${+day.date.slice(5, 7)}/${+day.date.slice(8, 10)}` ? shows : null };
+    }
+
     // The Billed entries section, from its heading to the end of the note. Each entry takes its date
     // from the date row above it, so the date rows are checked as strictly as the entries: a date row
     // has its date and its hours and nothing else, and its hours are what its entries add up to. A day
@@ -141,11 +157,13 @@ export default class Billing {
     // one that doesn't read), an entry with no date row above it, a date row holding more than its date
     // and hours, and a row after the table has ended don't read. Rows of a day that doesn't add up still count as billed: the
     // invoice is a Problem until it's fixed, and nothing it may have billed looks unbilled meanwhile.
+    // A date row is the one whose first cell links a day's note (dayOf, OBS-298): its entries are on the day it
+    // links, and one whose label shows another day is listed in `labeled`, which makes the invoice a Problem too.
     // `again` is a second Billed entries heading.
-    readSection(lines, tr) {
-        const rows = [], bad = [];
+    readSection(lines, tr, read = tr.reader()) {
+        const rows = [], bad = [], labeled = [];
         const at = lines.findIndex((l) => this.isHeading(l));
-        if (at === -1) return { rows, bad, found: false, head: false, again: false };
+        if (at === -1) return { rows, bad, labeled, found: false, head: false, again: false };
         let head = false, first = true, inTable = false, ended = false, again = false, day = null;
         const close = () => {
             if (!day) return;
@@ -174,11 +192,13 @@ export default class Billing {
             if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
             // An empty row (Enter in the table) is nothing; a cleared entry still leaves its day short
             if (cells.every((c) => c === "")) continue;
-            // A row with a date starts that day, even when it holds more than a date row should: it
+            // A row linking a day starts that day, even when it holds more than a date row should: it
             // doesn't read then, but the entries under it stay on its date, not the day before
-            const date = cells[0].match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
-            if (date && this.isoDate(date)) {
+            const linked = this.dayOf(cells[0], tr, read);
+            if (linked) {
+                const { date } = linked;
                 close();
+                if (linked.shows) labeled.push({ line: i + 1, text: body, date, shows: linked.shows });
                 const clean = cells.length === Billing.HEAD.length && [1, 2, 3, 4, 5].every((n) => cells[n] === "");
                 const hours = Number(String(cells[6] ?? "").replace(/\*/g, ""));
                 day = { date, minutes: cells[6] && Number.isFinite(hours) ? Math.round(hours * 60) : null, rows: [], at: { line: i + 1, text: body }, unread: !clean };
@@ -193,7 +213,7 @@ export default class Billing {
             }
         }
         close();
-        return { rows, bad, found: true, head, again };
+        return { rows, bad, labeled, found: true, head, again };
     }
 
     // An entry row of the section, on `date`, or null: exactly the table's cells, and a project, since
@@ -223,12 +243,12 @@ export default class Billing {
         return { date, start, end, minutes: end - start };
     }
 
-    // The old folded callout, read as it always was
-    readCallout(lines, tr) {
+    // The old folded callout, read as it always was, its date read by its link's name as the section's (dayOf)
+    readCallout(lines, tr, read = tr.reader()) {
         const opener = new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "i");
         const at = lines.findIndex((l) => opener.test(l.trim()));
-        const rows = [], bad = [];
-        if (at === -1) return { rows, bad, found: false, head: false };
+        const rows = [], bad = [], labeled = [];
+        if (at === -1) return { rows, bad, labeled, found: false, head: false };
         let head = false, first = true;
         for (let i = at + 1; i < lines.length && /^\s*>/.test(lines[i]); i++) {
             const body = lines[i].replace(/^\s*>\s?/, "").trim();
@@ -237,24 +257,35 @@ export default class Billing {
             if (first && this.shown(cells[0]).toLowerCase() === "date") { head = true; first = false; continue; }
             first = false;
             if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
-            const row = this.readRow(cells, tr);
-            if (row) rows.push(row);
-            else bad.push({ line: i + 1, text: body });
+            const linked = this.dayOf(cells[0], tr, read);
+            const row = this.readRow(cells, tr, linked);
+            if (row) {
+                rows.push(row);
+                if (linked.shows) labeled.push({ line: i + 1, text: body, date: linked.date, shows: linked.shows });
+            } else bad.push({ line: i + 1, text: body });
         }
-        return { rows, bad, found: true, head };
+        return { rows, bad, labeled, found: true, head };
     }
 
-    // A row of the old callout, or null
-    readRow(cells, tr) {
-        if (cells.length < Billing.CALLOUT_HEAD.length) return null;
-        const date = cells[0].match(/(\d{4}-\d{2}-\d{2})/)?.[1];
-        if (!date || !this.isoDate(date)) return null;
+    // A row of the old callout, on the day its first cell links (`linked`, dayOf), or null
+    readRow(cells, tr, linked) {
+        if (cells.length < Billing.CALLOUT_HEAD.length || !linked) return null;
+        const date = linked.date;
         const row = this.times(date, cells[1], cells[2], tr);
         if (!row || cells[3] === "" || cells[4] === "" || cells[5] === "") return null;
         const minutes = Number(cells[3]), hours = Number(cells[4]), rate = Number(cells[5].replace(/[$,]/g, ""));
         if (![minutes, hours, rate].every(Number.isFinite)) return null;
         const project = cells[6].match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? (cells[6] || null);
         return { ...row, minutes, billed: Math.round(hours * 60), cents: Math.round(rate * 100), project, task: cells[7], note: cells[8] };
+    }
+
+    // What an invoice's Problem says about its date rows labeled with another day (readBilled's `labeled`): the
+    // first one's label and the day it links, the one its entries count on
+    labeledText(labeled, tr) {
+        const [l] = labeled, n = labeled.length;
+        const one = `labeled ${l.shows} that links the daily note for ${tr.shortDate(l.date)}, the date Plainday reads`;
+        return n === 1 ? `has a Billed entries row ${one}`
+            : `has ${n} Billed entries rows labeled with another day than the daily note they link, the first ${one}`;
     }
 
     // ---------------------------------------------------------------- invoices
@@ -266,8 +297,9 @@ export default class Billing {
     // to (how invoices are written now), else the project its folder is in; each row's `projectPath` is where its project
     // link points. `problem` says why the invoice can't be trusted, or is null: its frontmatter doesn't
     // read (`error`), it's lost its `invoice` tag (`tagged` false: found by its Billed entries where
-    // invoices are filed), no table, a row that doesn't read, no column names, no rows, or rows that
-    // don't add up to its `hours` and `total`. Its rows still count as billed either way.
+    // invoices are filed), no table, a row that doesn't read, a date row labeled with another day than the one
+    // it links (OBS-298), no column names, no rows, or rows that don't add up to its `hours` and `total`. Its
+    // rows still count as billed either way, a labeled row's on the day it links.
     readInvoice({ path, props = {}, text = "", tagged = true, error = null }, tr, index) {
         const p = (name) => tr.prop(props ?? {}, name);
         const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
@@ -280,7 +312,7 @@ export default class Billing {
         };
         // `project` before OBS-117; then `parent`, or `area` before OBS-175, read as the report reads it
         const project = linkedTo(p("project")) ?? linkedTo(tr.parentValue(props ?? {})) ?? tr.projectOfNote(path, index);
-        const { rows, bad, found, head, both } = this.readBilled(text, tr);
+        const { rows, bad, labeled, found, head, both } = this.readBilled(text, tr);
         for (const r of rows) r.projectPath = r.project ? index.linkDest(r.project, path) : null;
         const minutes = rows.reduce((s, r) => s + r.billed, 0);
         const cents = this.rows(rows).reduce((s, r) => s + r.amount, 0);
@@ -292,6 +324,7 @@ export default class Billing {
             : !found ? "has no Billed entries table"
             : both ? "has two Billed entries tables"
             : n ? `has ${n === 1 ? "a Billed entries row that doesn't" : `${n} Billed entries rows that don't`} read`
+            : labeled.length ? this.labeledText(labeled, tr)
             : !head ? "has a Billed entries table without its column names"
             : !rows.length ? "has no rows in its Billed entries"
             : hours !== null && (!Number.isFinite(hours) || Math.round(hours * 60) !== minutes) ? `has Billed entries that add up to ${tr.hours(minutes)} hours, not its \`hours\` (${p("hours")})`
@@ -302,7 +335,7 @@ export default class Billing {
             // states a status is read by it.
             path, name: tr.basename(path), number: String(p("number") ?? tr.basename(path)), status, unread: !!error || (!tagged && !raw),
             paid: this.isoDate(p("paid")), invoiceDate: this.isoDate(p("invoice_date")),
-            periodStart: this.isoDate(p("period_start")), periodEnd: this.isoDate(p("period_end")), project, rows, bad, problem,
+            periodStart: this.isoDate(p("period_start")), periodEnd: this.isoDate(p("period_end")), project, rows, bad, labeled, problem,
             // As the invoice states them, for the project's list of invoices (null when blank or not a number)
             hours: Number.isFinite(hours) ? hours : null, total: Number.isFinite(total) ? total : null,
         };
