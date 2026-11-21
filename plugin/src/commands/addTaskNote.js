@@ -77,7 +77,7 @@ export default class AddTaskNote {
     // after the cursor. With only whitespace after the cursor, insert an empty link to type a name into. On a
     // line that already has a ⋯, that note's ⋯ goes on the task's other lines (spread). A new note is filed in
     // the line's project, or waits in Inbox. A note of that name already there is settled (attach).
-    // On an event line (`- [<]`), link a event log named with the daily note's date and the event's title
+    // On an event line (`- [<]`), link a event log named with the daily note's day and the event's title
     // (the selection, or the text after its time), at the end of the line like a task's note (OBS-57), and
     // make the log right away, as a task's note is made (see makeLog).
     async invoke() {
