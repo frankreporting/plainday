@@ -9,7 +9,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { createRequire } from "node:module";
 import { classScript } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
@@ -22,7 +21,9 @@ const Schedule = load("schedule.js", "Schedule");
 const DueDate = load("setDueDate.js", "DueDate");
 const TimeReport = load("timeReport.js", "TimeReport");
 const CalendarSync = load("calendarSync.js", "CalendarSync");
-const recordEvent = createRequire(import.meta.url)("../Templater/recordEvent.js");
+const EventLog = load("eventLog.js", "EventLog");
+const eventLog = new EventLog();
+const recordEvent = (...args) => JSON.parse(JSON.stringify(eventLog.recordEvent(...args)));
 const [linker, report, sync] = [new AddProjectLink(), new TimeReport(), new CalendarSync()];
 
 const SPELLINGS = { "⋯": "⋯", "↗": "↗", "↗ + U+FE0F": "↗\uFE0F" };

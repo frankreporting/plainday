@@ -19,7 +19,7 @@ const map = (o) => new Map(Object.entries(o));
 // Objects made inside the vm context have that context's prototypes; compare as plain data
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-const SCRIPT = "Config/Scripts/Templater/recordEvent.js";
+const SCRIPT = "Config/Scripts/Templater/arrivedNote.js";
 const TEMPLATE = "Config/Templates/Task.md";
 const SETTINGS = ".obsidian/plugins/templater-obsidian/data.json";
 // Installed until OBS-257, when the class files stopped running under CustomJS

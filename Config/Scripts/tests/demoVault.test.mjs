@@ -8,7 +8,6 @@
 import { test as baseTest } from "node:test";
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import vm from "node:vm";
 import { DAYS, FOLDERS, NOTE_FOLDERS, SETTINGS_FILE, loadTimeReport, loadBilling, readVault, planReports, dailyNotes, vaultSettings } from "./demo/renderReports.mjs";
 import { compactTables, obsidianPadded, tablesIn } from "./tables.mjs";
@@ -199,7 +198,7 @@ test("demo vault: every convention the README describes shows up at least once",
     assert.match(days, /^- \[\/\] |^- \[x\] /m, "started or done task");
     assert.match(days, /\[\[\d{4}-\d{2}-\d{2}\|🚩 \d{1,2}\/\d{1,2}\]\]/, "due date");
     assert.match(days, /^## Notes$/m, "notes section");
-    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|⋯\]\] \^e-[a-z0-9]{6}\n\t- \d/m, "event linking its project, then its meeting log at the end of its line, then its ID");
+    assert.match(days, /^- \[<\] [^\n]*\t[^\n[]+ \[\[[^\]|]+\|⭕\]\] \[\[\d{4}-\d{2}-\d{2} [^\]|]+\|⋯\]\] \^e-[a-z0-9]{6}\n\t- \d/m, "event linking its project, then its event log at the end of its line, then its ID");
     // Every synced event line ends in its event's ID (OBS-275); a forwarded one and a log's line with no time have none
     for (const line of days.split("\n").filter((l) => /^- \[[<x-]\] (?:All day|\d{1,2}:\d{2}[ap]m)\t/.test(l))) assert.match(line, / \^e-[a-z0-9]{6}$/, line);
     assert.doesNotMatch(days, /^- \[>\] \[\[[^\n]*\^e-[a-z0-9]{6}$/m, "a forwarded event line has no ID");
@@ -291,7 +290,7 @@ test("demo vault: no sample note still has the old `area` property (OBS-175)", (
     assert.deepEqual(left, []);
 });
 
-test("demo vault: ⋯, ⭕, meeting log and property links all resolve", () => {
+test("demo vault: ⋯, ⭕, event log and property links all resolve", () => {
     const files = new Set(vault.files);
     const resolves = (target, from) => plan.index.linkDest(target, from) !== null || files.has(target) || vault.files.some((f) => basename(f) === target || f.endsWith(`/${target}`));
     const isPeriod = (t) => /^\d{4}(-\d{2}(-\d{2})?|w\d{2})?$/.test(t);
@@ -323,10 +322,11 @@ test("demo vault: ⋯, ⭕, meeting log and property links all resolve", () => {
     assert.ok(checked > 50);
 });
 
-test("demo vault: every meeting log has its line in its daily note, and its time and endTime match that line", () => {
-    const require = createRequire(import.meta.url);
-    const eventTimes = require("../Templater/eventTimes.js");
-    const recordEvent = require("../Templater/recordEvent.js");
+test("demo vault: every event log has its line in its daily note, and its time and endTime match that line", () => {
+    const eventLog = new (vm.runInContext(classScript("eventLog.js") + "\n;EventLog", vm.createContext({})))();
+    // Objects made in the vm context have its prototypes; compared as plain data
+const eventTimes = (...args) => JSON.parse(JSON.stringify(eventLog.eventTimes(...args)));
+    const recordEvent = (...args) => JSON.parse(JSON.stringify(eventLog.recordEvent(...args)));
     const code = classScript("calendarSync.js");
     const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, plainday: {}, console })))();
     const logs = demoNotes.filter((p) => tagsOf(p).includes("log"));

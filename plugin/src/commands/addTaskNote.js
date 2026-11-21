@@ -16,12 +16,12 @@ export default class AddTaskNote {
     static PROJECT_MARK = "⭕";
     // The `status` values that mean a project or area is finished, lowercased (see isFinished)
     static FINISHED = ["done", "canceled", "cancelled"];
-    // A project or area keeps its meeting logs in a folder of their own, `›logs`: the U+203A puts it
+    // A project or area keeps its event logs in a folder of their own, `›logs`: the U+203A puts it
     // above the project folders in Notebook Navigator's sort (OBS-164)
     static LOGS_FOLDER = "›logs";
     // Notebook Navigator's icon for a logs folder the system makes (a Lucide name)
     static LOGS_ICON = "history";
-    // A line's link to its own note: a task's note, or an event's meeting log (OBS-57), marked ⋯
+    // A line's link to its own note: a task's note, or an event's event log (OBS-57), marked ⋯
     // (OBS-208). FROM_MARK, ↗, links the note Schedule sent the line from (Schedule.FROM_MARK). NOTE_LINK
     // reads either, for where the marks sit in a line's run; OWN_NOTE_LINK and FROM_LINK read one each, and
     // only the ⋯ is a line's own note. A phone may add the U+FE0F to ↗.
@@ -67,8 +67,8 @@ export default class AddTaskNote {
     // An event title wrapped in a link to its log, the way lines were written before OBS-57, and the way a
     // meeting line in the form used before August 2025 (no bullet, its time first) was (OBS-193)
     static LOG_TITLE = /^\s*(?:[-*+]\s+\[.\]\s+(?:(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?|(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2} /iu;
-    // The parent picked in advance for the one log being created ({ path, parent }), read by the Log
-    // template (takePresetParent). Raycast's Open Log Note sets "inbox" as the parent
+    // Set by an older CalNav's Open Log Note, which made logs through the Log template; nothing reads it since
+    // Plainday makes logs itself (EventLog, OBS-122), and it stays so that script still runs
     static preset = null;
 
     // On a task line: link the task's note, making it first when there isn't one (createTaskNote),
@@ -77,7 +77,7 @@ export default class AddTaskNote {
     // after the cursor. With only whitespace after the cursor, insert an empty link to type a name into. On a
     // line that already has a ⋯, that note's ⋯ goes on the task's other lines (spread). A new note is filed in
     // the line's project, or waits in Inbox. A note of that name already there is settled (attach).
-    // On an event line (`- [<]`), link a meeting log named with the daily note's date and the event's title
+    // On an event line (`- [<]`), link a event log named with the daily note's date and the event's title
     // (the selection, or the text after its time), at the end of the line like a task's note (OBS-57), and
     // make the log right away, as a task's note is made (see makeLog).
     async invoke() {
@@ -174,7 +174,7 @@ export default class AddTaskNote {
         return project ? app.vault.getFileByPath(project) : null;
     }
 
-    // The project or area a line of a daily note at `path` says, for the Log template, or null
+    // The project or area a line of a daily note at `path` says, for a event log (EventLog), or null
     lineHomeIn(lineText, path) {
         return this.lineHomeAt([lineText], 0, path);
     }
@@ -371,7 +371,7 @@ export default class AddTaskNote {
     }
 
     // The Inbox, as Settings → Plainday → Folders has it (OBS-283): where a task note whose line names no
-    // project is made, and a new log before its template files it. A note there is unfiled: it waits until
+    // project is made, and a log whose line names none (EventLog). A note there is unfiled: it waits until
     // AddProjectLink or MoveToProject files it (OBS-55).
     stagingFolder() {
         return plainday.Settings.folders().inbox;
@@ -539,7 +539,7 @@ export default class AddTaskNote {
         return !!cache && this.tagsOf(cache).includes("area");
     }
 
-    // A meeting log: a note tagged #log, or any note in a `›logs` folder. Logs are filed in their
+    // A event log: a note tagged #log, or any note in a `›logs` folder. Logs are filed in their
     // project's `›logs`, so one waiting in Inbox still goes there when it's moved.
     isLog(file) {
         if (this.isLogsFolderName(file.parent?.name)) return true;
@@ -677,16 +677,6 @@ export default class AddTaskNote {
             }
         }
         return lineText.slice(0, head) + body.trim();
-    }
-
-    // For the Log template: the parent picked in advance for the note at `path`, once. Any other note, a
-    // second ask, or Raycast's "inbox" gets null, and the template files the note in Inbox. Task notes
-    // don't need it since Plainday makes them (OBS-121); an older Task template still in a vault gets null.
-    takePresetParent(path) {
-        const preset = AddTaskNote.preset;
-        if (!preset || preset.path !== path) return null;
-        AddTaskNote.preset = null;
-        return preset.parent === "inbox" ? null : preset.parent;
     }
 
     // "2026-09-30 Renew the domain" → "Renew the domain". Text that's only a date is left alone.
@@ -904,9 +894,9 @@ export default class AddTaskNote {
         return `${bare.slice(0, bare.length - block.length).replace(/\s+$/, "")} ${link}${block}`;
     }
 
-    // Links an event line to its meeting log (see eventLine); the cursor stays where it was. A new log is made
-    // (makeLog), and the Log template files it where the line's ⭕ says. A log that exists already is settled
-    // the way a task's note is (attach).
+    // Links an event line to its event log (see eventLine); the cursor stays where it was. A new log is made
+    // (makeLog), filed where the line's ⭕ says. A log that exists already is settled the way a task's note is
+    // (attach).
     async linkEvent(line, name) {
         const { editor, source, at, lineText, cursor } = line;
         const change = plainday.TaskChange;
@@ -921,7 +911,7 @@ export default class AddTaskNote {
         if (!existing) {
             editor.replaceRange(fresh, { line: at, ch: 0 }, { line: at, ch: lineText.length });
             this.keepCursor(editor, cursor, at, lineText);
-            await this.makeLog(logName);
+            await this.makeLog(date, name);
             return;
         }
         if (!change.ready()) return;
@@ -943,29 +933,21 @@ export default class AddTaskNote {
             .replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
     }
 
-    // Makes the meeting log `name` right away, the way a task's note is made: through the Log
-    // template, without opening it, so you stay in the daily note. The template files it in the
-    // project the event line's ⭕ or 🗃️ names, or else leaves it in Inbox with no menu (OBS-55). A
-    // log that already has the name is left where it is. The daily note is saved
-    // first, so the template reads the line just linked rather than the one on disk.
-    async makeLog(name) {
-        if (app.metadataCache.getFirstLinkpathDest(name, app.workspace.getActiveFile()?.path ?? "")) return;
-        const templater = app.plugins.plugins["templater-obsidian"]?.templater;
-        const template = app.vault.getFileByPath(this.templatePath("log"));
-        if (!templater || !template) {
-            new Notice("Templater or the Log template is missing, so the log wasn't made: click its link to make it");
-            return;
-        }
+    // Makes the event log of the event `title` on `date` right away, the way a task's note is made, without
+    // opening it, so you stay in the daily note (EventLog.make, OBS-122): filed in the project the event line's ⭕
+    // or 🗃️ names, or else in the Inbox with no menu (OBS-55). A log that already has the name is left where it is.
+    // The daily note is saved first, so what reads it from disk sees the line just linked.
+    async makeLog(date, title) {
         try {
             await app.workspace.activeLeaf?.view?.save?.();
-            await templater.create_new_note_from_template(template, this.stagingFolder(), name, false);
+            await plainday.EventLog.make({ date, title });
         } catch (e) {
             console.error("AddTaskNote: couldn't make the log", e);
-            new Notice(`Couldn't make the log "${name}": click its link to make it`);
+            new Notice(`Couldn't make the log "${date} ${this.fileName(title)}": click its link to make it`);
         }
     }
 
-    // The event line with a link to its meeting log, `[[date name|⋯]]` (or `[[linktext|⋯]]`): at
+    // The event line with a link to its event log, `[[date name|⋯]]` (or `[[linktext|⋯]]`): at
     // the end, after the title, its ℹ️ or 🆓 and any ⭕ or 🗃️ links, so the note link ends the line
     // (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
     eventLine(lineText, name, date, linktext = null) {

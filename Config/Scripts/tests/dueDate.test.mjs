@@ -229,7 +229,7 @@ scenario("DueDate on a task whose lines link two task notes sets due on both", a
 });
 
 scenario("DueDate leaves an event line among a task's lines without a 🚩, and its log without a due", async ({ lag }) => {
-    // Only a hand edit makes this: a task line whose ⋯ links a meeting log, which its event line links too
+    // Only a hand edit makes this: a task line whose ⋯ links a event log, which its event line links too
     const notes = {
         ...NOTES,
         [day("2026-09-16")]: "- [<] 10:00am\tPlanning [[Old|⭕]] [[2026-09-16 Planning|⋯]]\n\t- 10:00am - 10:30am\n- [ ] Plan the copy [[Old|⭕]] [[2026-09-16 Planning|⋯]]\n",

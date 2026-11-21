@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const arrivedNote = createRequire(import.meta.url)("../Templater/arrivedNote.js");
 
 test("arrived: a note with properties and nothing below them isn't new; an empty one, or one with text, is left to Templater", () => {
-    // Not new: what a meeting log with no notes yet, or a person note, looks like when it arrives
+    // Not new: what a event log with no notes yet, or a person note, looks like when it arrives
     for (const text of [
         "---\nid: 2026091409000000\ntags:\n  - log\nparent: \"[[Kestrel Outfitters 2026|⭕]]\"\n---\n",
         "---\ntags: person\n---\n\n\n",
@@ -190,17 +190,11 @@ test("Get Template stops on a note that already has properties when Templater's 
     assert.match(text.slice(guard, guard + 900), /new Notice\(why, 10000\);\s*throw new Error\(why\)/, "says why in its own notice, then stops");
 });
 
-test("the Log template trashes a same-named note only when it was empty when the template started", () => {
-    const text = fs.readFileSync(new URL("../../Templates/Log.md", here), "utf8");
-    assert.match(text, /const startedEmpty = \(await app\.vault\.read\(tp\.config\.target_file\)\)\.trim\(\) === "";/);
-    const keep = text.indexOf("if (existing && !startedEmpty)"), trash = text.indexOf("app.fileManager.trashFile(here)");
-    assert.ok(keep > 0 && trash > keep, "the non-empty case comes first, and only the other branch trashes");
-    assert.ok(text.indexOf("const startedEmpty") < keep);
-    // The trigger running it on a note that arrived with only properties stops before a move
-    const stop = text.indexOf("tp.config.run_mode === 2 && !startedEmpty && !window.newNoteGuardMadeHere?.has(tp.config.target_file) && tp.user.arrivedNote(");
-    assert.ok(stop > 0 && stop < text.indexOf("tp.file.move("), "before a move");
-    assert.ok(stop < text.indexOf("takePresetParent"), "before it takes a preset meant for a new note");
-    assert.match(text.slice(stop, stop + 500), /new Notice\(why, 10000\);\s*throw new Error\(why\)/);
+test("Get Template has no log routes: a title starting with a date or !today is a note like any other (OBS-122)", () => {
+    const code = fs.readFileSync(new URL("../../Templates/Get Template.md", here), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+    assert.doesNotMatch(code, /!today|\[\[Log\]\]|\[0-9\]\{4\}-/, "no route to the Log template");
+    assert.match(code, /tp\.file\.include\("\[\[Empty Note\]\]"\)/, "a dated title gets the Empty Note, like any other");
+    assert.equal(fs.readFileSync(new URL("../../Templates/Log.md", here), "utf8"), "", "and the Log template is content only, empty here");
 });
 
 test("the startup scripts start the guard", () => {

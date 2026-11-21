@@ -27,7 +27,7 @@ export default class CalendarSync {
     //   free and busy, ℹ️ is set to match; one you add or take off in between stays.
     // - The box is yours, as before Plainday: a new line gets [<], and the line is kept current whatever box
     //   you give it. The sync marks [<] lines [-] when their event is gone, and puts back [<] on a line
-    //   it marked [-] when the event returns; a [-] you set yourself (a meeting you skipped) stays.
+    //   it marked [-] when the event returns; a [-] you set yourself (an event you skipped) stays.
     // - The ID, last: `^e-` and six letters and digits worked out from the event's key (its UID, with the
     //   date it was due for one occurrence of a repeating event: lineId), so the line is found on any day
     //   with nothing kept in the vault. The `e-` sets it apart from a task's ID or a block link.
@@ -38,8 +38,8 @@ export default class CalendarSync {
     // unless time entries are under it, and comes back when its day is in range. A series split by a
     // "this and future events" edit keeps its lines (handOver). A new line for a recurring series gets
     // the series' ⭕ from the settings. Lines from before IDs (no ID at all) are taken over by their exact start and title, and a
-    // log's line with no time (`- [<] Title [[log|⋯]]`, the Log template writes one when the calendar has
-    // no event for a meeting, OBS-10) by its title. A log a line links takes the line's times (fillLog).
+    // log's line with no time (`- [<] Title [[log|⋯]]`, a new log writes one when the calendar has
+    // no event of that title, OBS-10) by its title. A log a line links takes the line's times (fillLog).
     //
     // Where the events come from: every calendar in Settings → Plainday → Calendars that's on and has a
     // link on this device, downloaded and read by CalendarFeed. A calendar that's off, has no link here,
@@ -319,7 +319,7 @@ export default class CalendarSync {
     // A "this and future events" edit gives the rest of a series a new ID: its occurrences vanish, and a
     // new series appears in the same places. An occurrence this device remembers a line for, gone from a
     // calendar read this time, and an occurrence of a repeating event it has no line for, on the same
-    // calendar, day, start and end, are the same meeting: the new one takes over the old one's line, and
+    // calendar, day, start and end, are the same event: the new one takes over the old one's line, and
     // its series goes by the old one's title, so seriesProjects renames the series' project to it (as
     // the sync did before Plainday). Only places where one of each pairs up.
     async handOver(feed, selected, cache) {
@@ -944,7 +944,7 @@ export default class CalendarSync {
     }
 
     // What an event's line came to, into the report, once its log (if one line alone links it) has the
-    // line's times. A log more than one event line links (one kept across a series' meetings, say)
+    // line's times. A log more than one event line links (one kept across a series' events, say)
     // keeps its own: which line's times it should have would be a guess.
     async tell(done, report) {
         const links = new Map();
@@ -1329,8 +1329,8 @@ export default class CalendarSync {
         return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2], true).rest) };
     }
 
-    // An event line with no time: `- [<] Title [[log|⋯]]`, which the Log template writes for a
-    // meeting the calendar doesn't have (OBS-10). Sorts after the timed events.
+    // An event line with no time: `- [<] Title [[log|⋯]]`, which a new log writes for a
+    // log whose event the calendar doesn't have (OBS-10). Sorts after the timed events.
     timeless(line) {
         return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);
     }
@@ -1449,7 +1449,7 @@ export default class CalendarSync {
 
     // A linked log follows its line (OBS-10): once the sync has written a line that links a log,
     // the log's `time` and `endTime` are the line's start and end, so a log made before
-    // its event reached the calendar, or whose event was retimed or moved, says when the meeting
+    // its event reached the calendar, or whose event was retimed or moved, says when the event
     // is. An all-day event says nothing about time, and an event with no end line (it ends on
     // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Only a log
     // is changed (see isLog): a ⋯ on an event line can point at any note. Returns whether the
@@ -1475,7 +1475,7 @@ export default class CalendarSync {
         return true;
     }
 
-    // A meeting log, as AddTaskNote.isLog and MoveToProject know one: filed in a `›logs` folder
+    // A event log, as AddTaskNote.isLog and MoveToProject know one: filed in a `›logs` folder
     // (AddTaskNote.isLogsFolderName), or tagged #log (in its frontmatter or its text) wherever it waits
     isLog(file, cache) {
         const folder = (file.path ?? "").split("/").slice(-2, -1)[0];

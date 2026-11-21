@@ -77,17 +77,16 @@ Every note inside an area or project has a `parent` property linking the folder 
 
 ## Creating notes: the title picks the template
 
-New notes run `Get Template.md`, which picks a template from the title you type. A title that's a date (`2026-09-15`, `2026w38`, `2026-09`, `2026`) isn't routed there: Plainday files that note in its folder and gives it its alias (`9/15/26 Tuesday`, `Week of 9/13/26`, `September 2026`), as it does every daily, weekly, monthly and yearly note (the manual's *The periodic notes*). Task notes aren't made by title either: *Add note* on a task line makes one, with its properties, filed in the line's project (the manual's *Add note*).
+New notes run `Get Template.md`, which picks a template from the title you type. A title that's a date (`2026-09-15`, `2026w38`, `2026-09`, `2026`) isn't routed there: Plainday files that note in its folder and gives it its alias (`9/15/26 Tuesday`, `Week of 9/13/26`, `September 2026`), as it does every daily, weekly, monthly and yearly note (the manual's *The periodic notes*). Task notes and event logs aren't made by title either: *Add note* on a task line makes a task note, and on an event line a log, with their properties, filed in the line's project, and *New event log* makes a log for an event you name (the manual's *Add note* and *Log notes*). A title like `2026-09-15 Kickoff call` is a plain note.
 
 | Title | Template | Result |
 | --- | --- | --- |
-| `2026-09-15 Kickoff call` or `!today Kickoff call` | Log | Log note: files it in the `›logs/` of the project or area its event line's one ⭕ or 🗃️ names, or else in `Inbox`, with no menu, to be filed later with *Add project link* or *Move to project*. Records the log in its daily note (the event line with that title links to it at the end, after its ⭕, `[[Project|⭕]] [[log|⋯]]`, else a `[<]` line with no time goes after the day's events; a missing daily note is created); fills `parent`, `date`, `time`, `endTime` (from that event line), `who` |
 | `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *Move to project*; dates become `start`/`due` |
 | `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
 | `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `People` / `Entities` |
 | anything else | Empty Note | `id` and `tags` frontmatter |
 
-Templater user scripts (`Config/Scripts/Templater/`): `showNewNote` (redraws properties and places the cursor after the Log, Project or Area template moves a note), `eventTimes` (start and end time from a calendar event line), `recordEvent` (a new log's line in its daily note), `arrivedNote` (tells a note that arrived with its properties from a new, empty one).
+Templater user scripts (`Config/Scripts/Templater/`): `showNewNote` (redraws properties and places the cursor after the Project or Area template moves a note), `arrivedNote` (tells a note that arrived with its properties from a new, empty one).
 
 ## Daily notes
 
@@ -125,6 +124,7 @@ Run from the command palette ("Plainday: Add note"), a hotkey, or the command li
 | Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; on a nested task it moves the task above it. One already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line; a finished task reopens |
 | Due date | `⇧⌘D` | Sets the `🚩 M/D` due date on every line of the task, replacing one already there, and its task note's `due` |
 | Add note | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and puts its ⋯ on every line of the task; on an event line, links a log note |
+| New event log | | Asks for an event's title and makes its log on the day you're on (or today), linked from that day's event line, and opens it |
 | Add project link | `⌥⌘P` | On a line in a daily, weekly, monthly or yearly note, says which project (`⭕`) or area (`🗃️`) its task belongs to: every line of the task changes, its note moves with the task note or log it's a subtask of, and its line in a project note goes to the new `## To Do`. It asks before a note leaves a project or time moves, and refuses to move billed time |
 | Move to project | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area, and its tasks and subtasks follow: a log into its `›logs/`, a project with its whole folder. Picking the project a note is already in puts its lines right. Also *Move to project…* in the file menus |
 | Toggle time entry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |

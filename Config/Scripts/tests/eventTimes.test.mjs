@@ -1,10 +1,14 @@
-// Tests for Templater/eventTimes.js. Run from the vault root:
+// Tests for EventLog.eventTimes, a log's times from its event line (the Log template's eventTimes.js until
+// OBS-122). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
+import vm from "node:vm";
+import { loadClass } from "../../../plugin/classShape.mjs";
 
-const eventTimes = createRequire(import.meta.url)("../Templater/eventTimes.js");
+const log = new (loadClass("eventLog.js", vm.createContext({})))();
+// Objects made in the vm context have its prototypes; compared as plain data
+const eventTimes = (...args) => JSON.parse(JSON.stringify(log.eventTimes(...args)));
 
 const DAY = [
     "---",

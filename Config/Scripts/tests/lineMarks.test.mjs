@@ -133,7 +133,7 @@ const counted = (v) => {
 };
 
 test("a line's own note is its ⋯ and nothing else: a ↗ is read by nobody (OBS-196)", () => {
-    // ⋯ in Kestrel, ↗ to a meeting log in Pinecrest, ⭕ Kestrel: Kestrel's, and nothing disagrees
+    // ⋯ in Kestrel, ↗ to a event log in Pinecrest, ⭕ Kestrel: Kestrel's, and nothing disagrees
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[Kestrel|⭕]] [[Pick fonts|⋯]] [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [KES], conflicts: 0 });
     // Only a ↗: Unassigned, like any line with no ⭕
     assert.deepEqual(counted(standIn({ notes: TIMED("- [x] Pick fonts [[2026-09-15 Pinecrest kickoff|↗]]") })), { projects: [null], conflicts: 0 });

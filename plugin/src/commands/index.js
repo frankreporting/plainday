@@ -21,6 +21,7 @@ import ConvertToProject from "./convertToProject.js";
 import Invoice from "./invoice.js";
 import JumpToDate from "./jumpToDate.js";
 import MoveToProject from "./moveToProject.js";
+import NewEventLog from "./newEventLog.js";
 import Plan from "./plan.js";
 import Schedule from "./schedule.js";
 import DueDate from "./setDueDate.js";
@@ -30,7 +31,7 @@ import UpdateObsidianPM from "./updateObsidianPM.js";
 import ViewErrorLogs from "./viewErrorLogs.js";
 
 export const CLASSES = {
-    AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, Plan,
+    AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, NewEventLog, Plan,
     Schedule, TimeReport, ToggleTimeEntry, UpdateObsidianPM, ViewErrorLogs,
 };
 
@@ -38,6 +39,7 @@ export const COMMANDS = [
     { id: "schedule", name: "Schedule", script: "Schedule", icon: "calendar-arrow-up" },
     { id: "due-date", name: "Due date", script: "DueDate", icon: "flag" },
     { id: "add-note", name: "Add note", script: "AddTaskNote", icon: "file-plus-corner" },
+    { id: "new-event-log", name: "New event log", script: "NewEventLog", icon: "notebook-pen" },
     { id: "add-project-link", name: "Add project link", script: "AddProjectLink", icon: "circle" },
     { id: "move-to-project", name: "Move to project", script: "MoveToProject", icon: "folder-input" },
     { id: "convert-to-project", name: "Convert to project", script: "ConvertToProject", icon: "folder-plus" },

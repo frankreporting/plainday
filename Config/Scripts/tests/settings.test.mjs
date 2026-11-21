@@ -809,12 +809,15 @@ test("templateWarning: the properties a template sets that Plainday writes itsel
     assert.equal(settings.templateWarning(["a", "b", "c"], ["a", "b", "c"]), "Your template also sets `a`, `b` and `c`; Plainday writes its own.");
     assert.equal(settings.templateWarning(["tags", "aliases"], ["tags", "aliases"]), "");
     assert.equal(settings.templateWarning(["date"], []), "");
-    assert.deepEqual(plain(Settings.WRITES), { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"] },
-        "the alias PeriodicNotes writes (OBS-120), a list, so no row warns; a task note's tag, parent and due (OBS-121)");
+    assert.deepEqual(plain(Settings.WRITES), { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"] },
+        "the alias PeriodicNotes writes (OBS-120), a list, so no row warns; a task note's tag, parent and due (OBS-121); a log's parent, day, times and who (OBS-122)");
     assert.equal(settings.templateWarning(["aliases", "tags"], Settings.WRITES.week), "");
     // A Task template that sets `parent` or `due` is warned about; its `id`, `status` and tags aren't (OBS-121)
     assert.equal(settings.templateWarning(["id", "tags", "parent", "due", "status"], Settings.WRITES.task), "Your template also sets `parent` and `due`; Plainday writes its own.");
     assert.equal(settings.templateWarning(["id", "tags"], Settings.WRITES.task), "");
+    // A Log template that sets `date` is warned about; its `id`, `series`, `topic` and aliases aren't (OBS-122)
+    assert.equal(settings.templateWarning(["id", "aliases", "series", "topic", "date"], Settings.WRITES.log), "Your template also sets `date`; Plainday writes its own.");
+    assert.equal(settings.templateWarning(["id", "series", "topic"], Settings.WRITES.log), "");
 });
 
 test("Paste and Sync: a copy or a data file from before folders leaves this device's folders and templates as they are", async () => {

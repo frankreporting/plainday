@@ -1,18 +1,18 @@
-// Tests for Templater/recordEvent.js. Run from the vault root:
+// Tests for EventLog.recordEvent, the event line a log is recorded on (the Log template's recordEvent.js
+// until OBS-122). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The helper borrows the calendar sync's line shape, matching and sort order, so the sync class
-// is loaded with vm the way its own tests do, and passed in as the Log template passes
-// plainday.CalendarSync.
+// It borrows the calendar sync's line shape, matching and sort order, so the sync class is loaded with vm
+// the way its own tests do, and passed in as EventLog passes plainday.CalendarSync.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { createRequire } from "node:module";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, loadClass } from "../../../plugin/classShape.mjs";
 
-const require = createRequire(import.meta.url);
-const recordEvent = require("../Templater/recordEvent.js");
-const eventTimes = require("../Templater/eventTimes.js");
+const log = new (loadClass("eventLog.js", vm.createContext({})))();
+const recordEvent = (...args) => JSON.parse(JSON.stringify(log.recordEvent(...args)));
+// Objects made in the vm context have its prototypes; compared as plain data
+const eventTimes = (...args) => JSON.parse(JSON.stringify(log.eventTimes(...args)));
 
 const code = classScript("calendarSync.js");
 const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, plainday: {}, console })))();
