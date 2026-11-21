@@ -329,13 +329,15 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     for (const unit of ["week", "month", "year"]) {
         const keys = new Set(wanted[unit]);
         for (const p of vault.notes.keys()) {
-            if (p.slice(0, p.lastIndexOf("/")) === folders[unit] && tr.constructor.PERIOD_NAME[unit].test(basename(p)) && hasBlock(p)) keys.add(basename(p));
+            if (p.slice(0, p.lastIndexOf("/")) === folders[unit] && tr.periodStartOf(unit, basename(p)) && hasBlock(p)) keys.add(basename(p));
         }
-        for (const key of [...keys].sort()) {
+        for (const key of tr.byStart(unit, keys)) {
             const p = `${folders[unit]}/${key}.md`;
             targets[unit].push(p);
             const block = tr.render(model, { kind: "period", unit, key, linkTarget }, stamp, link);
-            const fm = tr.periodFrontmatter(unit, key);
+            // The alias PeriodicNotes gives a new note, in the demo's English Sunday weeks
+            const alias = unit === "week" ? `Week of ${tr.shortDate(tr.weekRange(key)[0])}` : unit === "month" ? tr.monthTitle(key) : null;
+            const fm = alias ? `---\naliases: ${alias}\n---\n` : "";
             const created = `${fm}${fm ? "\n" : ""}${tr.constructor.HEADING}\n\n${block}\n`;
             write(p, block, created);
         }

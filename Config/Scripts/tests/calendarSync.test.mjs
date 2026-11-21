@@ -152,10 +152,24 @@ function load(app = {}, state = newState(), extra = {}) {
         window: { setTimeout, clearTimeout },
         Platform: { isMacOS: true },
         performance,
-        plainday: { ...stand(state), ...extra },
+        plainday: { ...stand(state), PeriodicNotes: periodicNotes(app, state), ...extra },
         console,
     });
     return new (vm.runInContext(code + "\n;CalendarSync", context))();
+}
+
+// PeriodicNotes, as far as the sync uses it (OBS-120): a missing day's note made in the daily notes'
+// folder by their format, with its alias. periodicNotes.test.mjs tests the real one.
+function periodicNotes(app, state) {
+    return {
+        made: [],
+        async ensure(unit, date) {
+            const m = moment(date, "YYYY-MM-DD", true);
+            const path = `${DAYS}/${m.format(state.format)}.md`;
+            this.made.push(path);
+            return app.vault.getFileByPath?.(path) ?? app.vault.create(path, `---\naliases: ${m.format("M/D/YY dddd")}\n---\n`);
+        },
+    };
 }
 
 const cs = load();

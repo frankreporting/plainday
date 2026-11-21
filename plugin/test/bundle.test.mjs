@@ -721,17 +721,19 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.equal(inbox2.s.warning(), "Not used: it's a note, not a folder. Inbox stays `Waiting`.");
 
         // A template: none in this vault until one is chosen; one that sets a property Plainday writes
-        // itself says so (the list comes with OBS-120: here, a stand-in)
+        // itself says so (a stand-in list: the real one has only aliases, a list, which never warns)
         const tpl = draw("Weekly note");
         assert.equal(tpl.s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md", "the default is always a path, so the field always suggests one");
         tpl.s.type("Templates/Missing");
         assert.equal(tpl.s.warning(), "“Templates/Missing.md” isn't in the vault, so the template Plainday used before is used until it is.");
-        window.plainday.Settings.constructor.WRITES.week.push("date", "tags");
+        const writes = window.plainday.Settings.constructor.WRITES;
+        const real = writes.week;
+        writes.week = [...real, "date", "tags"];
         try {
             tpl.s.type("Templates/Plain week.md");
             assert.equal(tpl.s.warning(), "Your template also sets `date`; Plainday writes its own.", "tags are combined, so they don't warn");
         } finally {
-            window.plainday.Settings.constructor.WRITES.week.length = 0;
+            writes.week = real;
         }
         tpl.s.leave();
         await new Promise((r) => setTimeout(r, 0));
@@ -1357,7 +1359,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 31);
+    assert.equal(classFiles.length, 33);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

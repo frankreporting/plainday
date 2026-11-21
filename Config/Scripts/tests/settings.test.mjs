@@ -809,7 +809,8 @@ test("templateWarning: the properties a template sets that Plainday writes itsel
     assert.equal(settings.templateWarning(["a", "b", "c"], ["a", "b", "c"]), "Your template also sets `a`, `b` and `c`; Plainday writes its own.");
     assert.equal(settings.templateWarning(["tags", "aliases"], ["tags", "aliases"]), "");
     assert.equal(settings.templateWarning(["date"], []), "");
-    assert.deepEqual(plain(Settings.WRITES), { week: [], month: [], year: [] }, "no note type gives its list until OBS-120, so no row warns");
+    assert.deepEqual(plain(Settings.WRITES), { week: ["aliases"], month: ["aliases"], year: [] }, "the alias PeriodicNotes writes (OBS-120), a list, so no row warns");
+    assert.equal(settings.templateWarning(["aliases", "tags"], Settings.WRITES.week), "");
 });
 
 test("Paste and Sync: a copy or a data file from before folders leaves this device's folders and templates as they are", async () => {

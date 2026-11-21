@@ -1,5 +1,5 @@
 import { getLanguage, Modal, moment, Notice, TextComponent } from "obsidian";
-import { app } from "../host.js";
+import { app, plainday } from "../host.js";
 
 export default class DatePrompt {
     // The date prompt behind Schedule, Due and JumpToDate: type a date in words, see the date it
@@ -118,14 +118,16 @@ export default class DatePrompt {
         return { date, words, yearless };
     }
 
-    // How weeks are counted and periodic notes named, from the user's own settings, the way Notebook
-    // Navigator names its periodic notes: its periodic notes locale, which is its calendar Locale
-    // ("System default" is Obsidian's language) unless set to follow Obsidian's. Without Notebook
-    // Navigator, Obsidian's language, which is moment's. "en" weeks start on Sunday.
-    // Returns { locale, weekStart (0 is Sunday), format: { week, month, year } } (the file part of
-    // Notebook Navigator's patterns, else this vault's names).
+    // How weeks are counted and periodic notes named, from the user's own settings. With Notebook
+    // Navigator as the periodic notes' source (Settings → Plainday → Folders, OBS-283), the way it names
+    // them: its periodic notes locale, which is its calendar Locale ("System default" is Obsidian's
+    // language) unless set to follow Obsidian's, and its patterns. Otherwise Obsidian's language, which is
+    // moment's, and Plainday's own names (gggg[w]ww, YYYY-MM, YYYY), even with Navigator installed
+    // (OBS-120). "en" weeks start on Sunday. Where Settings isn't loaded (tests), Navigator when it's there.
+    // Returns { locale, weekStart (0 is Sunday), format: { week, month, year } }.
     weekRules() {
-        const nn = app.plugins?.plugins?.["notebook-navigator"]?.settings;
+        const source = plainday?.Settings?.periodicSource?.();
+        const nn = source === undefined || source === "notebook-navigator" ? app.plugins?.plugins?.["notebook-navigator"]?.settings : null;
         const current = moment.locale();
         let locale = current;
         if (nn && nn.calendarPeriodicNotesLocaleSource !== "obsidian") {
