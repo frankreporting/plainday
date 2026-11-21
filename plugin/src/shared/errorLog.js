@@ -41,6 +41,7 @@ export default class ErrorLog {
     static RULE = {
         notes: "Task in two notes", ownNotes: "Two ⋯ notes on one task",
         stray: "⭕ outside a periodic note", subtaskProject: "Subtask in another project than its note", deadline: "Two deadlines on one task",
+        dayLabel: "Day link labeled with another day",
     };
     // A billed row's change (Billing.changes)
     static CHANGE = {
