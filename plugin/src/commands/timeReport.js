@@ -132,6 +132,8 @@ export default class TimeReport {
     static SUB_TIME = "is under a nested task, so it isn't counted; move it up to the task at the left edge, or outdent the nested task";
 
     static TIME = String.raw`\d{1,2}:\d{2}\s?[ap]m`;
+    // A time or "all day" starting a text: what follows a moved event's link to its new day
+    static AT_TIME = new RegExp(String.raw`^\s*(?:all day|${TimeReport.TIME})`, "i");
     // `9:01am - 9:40am: note`, or `3:00pm - ` still running. En and em dashes count too, since
     // phones turn "--" into one.
     static ENTRY = new RegExp(String.raw`^(${TimeReport.TIME})\s*[-–—]\s*(${TimeReport.TIME})?\s*(?::\s*(.*?))?\s*$`, "i");
@@ -162,21 +164,23 @@ export default class TimeReport {
     static LINK = /\[\[[^\]]*\]\]/g;
     // The free mark at the end of an event's title; a phone may leave out the U+FE0F
     static FREE_MARK = /(?:^|\s)ℹ️?$/u;
-    // ⋯, ↗, ⭕, 🗃️ and 🚩 links, and a sent line's forward date (FORWARD_LINK),
-    // which say nothing about what a line is
-    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:⋯|↗|⭕|🗃|🚩|➡)[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
-    // A sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
-    // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD); or one written with a ➡️ before its date
-    static FORWARD_LINK = /\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
+    // ⋯, ↗, ⭕, 🗃️ and 🚩 links, which say nothing about what a line is; a sent line's forward date
+    // doesn't either, and comes off by its name (withoutForwardDates)
+    static SYMBOL_LINK = /\[\[[^\]|]*\|\s*(?:⋯|↗|⭕|🗃|🚩|➡)[^\]]*\]\]/gu;
+    // A sent line's forward date (OBS-181) by its shape: a link to a note's line with a date for its label,
+    // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD), its name in group 1; or one written with a ➡️ before
+    // its date. Whether the name is a periodic note's is the reader's to say (withoutForwardDates); the
+    // Raycast timer's dropdown, which has no reader, drops it by its shape alone (itemLabel).
+    static FORWARD_LINK = /\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
     // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
     // note's ⋯ or ↗, a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
     // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
     // its date. A phone may add or drop the U+FE0F. A date label (group 3) counts only on a link to a
     // periodic note's line, which trailLink checks: read the links with it.
     static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
-    // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
-    // name, then `#^` and an ID, `2026-09-17#^p7d2qe`; periodicLine searches with it from a place
-    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/g;
+    // A link's text when it's a periodic note's line: a name or path, then `#^` and an ID,
+    // `2026-09-17#^p7d2qe`; periodicLine reads the name
+    static PERIODIC_LINE = /^([^#]+)#\^[A-Za-z0-9-]+$/;
     // The free mark and 🆓, as words between or after those links, as the calendar sync allows them
     static TRAIL_MARK = /(?:^|\s)(?:ℹ|🆓)️?$/u;
     // A block ID ending a line (` ^abc123`, as Copy link to block adds it): Obsidian hides it, so the
@@ -185,9 +189,9 @@ export default class TimeReport {
     // An event line whose title is one link, the way lines were written before OBS-57: `[<] 10:00am⇥
     // [[2026-09-14 Review|Review]]`, a log's line with no time yet, a canceled or forwarded event,
     // and the old layout's `10:00am⇥[[Weekly sync#Sep 14|Weekly sync]]` without a bullet. That link
-    // is the event's own note.
-    static WRAPPED_TITLE = new RegExp(String.raw`^(?:\[<\]\s+(?:(?:all day|${TimeReport.TIME})\s+)?|(?:\[.\]\s+)?(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(?:all day|${TimeReport.TIME})\s+)\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$`, "iu");
-    static DATE_LINK = /^\d{4}-\d{2}(-\d{2})?$/;
+    // is the event's own note. A moved event's link to its new day is told by its shape, any link before
+    // its time, as TaskIds.EVENT_LINE tells it (OBS-297).
+    static WRAPPED_TITLE = new RegExp(String.raw`^(?:\[<\]\s+(?:(?:all day|${TimeReport.TIME})\s+)?|(?:\[.\]\s+)?(?:\[\[[^\]]*\]\]\s+)?(?:all day|${TimeReport.TIME})\s+)\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$`, "iu");
     static SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July",
         "August", "September", "October", "November", "December"];
@@ -319,7 +323,7 @@ export default class TimeReport {
 
     // Whether an event line's body carries the free mark after its title (its ⭕ links and a 🆓 aside)
     freeEvent(body) {
-        return TimeReport.FREE_MARK.test(body.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.SYMBOL_LINK, "").replace(TimeReport.FREE_WORDS, "$1").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
+        return TimeReport.FREE_MARK.test(this.withoutForwardDates(body.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.SYMBOL_LINK, "")).replace(TimeReport.FREE_WORDS, "$1").replace(TimeReport.EMPTY_BRACKETS, "").trimEnd());
     }
 
     // Whether a task or event line carries 🆓 as a word of its own (links aside), which frees every
@@ -578,12 +582,15 @@ export default class TimeReport {
     // date breadcrumbs; other links show their alias. A 🆓 comes out: a timesheet shows it in its own
     // column (OBS-242).
     taskText(body) {
-        const text = body.trimEnd().replace(TimeReport.BLOCK_ID, "")
+        const read = this.reader();
+        // A moved event's link to its new day (its time follows), or a breadcrumb from before task IDs (a day)
+        const leading = (all, target, at, text) => (TimeReport.AT_TIME.test(text.slice(all.length)) || read(target)?.unit === "day" ? "" : all);
+        const text = this.withoutForwardDates(body.trimEnd().replace(TimeReport.BLOCK_ID, "")
             .replace(/^\[.\]\s*/, "")
-            .replace(/^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s*/, "")
+            .replace(/^\[\[([^[\]|]+)\|[^\]]*\]\]\s*/, leading)
             .replace(TimeReport.OLD_EVENT, "")
             .replace(/^all day\b/i, "")
-            .replace(TimeReport.SYMBOL_LINK, "")
+            .replace(TimeReport.SYMBOL_LINK, ""), read)
             .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
             .replace(/\[\[([^\]#]*)(?:#[^\]]*)?\]\]/g, "$1");
         return text.replace(TimeReport.FREE_WORDS, "$1").replace(TimeReport.EMPTY_BRACKETS, "")
@@ -597,7 +604,19 @@ export default class TimeReport {
         return [...body.matchAll(/\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g)].map((m) => ({
             target: m[1].split(/[#^]/)[0].trim(),
             alias: (m[2] ?? "").trim(),
-        })).filter((l) => l.target && !TimeReport.DATE_LINK.test(l.target));
+        })).filter((l) => l.target && !this.isDateLink(l.target));
+    }
+
+    // `text` without the forward dates in it, told by their names (FORWARD_LINK, `read`); a ➡️ one
+    // by its shape
+    withoutForwardDates(text, read = this.reader()) {
+        return text.replace(TimeReport.FORWARD_LINK, (all, target) => (target === undefined || read(target) ? "" : all));
+    }
+
+    // Whether a link's target names a day's or a month's note, which no project lookup follows
+    isDateLink(target, read = this.reader()) {
+        const unit = read(target)?.unit;
+        return unit === "day" || unit === "month";
     }
 
     // ---------------------------------------------------------------- projects
@@ -703,11 +722,11 @@ export default class TimeReport {
     // links, due: its 🚩 links, title: the link an old event's title is wrapped in, or null }, each
     // { target, alias }. Only the run of links that ends the line counts, stepping over the free mark
     // and 🆓 among them, and a block ID after them; a link in the text is part of the title.
-    lineLinks(body) {
+    lineLinks(body, read) {
         const marks = [], own = [], from = [], due = [];
         let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
         for (;;) {
-            const link = this.trailLink(rest);
+            const link = this.trailLink(rest, read);
             if (link) {
                 const target = link[1].split(/[#^]/)[0].trim();
                 const symbol = link[2].replace(/[️\s]/g, "");
@@ -729,28 +748,23 @@ export default class TimeReport {
     }
 
     // The link that ends `text` (TRAIL_LINK's match), or null. A date label counts only on a link to a
-    // periodic note's line: the text before the link's `|` ends with one (periodicLine). Older iPhones
-    // can't run that check in the pattern (a lookbehind), so it's made here (OBS-199). When it fails, no
-    // link ends the text: one starting later would need a `|` after this one's, and a date label has
-    // none. TrailingLinks.lastLink is the same.
-    trailLink(text) {
+    // periodic note's line (periodicLine). Older iPhones can't run that check in the pattern (a
+    // lookbehind, OBS-199), and a pattern can't read a name by the vault's formats (OBS-297), so it's made
+    // here. When it fails, no link ends the text: one starting later would need a `|` after this one's,
+    // and a date label has none. TrailingLinks.lastLink is the same.
+    trailLink(text, read) {
         const m = text.match(TimeReport.TRAIL_LINK);
-        return m && (m[3] === undefined || this.periodicLine(text.slice(0, m.index + 2 + m[1].length))) ? m : null;
+        return m && (m[3] === undefined || this.periodicLine(m[1], read)) ? m : null;
     }
 
-    // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
-    // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
-    // ending in `/` with no `]`, `|` or `#`. It starts near the last `#`, as the lookbehind started at
-    // the end, so a long line costs no more than a short one.
-    periodicLine(before) {
-        const re = TimeReport.PERIODIC_LINE;
-        re.lastIndex = Math.max(0, before.lastIndexOf("#") - 10);
-        const at = re.exec(before)?.index;
-        if (at === undefined) return false;
-        if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
-        if (before[at - 1] !== "/") return false;
-        for (let i = at - 2; i > 0 && !"]|#".includes(before[i]); i--) if (before[i] === "[" && before[i - 1] === "[") return true;
-        return false;
+    // Whether `target`, a link's text before its `|`, is a periodic note's line: after the last `[[` (the
+    // link's own, one inside its text, or one made of the link's second `[` and a `[` after it, as the
+    // lookbehind read it, OBS-199), a name or path that reads as a day's, week's, month's or year's note
+    // (reader), then `#^` and an ID
+    periodicLine(target, read = this.reader()) {
+        const text = `[[${target}`;
+        const m = text.slice(text.lastIndexOf("[[") + 2).match(TimeReport.PERIODIC_LINE);
+        return !!m && !!read(m[1]);
     }
 
     // Where a line's project is read when the line isn't one a top-level line can be: { project: null, … }
@@ -794,7 +808,7 @@ export default class TimeReport {
 
     // The projects and areas a line's ⭕ and 🗃️ links (lineLinks) name, each once
     named(links, path, index) {
-        const dest = (l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, path));
+        const dest = (l) => (this.isDateLink(l.target) ? null : index.linkDest(l.target, path));
         return [...new Set(links.marks.map(dest))].filter((d) => d && this.counts(d, index));
     }
 
@@ -803,7 +817,7 @@ export default class TimeReport {
     // is a reference, which nothing compares, and a ↗ is read by nobody (rule 4, *Words*).
     ownNote(links, path, index) {
         return [...links.notes, ...(links.title ? [links.title] : [])]
-            .map((l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, path)))
+            .map((l) => (this.isDateLink(l.target) ? null : index.linkDest(l.target, path)))
             .filter((p) => p && (index.inSystem(p) || this.isArchived(p)));
     }
 
@@ -867,11 +881,12 @@ export default class TimeReport {
     // under a task or event at the left edge. [{ path, line, text, message }], line counted from 0. A block
     // ID counts only when it's a task's, which a sent line ([>], or one with a forward date) makes it.
     subTaskProblems(notes, T) {
+        const read = this.reader();
         const tasks = new Set(), out = [];
         for (const note of notes) {
             for (const line of this.shown(note)) {
                 const box = line.match(T.CHECKBOX), id = box ? T.idOf(line) : null;
-                if (id && (box[1] === ">" || T.forwardOf(line))) tasks.add(id.toLowerCase());
+                if (id && (box[1] === ">" || T.forwardOf(line, read))) tasks.add(id.toLowerCase());
             }
         }
         for (const note of notes) {
@@ -897,6 +912,48 @@ export default class TimeReport {
     // A task line: a checklist line at the left edge, nested under nothing (rule 5)
     isTaskLine(text) {
         return /^[-*+]\s+\[.\]/.test(text);
+    }
+
+    // Every link to a day on a task line whose label shows another month and day than the day its name reads as
+    // (OBS-297): a 🚩, a forward date, or the date in front of a line sent before task IDs. The link still counts
+    // on the day its name says; the label is only compared, so the line is listed to be fixed. A label without a
+    // month and day isn't compared, and neither is a link to a week, a month or a year. [{ path, line, text, link
+    // ("due", "forward" or "sent"), shows ("9/19"), date (YYYY-MM-DD, the day it links) }], line counted from 0.
+    dayLabelProblems(notes, T) {
+        const read = this.reader(), out = [];
+        for (const note of notes) {
+            if (!note.text.includes("[[")) continue;
+            this.shown(note).forEach((text, i) => {
+                if (!this.isTaskLine(text) || !text.includes("[[") || this.eventKind(text) !== null) return;
+                const links = this.lineLinks(this.classify(text).body, read).due.map((l) => ({ link: "due", target: l.target, label: l.alias }));
+                const fwd = T?.forwardOf?.(text, read);
+                const old = !fwd && T?.oldForward?.(text, read);
+                if (fwd) links.push({ link: "forward", target: fwd.linkpath, label: fwd.label });
+                if (old) links.push({ link: "sent", target: old.linkpath, label: old.label });
+                for (const l of links) {
+                    const day = read(l.target), shows = TimeReport.labelDay(l.label);
+                    if (day?.unit !== "day" || !shows || shows === `${+day.date.slice(5, 7)}/${+day.date.slice(8)}`) continue;
+                    out.push({ path: note.path, line: i, text: text.trim(), link: l.link, shows, date: day.date });
+                }
+            });
+        }
+        return out;
+    }
+
+    // The month and day a link's label shows, "9/19", or null when it shows none. The labels Plainday writes
+    // a day with: 🚩 M/D, M/D, ddd M/D (Thu 9/17), M/D/YY.
+    static labelDay(label) {
+        const bare = String(label ?? "").split(String.fromCharCode(0xfe0f)).join("").replace(/^\s*(?:🚩|➡)\s*/u, "");
+        const m = bare.match(/^(?:\p{L}{2,9}\.?,?\s+)?(\d{1,2})\/(\d{1,2})(?:\/(?:\d{2}|\d{4}))?\s*$/u);
+        return m ? `${+m[1]}/${+m[2]}` : null;
+    }
+
+    // What a Problem says about a link whose label shows another day (dayLabelProblems): what it shows, the day
+    // it counts on, and the fix. A 🚩 is set again with DueDate; a forward date or an older date in front, by hand.
+    dayLabelText(l) {
+        const what = { due: "a 🚩", forward: "a forward date", sent: "a date in front" }[l.link];
+        const head = `has ${what} labeled ${l.shows} that links the daily note for ${this.shortDate(l.date)}, the date Plainday reads`;
+        return l.link === "due" ? `${head}: run DueDate on the line to set its deadline again` : `${head}: fix its label or its link by hand`;
     }
 
     // Every ⭕ or 🗃️ at the end of a task line in a note that isn't a daily, weekly, monthly or yearly note
@@ -945,6 +1002,7 @@ export default class TimeReport {
     // [{ path, line, text, note, log, noteProject, lineProject, disputed }], line counted from 0; `disputed`: the line
     // also disagrees with itself, so its time counts nowhere (resolve's `conflict`).
     subtaskProjectProblems(notes, index, T) {
+        const read = this.reader();
         const parent = (path) => index.kind(path) === "other" && !this.counts(path, index) && (index.isTaskNote(path) || index.isLog(path));
         const idIn = (text) => (text.includes("^") && this.isTaskLine(text) ? T.idOf(text)?.toLowerCase() ?? null : null);
         // The subtasks' IDs first, then every line with one of them, so the rest of the vault's IDs cost nothing
@@ -962,7 +1020,7 @@ export default class TimeReport {
         }
         const out = [];
         for (const hits of byId.values()) {
-            if (!T.isTask(hits)) continue;
+            if (!T.isTask(hits, read)) continue;
             const notesOf = [...new Set(hits.filter((h) => parent(h.note.path)).map((h) => h.note.path))];
             for (const h of hits) {
                 if (index.kind(h.note.path) === "other") continue;
@@ -1001,7 +1059,7 @@ export default class TimeReport {
     }
 
     // Every task whose deadlines differ (OBS-233): the day each 🚩 at the end of its lines links (a link to a
-    // day's note, as DueDate writes it; its label isn't read), done, forwarded and canceled lines included, and
+    // day's note, as DueDate writes it, read by its name; its label isn't read), done, forwarded and canceled lines included, and
     // the `due` of each task note its ⋯ links, in the system or Archive, when it reads as a date. A task's lines
     // are the ones DueDate writes (TaskChange.find with `family: false`): the top-level checklist lines joined
     // by a task's ID (isTask) and by the note their ⋯ links, until nothing new turns up. A note joins its lines
@@ -1011,6 +1069,7 @@ export default class TimeReport {
     // [{ key, lines, at, dates: [{ date, where: [{ path, line } | { path, due: true }] }], projects }]: `lines` the
     // task's lines with a 🚩, `at` the first of them in each note, where the Problem goes.
     deadlineProblems(notes, index, T) {
+        const read = this.reader();
         // Only a line with a ⋯ or a 🚩 can date a task or join it to a note, or one whose title is wrapped in a link,
         // which follows a time. A line with only an ID joins nothing its ID doesn't, so it's only kept by its ID.
         // The rest are left before anything is read: a report reads every line of the vault.
@@ -1038,7 +1097,7 @@ export default class TimeReport {
         const task = new Map();
         const isTask = (id, side) => {
             const k = `${side}:${id}`;
-            if (!task.has(k)) task.set(k, T.isTask(byId.get(id).filter((x) => this.isArchived(x.path) === (side === "archive"))));
+            if (!task.has(k)) task.set(k, T.isTask(byId.get(id).filter((x) => this.isArchived(x.path) === (side === "archive")), read));
             return task.get(k);
         };
         // DueDate never reads a line in Archive, so lines there join only each other: a task of the system's lines
@@ -1046,13 +1105,14 @@ export default class TimeReport {
         for (const h of hits) {
             h.links = this.lineLinks(this.classify(h.text).body);
             h.own = [...h.links.notes, ...(h.links.title ? [h.links.title] : [])]
-                .map((l) => (TimeReport.DATE_LINK.test(l.target) ? null : index.linkDest(l.target, h.path))).filter((p) => p && joins(p));
+                .map((l) => (this.isDateLink(l.target, read) ? null : index.linkDest(l.target, h.path))).filter((p) => p && joins(p));
             const side = this.isArchived(h.path) ? "archive" : "system";
             up.set(h, h);
             if (h.id && isTask(h.id, side)) join(h, `${side}:id:${h.id}`);
             for (const p of h.own) join(h, `${side}:note:${p}`);
         }
-        const day = (target) => { const d = this.basename(target); return /^\d{4}-\d{2}-\d{2}$/.test(d) ? this.isoDate(d) : null; };
+        // A 🚩's day, by its note's name (OBS-297)
+        const day = (target) => { const p = read(target); return p?.unit === "day" ? p.date : null; };
         // A task note's `due` from its text when the report read it, as it is now: the cache can be a moment
         // behind DueDate's write in an open note
         const textOf = new Map(notes.map((n) => [n.path, n.text]));
@@ -1605,6 +1665,33 @@ export default class TimeReport {
     }
 
     // ---------------------------------------------------------------- periods
+
+    // The reader of periodic note names this report reads task lines with (OBS-297): a link's name, or its
+    // path's last part, in; { unit, date } (the period's first day) or null out. The one a run took when it
+    // began (refresh, currentModel), else Plainday's (PeriodicNotes.reader), else plainName where Plainday
+    // isn't loaded. Every TaskIds helper the report calls is handed it.
+    reader() {
+        return this.runRead ?? plainday?.PeriodicNotes?.reader?.() ?? TimeReport.plainName;
+    }
+
+    // The names read where Plainday isn't loaded (the Raycast timer, the demo's render, the private tests),
+    // the demo's own, worked out without moment: a day YYYY-MM-DD, a week gggg[w]ww (English Sunday weeks),
+    // a month YYYY-MM and a year YYYY. A name of another shape isn't a periodic note's.
+    static plainName(linktext) {
+        const name = String(linktext ?? "").split("/").pop().trim();
+        let m = name.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) {
+            const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+            return +m[1] >= 1000 && d.toISOString().slice(0, 10) === name ? { unit: "day", date: name } : null;
+        }
+        if (/^\d{4}w\d{2}$/.test(name)) {
+            const [start] = TimeReport.prototype.plainWeekRange(name);
+            return TimeReport.prototype.plainWeekKey(start) === name ? { unit: "week", date: start } : null;
+        }
+        if (/^\d{4}-(?:0[1-9]|1[0-2])$/.test(name)) return { unit: "month", date: `${name}-01` };
+        if (/^\d{4}$/.test(name)) return { unit: "year", date: `${name}-01-01` };
+        return null;
+    }
 
     // How weeks are counted and the weekly, monthly and yearly notes named (OBS-91): the week settings
     // (DatePrompt.weekRules), as Jump to date, Schedule and PeriodicNotes name them, read once per report
@@ -3044,7 +3131,7 @@ export default class TimeReport {
         if (!m) return this.classify(line).kind === "event" ? "meeting" : null;
         const [, box, body] = m;
         if (box === "<") return "event";
-        if (box === ">" && /^\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(body)) return "forwarded";
+        if (box === ">" && /^\[\[[^\]]*\]\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(body)) return "forwarded";
         if (box === "-" && /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i.test(body)) return "canceled";
         return null;
     }
@@ -3292,8 +3379,11 @@ export default class TimeReport {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
         // Keep the Schedule and Billing this run began with instead of looking them up on `plainday`
-        // part-way through, so the whole run uses the same ones (OBS-41)
+        // part-way through, so the whole run uses the same ones (OBS-41), and the reader of periodic note
+        // names the same way (OBS-297)
         this.schedule = plainday.Schedule;
+        this.runRead = null;
+        this.runRead = this.reader();
         const billing = plainday.Billing;
         const errorLog = plainday.ErrorLog;
         const working = quiet ? null : new Notice("Building the time report…", 0);
@@ -3368,6 +3458,7 @@ export default class TimeReport {
             }
         } finally {
             working?.hide();
+            this.runRead = null;
             window.timeReportRunning = false;
         }
     }
@@ -3389,7 +3480,7 @@ export default class TimeReport {
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
         const tasks = plainday?.TaskIds;
         if (!tasks?.allIds) return [...byPath.values()];
-        const T = tasks.constructor;
+        const T = tasks.constructor, read = this.reader();
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
         const add = async (file) => {
             if (!byPath.has(file.path) && (!tasks.ignored(file) || this.isArchived(file.path))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
@@ -3398,7 +3489,7 @@ export default class TimeReport {
         // A forward date is only checked on a line outside the periodic notes (TaskIds.check)
         for (const note of [...byPath.values()].filter((n) => n.kind === "other")) {
             for (const line of note.text.split("\n")) {
-                const fwd = T.CHECKBOX.test(line) && T.idOf(line) ? T.forwardOf(line) : null;
+                const fwd = T.CHECKBOX.test(line) && T.idOf(line) ? T.forwardOf(line, read) : null;
                 const to = fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, note.path) : null;
                 if (to && tasks.kindOf(to) !== "other") await add(to);
             }
@@ -3440,6 +3531,7 @@ export default class TimeReport {
             compared: (note) => this.comparedNote(note, index),
             resolve: (linkpath, from) => index.linkDest(linkpath.split("#")[0], from),
             ownNote: (text, from) => this.ownNote(this.lineLinks(this.classify(text).body), from, index),
+            read: this.reader(),
         });
         // Where a Problem on line `l` of its note goes. `group` names a Problem about a whole task, which a
         // report says once (problemLines). The report's own checks (`own`, OBS-233) keep to the periods of
@@ -3482,6 +3574,11 @@ export default class TimeReport {
             const project = this.projectOfNote(l.path, index);
             place(l, { kind: "task", rule: "stray", message: this.strayMarkText(l, project, index), own: true }, project ? [project] : []);
         }
+        for (const l of this.dayLabelProblems(notes, T)) {
+            const note = byPath.get(l.path);
+            const project = this.lineProject(note, l.line, this.shown(note), index, false);
+            place(l, { kind: "task", rule: "dayLabel", message: this.dayLabelText(l), own: true }, project ? [project] : []);
+        }
         // About where the day's time counts, so on both projects, as for two projects
         for (const l of this.subtaskProjectProblems(notes, index, T)) {
             place(l, { kind: "task", rule: "subtaskProject", message: this.subtaskProjectText(l, index), own: true, lead: "Project disagreement on", title: this.taskText(this.classify(l.text).body) }, [...new Set([l.noteProject, l.lineProject].filter(Boolean))]);
@@ -3500,7 +3597,7 @@ export default class TimeReport {
     // or year's first), else today
     problemDate(note, l, byPath, index, T) {
         if (note.kind !== "other") return this.noteDate(note, note.kind);
-        const fwd = T.forwardOf(l.text);
+        const fwd = T.forwardOf(l.text, this.reader());
         const to = fwd ? index.linkDest(fwd.linkpath, l.path) : null;
         const target = to ? byPath.get(to) : null;
         const date = !to ? null : target?.kind === "day" ? target.date ?? this.dailyDate(to)
@@ -3569,16 +3666,23 @@ export default class TimeReport {
     // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
     // when it started (refresh, OBS-41) passes them in.
     async currentModel({ index = this.appIndex(), schedule = plainday.Schedule, billing = plainday.Billing } = {}) {
-        const clock = moment();
-        const daily = await this.readDailyNotes(schedule);
-        if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
-        const checked = await this.taskNotes(daily);
-        const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() }, checked });
-        this.attachBilling(model, await this.readInvoices(billing), index, billing);
-        this.addTaskProblems(model, index, checked);
-        // The default freeze for the tables written from it (OBS-238)
-        model.tables = this.tableDefault();
-        return { model, index };
+        // A command's model (Invoice) is a run of its own: it reads names with one reader too
+        const own = !this.runRead;
+        if (own) this.runRead = this.reader();
+        try {
+            const clock = moment();
+            const daily = await this.readDailyNotes(schedule);
+            if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
+            const checked = await this.taskNotes(daily);
+            const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() }, checked });
+            this.attachBilling(model, await this.readInvoices(billing), index, billing);
+            this.addTaskProblems(model, index, checked);
+            // The default freeze for the tables written from it (OBS-238)
+            model.tables = this.tableDefault();
+            return { model, index };
+        } finally {
+            if (own) this.runRead = null;
+        }
     }
 
     // Every invoice note, anywhere in the vault, Archive included: an archived project's invoices
@@ -3780,7 +3884,8 @@ export default class TimeReport {
     // a convertible line whose run ends in a 🗒️ or 🔗 link, the marks before OBS-208
     oldMarkLines(daily) {
         const T = plainday?.TaskIds?.constructor;
-        const old = (l) => (T?.oldMarks ? T.oldMarks(l).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
+        const read = this.reader();
+        const old = (l) => (T?.oldMarks ? T.oldMarks(l, read).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
         let n = 0;
         for (const d of daily) {
             if (!/🗒|🔗/u.test(d.text)) continue;

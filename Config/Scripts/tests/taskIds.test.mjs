@@ -7,7 +7,7 @@ import vm from "node:vm";
 
 const here = new URL(".", import.meta.url);
 // `plainday` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
-const TaskIds = vm.runInContext(classScript("taskIds.js") + "\n;TaskIds", vm.createContext({ plainday: {} }));
+const TaskIds = vm.runInContext(classScript("taskIds.js") + "\n;TaskIds", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const F = "[[2026-10-08#^k3x9m2|10/8]]";
 
@@ -38,12 +38,14 @@ test("forwardLink and forwardOf: the forward date names the note and the task's 
     // Known by its target: a periodic note, by name or path, and a line's ID; any alias
     for (const [link, linkpath, label] of [
         ["[[2026w41#^k3x9m2|Wk of 10/4]]", "2026w41", "Wk of 10/4"],
-        ["[[2026-W41#^k3x9m2|Wk of 10/5]]", "2026-W41", "Wk of 10/5"],
         ["[[2026-10#^k3x9m2|Oct. 2026]]", "2026-10", "Oct. 2026"],
         ["[[2027#^k3x9m2|2027]]", "2027", "2027"],
         ["[[Reference/Planner/days/2026-10-08#^k3x9m2|10/8]]", "Reference/Planner/days/2026-10-08", "10/8"],
     ]) assert.deepEqual(plain(TaskIds.forwardOf(`- [>] Book it ${link} ^k3x9m2`)), { raw: link, linkpath, id: "k3x9m2", label }, link);
     assert.equal(TaskIds.forwardOf("- [>] Book it [[Brief#^k3x9m2|see]] ^k3x9m2"), null, "a block link to a note that isn't a periodic one");
+    // Read by the vault's names (OBS-297): the demo's weeks are 2026w41, so a week spelled 2026-W41 is no note of its
+    assert.equal(TaskIds.forwardOf("- [>] Book it [[2026-W41#^k3x9m2|Wk of 10/5]] ^k3x9m2"), null);
+    assert.equal(TaskIds.forwardOf("- [>] Book it [[Brief#^k3x9m2|9/17]] ^k3x9m2"), null, "a date label on a block link to any other note");
     // Only with a label Schedule writes: a day, a week, a month (any locale's short name) or a year
     for (const label of ["May 2026", "févr. 2026", "Sept. 2026", "10月 2026", "10月. 2026", "10월 2026"]) assert.equal(TaskIds.forwardOf(`- [>] Book it [[2026-09#^k3x9m2|${label}]] ^k3x9m2`)?.label, label, label);
     assert.equal(TaskIds.forwardOf("- [>] Book it [[2026-09#^k3x9m2|Q3 budget 2026]] ^k3x9m2"), null, "a month label is one word and the year, never more");
@@ -117,6 +119,7 @@ test("reopenIn: a task's done or canceled lines become [>], top-level lines only
 
 import { standIn, PLANNER } from "./standInVault.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const D8 = `${PLANNER}/days/2026-10-08.md`;
 const KES = "Projects/Freelance/Kestrel/Kestrel.md";

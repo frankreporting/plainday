@@ -6,9 +6,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
-const TrailingLinks = vm.runInContext(classScript("trailingLinks.js") + "\n;TrailingLinks", vm.createContext({}));
+const TrailingLinks = vm.runInContext(classScript("trailingLinks.js") + "\n;TrailingLinks", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 // Values made in the script's own context, as plain ones this file can compare
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const kinds = (line) => plain(TrailingLinks.trail(line)?.links.map((l) => l.kind) ?? null);

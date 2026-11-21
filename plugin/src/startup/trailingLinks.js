@@ -141,9 +141,9 @@ export default class TrailingLinks {
     // A date label (group 3) counts only on a link to a periodic note's line, which lastLink checks:
     // read the links with it.
     static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
-    // The end of a link's text when it's a periodic note's line: a day's, week's, month's or year's
-    // name, then `#^` and an ID, `2026-09-17#^p7d2qe`; periodicLine searches with it from a place
-    static PERIODIC_LINE = /(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+$/g;
+    // A link's text when it's a periodic note's line: a name or path, then `#^` and an ID,
+    // `2026-09-17#^p7d2qe`; periodicLine reads the name
+    static PERIODIC_LINE = /^([^#]+)#\^[A-Za-z0-9-]+$/;
     // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
     static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
@@ -164,59 +164,64 @@ export default class TrailingLinks {
 
     // Where a task or event line's text ends, ahead of the links and the hidden ID that end it, or null
     // when nothing does. A task with no text yet ends right after its checkbox, where the cursor rests.
-    static textEnd(text) {
+    // `read` reads a forward date's name, here and in each rule below that takes it (periodicLine).
+    static textEnd(text, read) {
         const head = text.match(TrailingLinks.TASK_LINE);
         if (!head) return null;
-        const end = TrailingLinks.trail(text)?.textEnd ?? TrailingLinks.blockId(text, { strict: true })?.from;
+        const end = TrailingLinks.trail(text, read)?.textEnd ?? TrailingLinks.blockId(text, { strict: true })?.from;
         return end === undefined ? null : Math.max(end, head[0].length);
     }
 
     // Where End and Cmd-→ go from `ch` on a line with a textEnd: the end of the text, then, from there or
     // past it, the end of the line. Null on any other line, and on an upper row of one that wraps, which
     // ends at `rowEnd`, ahead of the text's end.
-    static endStop(text, ch, rowEnd = text.length) {
-        const end = TrailingLinks.textEnd(text);
+    static endStop(text, ch, rowEnd = text.length, read) {
+        const end = TrailingLinks.textEnd(text, read);
         if (end === null || Math.max(ch, rowEnd) < end) return null;
         return ch < end ? end : text.length;
     }
 
     // The system link that ends `text` (LINK's match), or null. A date label counts only on a link to a
-    // periodic note's line: the text before the link's `|` ends with one (periodicLine). Older iPhones
-    // can't run that check in the pattern (a lookbehind), so it's made here (OBS-199). When it fails, no
-    // link ends the text: one starting later would need a `|` after this one's, and a date label has
-    // none. TimeReport.trailLink is the same.
-    static lastLink(text) {
+    // periodic note's line (periodicLine). Older iPhones can't run that check in the pattern (a
+    // lookbehind, OBS-199), and a pattern can't read a name by the vault's formats (OBS-297), so it's made
+    // here. When it fails, no link ends the text: one starting later would need a `|` after this one's,
+    // and a date label has none. TimeReport.trailLink is the same.
+    static lastLink(text, read) {
         const m = text.match(TrailingLinks.LINK);
-        return m && (m[3] === undefined || TrailingLinks.periodicLine(text.slice(0, m.index + 2 + m[1].length))) ? m : null;
+        return m && (m[3] === undefined || TrailingLinks.periodicLine(m[1], read)) ? m : null;
     }
 
-    // Whether `before`, the text ahead of a link's `|`, ends with a link to a periodic note's line, as
-    // the lookbehind read it (OBS-199): PERIODIC_LINE, with `[[` before it, or a folder between them, one
-    // ending in `/` with no `]`, `|` or `#`. It starts near the last `#`, as the lookbehind started at
-    // the end, so a long line costs no more than a short one.
-    static periodicLine(before) {
-        const re = TrailingLinks.PERIODIC_LINE;
-        re.lastIndex = Math.max(0, before.lastIndexOf("#") - 10);
-        const at = re.exec(before)?.index;
-        if (at === undefined) return false;
-        if (at >= 2 && before[at - 2] === "[" && before[at - 1] === "[") return true;
-        if (before[at - 1] !== "/") return false;
-        for (let i = at - 2; i > 0 && !"]|#".includes(before[i]); i--) if (before[i] === "[" && before[i - 1] === "[") return true;
-        return false;
+    // Whether `target`, a link's text before its `|`, is a periodic note's line: after the last `[[` (the
+    // link's own, one inside its text, or one made of the link's second `[` and a `[` after it, as the
+    // lookbehind read it, OBS-199), a name or path that reads as a day's, week's, month's or year's note
+    // (`read`, PeriodicNotes.reader; Plainday's when it's not given), then `#^` and an ID
+    static periodicLine(target, read) {
+        const text = `[[${target}`;
+        const m = text.slice(text.lastIndexOf("[[") + 2).match(TrailingLinks.PERIODIC_LINE);
+        return !!m && !!TrailingLinks.reader(read)(m[1]);
+    }
+
+    // `read`, or Plainday's reader of periodic note names (PeriodicNotes.reader). Code that runs without
+    // Plainday hands its own in; with neither, it throws rather than read a name wrong.
+    static reader(read) {
+        if (read) return read;
+        const own = plainday?.PeriodicNotes?.reader?.();
+        if (!own) throw new Error("TrailingLinks: no reader of periodic note names, and Plainday's isn't loaded");
+        return own;
     }
 
     // The run of system links that ends a task or event line, before a task's ID: { bodyFrom
     // (where the text starts, after the checkbox), textEnd (where it ends, before the space ahead
     // of the run), runFrom, runTo, links: [{ from, to, kind, target, alias }] in line order }. Null
     // when the line doesn't end in one. Trailing spaces and the ID aren't part of the run.
-    static trail(text) {
+    static trail(text, read) {
         const head = text.match(TrailingLinks.TASK_LINE);
         if (!head) return null;
         const links = [];
         let end = TrailingLinks.blockId(text)?.from ?? text.length;
         end = text.slice(0, end).trimEnd().length;
         for (;;) {
-            const m = TrailingLinks.lastLink(text.slice(0, end));
+            const m = TrailingLinks.lastLink(text.slice(0, end), read);
             if (!m) break;
             const from = end - m[0].length;
             const kind = TrailingLinks.KINDS[String.fromCodePoint(m[2].codePointAt(0))] ?? "forward";
@@ -249,9 +254,11 @@ export default class TrailingLinks {
         return plain.reduce((best, a) => (a.length < best.length ? a : best), basename);
     }
 
-    // Whether a due link's target (YYYY-MM-DD) is before `today` (also YYYY-MM-DD)
-    static overdue(target, today) {
-        return /^\d{4}-\d{2}-\d{2}$/.test(target) && target < today;
+    // Whether a due link's target, read as a day's note (`read`, as periodicLine), is before `today`
+    // (YYYY-MM-DD). A 🚩 on a link to any other note never is.
+    static overdue(target, today, read) {
+        const period = TrailingLinks.reader(read)(target);
+        return period?.unit === "day" && period.date < today;
     }
 
     // A line's indent, a tab counting as four spaces (as TimeReport counts it)
@@ -288,7 +295,7 @@ export default class TrailingLinks {
     // Obsidian's own (fix round 1). The start the old and new text share is left out (an edit may
     // replace the character before the cursor with itself), and an edit that takes text off is left
     // alone.
-    static keepIdAtEnd(text, edit) {
+    static keepIdAtEnd(text, edit, read) {
         if (!TrailingLinks.TASK_LINE.test(text)) return null;
         const id = TrailingLinks.blockId(text, { strict: true });
         if (!id) return null;
@@ -305,7 +312,7 @@ export default class TrailingLinks {
         const boxOnly = (n) => /^\s*[-*+]\s+\[.\]$/.test(text.slice(0, n)) && /^\S/.test(before);
         // Where `before` goes; `after` goes at the end of the line
         let at;
-        if (before && !taken && from >= id.to) at = TrailingLinks.trail(text)?.textEnd ?? id.from;
+        if (before && !taken && from >= id.to) at = TrailingLinks.trail(text, read)?.textEnd ?? id.from;
         else if (boxOnly(id.from) && !taken && !after && (from === id.from || from === id.from + 1)) at = id.from;
         else return null;
         const pad = boxOnly(at) ? " " : "";
@@ -349,6 +356,8 @@ export default class TrailingLinks {
             const doc = v.state.doc;
             const sourcePath = sourceOf(v);
             const today = moment().format("YYYY-MM-DD");
+            // The names of periodic notes read as the settings are now, once for the lines drawn
+            const read = T.reader();
             const outer = [], inner = [];
             let unmeasured = false;
             for (const { from, to } of ranges) {
@@ -366,7 +375,7 @@ export default class TrailingLinks {
                         if (head <= line.from + id.from || head > line.to) inner.push(Decoration.replace({}).range(line.from + id.from, line.from + id.to));
                         else idShown = id;
                     }
-                    const t = T.trail(line.text);
+                    const t = T.trail(line.text, read);
                     if (!t) continue;
                     // A shown ID (OBS-185) is drawn in the run, last, at the right edge after the links: where
                     // it is in the text, after the room the last word keeps, it lands on top of them
@@ -393,7 +402,7 @@ export default class TrailingLinks {
                     // Measured with the links (it has their .pm-trail), so the last word keeps room for it too
                     if (idShown) outer.push(Decoration.mark({ class: "pm-trail pm-trail-id" }).range(at(idShown.from + 1), at(idShown.to)));
                     for (const s of shown) {
-                        const overdue = s.l.kind === "due" && T.overdue(s.l.target, today) ? " pm-trail-overdue" : "";
+                        const overdue = s.l.kind === "due" && T.overdue(s.l.target, today, read) ? " pm-trail-overdue" : "";
                         outer.push(Decoration.mark({ class: `pm-trail pm-trail-${s.l.kind}${overdue}` }).range(at(s.l.from), at(s.l.to)));
                         if (s.name) {
                             // The alias itself, inside Obsidian's link, drawn as the name: the link still works
