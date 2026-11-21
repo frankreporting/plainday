@@ -14,6 +14,7 @@ import { DAYS, FOLDERS, NOTE_FOLDERS, SETTINGS_FILE, loadTimeReport, loadBilling
 import { compactTables, obsidianPadded, tablesIn } from "./tables.mjs";
 import { convert } from "./demo/addProjectLinks.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 // Only the demo vault has Welcome.md. In a vault of real notes these checks would fail, and the
 // failure text says to run renderReports.mjs, which writes report blocks into notes: so skip them,
@@ -454,7 +455,7 @@ test("demo vault: the Project template and the Invoices base carry the invoice p
 });
 
 test("demo vault: every task's lines agree, and the sample shows a sent task and a forwarded one with IDs (OBS-185)", () => {
-    const TaskIds = vm.runInContext(classScript("taskIds.js") + "\n;TaskIds", vm.createContext({}));
+    const TaskIds = vm.runInContext(classScript("taskIds.js") + "\n;TaskIds", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
     const kind = (p) => (p.startsWith(`${DAYS}/`) ? "day" : /\/(weeks|months|years)\//.test(p) ? "period" : "other");
     const notes = demoNotes.map((p) => ({ path: p, kind: kind(p), text: vault.notes.get(p).text }));
     const violations = TaskIds.check(notes, {

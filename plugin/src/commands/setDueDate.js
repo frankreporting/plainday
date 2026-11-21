@@ -4,18 +4,22 @@ import { app, plainday } from "../host.js";
 export default class DueDate {
     // Note links end a line (⋯ task note or log, ↗ the note it was sent from, ⭕ project, 🗃️ area), so End reaches the note; the
     // due date goes in front of them (OBS-36), and in front of a sent line's forward date (OBS-107): a
-    // link to a periodic note's line with a date for its label, `[[2026-10-08#^k3x9m2|10/8]]`, or one
-    // written with a ➡️ before its date. A task's ID stays last (OBS-181). A phone may add or drop the U+FE0F on an emoji.
-    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
+    // link to a periodic note's line with a date for its label, `[[2026-10-08#^k3x9m2|10/8]]` (its name in
+    // group 1, read with the reader of periodic note names, OBS-297), or one written with a ➡️ before its
+    // date. A task's ID stays last (OBS-181). A phone may add or drop the U+FE0F on an emoji.
+    static NOTE_LINK = /\[\[[^\]]*\|\s*(?:⋯|↗|⭕|🗃|➡)\uFE0F?[^\]]*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]/gu;
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
-    // A due date, with any whitespace before it: a link to a day's note with a 🚩 for its label. A link
-    // to a day with no 🚩 isn't one, and neither is a 🚩 on a link to any other note.
-    static DUE_LINK = /(\s*)\[\[(?:[^\]|#]*\/)?\d{4}-\d{2}-\d{2}\|\s*🚩\uFE0F?[^\]]*\]\]/gu;
+    // A due date, with any whitespace before it: a link with a 🚩 and a month and day for its label, as Due
+    // date writes one, told by its label alone (OBS-297), so a 🚩 written with the day's old name, before the
+    // daily notes' format changed, is still the one Due date replaces. A link to a day with no 🚩 isn't one,
+    // and neither is a 🚩 with words, `[[Launch plan|🚩 launch]]`.
+    static DUE_LINK = /(\s*)\[\[[^[\]|]+\|\s*🚩\uFE0F?\s*\d{1,2}\/\d{1,2}[^\]]*\]\]/gu;
 
     // Where the due link goes on `lineText`, and the text to insert there: over the 🚩 the line has, the
     // first one if there are more, which go (OBS-65); else right before the line's trailing note links
-    // and forward date (with one space either side), else at the end, ahead of an ID
-    placement(lineText, dueLink) {
+    // and forward date (with one space either side), else at the end, ahead of an ID. `read` reads a
+    // forward date's name (Plainday's reader when it's not given).
+    placement(lineText, dueLink, read) {
         const flags = [...lineText.matchAll(DueDate.DUE_LINK)];
         if (flags.length) {
             const [first, last] = [flags[0], flags[flags.length - 1]];
@@ -29,6 +33,8 @@ export default class DueDate {
             const head = trimmed.slice(0, at).trimEnd();
             const last = [...head.matchAll(DueDate.NOTE_LINK)].pop();
             if (!last || last.index + last[0].length !== head.length) break;
+            // A date-labelled block link ends the run only when it links a periodic note's line
+            if (last[1] !== undefined && !(read ??= DueDate.reader())(last[1])) break;
             at = last.index;
         }
         if (at === trimmed.length) {
@@ -45,9 +51,25 @@ export default class DueDate {
         return ch <= from ? ch : ch < to ? from : ch + text.length - (to - from);
     }
 
-    // The due link for a date (a moment): [[2026-09-25|🚩 9/25]]
-    static link(m) {
-        return `[[${m.format("YYYY-MM-DD")}|🚩 ${m.format("M/D")}]]`;
+    // The due link for a date (a moment), to the day's note by `linktext`: [[2026-09-25|🚩 9/25]]
+    static link(m, linktext) {
+        return `[[${linktext}|🚩 ${m.format("M/D")}]]`;
+    }
+
+    // The due link for a date (a moment), to the day's note by its real name (Schedule.dailyNotePath), or by
+    // its path when another note has that name, as Schedule links a day (OBS-297)
+    dueLink(m) {
+        const path = plainday.Schedule.dailyNotePath(m);
+        const name = path.split("/").pop().replace(/\.md$/, "");
+        return DueDate.link(m, plainday.AddTaskNote.linktextFor({ path, basename: name }, app.vault.getMarkdownFiles().map((f) => f.path)));
+    }
+
+    // `read`, or Plainday's reader of periodic note names (PeriodicNotes.reader)
+    static reader(read) {
+        if (read) return read;
+        const own = plainday?.PeriodicNotes?.reader?.();
+        if (!own) throw new Error("DueDate: no reader of periodic note names, and Plainday's isn't loaded");
+        return own;
     }
 
     // `lineText` with the due link placed on it (placement)
@@ -91,7 +113,7 @@ export default class DueDate {
                 new Notice("The line changed while the date box was open, so no deadline was set");
                 return;
             }
-            const change = this.placement(lineText, DueDate.link(m));
+            const change = this.placement(lineText, this.dueLink(m));
 
             // Insert while the modal is still open — same order NLD uses
             editor.replaceRange(change.text, { line: lineNum, ch: change.from }, { line: lineNum, ch: change.to });
@@ -122,7 +144,7 @@ export default class DueDate {
     // the date box.
     async spread(start, m) {
         const change = plainday.TaskChange, tr = plainday.TimeReport;
-        const dueLink = DueDate.link(m), date = m.format("YYYY-MM-DD");
+        const dueLink = this.dueLink(m), date = m.format("YYYY-MM-DD");
         let found;
         try {
             found = await change.find(start, { family: false });

@@ -27,7 +27,7 @@ export default class ErrorLog {
         "Line and note name different projects", "Two project links on one line", "Line's note waits in the Inbox",
         "Subtask in another project than its note", "⭕ outside a periodic note",
         "Mark on a nested task", "Task lines disagree", "Task in two notes", "Two ⋯ notes on one task", "Two deadlines on one task",
-        "Link stopped working", "Calendar not synced", "Event skipped", "Held back changes", "Skipped lines",
+        "Day link labeled with another day", "Link stopped working", "Calendar not synced", "Event skipped", "Held back changes", "Skipped lines",
     ];
     // An entry Problem's kind (TimeReport.parseNote, build, the task checks)
     static ENTRY = {
@@ -41,6 +41,7 @@ export default class ErrorLog {
     static RULE = {
         notes: "Task in two notes", ownNotes: "Two ⋯ notes on one task",
         stray: "⭕ outside a periodic note", subtaskProject: "Subtask in another project than its note", deadline: "Two deadlines on one task",
+        dayLabel: "Day link labeled with another day",
     };
     // A billed row's change (Billing.changes)
     static CHANGE = {

@@ -35,8 +35,9 @@ export default class AddTaskNote {
     // shaped as the time report reads them (TimeReport.TRAIL_LINK), or the ℹ️ or 🆓 mark (OBS-90). And a
     // sent line's forward date (OBS-181): a link to a periodic note's line with a date for its label,
     // `[[2026-10-08#^k3x9m2|10/8]]`, or one written with a ➡️ before its date. Read with trailItem,
-    // which adds the spaces before it and checks what's before a mark.
-    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
+    // which adds the spaces before it and checks what's before a mark. A forward date is taken by its shape,
+    // its name in group 1, and runItem reads the name (OBS-297): walk a run with runItem.
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
     // The item of the run that ends `text`, with the spaces before it, or null. An ℹ️ or 🆓 is one only
     // after a space or a tab: stuck to a word, it's part of the text. Both are found here, not in the
     // pattern: older iPhones can't run a lookbehind (OBS-199), and spaces in it would be tried again from
@@ -47,6 +48,19 @@ export default class AddTaskNote {
         while (text[item.index - 1] === " ") item.index--;
         item[0] = text.slice(item.index);
         return item;
+    }
+    // trailItem's item when it's one, a forward date only when its name is a periodic note's (`read`, a
+    // reader of names, PeriodicNotes.reader; Plainday's when none is given). TaskIds.runItem is a copy.
+    static runItem(text, read) {
+        const item = AddTaskNote.trailItem(text);
+        return item && (item[1] === undefined || AddTaskNote.reader(read)(item[1])) ? item : null;
+    }
+    // `read`, or Plainday's reader of periodic note names when it's not given (TaskIds.reader is a copy)
+    static reader(read) {
+        if (read) return read;
+        const own = plainday?.PeriodicNotes?.reader?.();
+        if (!own) throw new Error("AddTaskNote: no reader of periodic note names, and Plainday's isn't loaded");
+        return own;
     }
     // A block ID at the end of a line, ` ^abc123`, with the whitespace before it
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
@@ -433,13 +447,13 @@ export default class AddTaskNote {
         // its title's (Schedule's sentLine)
         if (inRun && drop.length) {
             let start = bare.length;
-            for (let item; (item = AddTaskNote.trailItem(bare.slice(0, start)));) start = item.index;
+            for (let item; (item = AddTaskNote.runItem(bare.slice(0, start)));) start = item.index;
             const run = this.withoutLinks(bare.slice(start).trim(), drop);
             bare = [bare.slice(0, start).replace(/\s+$/, ""), run].filter(Boolean).join(" ");
         }
         if (!link) return bare + block;
         let at = bare.length, before = null;
-        for (let item; (item = AddTaskNote.trailItem(bare.slice(0, at)));) {
+        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             if (AddTaskNote.NOTE_LINK.test(item[0])) before = at;
         }
@@ -631,7 +645,7 @@ export default class AddTaskNote {
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
         const out = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.trailItem(bare.slice(0, at)));) {
+        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             out.unshift(...this.projectLinks(item[0]));
         }
@@ -758,7 +772,7 @@ export default class AddTaskNote {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
         let at = bare.length, note = null;
-        for (let item; (item = AddTaskNote.trailItem(bare.slice(0, at)));) {
+        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             if (link.test(item[0])) note = item[0].trim();
         }
@@ -774,7 +788,7 @@ export default class AddTaskNote {
         bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
         const items = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.trailItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
+        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
         const run = items.filter((x) => !AddTaskNote.FROM_LINK.test(x));
         const after = (test) => run.reduce((last, x, i) => (test(x) ? i : last), -1);
         let i = after((x) => AddTaskNote.OWN_NOTE_LINK.test(x));
@@ -793,7 +807,7 @@ export default class AddTaskNote {
         bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
         const items = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.trailItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
+        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
         if (items.some((x) => AddTaskNote.OWN_NOTE_LINK.test(x))) return lineText;
         const from = items.findIndex((x) => AddTaskNote.FROM_LINK.test(x));
         items.splice(from === -1 ? items.length : from, 0, link);

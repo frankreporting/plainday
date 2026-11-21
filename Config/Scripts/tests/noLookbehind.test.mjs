@@ -8,10 +8,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { FOLDERS, loadClass } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
 const read = (file) => fs.readFileSync(new URL(`../${file}`, here), "utf8");
-const load = (file) => loadClass(file, vm.createContext({}));
+const load = (file) => loadClass(file, vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 const TaskIds = load("taskIds.js", "TaskIds");
 const TrailingLinks = load("trailingLinks.js", "TrailingLinks");
@@ -110,7 +111,7 @@ test("a date label is a forward date only on a link to a periodic note's line, i
     // As in Projects/Freelance/Pinecrest Library Brochure/Write brochure copy.md
     assert.deepEqual(forward("[[2026-09-17#^p7d2qe|9/17]]"), { editor: ["forward"], report: "2026-09-17#^p7d2qe" });
     assert.deepEqual(forward("[[Daily/2026-09-17#^p7d2qe|9/17]]"), { editor: ["forward"], report: "Daily/2026-09-17#^p7d2qe" });
-    assert.deepEqual(forward("[[2026-W38#^p7d2qe|Wk of 9/14]]"), { editor: ["forward"], report: "2026-W38#^p7d2qe" });
+    assert.deepEqual(forward("[[2026w38#^p7d2qe|Wk of 9/13]]"), { editor: ["forward"], report: "2026w38#^p7d2qe" });
     assert.deepEqual(forward("[[2026-09#^p7d2qe|Sept. 2026]]"), { editor: ["forward"], report: "2026-09#^p7d2qe" });
     assert.deepEqual(forward("[[2027#^p7d2qe|2027]]"), { editor: ["forward"], report: "2027#^p7d2qe" });
     // A date label on a link to another note's line, or to a day without a line, is text

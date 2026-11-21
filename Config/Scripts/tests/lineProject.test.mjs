@@ -5,13 +5,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
 // `plainday` defined and empty, as in the Raycast timer's sandbox: the classes read it bare
-const context = vm.createContext({ plainday: {} });
+const context = vm.createContext({ plainday: { PeriodicNotes: periodicNames() } });
 const TimeReport = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", context);
 const tr = new TimeReport();
-const load = (file, name) => vm.runInContext(classScript(`${file}.js`) + `\n;${name}`, vm.createContext({ plainday: {} }));
+const load = (file, name) => vm.runInContext(classScript(`${file}.js`) + `\n;${name}`, vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 const billing = new (load("billing", "Billing"))();
 const TaskIds = load("taskIds", "TaskIds");
 const log = new (load("errorLog", "ErrorLog"))();

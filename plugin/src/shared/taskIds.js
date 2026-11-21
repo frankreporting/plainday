@@ -14,18 +14,20 @@ export default class TaskIds {
     static ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
     static ID_LENGTH = 6;
     // A forward date on its own: [[2026-10-08#^k3x9m2|10/8]], a link to a periodic note (a day, week,
-    // month or year, by name or path) and the task's line in it, with a date for its label as Schedule
+    // month or year, by name or path, as the vault names them: runItem reads the name, OBS-297) and the
+    // task's line in it, with a date for its label as Schedule
     // writes one ("10/8", "Wk of 10/4", "Oct. 2026", any locale's short month name as one word, "10月 2026" too, then the year; "2027"). A block
     // link of your own to a day's line, with words for its alias, isn't one: it stays in the text. One
     // written with a ➡️ before its date (before OBS-185's first test round) is read too, the ➡️ left
     // out of its label; a phone may drop the U+FE0F.
-    static FORWARD = /^\[\[(?=(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
+    static FORWARD = /^\[\[(?=[^\]|#]+#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
     // One item of the run of links that ends a line: a 🚩, ⋯, ↗, ⭕ or
     // 🗃️ link, a forward date (or one written with a ➡️), or the ℹ️ or 🆓 mark. The same pattern as
     // AddTaskNote.TRAIL_ITEM, read with trailItem as AddTaskNote's is; TaskIds' statics must load in an
     // empty vm context, so they can't reach AddTaskNote, and these are copies that taskIds.test.mjs
-    // checks against it.
-    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[(?:[^\]|#]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4})#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    // checks against it. The pattern takes a forward date by its shape, its name in group 1: runItem reads
+    // the name, and a run is only ever walked with runItem.
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
     static trailItem(text) {
         const item = text.match(TaskIds.TRAIL_ITEM);
         if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
@@ -33,13 +35,28 @@ export default class TaskIds {
         item[0] = text.slice(item.index);
         return item;
     }
+    // trailItem's item when it's one, a forward date only when its name is a periodic note's (`read`, a
+    // reader of names, PeriodicNotes.reader; Plainday's when none is given). AddTaskNote.runItem is a copy.
+    static runItem(text, read) {
+        const item = TaskIds.trailItem(text);
+        return item && (item[1] === undefined || TaskIds.reader(read)(item[1])) ? item : null;
+    }
+    // `read`, or Plainday's reader of periodic note names when it's not given (PeriodicNotes.reader). Code
+    // that runs without Plainday (the time report in the Raycast timer and the demo's render) hands its own
+    // in, so a helper with neither throws rather than read a name wrong.
+    static reader(read) {
+        if (read) return read;
+        const own = plainday?.PeriodicNotes?.reader?.();
+        if (!own) throw new Error("TaskIds: no reader of periodic note names, and Plainday's isn't loaded");
+        return own;
+    }
     // The items a forward date goes before: a line's ⭕, 🗃️ and note links
     static HOME_OR_NOTE = /\|\s*(?:⭕|🗃|⋯|↗)/u;
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\]/;
     // The breadcrumb a line sent from a note had before OBS-181, in front of its text: a link to a
-    // day, week, month or year, by name or path. An event the calendar sync forwarded has a time and a
-    // tab after its link, and isn't one.
-    static OLD_FORWARD = /^(\s*[-*+]\s+\[>\]\s+)\[\[((?:[^\]|]*\/)?(?:\d{4}-\d{2}-\d{2}|\d{4}w\d{2}|\d{4}-W\d{2}|\d{4}-\d{2}|\d{4}))(?:\|([^\]]*))?\]\] (?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)/iu;
+    // day, week, month or year, by name or path (its name read by oldForward). An event the calendar sync
+    // forwarded has a time and a tab after its link, and isn't one.
+    static OLD_FORWARD = /^(\s*[-*+]\s+\[>\]\s+)\[\[([^[\]|#]+)(?:\|([^\]]*))?\]\] (?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)/iu;
 
     // An event line: its checkbox, a forwarded event's date link if it has one, then its start (a time
     // or "All day") and a tab, as the calendar sync writes it. Since OBS-275 an event line ends in its
@@ -84,12 +101,13 @@ export default class TaskIds {
     }
 
     // The run of links that ends a line, its ID set aside: { text, items }, the text before the run
-    // with no trailing spaces, and the run's links and marks in line order
-    static splitRun(line) {
+    // with no trailing spaces, and the run's links and marks in line order. `read` reads a forward date's
+    // name (runItem), here and in every helper below that takes one.
+    static splitRun(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
         const items = [];
         let at = bare.length;
-        for (let m; (m = TaskIds.trailItem(bare.slice(0, at)));) {
+        for (let m; (m = TaskIds.runItem(bare.slice(0, at), read));) {
             items.unshift(m[0].trim());
             at = m.index;
         }
@@ -97,8 +115,8 @@ export default class TaskIds {
     }
 
     // The forward date in the run that ends a line: { raw, linkpath, id, label }, or null
-    static forwardOf(line) {
-        for (const raw of TaskIds.splitRun(line).items) {
+    static forwardOf(line, read) {
+        for (const raw of TaskIds.splitRun(line, read).items) {
             const m = raw.match(TaskIds.FORWARD);
             if (m) return { raw, linkpath: m[1].trim(), id: m[2] ?? null, label: m[3].trim() };
         }
@@ -107,9 +125,9 @@ export default class TaskIds {
 
     // `line` with `link` as its forward date (null: none), in the spec's order: in place of one it has, after
     // any 🚩, before the ⭕, 🗃️ and note link that end the line, the ID last
-    static withForward(line, link) {
+    static withForward(line, link, read) {
         const id = TaskIds.idOf(line);
-        const { text, items } = TaskIds.splitRun(line);
+        const { text, items } = TaskIds.splitRun(line, read);
         const kept = items.filter((i) => !TaskIds.FORWARD.test(i));
         if (link) {
             const at = kept.findIndex((i) => TaskIds.HOME_OR_NOTE.test(i));
@@ -120,25 +138,25 @@ export default class TaskIds {
 
     // A line sent before OBS-181, its date in front: { linkpath, label, line } (the line without the
     // breadcrumb), or null
-    static oldForward(line) {
+    static oldForward(line, read) {
         // A line with a forward date is in the new shape already: a date at its start is its title's
-        if (TaskIds.forwardOf(line)) return null;
+        if (TaskIds.forwardOf(line, read)) return null;
         const m = line.match(TaskIds.OLD_FORWARD);
-        if (!m) return null;
+        if (!m || !TaskIds.reader(read)(m[2])) return null;
         return { linkpath: m[2], label: m[3] ?? m[2].split("/").pop(), line: m[1] + line.slice(m[0].length) };
     }
 
     // Whether the run that ends a line has a ⋯, wherever it links
-    static hasOwnNote(line) {
-        return TaskIds.splitRun(line).items.some((i) => /\|\s*⋯\s*\]\]$/u.test(i));
+    static hasOwnNote(line, read) {
+        return TaskIds.splitRun(line, read).items.some((i) => /\|\s*⋯\s*\]\]$/u.test(i));
     }
 
     // A task's title, for matching lines written before IDs: its text before the links that end it, any
     // link in it read as its alias (or name), without the checkbox, a breadcrumb, the ID, case or extra
     // spaces
-    static title(line) {
-        const body = (TaskIds.oldForward(line)?.line ?? line).replace(TaskIds.CHECKBOX, "");
-        return TaskIds.splitRun(body).text
+    static title(line, read) {
+        const body = (TaskIds.oldForward(line, read)?.line ?? line).replace(TaskIds.CHECKBOX, "");
+        return TaskIds.splitRun(body, read).text
             .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1").replace(/\[\[([^\]]*)\]\]/g, "$1")
             .replace(/\s+/g, " ").trim().toLowerCase();
     }
@@ -155,7 +173,7 @@ export default class TaskIds {
     // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
     // too, since the task is open elsewhere now (rule 13); with `mark` ("x" or "-"), each one is finished
     // instead, since the task was (CheckOff, OBS-232). { text, changed }. Line endings are kept.
-    static setForwardIn(text, id, link, { reopen = false, mark = null } = {}) {
+    static setForwardIn(text, id, link, { reopen = false, mark = null, read } = {}) {
         let changed = false;
         const all = text.split("\n");
         const lines = all.map((l, i) => {
@@ -164,7 +182,7 @@ export default class TaskIds {
             // Only a sent line ([>], or [x] or [-] once finished): an open line with the same ID is a copy
             const box = bare.match(TaskIds.CHECKBOX);
             if (!box || !">xX-".includes(box[1]) || TaskIds.isEvent(bare) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
-            let next = TaskIds.withForward(TaskIds.oldForward(bare)?.line ?? bare, link);
+            let next = TaskIds.withForward(TaskIds.oldForward(bare, read)?.line ?? bare, link, read);
             if (mark) next = next.replace(/^(\s*[-*+]\s+)\[.\]/, `$1[${mark}]`);
             else if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
             if (next === bare) return l;
@@ -326,8 +344,8 @@ export default class TaskIds {
 
     // Whether lines sharing a block ID are a task's: one of them is sent, a [>] line or one with a forward
     // date. Lines that only share a block ID of your own were never one task (rule 2).
-    static isTask(lines) {
-        return lines.some((l) => l.task === ">" || TaskIds.forwardOf(l.text));
+    static isTask(lines, read) {
+        return lines.some((l) => l.task === ">" || TaskIds.forwardOf(l.text, read));
     }
 
     // A note's text as it is now: from its editor when it's open in one in editing view (ahead of the saved
@@ -403,7 +421,7 @@ export default class TaskIds {
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
     // notes), "ownNotes" (two different ⋯ notes), "twice" (an ID twice in a note), "trailing" (text after
     // a task's ID, which Obsidian then doesn't read).
-    static check(notes, { projectOf, compared = () => true, resolve, ownNote = () => [] }) {
+    static check(notes, { projectOf, compared = () => true, resolve, ownNote = () => [], read }) {
         const found = [], out = [], twice = [];
         const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
         for (const note of notes) {
@@ -426,7 +444,7 @@ export default class TaskIds {
         }
         const isOpen = (h) => h.task === " " || h.task === "/";
         // Only a task's ID: one a sent line carries (isTask)
-        const isTask = TaskIds.isTask;
+        const isTask = (lines) => TaskIds.isTask(lines, read);
         for (const [id, hits] of byId) {
             if (!isTask(hits)) continue;
             const open = hits.filter(isOpen);
@@ -434,11 +452,11 @@ export default class TaskIds {
             // No line is let off (OBS-233): a project change writes every line of the task and refuses to move
             // billed time, so two projects are always something to fix. A line with a ⋯ and no project is
             // Unassigned and isn't listed (rule 4)
-            const named = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text));
+            const named = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text, read));
             if (new Set(named.map((n) => n.project)).size > 1) out.push({ rule: "project", id, lines: named.map((n) => TaskIds.where(n.h)), detail: { projects: named.map((n) => n.project) } });
             // `clicked`: which of them, if any, is a sent line a click turned from [>] into [ ] (a line outside
             // the periodic notes with a forward date), so the Problem can say to set it back rather than take off its ID
-            if (open.length > 1) out.push({ rule: "open", id, lines: open.map(TaskIds.where), detail: { clicked: open.findIndex((h) => h.kind === "other" && TaskIds.forwardOf(h.text)) } });
+            if (open.length > 1) out.push({ rule: "open", id, lines: open.map(TaskIds.where), detail: { clicked: open.findIndex((h) => h.kind === "other" && TaskIds.forwardOf(h.text, read)) } });
             const doneDays = finished.filter((h) => h.task === "x" && h.kind === "day");
             if (finished.length && open.length) out.push({ rule: "finished", id, lines: [...finished, ...open].map(TaskIds.where), detail: { open: true } });
             else if (doneDays.length > 1) out.push({ rule: "finished", id, lines: doneDays.map(TaskIds.where), detail: { open: false } });
@@ -448,9 +466,9 @@ export default class TaskIds {
             if (!at.length && !open.length) at.push(...finished.filter((h) => h.kind !== "other").slice(0, 1));
             const current = at[0] ?? null;
             for (const s of hits.filter((h) => h.kind === "other" && !isOpen(h))) {
-                const fwd = TaskIds.forwardOf(s.text);
+                const fwd = TaskIds.forwardOf(s.text, read);
                 // A [>] line with its date in front is in the old shape: the backfill gives it its forward date
-                if (!fwd && (s.task !== ">" || TaskIds.oldForward(s.text))) continue;
+                if (!fwd && (s.task !== ">" || TaskIds.oldForward(s.text, read))) continue;
                 const to = fwd ? resolve(fwd.linkpath, s.path) : null;
                 if (fwd && at.some((h) => h.path === to) && (fwd.id ?? "").toLowerCase() === id) continue;
                 out.push({ rule: "forward", id, lines: [s, ...(current ? [current] : [])].map(TaskIds.where), detail: { to, missing: !fwd } });
@@ -488,14 +506,14 @@ export default class TaskIds {
 
     // The old-mark links in the run that ends `line`: [{ from, to, target }] in line order, `target`
     // the link's text before its `|`
-    static oldMarks(line) {
+    static oldMarks(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
         const out = [];
         let at = bare.length;
         for (;;) {
             const head = bare.slice(0, at);
             const old = head.match(TaskIds.OLD_ITEM);
-            const item = old ?? TaskIds.trailItem(head);
+            const item = old ?? TaskIds.runItem(head, read);
             if (!item) break;
             if (old) out.unshift({ from: item.index + item[0].indexOf("[["), to: at, target: old[1].trim() });
             at = item.index;

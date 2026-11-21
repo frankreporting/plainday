@@ -9,9 +9,10 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER } from "./standInVault.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
-const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
+const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 const due = new DueDate();
 const D = "[[2026-09-30|🚩 9/30]]";
 const apply = (line) => { const { from, to, text } = due.placement(line, D); return line.slice(0, from) + text + line.slice(to); };

@@ -8,12 +8,13 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER, withFolders } from "./standInVault.mjs";
 import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
+import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
 // `plainday` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
 const AddTaskNote = vm.runInContext(
     classScript("addTaskNote.js") + "\n;AddTaskNote",
-    vm.createContext({ plainday: {} }),
+    vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }),
 );
 const add = new AddTaskNote();
 
@@ -680,7 +681,7 @@ test("OBS-55: a new task note with no project stays in Inbox, for AddTaskNote an
 });
 
 test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so the ⭕ is still found (OBS-185)", () => {
-    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({})))();
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } })))();
     const plain = (v) => JSON.parse(JSON.stringify(v));
     assert.deepEqual(plain(helper.trailingProjectLinks("- [>] Book it [[Kestrel|⭕]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2")), [{ raw: "[[Kestrel|⭕]]", linkpath: "Kestrel" }]);
     assert.equal(helper.trailingNote("- [>] Book it [[Book it|⋯]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");

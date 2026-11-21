@@ -64,17 +64,48 @@ export default class PeriodicNotes {
     }
 
     // Which periodic note a note's name is, by the vault's own name formats (the daily notes' format, and the
-    // week settings' patterns for the rest): { unit, date } (date the period's first day), or null
-    periodOfName(name, rules = plainday.DatePrompt.weekRules()) {
-        const formats = { day: plainday.Schedule.dailyOpts().format, ...rules.format };
+    // week settings' patterns for the rest): { unit, date } (date the period's first day), or null. A day's
+    // name is read in the language where() writes it in, Obsidian's (moment's own); the rest in the week
+    // settings' language.
+    periodOfName(name, rules = plainday.DatePrompt.weekRules(), day = plainday.Schedule.dailyOpts().format) {
+        const formats = { day, ...rules.format };
         for (const unit of ["day", "week", "month", "year"]) {
-            const m = moment(name, formats[unit], rules.locale, true);
+            const m = moment(name, formats[unit], unit === "day" ? moment.locale() : rules.locale, true);
             if (!m.isValid() || m.format(formats[unit]) !== name) continue;
             // A week's name reads as its first day already
             const first = unit === "day" || unit === "week" ? m : m.clone().startOf(unit);
             return { unit, date: first.format("YYYY-MM-DD") };
         }
         return null;
+    }
+
+    // The one reader of a link to a periodic note (OBS-297): `read(linktext)` reads a link's name, or its
+    // path's last part, as periodOfName does, with the formats and languages set now: { unit, date } or
+    // null. A 🚩, a forward date and every other link on a task line is told by the note its name names,
+    // never by how the name is spelled. Each name is read once and remembered under the formats and
+    // languages that read it, so a changed setting gives a new reader, and the editor's links, drawn on
+    // every keystroke, cost a lookup.
+    static NAMES_KEPT = 5000;
+    reader() {
+        const rules = plainday.DatePrompt.weekRules();
+        const day = plainday.Schedule.dailyOpts().format;
+        const key = [day, moment.locale(), rules.locale, rules.format.week, rules.format.month, rules.format.year].join("\n");
+        if (this.names?.key !== key) {
+            const seen = new Map();
+            const read = (linktext) => {
+                const name = String(linktext ?? "").split("/").pop().trim();
+                let out = seen.get(name);
+                if (out === undefined) {
+                    const period = name ? this.periodOfName(name, rules, day) : null;
+                    out = period ? Object.freeze(period) : null;
+                    if (seen.size >= PeriodicNotes.NAMES_KEPT) seen.clear();
+                    seen.set(name, out);
+                }
+                return out;
+            };
+            this.names = { key, read };
+        }
+        return this.names.read;
     }
 
     // That kind of note's template: the Daily notes plugin's or Notebook Navigator's for a day (as
