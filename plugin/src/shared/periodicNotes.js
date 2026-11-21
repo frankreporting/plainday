@@ -173,8 +173,12 @@ export default class PeriodicNotes {
             this.hold(target.path);
             await app.fileManager.renameFile(file, target.path);
         }
+        // Templater writes a template into an open note and puts the cursor at its top, above any properties
+        // it brought, so the cursor's place is noted before the template and set after the alias (review 4)
+        const top = this.cursorAtTopOf(file);
         if (empty) await this.applyTemplate(file, target);
         await this.addAlias(file, this.alias(period.unit, period.date, rules));
+        if (top) this.cursorBelowProperties(top);
         return "finished";
     }
 
@@ -209,11 +213,24 @@ export default class PeriodicNotes {
     // there (CodeMirror keeps a cursor before what's inserted at it), so it goes below them, where you'd
     // type: in a note just opened empty, that's where the next keystroke lands.
     async rewrite(file, fn) {
+        const top = this.cursorAtTopOf(file);
+        await plainday.Schedule.rewrite(file, fn);
+        if (top) this.cursorBelowProperties(top);
+    }
+
+    // The note's editor (in editing view) when the note is open there with no properties and the cursor at its
+    // very start, else null
+    cursorAtTopOf(file) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         const editor = view?.editor, cursor = editor?.getCursor();
-        const bare = editor && cursor.line === 0 && cursor.ch === 0 && !getFrontMatterInfo(editor.getValue()).exists;
-        await plainday.Schedule.rewrite(file, fn);
-        if (!bare) return;
+        return editor && cursor.line === 0 && cursor.ch === 0 && !getFrontMatterInfo(editor.getValue()).exists ? editor : null;
+    }
+
+    // A cursor still at the very start of a note that now has properties goes below them; one a template put
+    // elsewhere (tp.file.cursor) stays
+    cursorBelowProperties(editor) {
+        const cursor = editor.getCursor();
+        if (cursor.line !== 0 || cursor.ch !== 0) return;
         const info = getFrontMatterInfo(editor.getValue());
         if (info.exists) editor.setCursor(editor.offsetToPos(info.contentStart));
     }

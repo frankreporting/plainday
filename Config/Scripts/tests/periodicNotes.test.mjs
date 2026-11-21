@@ -295,6 +295,16 @@ test("finish: in a note just opened empty, with nothing typed yet, the cursor go
     assert.equal(w.placed(), null);
 });
 
+test("finish: with Templater writing a template that has properties into a note just opened empty, the cursor still goes below them (review round 4)", async () => {
+    const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, [`${TPL}/Daily Note.md`]: "---\ntags: [daily]\n---\n## Notes\n" } });
+    templaterOn(v);
+    const file = madeBy(v, `${DAYS}/2026-09-09.md`, "");
+    v.open(`${DAYS}/2026-09-09.md`, 0, 0);
+    assert.equal(await finisher(v).onCreate(file), "finished");
+    assert.equal(v.app.workspace.activeLeaf.view.editor.getValue(), "---\naliases: 9/9/26 Wednesday\ntags:\n  - daily\n---\n## Notes\n");
+    assert.deepEqual({ ...v.placed() }, { line: 5, ch: 0 }, "on the template's first line, below the properties");
+});
+
 // ------------------------------------------------------------------ written into by its maker: its alias when you leave it
 
 test("finish: a note Navigator writes from a template with content is left alone while it's made, and gets its alias when you leave it", async () => {
