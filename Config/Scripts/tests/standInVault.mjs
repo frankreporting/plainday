@@ -317,7 +317,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
-        PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"),
+        PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"), MeetingLog: make("meetingLog", "MeetingLog"),
         CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
@@ -330,13 +330,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         covers = { lines: days(weighed.lines), time: days(weighed.days.map((d) => d.l)), stops: days(weighed.stops.map((d) => d.l)) };
         try { return await ask(weighed, ...rest); } finally { covers = null; }
     };
-    // Templater's part: a log made where the Log template would put it. A task note is made by the code itself
-    // (AddTaskNote.createTaskNote, OBS-121), in a vault with no Task template and no Templater.
-    const made2 = (path, text) => { put(path, text); return fileOf(path); };
-    plainday.AddTaskNote.makeLog = async (name) => {
-        if (app.metadataCache.getFirstLinkpathDest(name)) return;
-        made2(`Inbox/${name}.md`, "---\ntags: [log]\n---\n");
-    };
+    // A task note and a log are made by the code itself (AddTaskNote.createTaskNote, OBS-121; MeetingLog, OBS-122),
+    // in a vault with no Task or Log template and no Templater
     let n = 0;
     plainday.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);
     return {

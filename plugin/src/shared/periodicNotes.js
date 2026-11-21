@@ -3,7 +3,7 @@ import { app, plainday } from "../host.js";
 
 export default class PeriodicNotes {
     // The daily, weekly, monthly and yearly notes, made in one place (OBS-120). Plan, Jump to date, Schedule,
-    // the calendar sync, the time report and the Log template all make theirs with ensure(), and
+    // the calendar sync, the time report and MeetingLog all make theirs with ensure(), and
     // FinishPeriodicNotes finishes one made any other way (Notebook Navigator's calendar, the Daily notes
     // plugin, a click on a link to a missing day) with finish().
     // - Where a note goes and what it's called: the periodic notes' source in Settings → Plainday → Folders

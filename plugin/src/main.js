@@ -51,8 +51,8 @@ export default class Plainday extends Plugin {
                 console.error(`Plainday: couldn't start ${name}`, e);
             }
         }
-        // For the templates (Log.md, Task.md) and for tools outside Obsidian, which call a class by
-        // eval: `plainday.SnapshotDailyNotes.invoke()`
+        // For the templates and for tools outside Obsidian, which call a class by eval:
+        // `plainday.SnapshotDailyNotes.invoke()`, CalNav's `plainday.MeetingLog.openLog(…)`
         window.plainday = plainday;
 
         // Before anything reads them; the defaults when they don't load

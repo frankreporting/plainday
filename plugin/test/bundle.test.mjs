@@ -253,7 +253,7 @@ test("each command in the list is added with its id, name and icon, and runs its
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
         assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
-        assert.equal(plugin.commands.length, 14);
+        assert.equal(plugin.commands.length, 15);
         for (const c of plugin.commands) {
             assert.match(c.id, /^[a-z]+(-[a-z]+)*$/, "ids are lower case with hyphens, without the plugin's id");
             // An icon name from Obsidian's set (OBS-263): without one, the phone's toolbar draws a question mark
@@ -871,8 +871,8 @@ test("Settings → Plainday → Note templates: the Task note and Log templates,
         assert.equal(t.control.inputEl.value, "", "blank as it comes");
         assert.equal(t.control.inputEl.placeholder, "Templates/Task.md", "Templater's folder, not this repository's");
         assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
-        // The Log's default isn't in this vault, so it says Add note has nothing to make one from
-        assert.match(draw("Log").warning(), /^“Templates\/Log\.md” isn't in the vault/);
+        // The Log's default isn't in this vault, and a log is made without one too (OBS-122)
+        assert.equal(draw("Log").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
         // A task note is made without one (OBS-121), so a missing Task template only says so
         files.delete(task.path);
         assert.equal(draw("Task note").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
@@ -1386,7 +1386,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 33);
+    assert.equal(classFiles.length, 36);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

@@ -38,7 +38,7 @@ export default class CalendarSync {
     // unless time entries are under it, and comes back when its day is in range. A series split by a
     // "this and future events" edit keeps its lines (handOver). A new line for a recurring series gets
     // the series' ⭕ from the settings. Lines from before IDs (no ID at all) are taken over by their exact start and title, and a
-    // log's line with no time (`- [<] Title [[log|⋯]]`, the Log template writes one when the calendar has
+    // log's line with no time (`- [<] Title [[log|⋯]]`, a new log writes one when the calendar has
     // no event for a meeting, OBS-10) by its title. A log a line links takes the line's times (fillLog).
     //
     // Where the events come from: every calendar in Settings → Plainday → Calendars that's on and has a
@@ -1329,7 +1329,7 @@ export default class CalendarSync {
         return { start: match[1].toLowerCase(), title: this.display(this.splitTail(match[2], true).rest) };
     }
 
-    // An event line with no time: `- [<] Title [[log|⋯]]`, which the Log template writes for a
+    // An event line with no time: `- [<] Title [[log|⋯]]`, which a new log writes for a
     // meeting the calendar doesn't have (OBS-10). Sorts after the timed events.
     timeless(line) {
         return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);

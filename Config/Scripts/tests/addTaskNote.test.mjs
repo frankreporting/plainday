@@ -249,45 +249,21 @@ test("withoutLinks: takes the project link out and closes the gap, keeping inden
     assert.equal(add.withoutLinks("- [ ] Call ([[P|⭕]]) now", ["[[P|⭕]]"]), "- [ ] Call () now");
 });
 
-test("takePresetParent: the parent goes only to the note it was picked for, and only once", () => {
-    AddTaskNote.preset = { path: "Inbox/Order toner.md", parent: "PROJECT" };
-    assert.equal(add.takePresetParent("Inbox/Something else.md"), null, "another note gets the menu");
-    assert.equal(add.takePresetParent(undefined), null);
-    assert.equal(add.takePresetParent("Inbox/Order toner.md"), "PROJECT");
-    assert.equal(add.takePresetParent("Inbox/Order toner.md"), null, "used up");
-    AddTaskNote.preset = null;
-    assert.equal(add.takePresetParent("Inbox/Order toner.md"), null);
-    // Raycast's Open Log Note presets Inbox: the template files the note there, as with no preset
-    AddTaskNote.preset = { path: "Inbox/2026-09-18 Printer call.md", parent: "inbox" };
-    assert.equal(add.takePresetParent("Inbox/2026-09-18 Printer call.md"), null);
-    assert.equal(AddTaskNote.preset, null, "used up");
-});
-
 test("Get Template has no !task route: task notes come from a task line, with Add note (OBS-121)", () => {
     const route = fs.readFileSync(new URL("../../Templates/Get Template.md", here), "utf8");
     assert.doesNotMatch(route, /\/!task\/|\[\[Task\]\]/, "no route by title, and the Task template isn't included");
     assert.match(route, /tp\.file\.include\("\[\[Empty Note\]\]"\)/, "a title starting !task gets the Empty Note template, like any other");
 });
 
-test("OBS-55: no template asks for a project; the Log template takes one only from the command", () => {
+test("OBS-55: no template asks for a project", () => {
     const read = (name) => fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
     for (const name of ["Task", "Log", "Project", "Area"]) {
         const template = read(name);
         assert.doesNotMatch(template, /tp\.system\.suggester|tp\.user\.pickParent|FuzzySuggestModal/, `${name} shows no menu`);
     }
     assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
-    // The Log template: the line's one live home first, then the command's preset (Raycast's Inbox is null)
-    const log = read("Log");
-    const presetLine = log.split("\n").find((l) => /^const preset = /.test(l));
-    assert.ok(presetLine, "the Log template takes the command's preset in one line");
-    const presetFor = (parent) => vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""),
-        { tasks: { takePresetParent: () => parent }, tp: { config: { target_file: { path: "Inbox/2026-09-18 Printer call.md" } } } });
-    const project = { path: "Projects/Freelance/Kestrel/Kestrel.md" };
-    assert.equal(presetFor(project), project);
-    assert.equal(presetFor(null), null);
-    assert.equal(presetFor("inbox"), null, "an older AddTaskNote's Inbox preset files the log in Inbox");
-    assert.equal(vm.runInNewContext(presetLine.replace(/^const preset = /, "").replace(/;$/, ""), { tasks: null, tp: { config: { target_file: { path: "x" } } } }), null, "without Plainday");
-    assert.match(log, /const pickedFile = lineHome \?\? preset;/);
+    // The Log template is content only: Plainday makes the log (MeetingLog, OBS-122)
+    assert.equal(read("Log"), "", "the repository's Log template is empty");
     // A new project or area gets its folder at the top of Projects/, and its note in it
     for (const name of ["Project", "Area"]) {
         const template = read(name);
@@ -511,9 +487,9 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
     assert.equal(shown.placeholder, 'Move "B" to which project or area? (Esc: cancel)');
 });
 
-// A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a Log template that
-// records what it's asked to make
-const invokeOn = async (line, { ch = line.length, paths = [], template = true, sel = null } = {}) => {
+// A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a MeetingLog that records what
+// it's asked to make
+const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {}) => {
     const calls = [];
     let text = line, cursor = null;
     const { files, app } = withApp(paths);
@@ -531,12 +507,8 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
         },
     };
     const view = { editor, save: async () => { calls.push("save"); } };
-    const tpl = { path: "Config/Templates/Log.md" };
     Object.assign(app, {
         workspace: { activeLeaf: { view }, getActiveFile: () => ({ basename: "2026-09-14", path: "days/2026-09-14.md" }) },
-        plugins: { plugins: template ? { "templater-obsidian": { templater: {
-            create_new_note_from_template: async (t, folder, name, open) => { calls.push(`template ${t.path} in ${folder}: ${name} (open: ${open})`); return { path: `${folder}/${name}.md` }; },
-        } } } : {} },
     });
     app.vault.createFolder = async (p) => { calls.push(`folder ${p}`); };
     app.fileManager = { renameFile: async (f, to) => {
@@ -544,12 +516,10 @@ const invokeOn = async (line, { ch = line.length, paths = [], template = true, s
         f.path = to;
         f.parent = files.find((g) => g.path.startsWith(to.slice(0, to.lastIndexOf("/")).replace(/\/›?logs$/, "")))?.parent ?? f.parent;
     } };
-    const getFileByPath = app.vault.getFileByPath;
-    app.vault.getFileByPath = (p) => (p === tpl.path ? tpl : getFileByPath(p));
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
     const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
-        app, plainday: withFolders({ DueDate: new DueDate() }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+        app, plainday: withFolders({ DueDate: new DueDate(), MeetingLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); } } }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -578,15 +548,15 @@ test("invoke on an event line: wherever the cursor is, the log is named from the
     assert.deepEqual(named.cursor, { line: 0, ch: 16 });
 });
 
-test("invoke on an event line makes the log right away through the Log template, after saving the line (OBS-57)", async () => {
+test("invoke on an event line makes the log right away, without Templater, after saving the line (OBS-57, OBS-122)", async () => {
     const ev = "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]]";
     const made = await invokeOn(ev, { ch: 16, paths: HAWK });
-    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", "the ⭕ stays, and the Log template files the log there");
-    assert.deepEqual(made.calls, ["write line", "save", "template Config/Templates/Log.md in Inbox: 2026-09-14 Kickoff call (open: false)"]);
+    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", "the ⭕ stays, and MeetingLog files the log there");
+    assert.deepEqual(made.calls, ["write line", "save", "log 2026-09-14: Kickoff call"]);
     // The cursor at the end of the line makes it just the same (fix round 2); a line with no title,
     // or one that's refused, makes nothing
     assert.deepEqual((await invokeOn(ev, { paths: HAWK })).calls, made.calls);
-    assert.ok(!(await invokeOn("- [<] 1:30pm\t")).calls.some((c) => c.startsWith("template")));
+    assert.ok(!(await invokeOn("- [<] 1:30pm\t")).calls.some((c) => c.startsWith("log ")));
     assert.deepEqual((await invokeOn("- [<] 1:30pm\tKickoff call [[2026-09-14 Kickoff call|⋯]]")).calls, ["notice: This event already links a log"]);
 });
 
@@ -616,10 +586,10 @@ test("isFinished: a status of Done or Canceled, in any case, finishes a project 
     assert.equal(add.isFinished({}), false, "no frontmatter");
 });
 
-test("one place for the logs folder's name: the Log template and every other script ask AddTaskNote (OBS-164)", () => {
-    const template = fs.readFileSync(new URL("../../Templates/Log.md", here), "utf8");
-    assert.match(template, /folder = tasks \? tasks\.logsFolderIn\(pickedFile\.parent\.path\)/, "the Log template files a log where AddTaskNote says");
-    assert.match(template, /if \(tasks\) await tasks\.makeFolder\(folder\);/, "and makes the folder through it, icon and all");
+test("one place for the logs folder's name: MeetingLog and every other script ask AddTaskNote (OBS-164)", () => {
+    const made = classSource("meetingLog.js");
+    assert.match(made, /tasks\.logsFolderIn\(home\.parent\.path\)/, "MeetingLog files a log where AddTaskNote says");
+    assert.match(made, /await tasks\.makeFolder\(folder\);/, "and makes the folder through it, icon and all");
     // No other class file spells a logs folder in its code (comments aside)
     for (const name of classFiles().map((f) => f.split("/")[1]).filter((n) => n !== "addTaskNote.js")) {
         const code = classSource(name).split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "").replace(/\s\/\/ .*$/, "")).join("\n");

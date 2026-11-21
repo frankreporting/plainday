@@ -138,7 +138,7 @@ test("every table the system writes comes from TimeReport.table: no script build
     walk(new URL("Config/Scripts/", repo));
     walk(new URL("plugin/src/", repo));
     assert.ok(scripts.some((u) => u.pathname.endsWith("plugin/src/commands/timeReport.js")), "the scan reaches the class files");
-    assert.ok(scripts.some((u) => u.pathname.endsWith("Config/Scripts/Templater/recordEvent.js")), "and the Templater scripts");
+    assert.ok(scripts.some((u) => u.pathname.endsWith("Config/Scripts/Templater/arrivedNote.js")), "and the Templater scripts");
     const found = [];
     for (const url of scripts) {
         const lines = fs.readFileSync(url, "utf8").split("\n");

@@ -831,7 +831,7 @@ export default class Schedule {
     }
 
     // The day's note at `path` (dailyNotePath), made if it isn't there, as every periodic note is made
-    // (PeriodicNotes.ensure). The Log template calls it for a log's day.
+    // (PeriodicNotes.ensure). MeetingLog calls it for a log's day.
     async ensureDailyNote(path) {
         const file = app.vault.getFileByPath(path);
         if (file) return file;
@@ -863,8 +863,8 @@ export default class Schedule {
     // one is there already, as the calendar sync does with an event; a note they end ends with a line break.
     // A note another plugin has just made from a template with Templater code in it still opens with the
     // code (`<%`), which Templater turns into the properties a moment later; above it, the lines would end
-    // up above the properties, so they go at the end, after the code, as the Log template's line does
-    // (recordEvent.js). Plainday's own new notes never hold template code (PeriodicNotes, OBS-120).
+    // up above the properties, so they go at the end, after the code, as a new log's line does
+    // (MeetingLog.recordEvent). Plainday's own new notes never hold template code (PeriodicNotes, OBS-120).
     // A CRLF note keeps its line endings. Returns { content, at, count, item }: the new content, the line
     // the insert starts at, how many lines it adds, and the line of the first one moved there.
     static placeInTopList(content, newLines) {
