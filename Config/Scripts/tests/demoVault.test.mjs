@@ -8,7 +8,6 @@
 import { test as baseTest } from "node:test";
 import fs from "node:fs";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import vm from "node:vm";
 import { DAYS, FOLDERS, NOTE_FOLDERS, SETTINGS_FILE, loadTimeReport, loadBilling, readVault, planReports, dailyNotes, vaultSettings } from "./demo/renderReports.mjs";
 import { compactTables, obsidianPadded, tablesIn } from "./tables.mjs";
@@ -324,9 +323,10 @@ test("demo vault: ⋯, ⭕, meeting log and property links all resolve", () => {
 });
 
 test("demo vault: every meeting log has its line in its daily note, and its time and endTime match that line", () => {
-    const require = createRequire(import.meta.url);
-    const eventTimes = require("../Templater/eventTimes.js");
-    const recordEvent = require("../Templater/recordEvent.js");
+    const meetingLog = new (vm.runInContext(classScript("meetingLog.js") + "\n;MeetingLog", vm.createContext({})))();
+    // Objects made in the vm context have its prototypes; compared as plain data
+const eventTimes = (...args) => JSON.parse(JSON.stringify(meetingLog.eventTimes(...args)));
+    const recordEvent = (...args) => JSON.parse(JSON.stringify(meetingLog.recordEvent(...args)));
     const code = classScript("calendarSync.js");
     const sync = new (vm.runInContext(code + "\n;CalendarSync", vm.createContext({ app: {}, window: {}, plainday: {}, console })))();
     const logs = demoNotes.filter((p) => tagsOf(p).includes("log"));

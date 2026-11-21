@@ -15,16 +15,10 @@ if (tp.config.run_mode === 2 && !window.newNoteGuardMadeHere?.has(tp.config.targ
 }
 // The daily, weekly, monthly and yearly notes aren't routed here: Plainday makes and finishes them, and
 // keeps this trigger off them (FinishPeriodicNotes, OBS-120). Nor are task notes: Add note makes them
-// from a task line (OBS-121), so a title starting "!task" is a note like any other.
-if (/!today/.test(tp.file.title)) {
-	let log = await tp.file.include("[[Log]]");
-	tR += log;
-}
-else if (tp.file.title.search(/^[0-9]{4}-[0-9]{2}-[0-9]{2} .*$/) !=-1) {
-	let log = await tp.file.include("[[Log]]");
-	tR += log;
-} 
-else if (/!person/.test(tp.file.title)) {
+// from a task line (OBS-121), so a title starting "!task" is a note like any other. Nor are meeting logs:
+// Add note and New meeting log make them, and a note an event line links is finished as one (MeetingLog,
+// OBS-122), so a title starting with a date or "!today" is a note like any other too.
+if (/!person/.test(tp.file.title)) {
 	let person = await tp.file.include("[[Person]]");
 	tR += person;
 } 

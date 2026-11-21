@@ -21,8 +21,8 @@ const Billing = load("billing.js", "Billing");
 const NewNoteGuard = load("newNoteGuard.js", "NewNoteGuard");
 const DueDate = load("setDueDate.js", "DueDate");
 const tr = new TimeReport(), billing = new Billing();
-// The Log template's helper, which isn't exported: read from its own file
-const recordEvent = vm.runInContext(read("Templater/recordEvent.js") + "\n;({ trailItem })", vm.createContext({ module: {}, require: () => ({}) }));
+// The meeting log's line code, moved from the Log template's recordEvent.js (OBS-122)
+const recordEvent = load("meetingLog.js", "MeetingLog");
 const arrivedNote = vm.runInContext(read("Templater/arrivedNote.js") + "\n;arrivedNote", vm.createContext({ module: {} }));
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const FE0F = String.fromCharCode(0xfe0f), BOM = String.fromCharCode(0xfeff), INFO = "ℹ" + FE0F;
@@ -52,7 +52,7 @@ const walk = (trailItem, line) => {
 const walkers = {
     "AddTaskNote": (l) => walk((t) => AddTaskNote.trailItem(t), l),
     "TaskIds": (l) => plain(TaskIds.splitRun(l)),
-    "the Log template": (l) => walk((t) => recordEvent.trailItem(t), l),
+    "MeetingLog": (l) => walk((t) => recordEvent.trailItem(t), l),
 };
 
 test("trailItem: the ℹ️ mark is part of a line's run after a space or a tab; stuck to a word, it's the title's", () => {
@@ -67,8 +67,8 @@ test("trailItem: the ℹ️ mark is part of a line's run after a space or a tab;
     }
 });
 
-test("trailItem: the Log template's is AddTaskNote's, read with its own pattern", () => {
-    const body = (f) => f.toString().replace(/^function /, "").replace(/AddTaskNote\./g, "").replace(/\s+/g, " ");
+test("trailItem: MeetingLog's is AddTaskNote's, read with its own pattern", () => {
+    const body = (f) => f.toString().replace(/^function /, "").replace(/(?:AddTaskNote|MeetingLog)\./g, "").replace(/\s+/g, " ");
     assert.equal(body(recordEvent.trailItem), body(AddTaskNote.trailItem));
 });
 

@@ -13,8 +13,8 @@ export default class NewNoteGuard {
     //   - one a template has just made and moved: Templater lists it by the path it was made at, and
     //     checks the path it's at now, so the trigger runs the templates on it a second time.
     // For both, this lists the note in that set for a moment (HOLD_MS), by the path it's at, so
-    // Templater skips it: no write, no notice. A note you make starts empty and isn't held. The Log
-    // template and Plan hold their own notes the same way.
+    // Templater skips it: no write, no notice. A note you make starts empty and isn't held. Plainday
+    // holds the notes it makes the same way (PeriodicNotes.hold): periodic notes, task notes and logs.
     //
     // If Templater ever renames the set, nothing here runs, and Get Template's own check
     // (tp.user.arrivedNote) stops the template instead: with Templater's error notice, and no write.
