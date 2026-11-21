@@ -1,4 +1,4 @@
-// Tests for the periodic notes' name check (OBS-299): Settings.nameProblem, periodicFormat and
+// Tests for the periodic notes' name check (OBS-299): Settings.namesWholeDate, periodicFormat and
 // nameWarning in plugin/src/shared/settings.js, which Settings → Plainday → Folders → Periodic notes
 // shows under a row whose notes' names don't give their whole date on their own. moment is the real
 // one, from node_modules (the plain-Node stand-in knows only a few formats), in four languages; the
@@ -13,7 +13,7 @@ import { loadClass } from "../classShape.mjs";
 
 const require = createRequire(import.meta.url);
 const moment = require("moment");
-for (const l of ["de", "fr", "en-gb"]) require(`moment/locale/${l}`);
+for (const l of ["de", "fr", "en-gb", "uk"]) require(`moment/locale/${l}`);
 moment.locale("en");
 // Reading a name back fills what it leaves out from today, so the tests run on a day of their own
 const TODAY = new Date(2026, 10, 20, 12).getTime();
@@ -37,6 +37,7 @@ function vault({ daily = { format: "YYYY-MM-DD", folder: "Reference/Planner/days
     plainday.Settings.data.folders.periodic = periodic;
     plainday.Schedule = new (loadClass("schedule.js", context))();
     plainday.DatePrompt = new (loadClass("datePrompt.js", context))();
+    plainday.TimeReport = new (loadClass("timeReport.js", context))();
     return plainday.Settings;
 }
 // Notebook Navigator's calendar making the notes, under `Planner`, with these patterns
@@ -68,7 +69,7 @@ test("names that give the whole date pass, in four languages: Navigator's defaul
     const settings = vault();
     for (const locale of LOCALES) {
         for (const [unit, formats] of Object.entries(WORKS)) {
-            for (const format of formats) assert.equal(settings.nameProblem(unit, format, locale), null, `${unit} ${format} in ${locale}`);
+            for (const format of formats) assert.equal(settings.namesWholeDate(unit, format, locale), true, `${unit} ${format} in ${locale}`);
         }
     }
 });
@@ -77,7 +78,7 @@ test("names that leave part of the date out fail, in four languages: Navigator's
     const settings = vault();
     for (const locale of LOCALES) {
         for (const [unit, formats] of Object.entries(FAILS)) {
-            for (const format of formats) assert.notEqual(settings.nameProblem(unit, format, locale), null, `${unit} ${format} in ${locale}`);
+            for (const format of formats) assert.equal(settings.namesWholeDate(unit, format, locale), false, `${unit} ${format} in ${locale}`);
         }
     }
 });
@@ -86,7 +87,7 @@ test("which format is checked: the Daily notes plugin's for the days, and nothin
     const settings = vault({ daily: { format: "MM-DD", folder: "Reference/Planner/days/2026" }, navigator: NAVIGATOR({ calendarCustomWeekPattern: "gggg/[W]ww" }), periodic: "daily-notes" });
     assert.deepEqual(plain(settings.periodicFormat("day")), { format: "MM-DD", navigator: false });
     for (const unit of ["week", "month", "year"]) assert.equal(settings.periodicFormat(unit), null, `Plainday names the ${unit}s itself, even with Navigator installed`);
-    assert.equal(settings.nameWarning("week"), "");
+    assert.equal(settings.periodicWarning("week"), "");
 });
 
 test("which format is checked with Notebook Navigator: its patterns as typed, even one Plainday can't follow", () => {
@@ -105,55 +106,70 @@ test("which format is checked with Notebook Navigator: its patterns as typed, ev
 test("the demo's settings warn on no row", () => {
     for (const periodic of ["", "daily-notes"]) {
         const settings = vault({ navigator: NAVIGATOR(), periodic });
-        for (const unit of ["day", "week", "month", "year"]) assert.equal(settings.nameWarning(unit, "en"), "", `${unit}, ${periodic || "as it starts"}`);
+        for (const unit of ["day", "week", "month", "year"]) assert.equal(settings.periodicWarning(unit, "en"), "", `${unit}, ${periodic || "as it starts"}`);
     }
 });
 
-test("the warning names the format, where it's set, the name it gives a note and what that leaves out, and what Plainday needs", () => {
+const NEEDS_DAY = "Plainday reads a note's date from its name alone, so it needs the year, month, and day, such as `YYYY-MM-DD`.";
+const NEEDS_WEEK = "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.";
+// What the red line says when Navigator files a unit's notes in folders by date
+const DATED = (unit, pattern, folder) => `Notebook Navigator's ${unit} pattern, \`${pattern}\`, puts these notes in folders by date, which Plainday can't follow yet. It keeps them in \`${folder}\` instead.`;
+
+test("why Plainday doesn't follow Navigator's pattern: none, no folder of its own, or folders by date", () => {
+    const followed = vault({ navigator: NAVIGATOR() });
+    for (const unit of ["day", "week", "month", "year"]) assert.equal(followed.navigatorUnfollowed(unit), null, unit);
+    assert.equal(vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD" }), periodic: "daily-notes" }).navigatorUnfollowed("day"), null, "Navigator doesn't own them");
+    const odd = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "" }) });
+    assert.deepEqual(plain(odd.navigatorUnfollowed("day")), { reason: "datedFolders", pattern: "YYYY/YYYYMMDD" });
+    assert.deepEqual(plain(odd.navigatorUnfollowed("week")), { reason: "empty", pattern: "" });
+    const homeless = vault({ navigator: { ...NAVIGATOR(), vaultProfiles: [{ periodicNotesFolder: "" }] } });
+    assert.deepEqual(plain(homeless.navigatorUnfollowed("month")), { reason: "noFolder", pattern: "[months]/YYYY-MM" });
+});
+
+test("the red line: where Navigator puts the notes when Plainday can't follow it, then what Plainday needs (Brian, 11/20)", () => {
+    // The row shows `MM-DD` and that the Daily notes plugin sets it, so the line says only what's needed
     const daily = vault({ daily: { format: "MM-DD", folder: "Reference/Planner/days/2026" }, periodic: "daily-notes" });
-    assert.equal(daily.nameWarning("day", "en"), "`MM-DD`, set in Settings → Daily notes, names the note for 9/30/2026 `09-30`, which doesn't give the year. "
-        + "For now, Plainday reads a note's date from its name alone, so the name needs the year, month and day, such as `YYYY-MM-DD`.");
+    assert.equal(daily.periodicWarning("day", "en"), NEEDS_DAY);
+    const followed = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/MM-DD" }) });
+    assert.equal(followed.periodicWarning("day", "en"), NEEDS_DAY);
+    // Folders by date: where Plainday keeps the notes instead, the Daily notes plugin's folder for a day
+    const dated = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD" }) });
+    assert.equal(dated.periodicWarning("day", "en"), `${DATED("day", "[days]/YYYY/MM-DD", "Reference/Planner/days")} ${NEEDS_DAY}`);
 
+    // Navigator's defaults: the day and the month only by their folders, the week by both, the year not at all
     const defaults = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "gggg/[W]ww", calendarCustomMonthPattern: "YYYY/YYYYMM", calendarCustomYearPattern: "YYYY" }) });
-    assert.equal(defaults.nameWarning("week", "en"), "Notebook Navigator's week pattern, `gggg/[W]ww`, names the note for the week of 9/30/2026 `W40`, which doesn't give the year. "
-        + "For now, Plainday reads a note's date from its name alone, so the name needs the week's year and number, such as `gggg[w]ww`. Change it in Settings → Notebook Navigator → Calendar.");
-    for (const unit of ["day", "month", "year"]) assert.equal(defaults.nameWarning(unit, "en"), "", `Navigator's default ${unit} pattern gives the whole date in its name`);
+    assert.equal(defaults.periodicWarning("day", "en"), DATED("day", "YYYY/YYYYMMDD", "Reference/Planner/days"));
+    assert.equal(defaults.periodicWarning("week", "en"), `${DATED("week", "gggg/[W]ww", "Reference/Planner/weeks")} ${NEEDS_WEEK}`);
+    assert.equal(defaults.periodicWarning("month", "en"), DATED("month", "YYYY/YYYYMM", "Reference/Planner/months"));
+    assert.equal(defaults.periodicWarning("year", "en"), "", "`YYYY` alone: under Navigator's folder, as it names it");
 
-    const day = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD" }) });
-    assert.match(day.nameWarning("day", "en"), /^Notebook Navigator's day pattern, `\[days\]\/YYYY\/MM-DD`, names the note for 9\/30\/2026 `09-30`, which doesn't give the year\. .* Change it in Settings → Notebook Navigator → Calendar\.$/);
+    // No pattern isn't a problem: the notes are Plainday's own. No folder of its own is.
+    assert.equal(vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "" }) }).periodicWarning("week", "en"), "");
+    const homeless = vault({ navigator: { ...NAVIGATOR(), vaultProfiles: [{ periodicNotesFolder: "" }] } });
+    assert.equal(homeless.periodicWarning("week", "en"), "Notebook Navigator has no folder set for its periodic notes, which Plainday needs. It keeps these notes in `Reference/Planner/weeks` instead.");
 
-    // A week named by the calendar year names the week that starts a year by the year before
+    // Names alone
     const slip = vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "[weeks]/YYYY[w]ww" }) });
-    assert.match(slip.nameWarning("week", "en"), /^Notebook Navigator's week pattern, `\[weeks\]\/YYYY\[w\]ww`, names the note for the week of 12\/28\/2026 `2026w01`, which Plainday reads as the week of 12\/28\/2025\. .*such as `gggg\[w\]ww`\./);
-    // An ISO week pattern is told the ISO one
+    assert.equal(slip.periodicWarning("week", "en"), NEEDS_WEEK, "the calendar year's week names the week that starts a year by the year before");
     const iso = vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "[weeks]/YYYY-[W]WW" }) });
-    assert.match(iso.nameWarning("week", "de"), /`2027-W53`, which Plainday can't read as a week\. .*such as `GGGG-\[W\]WW`\./);
-
+    assert.match(iso.periodicWarning("week", "de"), /such as `GGGG-\[W\]WW`\.$/, "an ISO week pattern is told the ISO one");
     const month = vault({ navigator: NAVIGATOR({ calendarCustomMonthPattern: "[months]/MM" }) });
-    assert.match(month.nameWarning("month", "en"), /names the note for September 2026 `09`, which doesn't give the year\. .*the year and month, such as `YYYY-MM`\./);
-    const days = vault({ daily: { format: "DD" }, periodic: "daily-notes" });
-    assert.match(days.nameWarning("day", "en"), /`30`, which doesn't give the year or the month\./);
-    // In September only the year is wrong; in February a 30th doesn't read at all. Either way, the
-    // note named is 2026's 9/30
-    for (const [day, said] of [[new Date(2026, 8, 12), /names the note for 9\/30\/2026 `30`, which doesn't give the year\./], [new Date(2027, 1, 10), /names the note for 9\/30\/2026 `30`, which Plainday can't read as a day\./]]) {
-        moment.now = () => day.getTime();
-        try {
-            assert.match(days.nameWarning("day", "en"), said);
-        } finally {
-            moment.now = () => TODAY;
-        }
-    }
+    assert.equal(month.periodicWarning("month", "en"), "Plainday reads a note's date from its name alone, so it needs the year and month, such as `YYYY-MM`.");
 });
 
 test("days are checked in moment's language, weeks, months and years in the week settings'", () => {
-    const days = vault({ daily: { format: "dddd D MMMM" }, periodic: "daily-notes" });
-    moment.locale("de");
+    // moment can't read its own Ukrainian month names back strictly, so a name with them can't work
+    // there, though it does in English
+    const days = vault({ daily: { format: "D MMMM YYYY" }, periodic: "daily-notes" });
+    assert.equal(days.periodicWarning("day"), "");
+    moment.locale("uk");
     try {
-        assert.match(days.nameWarning("day"), /^`dddd D MMMM`, set in Settings → Daily notes, names the note for 9\/30\/2026 `Mittwoch 30 September`, which doesn't give the year\./);
+        assert.equal(days.periodicWarning("day"), NEEDS_DAY);
     } finally {
         moment.locale("en");
     }
-    // Navigator's calendar locale, French here, through DatePrompt.weekRules
-    const months = vault({ navigator: NAVIGATOR({ calendarCustomMonthPattern: "[months]/MMMM", calendarLocale: "fr" }) });
-    assert.match(months.nameWarning("month"), /names the note for September 2026 `septembre`, which doesn't give the year\./);
+    // Navigator's calendar locale, through DatePrompt.weekRules: a week named by a day in it
+    const weeks = (calendarLocale) => vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "[weeks]/[Week of] D MMMM YYYY", calendarLocale }) });
+    assert.equal(weeks("en").periodicWarning("week"), "");
+    assert.match(weeks("uk").periodicWarning("week"), /so it needs the week's year and number/);
 });

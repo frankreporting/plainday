@@ -582,7 +582,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         }
         // The periodic folders say their default in Brian's form (11/16), and nothing says "changing it
         // doesn't move the notes" any more
-        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` in same folder as daily notes.");
+        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` in same folder as daily notes. Named `gggg[w]ww`.", "and what names them (OBS-299)");
         assert.equal(items.find((i) => i.name === "Weekly note").desc, undefined, "the placeholder says the default, so no description");
         assert.equal(draw("Weekly note").s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md");
         for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
@@ -813,7 +813,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.equal(page().displayValue, "Notebook Navigator");
         const weekly = draw("Weekly notes");
         assert.equal(weekly.control.inputEl.value, "", "no input to type into");
-        assert.match(weekly.descEl.text, /^`Planner\/weeks`\. Set in Notebook Navigator\.$/);
+        assert.match(weekly.descEl.text, /^`Planner\/weeks`, named `gggg\[w\]ww`\. Set in Notebook Navigator\.$/, "every folder row says what names its notes (OBS-299)");
         assert.match(draw("Daily notes").descEl.text, /^`Planner\/days`, named `YYYY-MM-DD`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Weekly note").descEl.text, /^`T\/Week\.md`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Monthly note").descEl.text, /^None\. Set in Notebook Navigator\.$/, "a calendar with no template of its own");
@@ -824,11 +824,14 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         NAVIGATOR.calendarCustomWeekPattern = "gggg/[W]ww";
         try {
             const bad = draw("Weekly notes");
-            assert.match(bad.descEl.text, /so they sit beside the daily notes\.$/, "the row's own text, as before");
+            assert.equal(bad.descEl.text, "`Planner/weeks`, named `[W]ww`. Set in Notebook Navigator.", "where Plainday keeps them and the name it names them by, as every row says; the red line says why");
             assert.equal(warnings(bad).length, 1);
-            assert.match(warnings(bad)[0], /^Notebook Navigator's week pattern, `gggg\/\[W\]ww`, names the note for the week of 9\/30\/2026 `W40`, which doesn't give the year\./);
+            assert.equal(warnings(bad)[0], "Notebook Navigator's week pattern, `gggg/[W]ww`, puts these notes in folders by date, which Plainday can't follow yet. It keeps them in `Planner/weeks` instead. "
+                + "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.");
             assert.equal(warnings(draw("Weekly notes")).length, 1, "a redraw keeps one line");
-            assert.deepEqual(warnings(draw("Weekly note")), [], "a template row isn't checked");
+            const template = draw("Weekly note");
+            assert.deepEqual(warnings(template), [], "a template row isn't checked");
+            assert.equal(template.descEl.text, "None, until Plainday can file these notes where Notebook Navigator does.");
         } finally {
             NAVIGATOR.calendarCustomWeekPattern = "[weeks]/gggg[w]ww";
         }
