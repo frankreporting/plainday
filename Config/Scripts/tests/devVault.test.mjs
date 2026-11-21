@@ -327,8 +327,8 @@ test("done: restores every tracked note, removes the plan and the lock, and retu
 
 test("done: a write the app makes after the reload is restored, not left behind", (t) => {
     // Seen for real: `done` restored the tree, checked it clean, then its own reload set the
-    // startup report writing, and the tree was dirty again a moment later. The next thing to read
-    // this clone is UpdateObsidianPM, which refuses to install from a tree that isn't clean.
+    // startup report writing, and the tree was dirty again a moment later. The next `test`
+    // refuses a tree that isn't clean.
     const f = setUp();
     cleanUp(t, f);
     f.setState("running");

@@ -14,7 +14,6 @@ const TimeReport = load("timeReport.js", "TimeReport");
 const tr = new TimeReport();
 const billing = new (load("billing.js", "Billing"))();
 const inv = new (load("invoice.js", "Invoice"))();
-const UpdateObsidianPM = load("updateObsidianPM.js", "UpdateObsidianPM");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const ON = { rows: 1, columns: 1 };
@@ -413,26 +412,6 @@ test("Rebuild keeps the freeze you set on an invoice's table, and the other foll
     assert.equal(comments(rebuilt, "Billed entries"), "%%freeze 4 1%% %%custom%%");
     assert.equal(comments(rebuilt, "Billable hours"), "%%freeze 2 1%% %%default 2 1%%");
     assert.equal(billing.readBilled(rebuilt, tr).head, true);
-});
-
-// ------------------------------------------------------------------ installing
-
-test("UpdateObsidianPM never installs, lists or removes a vault's own Table Settings or Invoice Settings (OBS-281)", () => {
-    const up = new UpdateObsidianPM();
-    for (const PATH of ["Config/Table Settings.md", "Config/Invoice Settings.md"]) {
-        assert.equal(up.installs(PATH), false, PATH);
-        const listed = (plan) => Object.entries(plain(plan)).filter(([, paths]) => paths.some?.((p) => p === PATH || p?.to === PATH)).map(([k]) => k);
-        // The repository dropped them; a vault that was given Table Settings keeps its copy, as you left it
-        // or as it was installed, and it leaves the record of what's installed
-        const source = new Map([["Config/Scripts/Templater/recordEvent.js", "s1"]]);
-        for (const vault of ["repo", "yours"]) {
-            const plan = up.plan(source, new Map([[PATH, vault]]), new Map([[PATH, "repo"]]));
-            assert.deepEqual(listed(plan), [], `${PATH}: ${vault}`);
-            assert.equal(up.manifestAfter(source, new Map([[PATH, "repo"]]), up.steps(plan)).has(PATH), false);
-        }
-        // Even a clone that still had one wouldn't install it
-        assert.deepEqual(listed(up.plan(new Map([[PATH, "repo"]]), new Map())), [], `${PATH} from an older clone`);
-    }
 });
 
 // ------------------------------------------------------------------ writing to an open note

@@ -376,9 +376,8 @@ export default class Billing {
 
     // The invoice folder as a vault path: { folder, error }, with "" for none. It reads as any folder
     // setting does (pathOf), and can't be inside `Config` or the archive (`archive`, the archive folder
-    // as Settings → Plainday → Folders has it, OBS-283), so an invoice (or the Invoices base, which
-    // UpdateObsidianPM places the same way) never lands outside the vault, in a hidden folder, or
-    // where a base can't list it.
+    // as Settings → Plainday → Folders has it, OBS-283), so an invoice never lands outside the vault,
+    // in a hidden folder, or where a base can't list it.
     folderOf(raw, archive = null) {
         const read = this.pathOf(raw);
         if (!read.folder) return read;

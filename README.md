@@ -134,7 +134,6 @@ Run from the command palette ("Plainday: Add note"), a hotkey, or the command li
 | Time report | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note, and lists every Problem in the error log |
 | View error logs | | Opens the error log: every Problem the time report and the calendar sync found, one line per kind per note |
 | Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick (on a flat-fee project, records the day its fee was earned); on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
-| Update Obsidian PM | | Installs this repository's system files into your vault from a local clone (see below) |
 
 The manual's *Commands* section says exactly what each one does.
 
@@ -153,7 +152,8 @@ Startup scripts (run when Obsidian starts):
 
 | Script | What it does |
 | --- | --- |
-| `Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Not installed by Update Obsidian PM |
+| `Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Never copied into a vault |
+| `Scripts/update-vault.mjs` | Copies the system's files from the clone's `main` into a vault that uses the system: `node Config/Scripts/update-vault.mjs --vault <folder> [--dry-run]` from the clone (see *Using it for your own notes*). Never copied into a vault |
 
 ## Raycast
 
@@ -181,15 +181,15 @@ GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests
 
 Don't make your own vault a copy of this repository: it carries the sample notes, and their paths (daily notes, weekly notes, `Projects/`) would collide with yours.
 
-Instead, install Plainday in your vault, clone this repository somewhere outside it, and install the rest of the system (the templates, bases and manual) with the **Update Obsidian PM** command:
+Instead, install Plainday in your vault, clone this repository somewhere outside it, and copy the rest of the system (the templates, the Templater scripts and the manual) into your vault with `Config/Scripts/update-vault.mjs`:
 
-1. Install Templater, Natural Language Dates (Revived) and BRAT, then Plainday through BRAT, as in *Try it* (steps 2 and 3). Before your first invoice, add your name and choose an invoice folder in **Settings → Plainday → Invoices**.
-2. Run **Plainday: Update Obsidian PM** from the command palette. It asks where your clone is the first time: the folder with Plainday's `manifest.json`.
-3. It pulls the clone, then lists what would be added, updated and removed. Nothing is written until you confirm. The clone has to be on `main` with nothing uncommitted: it's also where a branch is tested, and only what a pull request merged installs. That's checked again when you click Update, so a dialog left open while the clone moved (a test started, a pull ran in a terminal, a worktree was deleted) installs nothing and says so.
+1. Install Templater, Natural Language Dates (Revived) and BRAT, then Plainday through BRAT, as in *Try it* (steps 2 and 3). BRAT keeps Plainday up to date. Before your first invoice, add your name and choose an invoice folder in **Settings → Plainday → Invoices**.
+2. From the clone, with Node 20 or later: `node Config/Scripts/update-vault.mjs --vault <your vault's folder> --dry-run` lists what it would copy and writes nothing. Without `--dry-run`, it copies.
+3. Set Templater and the Daily notes plugin up as the demo's are: their settings are `.obsidian/plugins/templater-obsidian/data.json` and `.obsidian/daily-notes.json` in the clone. The script leaves your Obsidian settings alone.
 
-What it installs: everything the repository has under `Config/` (the manual included) but the tests, plus `README.md`, `CLAUDE.md`, `Projects/Projects.base` and the two settings files the scripts depend on (`daily-notes.json` and Templater's `data.json`). The Invoices base goes beside your invoices, in the invoice folder you chose in Settings → Plainday, once you have (see the manual's *Where invoices live*). The demo's own invoices and Plainday settings are never installed. What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them, your own tests included), your other Obsidian settings, and the script that tests a branch in the clone. Plainday's class files aren't installed either: the plugin runs its own build of them. A vault that took an update before they moved to `plugin/src/` gets its old copies in `Config/Scripts/CustomJS/`, and the tests it was given in `Config/Scripts/tests/`, offered for removal.
+What it copies: everything the repository has under `Config/` (the manual included) but the tests and the two scripts for working on the system, plus `README.md` and `CLAUDE.md`. It takes them from the clone's `main` as git has it, not from the clone's folder, which may have a branch checked out, and it refuses until `main` is pulled (`git pull --ff-only`). What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them, your own tests included), and your Obsidian settings. The demo's two bases outside `Config/`, `Projects/Projects.base` and `Reference/Invoices/Invoices.base`, aren't copied either: put a copy beside your projects and your invoices once, and the views you give them stay yours.
 
-A file you've edited yourself is never overwritten silently: it's listed separately, and left alone unless you ask. A file the repository has dropped is offered for removal and goes to the vault's trash. Two files record what happened, and neither is in the repository: `Config/Scripts/update-source` (where your clone is) and `update-manifest.json` (what was installed, which is how your edits are told apart from an old version). If an update stops partway (a file that can't be written, a removal the trash refuses, a file that changed under the dialog), the manifest still records what landed and names where it stopped, so the next run picks up from there instead of calling the copied files your own edits.
+A file you've edited yourself is never overwritten: it's listed, and stays as it is (to take the repository's version, delete yours and run the script again). Nothing is ever removed: a file the repository has dropped is listed once and stays in your vault as yours. Your vault's `Config/Scripts/update-manifest.json`, which isn't in the repository, records what was copied, which is how your edits are told apart from an old version. If a copy stops partway, the record says what landed, and the next run picks up from there.
 
 Run it again whenever you want the latest. Some versions change how your notes are written and come with a one-time conversion to run after installing; the manual says when and how (for the line marks: *Links at the end of a line*, *The marks before*). Until it has run, the time report, invoices and the calendar sync write nothing and say why.
 
