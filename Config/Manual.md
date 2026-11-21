@@ -477,7 +477,7 @@ aliases:
   - 9/17/26 Kestrel standup
 tags:
   - log
-parent: "[[Kestrel Outfitters 2026|Kestrel Outfitters 2026]]"
+parent: "[[Kestrel Outfitters 2026|⭕.Freelance.Kestrel Outfitters 2026]]"
 date: 2026-09-17
 time: 9:00am
 endTime: 9:20am

@@ -237,10 +237,13 @@ export default class MeetingLog {
             if (tplText.includes("<%")) unused = true;
             else text = this.withTemplate(text, notes.fill(tplText, { name, start: own.date }), own);
         }
-        let file = into;
+        let file = into, top = null;
         if (into) {
+            // Written on disk, not through its editor: the move below sets SyncArea going, which writes the note's
+            // `parent` on disk, and an editor's unsaved text would then be lost. It's blank, so nothing typed is.
             notes.hold(into.path);
-            await notes.rewrite(into, (now) => text + now.replace(/^\s+/, ""));
+            top = notes.cursorAtTopOf(into);
+            await app.vault.process(into, (now) => text + now.replace(/^\s+/, ""));
         } else {
             notes.hold(path);
             try {
@@ -260,6 +263,8 @@ export default class MeetingLog {
             notes.hold(path);
             await app.fileManager.renameFile(file, path);
         }
+        // The editor shows what's on disk a moment later; a cursor still at its top goes below the properties
+        if (top) setTimeout(() => notes.cursorBelowProperties(top), 100);
         return { file, made: true };
     }
 
