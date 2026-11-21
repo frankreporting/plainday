@@ -5,8 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { standIn, PLANNER, YAML } from "./standInVault.mjs";
+import { standIn, NN, PLANNER, YAML } from "./standInVault.mjs";
 import { loadClass } from "../../../plugin/classShape.mjs";
+import { plainName } from "./dayNames.mjs";
 
 const day = (d) => `${PLANNER}/days/${d}.md`;
 const KES = "Projects/Freelance/Kestrel/Kestrel.md";
@@ -130,12 +131,13 @@ test("finish: a blank note an event line's ⋯ links becomes its log, filed wher
 test("FinishLinkedLogs finishes only a note made blank here just now, named with a day and a title, that Templater isn't writing (OBS-122)", async () => {
     const finished = [];
     let pending = new Set();
-    const plainday = {
-        plugin: {}, EventLog: { making: new Map([["2026-09-18 Ours", 1]]), finish: async (f) => { finished.push(f.path); return "finished"; } },
-        PeriodicNotes: { pending: () => pending },
-    };
     const files = new Map();
     const app = { vault: { getFileByPath: (p) => files.get(p) ?? null } };
+    // The real EventLog reads a name's day, by the demo's names; what it would finish is recorded
+    const plainday = { plugin: {}, PeriodicNotes: { pending: () => pending, reader: () => plainName } };
+    plainday.EventLog = Object.assign(new (loadClass("eventLog.js", vm.createContext({ app, plainday })))(), {
+        making: new Map([["2026-09-18 Ours", 1]]), finish: async (f) => { finished.push(f.path); return "finished"; },
+    });
     const C = loadClass("finishLinkedLogs.js", vm.createContext({ app, plainday, window: {}, setTimeout, console }));
     const f = new C();
     const note = (path, { size = 0, ctime = 1000, extension = "md" } = {}) => {
@@ -145,7 +147,7 @@ test("FinishLinkedLogs finishes only a note made blank here just now, named with
     };
     assert.equal(await f.onCreate(note("2026-09-18 Wireframe sign-off.md"), 2000), "finished");
     for (const [why, file] of [
-        ["no title", note("2026-09-18.md")], ["not a day", note("Kickoff.md")], ["Plainday is making it", note("Inbox/2026-09-18 Ours.md")],
+        ["no title", note("2026-09-18.md")], ["not a day", note("Kickoff.md")], ["a week, not a day", note("2026w38 Review.md")], ["Plainday is making it", note("Inbox/2026-09-18 Ours.md")],
         ["it has text", note("2026-09-18 Notes.md", { size: 12 })], ["it arrived (an old creation time)", note("2026-09-18 Synced.md", { ctime: 1000 - 6000 })],
         ["not a note", note("2026-09-18 Board.canvas", { extension: "canvas" })],
     ]) assert.equal(await f.onCreate(file, 2000), null, why);
@@ -202,4 +204,35 @@ test("New event log: the day of the daily note you're in, else today; the title 
     // The box says the day in words near today, else as Plainday writes dates
     assert.deepEqual(["2026-09-16", "2026-09-17", "2026-09-15", "2026-11-21"].map((d) => cmd.when(d, "2026-09-16")),
         ["Today", "Tomorrow", "Yesterday", "Sat 11/21/26"]);
+});
+
+test("in a vault whose daily notes are named DD-MM-YYYY, a log is named with the day's name, its date still YYYY-MM-DD: Add note, New event log, a clicked link (OBS-300)", async () => {
+    const DD = { ...NN, calendarIntegrationMode: "notebook-navigator", calendarCustomFilePattern: "[days]/DD-MM-YYYY" };
+    const dd = (d) => `${PLANNER}/days/${d}.md`;
+    const notes = {
+        [KES]: NOTES[KES], [dd("17-09-2026")]: NOTES[day("2026-09-17")],
+        [dd("18-09-2026")]: "- [<] 10:30am\tWireframe sign-off [[Kestrel|⭕]] [[18-09-2026 Wireframe sign-off|⋯]]\n\t- 11:00am\n",
+        "18-09-2026 Wireframe sign-off.md": "",
+    };
+    const v = standIn({ nn: DD, notes, open: dd("17-09-2026"), at: 0 });
+    await v.addTaskNote();
+    assert.equal(v.notes()[dd("17-09-2026")].split("\n")[0], "- [<] 9:00am\tKestrel standup [[Kestrel|⭕]] [[17-09-2026 Kestrel standup|⋯]] ^e-q7m2xk");
+    assert.equal(v.notes()[`${LOGS}/17-09-2026 Kestrel standup.md`],
+        logText({ alias: "9/17/26 Kestrel standup", parent: "[[Kestrel|Kestrel Outfitters]]", date: "2026-09-17", time: "9:00am", endTime: "9:20am" }));
+    // New event log takes the day from the daily note's name, read the same way
+    const cmd = new (loadClass("newEventLog.js", v.globals))();
+    assert.equal(cmd.day(), "2026-09-17");
+    v.plainday.EventLog.open = async () => {};
+    cmd.ask = async () => "Coffee with Odile";
+    await cmd.invoke();
+    assert.equal(v.notes()[dd("17-09-2026")].split("\n")[6], "- [<] Coffee with Odile [[17-09-2026 Coffee with Odile|⋯]]");
+    assert.equal(v.notes()["Inbox/17-09-2026 Coffee with Odile.md"], logText({ alias: "9/17/26 Coffee with Odile", date: "2026-09-17" }));
+    // A clicked ⋯ to a log named the day's way becomes that log
+    const log = v.plainday.EventLog;
+    assert.equal(await log.finish(v.app.vault.getFileByPath("18-09-2026 Wireframe sign-off.md")), "finished");
+    assert.equal(v.notes()[`${LOGS}/18-09-2026 Wireframe sign-off.md`],
+        logText({ alias: "9/18/26 Wireframe sign-off", parent: "[[Kestrel|Kestrel Outfitters]]", date: "2026-09-18", time: "10:30am", endTime: "11:00am" }));
+    // A name spelled YYYY-MM-DD isn't a day's log in this vault; CalNav's openLog names its log the day's way too
+    assert.equal(log.dayOf("2026-09-17 Kestrel standup"), null);
+    assert.equal(log.nameFor("2026-09-16", "Sync: Q3 plan"), "16-09-2026 Sync - Q3 plan");
 });
