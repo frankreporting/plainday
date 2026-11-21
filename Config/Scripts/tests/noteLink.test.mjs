@@ -21,9 +21,9 @@ const Schedule = load("schedule.js", "Schedule");
 const DueDate = load("setDueDate.js", "DueDate");
 const TimeReport = load("timeReport.js", "TimeReport");
 const CalendarSync = load("calendarSync.js", "CalendarSync");
-const MeetingLog = load("meetingLog.js", "MeetingLog");
-const meetingLog = new MeetingLog();
-const recordEvent = (...args) => JSON.parse(JSON.stringify(meetingLog.recordEvent(...args)));
+const EventLog = load("eventLog.js", "EventLog");
+const eventLog = new EventLog();
+const recordEvent = (...args) => JSON.parse(JSON.stringify(eventLog.recordEvent(...args)));
 const [linker, report, sync] = [new AddProjectLink(), new TimeReport(), new CalendarSync()];
 
 const SPELLINGS = { "⋯": "⋯", "↗": "↗", "↗ + U+FE0F": "↗\uFE0F" };

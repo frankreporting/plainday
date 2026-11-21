@@ -1,15 +1,15 @@
-// Tests for MeetingLog.recordEvent, the event line a log is recorded on (the Log template's recordEvent.js
+// Tests for EventLog.recordEvent, the event line a log is recorded on (the Log template's recordEvent.js
 // until OBS-122). Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 // It borrows the calendar sync's line shape, matching and sort order, so the sync class is loaded with vm
-// the way its own tests do, and passed in as MeetingLog passes plainday.CalendarSync.
+// the way its own tests do, and passed in as EventLog passes plainday.CalendarSync.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript, loadClass } from "../../../plugin/classShape.mjs";
 
-const log = new (loadClass("meetingLog.js", vm.createContext({})))();
+const log = new (loadClass("eventLog.js", vm.createContext({})))();
 const recordEvent = (...args) => JSON.parse(JSON.stringify(log.recordEvent(...args)));
 // Objects made in the vm context have its prototypes; compared as plain data
 const eventTimes = (...args) => JSON.parse(JSON.stringify(log.eventTimes(...args)));

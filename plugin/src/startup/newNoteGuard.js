@@ -8,7 +8,7 @@ export default class NewNoteGuard {
     // properties is empty, unless the note is in its own set of files it's still writing. Two kinds of
     // note reach it that aren't new:
     //   - one that appears with its properties already there: delivered by Sync, moved in from
-    //     outside, restored. A meeting log with no notes yet, or a person note with only properties,
+    //     outside, restored. A event log with no notes yet, or a person note with only properties,
     //     went through the templates on a phone catching up, and the Log template trashed one.
     //   - one a template has just made and moved: Templater lists it by the path it was made at, and
     //     checks the path it's at now, so the trigger runs the templates on it a second time.

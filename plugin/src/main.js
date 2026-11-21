@@ -52,7 +52,7 @@ export default class Plainday extends Plugin {
             }
         }
         // For the templates and for tools outside Obsidian, which call a class by eval:
-        // `plainday.SnapshotDailyNotes.invoke()`, CalNav's `plainday.MeetingLog.openLog(…)`
+        // `plainday.SnapshotDailyNotes.invoke()`, CalNav's `plainday.EventLog.openLog(…)`
         window.plainday = plainday;
 
         // Before anything reads them; the defaults when they don't load

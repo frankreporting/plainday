@@ -181,7 +181,7 @@ test("withOwn: the ⋯ goes ahead of a ↗ and an ID, after the ⭕; a line with
     assert.equal(add.withOwn(has, N), has);
 });
 
-test("eventLink: a meeting log named with the day's date, as a ⋯ note link; blank, it waits for the name", () => {
+test("eventLink: a event log named with the day's date, as a ⋯ note link; blank, it waits for the name", () => {
     assert.equal(add.eventLink("2026-09-16", "Weekly sync"), "[[2026-09-16 Weekly sync|⋯]]");
     assert.equal(add.eventLink("2026-09-16", ""), "[[2026-09-16 |⋯]]");
 });
@@ -262,7 +262,7 @@ test("OBS-55: no template asks for a project", () => {
         assert.doesNotMatch(template, /tp\.system\.suggester|tp\.user\.pickParent|FuzzySuggestModal/, `${name} shows no menu`);
     }
     assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
-    // The Log template is content only: Plainday makes the log (MeetingLog, OBS-122)
+    // The Log template is content only: Plainday makes the log (EventLog, OBS-122)
     assert.equal(read("Log"), "", "the repository's Log template is empty");
     // A new project or area gets its folder at the top of Projects/, and its note in it
     for (const name of ["Project", "Area"]) {
@@ -487,7 +487,7 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
     assert.equal(shown.placeholder, 'Move "B" to which project or area? (Esc: cancel)');
 });
 
-// A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a MeetingLog that records what
+// A stand-in for invoke: one editor line, notes at `paths` ([path, tags]), and a EventLog that records what
 // it's asked to make
 const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {}) => {
     const calls = [];
@@ -519,7 +519,7 @@ const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {})
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
     const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
-        app, plainday: withFolders({ DueDate: new DueDate(), MeetingLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); } } }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
+        app, plainday: withFolders({ DueDate: new DueDate(), EventLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); } } }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
     }));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
@@ -551,7 +551,7 @@ test("invoke on an event line: wherever the cursor is, the log is named from the
 test("invoke on an event line makes the log right away, without Templater, after saving the line (OBS-57, OBS-122)", async () => {
     const ev = "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]]";
     const made = await invokeOn(ev, { ch: 16, paths: HAWK });
-    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", "the ⭕ stays, and MeetingLog files the log there");
+    assert.equal(made.text, "- [<] 1:30pm\tKickoff call [[Hawk Ledger|⭕]] [[2026-09-14 Kickoff call|⋯]]", "the ⭕ stays, and EventLog files the log there");
     assert.deepEqual(made.calls, ["write line", "save", "log 2026-09-14: Kickoff call"]);
     // The cursor at the end of the line makes it just the same (fix round 2); a line with no title,
     // or one that's refused, makes nothing
@@ -586,9 +586,9 @@ test("isFinished: a status of Done or Canceled, in any case, finishes a project 
     assert.equal(add.isFinished({}), false, "no frontmatter");
 });
 
-test("one place for the logs folder's name: MeetingLog and every other script ask AddTaskNote (OBS-164)", () => {
-    const made = classSource("meetingLog.js");
-    assert.match(made, /tasks\.logsFolderIn\(home\.parent\.path\)/, "MeetingLog files a log where AddTaskNote says");
+test("one place for the logs folder's name: EventLog and every other script ask AddTaskNote (OBS-164)", () => {
+    const made = classSource("eventLog.js");
+    assert.match(made, /tasks\.logsFolderIn\(home\.parent\.path\)/, "EventLog files a log where AddTaskNote says");
     assert.match(made, /await tasks\.makeFolder\(folder\);/, "and makes the folder through it, icon and all");
     // No other class file spells a logs folder in its code (comments aside)
     for (const name of classFiles().map((f) => f.split("/")[1]).filter((n) => n !== "addTaskNote.js")) {

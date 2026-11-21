@@ -1,4 +1,4 @@
-// Meeting logs made in code (MeetingLog, OBS-122): Add note on an event line, New meeting log, a ⋯ link clicked to a
+// Event logs made in code (EventLog, OBS-122): Add note on an event line, New event log, a ⋯ link clicked to a
 // log not made yet (FinishLinkedLogs), and CalNav's Open Log Note (openLog), on a stand-in vault with the real
 // classes. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
@@ -49,7 +49,7 @@ test("Add note on an event line makes its log without Templater: in its project'
 
 test("make: an event line of that title gets the log's link; with none, a line is added after the day's events; a log of that name is found, not made again (OBS-122)", async () => {
     const v = standIn({ notes: NOTES, open: day("2026-09-17"), at: 6 });
-    const log = v.plainday.MeetingLog;
+    const log = v.plainday.EventLog;
     const linked = await log.make({ date: "2026-09-17", title: "Call with Rafe" });
     assert.equal(linked.made, true);
     assert.equal(linked.file.path, `${LOGS}/2026-09-17 Call with Rafe.md`);
@@ -114,7 +114,7 @@ test("the Log template through Templater: its properties added, then Plainday's 
 test("finish: a blank note an event line's ⋯ links becomes its log, filed where the line says; any other blank dated note is left alone (OBS-122)", async () => {
     const notes = { ...NOTES, [day("2026-09-18")]: "- [<] 10:30am\tWireframe sign-off [[Kestrel|⭕]] [[2026-09-18 Wireframe sign-off|⋯]]\n\t- 11:00am\n" };
     const v = standIn({ notes: { ...notes, "2026-09-18 Wireframe sign-off.md": "", "2026-09-19 Kickoff.md": "" } });
-    const log = v.plainday.MeetingLog;
+    const log = v.plainday.EventLog;
     assert.equal(await log.finish(v.app.vault.getFileByPath("2026-09-18 Wireframe sign-off.md")), "finished");
     const path = `${LOGS}/2026-09-18 Wireframe sign-off.md`;
     assert.equal(v.notes()[path], logText({ alias: "9/18/26 Wireframe sign-off", parent: "[[Kestrel|Kestrel Outfitters]]", date: "2026-09-18", time: "10:30am", endTime: "11:00am" }));
@@ -123,7 +123,7 @@ test("finish: a blank note an event line's ⋯ links becomes its log, filed wher
     assert.equal(v.notes()["2026-09-19 Kickoff.md"], "");
     // One with something in it already is someone else's
     const w = standIn({ notes: { ...notes, "2026-09-18 Wireframe sign-off.md": "Notes\n" } });
-    assert.equal(await w.plainday.MeetingLog.finish(w.app.vault.getFileByPath("2026-09-18 Wireframe sign-off.md")), null);
+    assert.equal(await w.plainday.EventLog.finish(w.app.vault.getFileByPath("2026-09-18 Wireframe sign-off.md")), null);
     assert.equal(w.notes()["2026-09-18 Wireframe sign-off.md"], "Notes\n");
 });
 
@@ -131,7 +131,7 @@ test("FinishLinkedLogs finishes only a note made blank here just now, named with
     const finished = [];
     let pending = new Set();
     const plainday = {
-        plugin: {}, MeetingLog: { making: new Map([["2026-09-18 Ours", 1]]), finish: async (f) => { finished.push(f.path); return "finished"; } },
+        plugin: {}, EventLog: { making: new Map([["2026-09-18 Ours", 1]]), finish: async (f) => { finished.push(f.path); return "finished"; } },
         PeriodicNotes: { pending: () => pending },
     };
     const files = new Map();
@@ -165,38 +165,41 @@ test("openLog, for CalNav: finds the event's line as CalNav did, links it before
         return { format: (f) => (f === "h:mma" ? `${h % 12 || 12}:${at[2]}${h < 12 ? "am" : "pm"}` : assert.fail(`format ${f}`)) };
     };
     Object.assign(moment, base);
-    v.plainday.MeetingLog = new (loadClass("meetingLog.js", vm.createContext({ ...v.globals, moment })))();
+    v.plainday.EventLog = new (loadClass("eventLog.js", vm.createContext({ ...v.globals, moment })))();
     const opened = [];
     v.app.workspace.getLeaf = () => ({ openFile: async (f) => { opened.push(f.path); } });
-    const r = plain(await v.plainday.MeetingLog.openLog({ date: "2026-09-17", title: "Kestrel standup", start: "2026-09-17T09:00:00", allDay: false }));
+    const r = plain(await v.plainday.EventLog.openLog({ date: "2026-09-17", title: "Kestrel standup", start: "2026-09-17T09:00:00", allDay: false }));
     const path = `${LOGS}/2026-09-17 Kestrel standup.md`;
     assert.deepEqual(r, { status: "created", name: "2026-09-17 Kestrel standup", path, linked: true, dailyNote: true });
     assert.equal(v.notes()[day("2026-09-17")].split("\n")[0], "- [<] 9:00am\tKestrel standup [[Kestrel|⭕]] [[2026-09-17 Kestrel standup|⋯]] ^e-q7m2xk");
     assert.match(v.notes()[path], /\ntime: 9:00am\nendTime: 9:20am\n/);
-    const again = plain(await v.plainday.MeetingLog.openLog({ date: "2026-09-17", title: "Kestrel standup", start: "2026-09-17T09:00:00" }));
+    const again = plain(await v.plainday.EventLog.openLog({ date: "2026-09-17", title: "Kestrel standup", start: "2026-09-17T09:00:00" }));
     assert.equal(again.status, "opened");
     assert.deepEqual(opened, [path, path]);
     assert.equal(v.notes()[day("2026-09-17")].split("\n").filter((l) => l.includes("Kestrel standup")).length, 1, "one line, one link");
     // No line for the event: a log named for it, in the Inbox, and a line added
-    const none = plain(await v.plainday.MeetingLog.openLog({ date: "2026-09-17", title: "Hallway chat", allDay: true }));
+    const none = plain(await v.plainday.EventLog.openLog({ date: "2026-09-17", title: "Hallway chat", allDay: true }));
     assert.deepEqual([none.status, none.path, none.linked], ["created", "Inbox/2026-09-17 Hallway chat.md", false]);
-    assert.deepEqual(plain(await v.plainday.MeetingLog.openLog({ date: "someday", title: "x" })), { error: "someday isn't a date" });
+    assert.deepEqual(plain(await v.plainday.EventLog.openLog({ date: "someday", title: "x" })), { error: "someday isn't a date" });
 });
 
-test("New meeting log: the day of the daily note you're in, else today; the title typed makes the log and opens it (OBS-122)", async () => {
+test("New event log: the day of the daily note you're in, else today; the title typed makes the log and opens it (OBS-122)", async () => {
     const v = standIn({ notes: NOTES, open: day("2026-09-17"), today: "2026-09-16" });
-    const NewMeetingLog = loadClass("newMeetingLog.js", v.globals);
-    const cmd = new NewMeetingLog();
+    const NewEventLog = loadClass("newEventLog.js", v.globals);
+    const cmd = new NewEventLog();
     assert.equal(cmd.day(), "2026-09-17");
     v.open(KES, 0);
     assert.equal(cmd.day(), "2026-09-16", "anywhere else, today");
     v.open(day("2026-09-17"), 0);
     const opened = [];
-    v.plainday.MeetingLog.open = async (f) => { opened.push(f.path); };
+    v.plainday.EventLog.open = async (f) => { opened.push(f.path); };
     cmd.ask = async (date) => (date === "2026-09-17" ? "Call with Rafe" : null);
     await cmd.invoke();
     assert.deepEqual(opened, [`${LOGS}/2026-09-17 Call with Rafe.md`]);
     cmd.ask = async () => null;
     await cmd.invoke();
     assert.equal(opened.length, 1, "nothing typed, nothing made");
+    // The box says the day in words near today, else as Plainday writes dates
+    assert.deepEqual(["2026-09-16", "2026-09-17", "2026-09-15", "2026-11-21"].map((d) => cmd.when(d, "2026-09-16")),
+        ["Today", "Tomorrow", "Yesterday", "Sat. 11/21/26"]);
 });

@@ -1,12 +1,12 @@
 import { MarkdownView, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
-export default class MeetingLog {
-    // Meeting logs, made in code (OBS-122), as the Log template made them before: a log is named for its day and its
+export default class EventLog {
+    // Event logs, made in code (OBS-122), as the Log template made them before: a log is named for its day and its
     // event's title ("2026-09-17 Kestrel standup"), filed in the `›logs` folder of the project or area its event line's
     // ⭕ or 🗃️ names (else the Inbox), and its event line in the daily note links it. Plainday writes the properties
     // its code reads, in one write (noteText); then the Log template, when it has anything in it, adds its own.
-    // - make(): the one maker, for Add note on an event line, New meeting log and CalNav (openLog)
+    // - make(): the one maker, for Add note on an event line, New event log and CalNav (openLog)
     // - finish(): a note an event line's ⋯ links, made blank some other way (a click on the link), FinishLinkedLogs
     // - recordEvent() and eventTimes(): the event line and its times, moved here from the Log template's two
     //   Templater scripts as they were
@@ -48,7 +48,7 @@ export default class MeetingLog {
     // A note an event line's ⋯ links, made blank just now some other way (FinishLinkedLogs): it becomes that log, filled
     // and filed as make() would make it. Returns "finished", or null when no event line links it or it isn't blank.
     async finish(file) {
-        const m = file?.basename.match(MeetingLog.NAME);
+        const m = file?.basename.match(EventLog.NAME);
         if (!m || this.making.has(file.basename)) return null;
         const day = moment(m[1], "YYYY-MM-DD", true);
         const daily = day.isValid() ? app.vault.getFileByPath(plainday.Schedule.dailyNotePath(day)) : null;
@@ -182,7 +182,7 @@ export default class MeetingLog {
             try {
                 times = await this.recordLine({ daily, dailyPath, name, title, time, home });
             } catch (e) {
-                console.error("MeetingLog: couldn't record the log in its daily note", e);
+                console.error("EventLog: couldn't record the log in its daily note", e);
                 new Notice("Couldn't record this log in its daily note — check the console");
             }
         }
@@ -218,7 +218,7 @@ export default class MeetingLog {
             text = recorded;
         } else {
             await app.vault.process(daily, (t) => (text = record(t).text));
-            try { await plainday.RefoldDailyNotes?.onLeave?.(daily); } catch (e) { console.error("MeetingLog: couldn't snapshot the folds", e); }
+            try { await plainday.RefoldDailyNotes?.onLeave?.(daily); } catch (e) { console.error("EventLog: couldn't snapshot the folds", e); }
         }
         return this.eventTimes(text, name);
     }
@@ -251,7 +251,7 @@ export default class MeetingLog {
             } catch (e) {
                 const other = app.metadataCache.getFirstLinkpathDest(name, "");
                 if (other) return { file: other, made: false };
-                console.error("MeetingLog: couldn't make the log", e);
+                console.error("EventLog: couldn't make the log", e);
                 new Notice(`Couldn't make the log "${name}"`);
                 return null;
             }
@@ -280,9 +280,9 @@ export default class MeetingLog {
         const same = (key) => String(front[key] ?? "") === own[key];
         const aliases = [].concat(front.aliases ?? []), tags = [].concat(front.tags ?? []);
         const tagged = tags.some((t) => String(t).toLowerCase() === "log");
-        if (MeetingLog.OWN.every(same) && aliases[0] === own.alias && tagged) return;
+        if (EventLog.OWN.every(same) && aliases[0] === own.alias && tagged) return;
         await app.fileManager.processFrontMatter(file, (f) => {
-            for (const key of MeetingLog.OWN) if (String(f[key] ?? "") !== own[key]) f[key] = own[key] || null;
+            for (const key of EventLog.OWN) if (String(f[key] ?? "") !== own[key]) f[key] = own[key] || null;
             const others = [].concat(f.aliases ?? []).filter((a) => a !== null && a !== "" && a !== own.alias);
             f.aliases = [own.alias, ...others];
             const more = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
@@ -312,7 +312,7 @@ export default class MeetingLog {
         const extra = { ...props };
         const list = (key, first) => [...new Set([first, ...[].concat(extra[key] ?? []).filter((v) => v !== null && v !== "").map(String)])];
         const aliases = list("aliases", own.alias), tags = list("tags", "log");
-        for (const key of ["aliases", "tags", ...MeetingLog.OWN]) delete extra[key];
+        for (const key of ["aliases", "tags", ...EventLog.OWN]) delete extra[key];
         return this.noteText(own, { aliases, tags, extra, body });
     }
 
@@ -322,7 +322,7 @@ export default class MeetingLog {
     // title without the date, and `time` (optional) the start to prefer when several lines share the title. `sync` is
     // the calendar sync, whose line shape, matching and sort order this borrows rather than copies. `home` (optional)
     // is the ⭕ or 🗃️ link for the project or area the log is filed in: the event line's own ⭕ and 🗃️ links give way
-    // to it, so the line and its log agree on where the meeting's time counts (OBS-90). Every note link ends its line,
+    // to it, so the line and its log agree on where the event's time counts (OBS-90). Every note link ends its line,
     // so the log's goes after the line's ⭕.
     // Returns { text, outcome, line }, where `line` is the event line as it was before this call (the one found present
     // or linked, so the caller can read its ⭕ links), or null, and the outcome is one of:
@@ -343,7 +343,7 @@ export default class MeetingLog {
     // A checklist line: its lead, marker, the date link a forwarded event carries, its start (all day or a time, before
     // the sync's tab or, on a line typed by hand, a space) and the rest
     static LINE = /^(\s*[-*+]\s+\[(.)\]\s+)(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(?:(all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+)?(.*)$/i;
-    // A meeting line in the form used before August 2025: no bullet, its time first (OBS-193), and the rest
+    // An event line in the form used before August 2025: no bullet, its time first (OBS-193), and the rest
     static OLD_LINE = /^(?:all day|\d{1,2}:\d{2}\s?[ap]m)[\t ]+(.*)$/i;
     // A ⭕ project or 🗃️ area link, as the sync reads them (a phone may add or drop the U+FE0F)
     static HOME_LINK = /\[\[[^[\]|]+\|\s*(?:⭕|🗃)️?\s*\]\]/gu;
@@ -357,7 +357,7 @@ export default class MeetingLog {
     // The item of the run that ends `text`, with the spaces before it, or null: an ℹ️ or 🆓 only after a space or a
     // tab, found here since older iPhones can't run a lookbehind (AddTaskNote.trailItem)
     static trailItem(text) {
-        const item = text.match(MeetingLog.TRAIL_ITEM);
+        const item = text.match(EventLog.TRAIL_ITEM);
         if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
         while (text[item.index - 1] === " ") item.index--;
         item[0] = text.slice(item.index);
@@ -375,12 +375,12 @@ export default class MeetingLog {
         const wanted = normal(time);
         const candidates = [];
         for (const [i, line] of lines.entries()) {
-            const match = line.match(MeetingLog.LINE);
-            // A meeting line in the old form is only ever the log's when it links it, as Add note links one
-            const old = match ? null : line.match(MeetingLog.OLD_LINE);
+            const match = line.match(EventLog.LINE);
+            // An event line in the old form is only ever the log's when it links it, as Add note links one
+            const old = match ? null : line.match(EventLog.OLD_LINE);
             if (!match && !old) continue;
             // A block ID at the end (` ^mtg1`) isn't part of the title or the links before it
-            const { rest, log: linked } = sync.splitTail((match ? match[4] : old[1]).replace(MeetingLog.BLOCK_ID, ""), true);
+            const { rest, log: linked } = sync.splitTail((match ? match[4] : old[1]).replace(EventLog.BLOCK_ID, ""), true);
             const event = !match || match[2] === "<" || !!match[3];
             if ((rest.match(LOG_LINK) && logOf(rest) === log) || (linked && event && logOf(linked) === log)) {
                 const homed = this.homeIn(line, home);
@@ -404,7 +404,7 @@ export default class MeetingLog {
             // At the end: after the title, its ℹ️ or 🆓, and any ⭕
             const line = lines[found.i];
             const bare = line.replace(/\s+$/, "");
-            const block = bare.match(MeetingLog.BLOCK_ID)?.[0] ?? "";
+            const block = bare.match(EventLog.BLOCK_ID)?.[0] ?? "";
             lines[found.i] = this.homeIn(`${bare.slice(0, bare.length - block.length)} ${link}${block}`, home);
             return { text: lines.join("\n"), outcome: "linked", line };
         }
@@ -422,11 +422,11 @@ export default class MeetingLog {
     homeIn(line, home) {
         if (!home) return line;
         let bare = line.replace(/\s+$/, "");
-        const block = bare.match(MeetingLog.BLOCK_ID)?.[0] ?? "";
+        const block = bare.match(EventLog.BLOCK_ID)?.[0] ?? "";
         bare = bare.slice(0, bare.length - block.length);
         // Taken off with one space beside each, keeping a space where two words would touch (as
         // AddTaskNote.withoutLinks does), so `Review [[Old|⭕]]🆓` doesn't become `Review🆓`
-        for (const l of [...bare.matchAll(MeetingLog.HOME_LINK)].map((m) => m[0])) {
+        for (const l of [...bare.matchAll(EventLog.HOME_LINK)].map((m) => m[0])) {
             const at = bare.lastIndexOf(l);
             let from = at, to = at + l.length;
             if (bare[from - 1] === " ") from--;
@@ -436,9 +436,9 @@ export default class MeetingLog {
         }
         bare = bare.replace(/\s+$/, "");
         let at = bare.length, before = null;
-        for (let item; (item = MeetingLog.trailItem(bare.slice(0, at)));) {
+        for (let item; (item = EventLog.trailItem(bare.slice(0, at)));) {
             at = item.index;
-            if (MeetingLog.NOTE_LINK.test(item[0])) before = at;
+            if (EventLog.NOTE_LINK.test(item[0])) before = at;
         }
         const out = before === null ? `${bare} ${home}` : `${bare.slice(0, before).replace(/ +$/, "")} ${home} ${bare.slice(before).trim()}`;
         return out + block === line.replace(/\s+$/, "") ? line : out + block;

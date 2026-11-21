@@ -121,7 +121,7 @@ export default class Settings {
     // The properties Plainday writes itself into each kind of note it makes, which a template's own
     // would give way to (Settings → Plainday → Note templates warns). Weekly and monthly notes get their
     // alias (PeriodicNotes, OBS-120), yearly notes nothing, task notes their tag, `parent` and `due`
-    // (AddTaskNote.createTaskNote, OBS-121), logs their `parent`, `date`, `time`, `endTime` and `who` (MeetingLog,
+    // (AddTaskNote.createTaskNote, OBS-121), logs their `parent`, `date`, `time`, `endTime` and `who` (EventLog,
     // OBS-122). List properties are combined with a template's, not replaced, so they never warn.
     /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log", string[]>>} */
     static WRITES = { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"] };

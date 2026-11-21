@@ -64,9 +64,11 @@ export const momentOn = (today) => {
         clone: () => make(date, valid),
         startOf: (unit) => make({ week: plus(date, -dow(date)), isoWeek: plus(date, -((dow(date) + 6) % 7)), month: `${date.slice(0, 7)}-01`, year: `${date.slice(0, 4)}-01-01` }[unit] ?? date, valid),
         year: () => Number(date.slice(0, 4)),
+        date,
+        diff: (other, unit) => (unit === "days" ? (utc(date) - utc(other.date)) / 864e5 : assert.fail(`diff ${unit}`)),
         format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`, "ddd M/D": `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dow(date)]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`,
             // The aliases PeriodicNotes writes (OBS-120)
-            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
+            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "ddd. M/D/YY": `${DAY_NAMES[dow(date)].slice(0, 3)}. ${short(date)}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
     });
     const moment = (text, format) => {
         if (text === undefined) return make(today);
@@ -317,7 +319,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
-        PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"), MeetingLog: make("meetingLog", "MeetingLog"),
+        PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"), EventLog: make("eventLog", "EventLog"),
         CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
@@ -330,7 +332,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         covers = { lines: days(weighed.lines), time: days(weighed.days.map((d) => d.l)), stops: days(weighed.stops.map((d) => d.l)) };
         try { return await ask(weighed, ...rest); } finally { covers = null; }
     };
-    // A task note and a log are made by the code itself (AddTaskNote.createTaskNote, OBS-121; MeetingLog, OBS-122),
+    // A task note and a log are made by the code itself (AddTaskNote.createTaskNote, OBS-121; EventLog, OBS-122),
     // in a vault with no Task or Log template and no Templater
     let n = 0;
     plainday.TaskIds.random = () => ((n = (n * 9301 + 49297) % 233280) / 233280);

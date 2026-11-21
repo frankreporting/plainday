@@ -2,7 +2,7 @@ import { app, plainday } from "../host.js";
 
 export default class FinishLinkedLogs {
     // Startup script (OBS-122): a click on an event line's ⋯ link to a log that isn't made yet makes a blank note of
-    // that name, which becomes the log at once (MeetingLog.finish): Plainday's properties, the Log template, and filed
+    // that name, which becomes the log at once (EventLog.finish): Plainday's properties, the Log template, and filed
     // in the `›logs` folder of the project or area the line names, else the Inbox. Only what's a fact, as
     // FinishPeriodicNotes does (Brian, 2026-11-20): a note made on this device in the last MADE_WITHIN_MS, named with
     // a day and a title, still blank and not being written by Templater HOLD_AFTER_MS later, which an event line in
@@ -27,7 +27,7 @@ export default class FinishLinkedLogs {
     onCreate(file, now = Date.now()) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin || file?.extension !== "md" || !FinishLinkedLogs.NAME.test(file.basename)) return null;
-        if (plainday.MeetingLog?.making.has(file.basename)) return null;
+        if (plainday.EventLog?.making.has(file.basename)) return null;
         if (file.stat?.size !== 0 || Math.abs(now - (file.stat?.ctime ?? 0)) > FinishLinkedLogs.MADE_WITHIN_MS) return null;
         return this.later(file);
     }
@@ -38,7 +38,7 @@ export default class FinishLinkedLogs {
         await FinishLinkedLogs.sleep(FinishLinkedLogs.HOLD_AFTER_MS);
         if (!plainday.plugin || app.vault.getFileByPath(file.path) !== file || notes.pending()?.has(file.path)) return null;
         try {
-            return await plainday.MeetingLog.finish(file);
+            return await plainday.EventLog.finish(file);
         } catch (e) {
             console.error(`FinishLinkedLogs: couldn't finish ${file.path}`, e);
             return null;

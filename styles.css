@@ -55,7 +55,7 @@
     color: var(--link-color-hover);
 }
 
-/* New meeting log: the title box as wide as the dialog */
+/* New event log: the title box as wide as the dialog */
 .plainday-wide-input {
     width: 100%;
 }
