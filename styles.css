@@ -179,6 +179,11 @@ body .pm-invoice .pm-invoice-parties {
     justify-content: space-between;
     gap: 2em;
     padding: 1.2em 0;
+}
+
+/* A line between your details and who it's billed to. On screen, none above your details, since many themes
+   underline the title already (Brian, 11/22); printed, a line there too, as before. */
+body .pm-invoice .pm-invoice-parties + .pm-invoice-parties {
     border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -246,6 +251,10 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
         display: none !important;
     }
 
+    body .pm-invoice .pm-invoice-parties {
+        border-top: 1px solid var(--background-modifier-border);
+    }
+
     /* Billed entries, the last section: its heading and everything after it (OBS-145). Each block
        prints in a div of its own, so that's the blocks after the heading's div; and the heading's own
        siblings, should they print unwrapped. Never the heading's div itself: unwrapped, that would be
@@ -281,14 +290,18 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
    the default theme's light one is faint.
    A day row is the one with a bold date in its Date / Time column: the second column, after the status
    column, or the first in a timesheet that has none.
+   An invoice's Billed entries, a timesheet's table of the entries billed, take the same bands (Brian, 11/22):
+   every table in a note with `cssclasses: pm-invoice` but Billable hours, the one of four columns.
    To pick the entries' color, set --pm-timesheet-entry-background in a snippet of your own, for example
    body { --pm-timesheet-entry-background: var(--background-secondary); } */
 /* How much of the text color the entries' shade takes: more in dark mode */
-.pm-timesheet {
+.pm-timesheet,
+body .pm-invoice {
     --pm-timesheet-entry-mix: 4%;
 }
 
-.theme-dark .pm-timesheet {
+.theme-dark .pm-timesheet,
+.theme-dark .pm-invoice {
     --pm-timesheet-entry-mix: 12%;
 }
 
@@ -296,7 +309,9 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
    Each row rule holds under the mouse too, or Obsidian's own hover rule for odd rows would repaint every
    other row, and never a frozen cell, which Selectable Tables paints from the rows at rest. */
 .pm-timesheet table tbody tr:nth-child(n),
-.pm-timesheet table tbody tr:nth-child(n):hover {
+.pm-timesheet table tbody tr:nth-child(n):hover,
+body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:nth-child(n),
+body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:nth-child(n):hover {
     background-color: var(--pm-timesheet-entry-background,
         color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-timesheet-entry-mix)));
 }
@@ -304,19 +319,23 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
 /* Day rows are plain: the note's own background, painted rather than clear, since a theme can shade the
    table under its rows (Baseline gives the table's body --background-primary-alt) */
 .pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong),
-.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong):hover {
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong):hover,
+body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:has(> td:nth-child(-n + 2) strong),
+body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:has(> td:nth-child(-n + 2) strong):hover {
     background-color: var(--background-primary);
 }
 
 /* With the Selectable Tables plugin, frozen cells are painted solid, row by row, as the table's first odd
    and even rows look. In a timesheet those are always a day row and an entry under it, so each row's frozen
    cells take the look of its own kind: the day's plain background, or the entries' shade. */
-.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n) {
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n),
+.markdown-source-view.mod-cm6.pm-invoice .cm-table-widget.selectable-tables-frozen table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody > tr:nth-child(n) {
     --selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
     --selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
 }
 
-.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:has(> td:nth-child(-n + 2) strong) {
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:has(> td:nth-child(-n + 2) strong),
+.markdown-source-view.mod-cm6.pm-invoice .cm-table-widget.selectable-tables-frozen table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody > tr:has(> td:nth-child(-n + 2) strong) {
     --selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
     --selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
 }
@@ -354,7 +373,7 @@ body.plainday-task-markers {
     --plainday-goal-color: var(--color-orange);
     --plainday-canceled-color: var(--checkbox-border-color);
     --plainday-canceled-dash: white;
-    --plainday-canceled-text: var(--checklist-done-color);
+    --plainday-faded-text: var(--checklist-done-color);
 }
 
 body.plainday-task-markers [data-task="<"] {
@@ -457,15 +476,12 @@ body.plainday-task-markers :is(
     transform: none;
 }
 
-/* A forwarded task's text muted. A canceled one's in a done task's gray (Brian, 11/22, OBS-200), the color
-   the theme gives a done task's text, and struck through as well, as a done task isn't in every theme
-   (Minimal, unless its strike setting is on) */
-body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item)[data-task=">"] {
-    color: var(--text-muted);
-}
-
-body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item)[data-task="-"] {
-    color: var(--plainday-canceled-text);
+/* A forwarded or canceled task's text in a done task's gray, the color the theme gives a done task's text
+   (Brian, 11/22, OBS-200). A snippet that colors done tasks itself can set --checklist-done-color to its
+   gray, and these follow. A canceled one is struck through as well, as a done task isn't in every theme
+   (Minimal, unless its strike setting is on). */
+body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item):is([data-task=">"], [data-task="-"]) {
+    color: var(--plainday-faded-text);
 }
 
 body.plainday-task-markers .markdown-rendered li.task-list-item[data-task="-"] {
@@ -481,7 +497,7 @@ body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-lin
 }
 
 body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] > span:not(.pm-trail-run, .cm-foldPlaceholder) {
-    background-image: linear-gradient(var(--plainday-canceled-text), var(--plainday-canceled-text));
+    background-image: linear-gradient(var(--plainday-faded-text), var(--plainday-faded-text));
     background-position: 0 55%;
     background-size: 100% 1px;
     background-repeat: repeat-x;

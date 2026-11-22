@@ -95,15 +95,25 @@ test("styles.css draws the invoice and the timesheet, under the classes their no
     assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice \.metadata-container/);
     assert.match(CSS, /\.pm-timesheet table tbody tr:nth-child\(n\)/);
     assert.match(CSS, /--pm-timesheet-entry-background/);
+    // On screen, a line only between the two blocks of names, since many themes underline the title; printed,
+    // above the first too
+    const block = (sel) => CSS.slice(CSS.indexOf(`${sel} {`)).split("}")[0];
+    assert.doesNotMatch(block("body .pm-invoice .pm-invoice-parties"), /border-top/);
+    assert.match(block("body .pm-invoice .pm-invoice-parties + .pm-invoice-parties"), /border-top: 1px solid/);
+    assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice \.pm-invoice-parties \{\s*border-top: 1px solid/);
+    // Billed entries take the timesheet's day bands; Billable hours, the table of four columns, doesn't
+    const billed = "body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr";
+    assert.ok(CSS.includes(`${billed}:nth-child(n):hover {`), "entries shaded");
+    assert.ok(CSS.includes(`${billed}:has(> td:nth-child(-n + 2) strong):hover {`), "day rows plain");
     // Nothing left to copy into a vault's snippets
     assert.ok(!fs.existsSync(new URL("Config/Scripts/Style Settings/pm-invoice.css", root)));
     assert.ok(!fs.existsSync(new URL("Config/Scripts/Style Settings/pm-timesheet.css", root)));
 });
 
-test("styles.css: a canceled task's text and its strike are a done task's color", () => {
-    assert.match(CSS, /--plainday-canceled-text: var\(--checklist-done-color\);/);
+test("styles.css: a forwarded or canceled task's text, and the strike, are a done task's color", () => {
+    assert.match(CSS, /--plainday-faded-text: var\(--checklist-done-color\);/);
     const rule = (sel) => CSS.slice(CSS.indexOf(sel)).split("}")[0];
-    assert.match(rule(`li.task-list-item)[data-task="-"] {`), /color: var\(--plainday-canceled-text\);/);
-    assert.match(rule(`li.task-list-item)[data-task=">"] {`), /color: var\(--text-muted\);/);
-    assert.match(CSS, /linear-gradient\(var\(--plainday-canceled-text\), var\(--plainday-canceled-text\)\)/);
+    assert.match(rule(`li.task-list-item):is([data-task=">"], [data-task="-"]) {`), /color: var\(--plainday-faded-text\);/);
+    assert.doesNotMatch(CSS, /\[data-task=">"\] \{\s*color: var\(--text-muted\)/);
+    assert.match(CSS, /linear-gradient\(var\(--plainday-faded-text\), var\(--plainday-faded-text\)\)/);
 });
