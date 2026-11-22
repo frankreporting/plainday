@@ -69,8 +69,7 @@ export function loadBilling(root = ROOT) {
 }
 
 // Plainday's settings as a vault keeps them (OBS-281): its data file, normalized as Settings loads it,
-// else what Plainday's first load would read from the old settings notes. The demo's are in its data
-// file, invented. Settings comes from this repository, which a private test's vault doesn't hold.
+// else the defaults. The demo's are in its data file, invented. Settings comes from this repository, which a private test's vault doesn't hold.
 export const SETTINGS_FILE = ".obsidian/plugins/plainday/data.json";
 export function vaultSettings(vault, billing = loadBilling()) {
     const Settings = loadClass("settings.js", vm.createContext({}), path.join(ROOT, "plugin/src"));
@@ -78,8 +77,7 @@ export function vaultSettings(vault, billing = loadBilling()) {
     // A vault made in memory, as the tests make them, has no root and no data file
     const file = vault.root ? path.join(vault.root, SETTINGS_FILE) : null;
     if (file && fs.existsSync(file)) return settings.normalize(JSON.parse(fs.readFileSync(file, "utf8")), billing);
-    const note = (p) => (vault.notes.has(p) ? { props: vault.notes.get(p).fm } : null);
-    return settings.fromOldNotes({ invoice: note(Settings.INVOICE_NOTE), table: note(Settings.TABLE_NOTE) }, billing).settings;
+    return settings.defaults();
 }
 
 // Every file in the vault, as vault-relative paths; dot folders (.obsidian, .git) are skipped, and

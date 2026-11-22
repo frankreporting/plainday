@@ -1037,18 +1037,14 @@ test("renameSeries: a swap in one run keeps each project with its series; a copy
     assert.deepEqual(plain(cs.renameSeries(list, [{ from: "A", to: "C", copy: true }])), [list[0], { title: "C", links: ["[[PA|⭕]]"] }, list[1]]);
 });
 
-test("run: recurring events' projects are read from the old Calendar Sync note once, into the settings", async () => {
-    const map = vault({ [NOTE]: text("---", "id: 1", "---", "", "## Recurring events", "", "- Weekly sync [[Pinecone Studio|⭕]]", "- Board call", "", "## Last run", "") });
+test("run: settings from before recurring events give no series a project, and the old Calendar Sync note isn't read (OBS-295)", async () => {
+    const map = vault({ [NOTE]: text("---", "id: 1", "---", "", "## Recurring events", "", "- Weekly sync [[Pinecone Studio|⭕]]", "", "## Last run", "") });
     device(map).state.calendars.recurring = null;
     const before = map.get(NOTE);
     assert.equal(await sync(map, SERIES.map((d) => weekly(d))), "Calendar sync: 3 added");
-    assert.deepEqual(plain(recurring(map)), [{ title: "Weekly sync", links: ["[[Pinecone Studio|⭕]]"] }]);
-    for (const d of SERIES) assert.match(map.get(day(d)), /Weekly sync \[\[Pinecone Studio\|⭕\]\]/);
+    for (const d of SERIES) assert.doesNotMatch(map.get(day(d)), /Pinecone Studio/);
+    assert.equal(recurring(map), null, "nothing read into the settings");
     assert.equal(map.get(NOTE), before, "the note isn't changed");
-    edit(map, NOTE, (t) => t.replace("- Board call", "- Board call [[Kestrel|⭕]]"));
-    const saves = device(map).state.saves;
-    await sync(map, SERIES.map((d) => weekly(d)));
-    assert.equal(device(map).state.saves, saves, "read once");
 });
 
 // ------------------------------------------------------------------ calendars, devices, messages

@@ -364,8 +364,9 @@ export default class Billing {
     }
 
     // The next invoice number: one past the highest `1001-HBR`-style number (whatever follows the
-    // dash), canceled ones included, or past `last` (Invoice Settings' `last_number`) when that's
-    // higher, so a deleted invoice's number is never used again. Null for the very first, with no `last`.
+    // dash), canceled ones included, or past `last` (the last number in Settings → Plainday →
+    // Invoices) when that's higher, so a deleted invoice's number is never used again. Null for the
+    // very first, with no `last`.
     nextNumber(invoices, last = null) {
         const n = invoices.map((i) => String(i.number).match(/^(\d+)-(?!\d{2}-\d{2}$)/)?.[1]).filter(Boolean).map(Number);
         if (Number.isInteger(last) && last >= 0) n.push(last);
@@ -375,17 +376,16 @@ export default class Billing {
     // ---------------------------------------------------------------- where invoices are filed (OBS-112)
 
     // The invoice folder as a vault path: { folder, error }, with "" for none. It reads as any folder
-    // setting does (pathOf), and can't be inside `Config` or the archive (`archive`, the archive folder
-    // as Settings → Plainday → Folders has it, OBS-283), so an invoice never lands outside the vault,
-    // in a hidden folder, or where a base can't list it.
+    // setting does (pathOf), and can't be inside the archive (`archive`, the archive folder as
+    // Settings → Plainday → Folders has it, OBS-283), so an invoice never lands outside the vault, in
+    // a hidden folder, or where a base can't list it.
     folderOf(raw, archive = null) {
         const read = this.pathOf(raw);
         if (!read.folder) return read;
         const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
-        const top = read.folder.split("/")[0], lower = read.folder.toLowerCase(), a = String(archive ?? "").toLowerCase();
-        // The system's folder and the archive are often excluded, and a base doesn't list what's
-        // excluded. `taken` names it, for the panel's message.
-        if (top.toLowerCase() === "config") return { folder: "", error: `is inside ${top}, where invoices don't belong (${shown})`, taken: "Config" };
+        const lower = read.folder.toLowerCase(), a = String(archive ?? "").toLowerCase();
+        // The archive is often excluded, and a base doesn't list what's excluded. `taken` names it, for
+        // the panel's message.
         if (a && (lower === a || lower.startsWith(`${a}/`))) return { folder: "", error: `is inside ${archive}, where invoices don't belong (${shown})`, taken: archive };
         return read;
     }

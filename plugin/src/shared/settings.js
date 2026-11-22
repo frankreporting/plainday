@@ -1,4 +1,4 @@
-import { getFrontMatterInfo, moment, Notice, parseYaml } from "obsidian";
+import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class Settings {
@@ -21,8 +21,8 @@ export default class Settings {
     //     own local storage (vaultKey()), keeps two vaults apart on a phone, where Obsidian keeps one
     //     secret storage for every vault. Sync calendars syncs every calendar that's on and has a link on
     //     this device (OBS-275). `recurring` is recurring events' projects, [{ title, links }]: the ⭕ and
-    //     🗃️ links each series' upcoming lines get (recurringOf), null until Sync calendars has read the old
-    //     Calendar Sync note's `## Recurring events` once.
+    //     🗃️ links each series' upcoming lines get (recurringOf), null in settings saved before OBS-275,
+    //     which reads as none.
     //   - folders (OBS-283): where projects and areas live (`projects`), where Plainday puts a note it
     //     makes before the note has a project (`inbox`, Plainday's own: Obsidian's Default location for
     //     new notes decides where notes you make go), where finished projects go (`archive`), the
@@ -44,17 +44,12 @@ export default class Settings {
     //     name (TEMPLATE_NAMES) in the vault's template folder, which Templater keeps, else at the top of
     //     the vault (defaultTemplatePath); the panel shows it. Projects and areas get theirs with OBS-123.
     //
-    // Whatever comes in, from the data file, a copy from another device or the old settings notes, goes
-    // through normalize(), so a value that doesn't read becomes its default and the rest can trust what
-    // they get.
+    // Whatever comes in, from the data file or a copy from another device, goes through normalize(),
+    // so a value that doesn't read becomes its default and the rest can trust what they get.
     //
-    // Vaults from before: on a device with no settings saved, the first load reads Config/Invoice
-    // Settings.md and Config/Table Settings.md once (readOldNotes), saves what they held, and says so.
-    // From then on the notes are never read again; they're left for you to delete. Likewise the
-    // `Sync range:` line of Config/Calendar Sync.md, on a device whose settings have no calendars yet
-    // (saved before OBS-282), and its `## Recurring events`, which Sync calendars reads once (OBS-275). A data file that's
-    // there but doesn't read (a write cut off, a sync conflict) isn't "no settings": Plainday says so,
-    // uses the defaults, and leaves the file alone until you change a setting or paste your settings.
+    // A data file that's there but doesn't read (a write cut off, a sync conflict) isn't "no
+    // settings": Plainday says so, uses the defaults, and leaves the file alone until you change a
+    // setting or paste your settings.
     //
     // A backup, or another device: plugin settings don't sync unless Obsidian Sync carries community
     // plugins, so copyText() is every setting as one block for the clipboard, and readCopy() and
@@ -62,8 +57,6 @@ export default class Settings {
     // but keeps the higher last number given, so no number is given twice. The copy carries each
     // calendar's link from this device's secret storage, beside the settings, and a paste stores them in
     // the other device's.
-    static INVOICE_NOTE = "Config/Invoice Settings.md";
-    static TABLE_NOTE = "Config/Table Settings.md";
     // Invoice numbers have at most six digits
     static MAX_NUMBER = 999999;
     // A new vault's first invoice is 1001, and none has been given yet
@@ -77,7 +70,6 @@ export default class Settings {
     // How far ahead Sync calendars writes events: the choices, and the days each means (OBS-282)
     static RANGES = [["1 week", 7], ["2 weeks", 14], ["3 weeks", 21], ["1 month", 31], ["2 months", 62], ["3 months", 92], ["6 months", 183]];
     static DEFAULT_RANGE = "2 months";
-    static CALENDAR_NOTE = "Config/Calendar Sync.md";
     // A calendar's ID, which also names its link in secret storage: lowercase letters and digits, as
     // secret storage's names must be
     static ID = /^[a-z0-9]{1,32}$/;
@@ -112,12 +104,8 @@ export default class Settings {
     // template folder, which Templater keeps, else the top of the vault — never a folder of this
     // repository's (Brian, 2026-11-17).
     static TEMPLATE_NAMES = { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
-    // The system's own folder in a vault from before: never a place for the three, or for invoices
-    static SYSTEM_FOLDER = "Config";
-    // The error log note: where it is in a vault from before (it, or the Config folder, is there), and
-    // where it goes in a new one
-    static OLD_ERROR_LOG = "Config/Error Log.md";
-    static NEW_ERROR_LOG = "Plainday error log.md";
+    // The error log note a blank setting means: at the top of the vault, in every vault (OBS-295)
+    static ERROR_LOG = "Plainday error log.md";
     // The properties Plainday writes itself into each kind of note it makes, which a template's own
     // would give way to (Settings → Plainday → Note templates warns). Weekly and monthly notes get their
     // alias (PeriodicNotes, OBS-120), yearly notes nothing, task notes their tag, `parent` and `due`
@@ -132,12 +120,11 @@ export default class Settings {
 
     constructor() {
         this.data = this.defaults();
-        // Whether this device has settings saved: until it has, the first load reads the old notes
+        // Whether this device has settings saved
         this.saved = false;
         // Whether the data file is there but doesn't read
         this.unreadable = false;
-        // Whether the saved settings have calendars: until they have, the first load reads the range
-        // from the Calendar Sync note (settings saved before OBS-282 have none)
+        // Whether the saved settings have calendars (settings saved before OBS-282 have none)
         this.calendarsSaved = false;
         // Whether the saved settings have folders (settings saved before OBS-283 have none)
         this.foldersSaved = false;
@@ -232,13 +219,6 @@ export default class Settings {
         return { number: 0, error: "isn't a whole number", capped: false };
     }
 
-    // A note's property by its name, in any case, as the old notes were read (TimeReport.prop)
-    prop(props, key) {
-        if (key in props) return props[key];
-        const k = Object.keys(props).find((x) => x.toLowerCase() === key.toLowerCase());
-        return k === undefined ? undefined : props[k];
-    }
-
     /**
      * Settings from whatever was stored or pasted: each value that reads, else its default. The invoice
      * folder follows Billing.folderOf's rules, so it's always a folder in the vault, or "".
@@ -262,8 +242,8 @@ export default class Settings {
         for (const key of /** @type {const} */ (["task", "log"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
         for (const unit of Settings.PERIODS) {
             const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
-            // A weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding
-            // one, is as before
+            // A weekly, monthly or yearly folder in Projects, the Inbox or the archive, or holding one, is
+            // as before
             out.folders[unit] = folder && this.overlap(folder, out.folders) ? "" : folder;
             out.templates[unit] = this.notePathOf(templates[unit], billing).path;
         }
@@ -459,8 +439,8 @@ export default class Settings {
 
     /**
      * What's wrong with a set of the three system folders, or null: the first that doesn't read, is the
-     * top of the vault, is inside the system's own folder, or holds another or sits inside it (or is
-     * it), with the one it meets. `first`, the one you're changing, is checked first.
+     * top of the vault, or holds another or sits inside it (or is it), with the one it meets. `first`,
+     * the one you're changing, is checked first.
      * @param {{ projects: string, inbox: string, archive: string }} folders
      * @param {{ pathOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
      * @param {"projects" | "inbox" | "archive" | null} [first]
@@ -475,7 +455,6 @@ export default class Settings {
             const read = billing.pathOf(folders[key]);
             if (read.error) return { key, problem: `it ${read.error}` };
             if (!read.folder) return { key, problem: "a folder is needed: notes can't go at the top of the vault" };
-            if (lower(read.folder.split("/")[0]) === lower(Settings.SYSTEM_FOLDER)) return { key, problem: `it's inside ${Settings.SYSTEM_FOLDER}, the system's own folder` };
             for (const other of all) {
                 if (other === key) continue;
                 const a = lower(read.folder), b = lower(folders[other]);
@@ -489,8 +468,8 @@ export default class Settings {
     }
 
     /**
-     * Where `folder` meets the system's own folders: the first of Config, Projects, the Inbox and the
-     * archive that it's inside, holds, or is, as { name, folder, how: "in" | "holds" | "is" }; else null
+     * Where `folder` meets the system's own folders: the first of Projects, the Inbox and the archive
+     * that it's inside, holds, or is, as { name, folder, how: "in" | "holds" | "is" }; else null
      * @param {string} folder
      * @param {{ projects: string, inbox: string, archive: string }} [folders]
      * @returns {{ name: string, folder: string, how: "in" | "holds" | "is" } | null}
@@ -498,7 +477,7 @@ export default class Settings {
     overlap(folder, folders = this.data.folders) {
         const a = String(folder).toLowerCase();
         /** @type {[string, string][]} */
-        const named = [[Settings.SYSTEM_FOLDER, Settings.SYSTEM_FOLDER], ...(/** @type {const} */ (["projects", "inbox", "archive"])).map((k) => /** @type {[string, string]} */ ([Settings.FOLDER_NAMES[k], folders[k]]))];
+        const named = (/** @type {const} */ (["projects", "inbox", "archive"])).map((k) => /** @type {[string, string]} */ ([Settings.FOLDER_NAMES[k], folders[k]]));
         for (const [name, f] of named) {
             const b = String(f).toLowerCase();
             if (!b) continue;
@@ -536,21 +515,16 @@ export default class Settings {
     }
 
     /**
-     * The error log note: the setting's, else the log already made (Config/Error Log.md, then Plainday
-     * error log.md), else Config/Error Log.md in a vault from before (the Config folder is there), else
-     * Plainday error log.md at the top of the vault
+     * The error log note: the setting's, else Plainday error log.md at the top of the vault
      * @returns {string}
      */
     errorLogPath() {
         return this.data.folders.errorLog || this.defaultErrorLogPath();
     }
 
-    // The error log note a blank setting means, which the panel shows: a log already made stays where it
-    // is (the old one first), so a Config folder that turns up later doesn't start a second log
+    // The error log note a blank setting means, which the panel shows
     defaultErrorLogPath() {
-        if (app.vault.getFileByPath(Settings.OLD_ERROR_LOG)) return Settings.OLD_ERROR_LOG;
-        if (app.vault.getFileByPath(Settings.NEW_ERROR_LOG)) return Settings.NEW_ERROR_LOG;
-        return app.vault.getFolderByPath(Settings.SYSTEM_FOLDER) ? Settings.OLD_ERROR_LOG : Settings.NEW_ERROR_LOG;
+        return Settings.ERROR_LOG;
     }
 
     /**
@@ -582,7 +556,7 @@ export default class Settings {
     }
 
     /**
-     * A sync range as the panel and the Calendar Sync note write it ("2 months", in any case), or null
+     * A sync range as the panel writes it ("2 months", in any case), or null
      * @param {unknown} raw
      * @returns {string | null}
      */
@@ -620,10 +594,9 @@ export default class Settings {
 
     /**
      * Recurring events' projects (OBS-275): [{ title, links }], each series by its title, with the ⭕ project
-     * and 🗃️ area links its upcoming lines get, as `## Recurring events` in the Calendar Sync note had
-     * them; one entry a title, the links of two merged. Null when it was never set: settings saved before
-     * OBS-275, whose Calendar Sync note Sync calendars reads once. Only links of that shape are kept, so no
-     * calendar link can reach the data file this way.
+     * and 🗃️ area links its upcoming lines get; one entry a title, the links of two merged. Null when it
+     * was never set (settings saved before OBS-275), which reads as none. Only links of that shape are
+     * kept, so no calendar link can reach the data file this way.
      * @param {unknown} v
      * @returns {Recurring[] | null}
      */
@@ -863,95 +836,6 @@ export default class Settings {
     }
 
     /**
-     * The range from the Calendar Sync note's `Sync range:` line: { range }, or { bad } when the line
-     * isn't one of the ranges; null when the note has no such line
-     * @param {string} text
-     * @returns {{ range: string, bad?: undefined } | { bad: string, range?: undefined } | null}
-     */
-    rangeFromNote(text) {
-        const said = /^Sync range:[ \t]*(.*?)[ \t]*$/m.exec(String(text ?? ""))?.[1];
-        if (said === undefined) return null;
-        const range = this.rangeOf(said);
-        return range ? { range } : { bad: `\`Sync range\` in Calendar Sync (${said})` };
-    }
-
-    /**
-     * What the first load says after reading the range from the Calendar Sync note
-     * @param {{ range?: string, bad?: string }} result
-     * @returns {string}
-     */
-    rangeNotice({ range, bad }) {
-        const lines = [`Plainday moved your calendar sync range${range ? `, ${range},` : ""} into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.`];
-        if (bad) lines.push(`This didn't read, so it starts from the default, ${Settings.DEFAULT_RANGE}: ${bad}.`);
-        return lines.join("\n\n");
-    }
-
-    /**
-     * Settings from the notes that held them before (OBS-281): `invoice` and `table` are each { props },
-     * the note's properties, { error } when they don't read, or null when the note isn't there.
-     * { settings, read: the notes that were there, bad: what didn't read, by the note's own name for it,
-     * capped: a freeze over 9, which is 9 now }. A value that doesn't read is left at its default.
-     * @typedef {{ props: Record<string, unknown>, error?: undefined } | { error: string, props?: undefined } | null} OldNote
-     * @param {{ invoice?: OldNote, table?: OldNote }} notes
-     * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
-     */
-    fromOldNotes({ invoice = null, table = null }, billing = plainday.Billing) {
-        const settings = this.defaults();
-        /** @type {("invoice" | "table")[]} */
-        const read = [];
-        /** @type {string[]} */
-        const bad = [], capped = [];
-        const shown = (v) => (typeof v === "string" ? v.trim() : JSON.stringify(v));
-        if (invoice) {
-            read.push("invoice");
-            if (!invoice.props) {
-                bad.push("Invoice Settings' properties");
-            } else {
-                const s = settings.invoices, p = invoice.props, get = (k) => this.prop(p, k);
-                s.name = this.text(get("name"));
-                s.address = this.lines(get("address"));
-                s.terms = this.text(get("terms"));
-                s.paymentNote = this.multiline(typeof get("payment_note") === "string" ? get("payment_note") : this.text(get("payment_note")));
-                const folder = billing.folderOf(get("folder"), settings.folders.archive);
-                if (folder.error) bad.push(`\`folder\` in Invoice Settings (${shown(get("folder"))})`);
-                else s.folder = folder.folder;
-                const last = this.lastNumberOf(get("last_number"));
-                if (last.error) bad.push(`\`last_number\` in Invoice Settings (${shown(get("last_number"))})`);
-                else if (last.number !== null) s.lastNumber = last.number;
-            }
-        }
-        if (table) {
-            read.push("table");
-            if (!table.props) {
-                bad.push("Table Settings' properties");
-            } else {
-                for (const [key, to] of /** @type {const} */ ([["freeze_rows", "freezeRows"], ["freeze_columns", "freezeColumns"]])) {
-                    const raw = this.prop(table.props, key), n = this.frozenOf(raw);
-                    if (n.error) bad.push(`\`${key}\` in Table Settings (${shown(raw)})`);
-                    else settings.tables[to] = n.number;
-                    if (n.capped) capped.push(`\`${key}\` in Table Settings (${shown(raw)})`);
-                }
-            }
-        }
-        return { settings, read, bad, capped };
-    }
-
-    /**
-     * What the first load says after reading the old notes, or null when there were none
-     * @param {{ read: ("invoice" | "table")[], bad: string[], capped?: string[] }} result
-     * @returns {string | null}
-     */
-    movedNotice({ read, bad, capped = [] }) {
-        if (!read.length) return null;
-        const what = read.map((r) => (r === "invoice" ? "invoice" : "table")).join(" and ");
-        const notes = read.map((r) => (r === "invoice" ? "Invoice Settings" : "Table Settings")).join(" or ");
-        const lines = [`Plainday moved your ${what} settings into Settings → Plainday. It no longer reads ${notes}; you can delete ${read.length === 1 ? "it" : "them"}.`];
-        if (bad.length) lines.push(`${bad.length === 1 ? "This" : "These"} didn't read, so ${bad.length === 1 ? "it starts" : "they start"} from the default: ${bad.join(", ")}.`);
-        if (capped.length) lines.push(`Plainday freezes at most ${Settings.MAX_FROZEN} rows or columns, so ${capped.length === 1 ? "this is" : "these are"} ${Settings.MAX_FROZEN} now: ${capped.join(", ")}.`);
-        return lines.join("\n\n");
-    }
-
-    /**
      * Every setting as one block of text, for Copy, with each calendar's link this device has
      * @param {ReturnType<Settings["defaults"]>} [settings]
      * @param {Record<string, string>} [links]
@@ -1010,7 +894,7 @@ export default class Settings {
 
     // Reads the saved settings, or the defaults on a device with none saved yet. Obsidian's loadData
     // gives null when there's no data file, and undefined when there is one that doesn't read: then the
-    // defaults hold, the old notes aren't read over it, and a notice says so.
+    // defaults hold, and a notice says so.
     async load() {
         const plugin = plainday.plugin;
         if (!plugin) return;
@@ -1026,7 +910,7 @@ export default class Settings {
         }
     }
 
-    // Whether a data file as loaded has calendars, or doesn't read (then nothing is read over it)
+    // Whether a data file as loaded has calendars, or doesn't read
     hasCalendars(raw) {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
@@ -1159,56 +1043,5 @@ export default class Settings {
         if (keep || keepFolders || dropped || keepRecurring) await this.save();
         else { this.calendarsSaved = nowCalendars; this.foldersSaved = nowFolders; }
         await plainday.ListCursor?.invoke();
-    }
-
-    // On a device with no settings saved: reads the old settings notes, and when there are any, saves
-    // what they held, so they're never read again, and says what moved. The notes are left as they are.
-    // With none, nothing is written: a device whose notes Sync hasn't brought yet reads them at a later
-    // load, and one whose data file Sync is still bringing doesn't write defaults over it. The same for
-    // the range on a device whose settings have no calendars yet: the Calendar Sync note's `Sync range:`
-    // line, read once (OBS-282). On a device with no settings saved, the range alone is used but not
-    // saved, for the same reason: it's saved with the invoice and table settings when their notes
-    // arrive, or with the first change you make.
-    async readOldNotes() {
-        if (this.saved && this.calendarsSaved) return;
-        const wasSaved = this.saved, hadCalendars = this.calendarsSaved;
-        const text = async (path) => {
-            const file = app.vault.getFileByPath(path);
-            return file ? app.vault.read(file) : null;
-        };
-        const props = async (path) => {
-            const note = await text(path);
-            if (note === null) return null;
-            const info = getFrontMatterInfo(note);
-            if (!info.exists) return { props: {} };
-            try {
-                const fm = parseYaml(info.frontmatter);
-                return { props: typeof fm === "object" && fm !== null && !Array.isArray(fm) ? fm : {} };
-            } catch (e) {
-                return { error: String(e?.message ?? e) };
-            }
-        };
-        const notes = wasSaved ? null : this.fromOldNotes({ invoice: await props(Settings.INVOICE_NOTE), table: await props(Settings.TABLE_NOTE) });
-        const calendarNote = hadCalendars ? null : await text(Settings.CALENDAR_NOTE);
-        const range = calendarNote === null ? null : this.rangeFromNote(calendarNote);
-        // Sync brought a data file while the notes were read: it wins
-        if (this.saved !== wasSaved || this.calendarsSaved !== hadCalendars) return;
-        if (!notes?.read.length && !range) return;
-        if (!wasSaved && !notes?.read.length && range) {
-            this.data.calendars.range = range.range ?? Settings.DEFAULT_RANGE;
-            return;
-        }
-        /** @type {string[]} */
-        const notices = [];
-        if (notes?.read.length) {
-            this.data = { ...notes.settings, calendars: this.data.calendars };
-            notices.push(/** @type {string} */ (this.movedNotice(notes)));
-        }
-        if (range) {
-            this.data.calendars.range = range.range ?? Settings.DEFAULT_RANGE;
-            notices.push(this.rangeNotice(range));
-        }
-        await this.save();
-        new Notice(notices.join("\n\n"), 0);
     }
 }
