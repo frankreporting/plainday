@@ -27,6 +27,10 @@ import * as obsidian from "obsidian";
 // starts a worker from it for each read (OBS-274).
 export { default as calendarWorkerSource } from "plainday:calendar-worker";
 
+// chrono-node's English, which DateWords reads typed dates with (OBS-139). Only English: the build
+// leaves chrono-node's other languages out of main.js.
+export * as chronoEn from "chrono-node/en";
+
 /**
  * @typedef {typeof import("./commands/index.js").CLASSES} CommandClasses
  * @typedef {typeof import("./startup/index.js").CLASSES} StartupClasses

@@ -40,7 +40,7 @@ export default class JumpToDate {
         });
     }
 
-    // A week or a month in words, read before Revived sees them: "w38", "wk 38", "week 38", with a
+    // A week or a month in words, read before the date readers see them: "w38", "wk 38", "week 38", with a
     // year before or after ("2027 w1", "w1 2027"); "sep", "sept", "september", "Sep 2026",
     // "2026 sep", "9/2026". Without a year, this year. `months` and `short` are the locale's month
     // names. Returns { unit, year, n, withYear } (n the week or month number; withYear when a year was
