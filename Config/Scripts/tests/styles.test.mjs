@@ -99,7 +99,8 @@ test("styles.css draws the invoice and the timesheet, under the classes their no
     // above the first too
     const block = (sel) => CSS.slice(CSS.indexOf(`${sel} {`)).split("}")[0];
     assert.doesNotMatch(block("body .pm-invoice .pm-invoice-parties"), /border-top/);
-    assert.match(block("body .pm-invoice .pm-invoice-parties + .pm-invoice-parties"), /border-top: 1px solid/);
+    assert.match(block("body .pm-invoice .cm-html-embed:has(> .pm-invoice-parties) + .cm-html-embed > .pm-invoice-parties"), /border-top: 1px solid/);
+    assert.ok(CSS.includes("body .pm-invoice .pm-invoice-parties + .pm-invoice-parties,\n"), "reading view's line");
     assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice \.pm-invoice-parties \{\s*border-top: 1px solid/);
     // Billed entries take the timesheet's day bands; Billable hours, the table of four columns, doesn't
     const billed = "body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr";

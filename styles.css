@@ -182,8 +182,10 @@ body .pm-invoice .pm-invoice-parties {
 }
 
 /* A line between your details and who it's billed to. On screen, none above your details, since many themes
-   underline the title already (Brian, 11/22); printed, a line there too, as before. */
-body .pm-invoice .pm-invoice-parties + .pm-invoice-parties {
+   underline the title already (Brian, 11/22); printed, a line there too, as before. Live Preview draws each
+   block in a widget of its own, so there it's the widget that follows another's. */
+body .pm-invoice .pm-invoice-parties + .pm-invoice-parties,
+body .pm-invoice .cm-html-embed:has(> .pm-invoice-parties) + .cm-html-embed > .pm-invoice-parties {
     border-top: 1px solid var(--background-modifier-border);
 }
 
