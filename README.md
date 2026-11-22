@@ -40,6 +40,32 @@ Plainday needs no other plugin. It finds your daily notes where the core Daily n
 - **[Task Status](https://github.com/vburzynski/obsidian-task-status)** adds a picker for a task's checkbox (`⇧⌘⏎`, or a long press). Plainday draws the markers itself.
 - **[Selectable Tables](https://github.com/frankreporting/selectable-tables)** keeps the header and first column of the reports', timesheets' and invoices' tables in view as they scroll (*Settings → Plainday → Tables*).
 
+## How your notes are organized
+
+```
+Projects/                               your areas and projects
+├── Freelance/                          an area: a folder, with a folder note tagged #area
+│   ├── Freelance.md
+│   ├── Kestrel Outfitters 2026/        a project in the area: a folder note tagged #project
+│   │   ├── Kestrel Outfitters 2026.md
+│   │   ├── Draft homepage wireframes.md   a task's own note
+│   │   └── ›logs/                      the project's event logs
+│   └── Pinecrest Library Brochure/
+│       └── Pinecrest Library Brochure.md
+└── Household/                          another area
+    └── Household.md
+Inbox/                                  notes Plainday makes before you file them
+Reference/                              everything else you keep, and the periodic notes
+└── Planner/
+    ├── days/2026-09-15.md
+    ├── weeks/2026w38.md
+    ├── months/2026-09.md
+    └── years/2026.md
+Archive/                                finished projects, moved here whole
+```
+
+It's the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. The folder names are yours: *Settings → Plainday → Folders*.
+
 ## Getting started
 
 1. Open today's daily note: the Daily notes plugin's *Open today's daily note*, or *Plainday: Jump to date* and type `today`.
