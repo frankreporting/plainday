@@ -55,10 +55,272 @@
     color: var(--link-color-hover);
 }
 
-/* New event log: the title box as wide as the dialog */
-.plainday-wide-input {
+/* Dialogs: a text box or a list as wide as the dialog (New event log's title, the date box of Schedule
+   and the other commands that ask for a date, Plan's number of days, Invoice's questions) */
+.modal .plainday-wide-input {
     width: 100%;
 }
+
+/* The date box: the line under it that reads the date back, apart from the box, keeping its height while
+   it's empty so the dialog doesn't jump */
+.modal .plainday-date-preview {
+    margin-top: 0.5em;
+    min-height: 1.5em;
+}
+
+/* "Move task?" and the question a [>] box asks: the task's name, highlighted */
+.modal mark.plainday-task-name {
+    background-color: var(--text-highlight-bg);
+    color: var(--text-normal);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-s);
+}
+
+/* Invoice's "Invoice … through …?": its text selectable, so a missing entry's task and note can be copied
+   back into its daily note */
+.modal .plainday-selectable {
+    user-select: text;
+}
+
+/* Trailing links (TrailingLinks): in Live Preview, a task line's ⭕, 🚩 date, forward date, ⋯ and ↗ drawn
+   small at the right edge of its last row, keyed to the classes the editor extension puts on a line:
+   - .pm-trail-line: the line, with --pm-run-w, the links' measured width, set on each line by the extension
+   - .pm-trail-glue: the text's last word, which keeps that much room after it
+   - .pm-trail-run: around the links
+   - .pm-trail: around each link, with .pm-trail-due / -forward / -note / -project / -area, and
+     .pm-trail-overdue on a due date that's passed; and around a shown task ID, with .pm-trail-id
+   - .pm-project-name: a ⭕/🗃️ link's alias, with data-pm-name, drawn as that name */
+@property --pm-trail-name-size { syntax: "<length>"; inherits: true; initial-value: 0px; }
+
+.markdown-source-view.is-live-preview {
+    /* The last word keeps room for the links after it, so when they don't fit it wraps with them */
+    & .pm-trail-glue {
+        white-space: nowrap;
+        padding-inline-end: var(--pm-run-w);
+    }
+
+    /* A folded line: Obsidian draws its "…" at the very end, after the room the last word kept.
+       Keep room for the "…" too, and pull it back to sit right after the text. */
+    & .pm-trail-line:has(> .cm-foldPlaceholder) {
+        --pm-fold-w: 1.75em;
+        & .pm-trail-glue { padding-inline-end: calc(var(--pm-run-w) + var(--pm-fold-w)); }
+        & > .cm-foldPlaceholder { margin-inline-start: calc(-1 * (var(--pm-run-w) + var(--pm-fold-w))); }
+    }
+
+    /* The links: a float with no width, so it always fits on the row it's on, the last one. Its
+       pills hang left from the row's right edge, into the room the last word kept. */
+    & .pm-trail-run {
+        float: right;
+        width: 0;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        min-height: 1lh;
+        text-indent: 0;
+        white-space: nowrap;
+    }
+    & .pm-trail-run > .pm-trail {
+        flex: none;
+        font-size: 0.8em;
+        margin-inline-start: 4px;
+        --pm-trail-name-size: 1em;
+    }
+
+    /* On screen: the project, the due date, the forward date, then the notes at the edge, the ⋯ and then
+       the ↗ to the note it was sent from, as in the line's text: the last mark names where the task came
+       from (Brian, 2026-10-28) */
+    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) { order: 1; }
+    & .pm-trail-run > .pm-trail-due { order: 2; }
+    & .pm-trail-run > .pm-trail-forward { order: 3; }
+    & .pm-trail-run > :is(.pm-trail-note, .pm-trail-from) { order: 4; }
+    /* A task's ID, once the cursor at the line's end shows it, comes last, at the right edge after the
+       links: the caret sits after it there, and ← moves into the links */
+    & .pm-trail-run > .pm-trail-id { order: 5; color: var(--text-faint); }
+
+    /* A project or area link reads as its name: faint, no pill, still a link */
+    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) .cm-hmd-internal-link {
+        background: none !important;
+        padding: 0 !important;
+    }
+    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) :is(.cm-hmd-internal-link, .cm-underline) {
+        color: var(--text-faint) !important;
+    }
+    & .pm-trail-run .pm-project-name { font-size: 0; }
+    & .pm-trail-run .pm-project-name::before {
+        content: attr(data-pm-name);
+        font-size: var(--pm-trail-name-size);
+    }
+
+    /* The due date: faint, red once it's passed. The inner span too: a link to a day with no note
+       yet is unresolved, and the theme colours that span. */
+    & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
+    & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
+    & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error) !important; }
+
+    /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown */
+    & .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {
+        & .pm-trail-glue { padding-inline-end: 0; white-space: inherit; }
+        & > .cm-foldPlaceholder { margin-inline-start: 0; }
+        & .pm-trail-run { float: none; width: auto; display: inline; min-height: 0; }
+        & .pm-trail { font-size: inherit; margin: 0; }
+        & .pm-project-name { font-size: inherit; }
+        & .pm-project-name::before { content: none; }
+    }
+}
+
+/* Invoices (Invoice, OBS-5): a note with `cssclasses: pm-invoice`, as Invoice writes it, laid out like a
+   printed invoice: your details and the date, then who it's billed to beside the totals, then the Billable
+   hours table. Export to PDF prints it without the properties, the Billed entries or the check block, and
+   with any link as plain text.
+   Each rule starts at body: styles.css loads before the theme, so a theme's rule of the same weight would
+   win otherwise, as Baseline's for every table and cell does. */
+body .pm-invoice .pm-invoice-parties {
+    display: flex;
+    justify-content: space-between;
+    gap: 2em;
+    padding: 1.2em 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+body .pm-invoice .pm-invoice-party {
+    flex: 1 1 55%;
+}
+
+body .pm-invoice .pm-invoice-facts {
+    flex: 1 1 45%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(7em, 1fr));
+    gap: 0.6em 2em;
+    align-content: start;
+}
+
+body .pm-invoice .pm-invoice-parties p {
+    margin: 0 0 0.3em;
+}
+
+body .pm-invoice .pm-invoice-label {
+    color: var(--text-muted);
+    font-size: 0.85em;
+}
+
+body .pm-invoice .pm-invoice-name {
+    font-size: 1.3em;
+    font-weight: 600;
+}
+
+body .pm-invoice .pm-invoice-facts strong {
+    font-size: 1.3em;
+}
+
+body .pm-invoice table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+body .pm-invoice th {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.85em;
+}
+
+body .pm-invoice th,
+body .pm-invoice td {
+    border: none;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 0.45em 0.3em;
+}
+
+/* Billable hours (the one table of four columns): Qty, Rate and Amount never wrap, and take only the
+   width their widest value needs, so the line item gets the rest (OBS-146). Billed entries, with its
+   long tasks and notes, wraps as any table does. */
+body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td):not(:first-child) {
+    white-space: nowrap;
+    width: 1%;
+}
+
+@media print {
+    body .pm-invoice .metadata-container,
+    body .pm-invoice .inline-title,
+    body .pm-invoice .callout[data-callout="pm-billed"],
+    body .pm-invoice .callout[data-callout="pm-invoice-check"] {
+        display: none !important;
+    }
+
+    /* Billed entries, the last section: its heading and everything after it (OBS-145). Each block
+       prints in a div of its own, so that's the blocks after the heading's div; and the heading's own
+       siblings, should they print unwrapped. Never the heading's div itself: unwrapped, that would be
+       the whole note. */
+    body .pm-invoice h2[data-heading="Billed entries" i],
+    body .pm-invoice h2[data-heading="Billed entries" i] ~ *,
+    body .pm-invoice div:has(> h2[data-heading="Billed entries" i]) ~ * {
+        display: none !important;
+    }
+
+    /* A long invoice: the column names again at the top of each page, and no row split between two */
+    body .pm-invoice thead {
+        display: table-header-group;
+    }
+
+    body .pm-invoice tr {
+        break-inside: avoid;
+    }
+
+    body .pm-invoice a,
+    body .pm-invoice .internal-link {
+        color: inherit !important;
+        text-decoration: none !important;
+    }
+}
+
+/* Timesheets (TimeReport, OBS-242, OBS-243): day bands in a note with `cssclasses: pm-timesheet`, which the
+   time report writes into every timesheet. Instead of shading every other row, each day's entries share
+   one shade under a day row in the note's own background, so each day reads as a block. The shade is the
+   theme's text color mixed into the note's background, 4% in light mode and 12% in dark, where a small
+   step near black doesn't show. Both are the theme's own colors, so it takes the theme's tint. No color a
+   theme names does that: Baseline's dark --background-primary-alt is a hair off the note's background, and
+   the default theme's light one is faint.
+   A day row is the one with a bold date in its Date / Time column: the second column, after the status
+   column, or the first in a timesheet that has none.
+   To pick the entries' color, set --pm-timesheet-entry-background in a snippet of your own, for example
+   body { --pm-timesheet-entry-background: var(--background-secondary); } */
+/* How much of the text color the entries' shade takes: more in dark mode */
+.pm-timesheet {
+    --pm-timesheet-entry-mix: 4%;
+}
+
+.theme-dark .pm-timesheet {
+    --pm-timesheet-entry-mix: 12%;
+}
+
+/* No alternating shade in a timesheet's table: every entry takes the band's shade, or the color you set.
+   Each row rule holds under the mouse too, or Obsidian's own hover rule for odd rows would repaint every
+   other row, and never a frozen cell, which Selectable Tables paints from the rows at rest. */
+.pm-timesheet table tbody tr:nth-child(n),
+.pm-timesheet table tbody tr:nth-child(n):hover {
+    background-color: var(--pm-timesheet-entry-background,
+        color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-timesheet-entry-mix)));
+}
+
+/* Day rows are plain: the note's own background, painted rather than clear, since a theme can shade the
+   table under its rows (Baseline gives the table's body --background-primary-alt) */
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong),
+.pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong):hover {
+    background-color: var(--background-primary);
+}
+
+/* With the Selectable Tables plugin, frozen cells are painted solid, row by row, as the table's first odd
+   and even rows look. In a timesheet those are always a day row and an entry under it, so each row's frozen
+   cells take the look of its own kind: the day's plain background, or the entries' shade. */
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n) {
+    --selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
+    --selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
+}
+
+.markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:has(> td:nth-child(-n + 2) strong) {
+    --selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
+    --selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
+}
+
 
 /* Task markers (OBS-140): an event `[<]`, a forwarded task `[>]`, a started `[/]`, a canceled `[-]` and a
    goal `[w]` drawn with looks of their own, in Live Preview and reading view. Obsidian draws every mark
@@ -92,6 +354,7 @@ body.plainday-task-markers {
     --plainday-goal-color: var(--color-orange);
     --plainday-canceled-color: var(--checkbox-border-color);
     --plainday-canceled-dash: white;
+    --plainday-canceled-text: var(--checklist-done-color);
 }
 
 body.plainday-task-markers [data-task="<"] {
@@ -194,11 +457,15 @@ body.plainday-task-markers :is(
     transform: none;
 }
 
-/* A forwarded or canceled task's text muted, a canceled one's struck through as well. Not a done task's
-   look, which some themes leave plain (Minimal, unless its strike setting is on): these two read the same
-   in every theme */
-body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item):is([data-task=">"], [data-task="-"]) {
+/* A forwarded task's text muted. A canceled one's in a done task's gray (Brian, 11/22, OBS-200), the color
+   the theme gives a done task's text, and struck through as well, as a done task isn't in every theme
+   (Minimal, unless its strike setting is on) */
+body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item)[data-task=">"] {
     color: var(--text-muted);
+}
+
+body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item)[data-task="-"] {
+    color: var(--plainday-canceled-text);
 }
 
 body.plainday-task-markers .markdown-rendered li.task-list-item[data-task="-"] {
@@ -214,7 +481,7 @@ body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-lin
 }
 
 body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] > span:not(.pm-trail-run, .cm-foldPlaceholder) {
-    background-image: linear-gradient(var(--text-muted), var(--text-muted));
+    background-image: linear-gradient(var(--plainday-canceled-text), var(--plainday-canceled-text));
     background-position: 0 55%;
     background-size: 100% 1px;
     background-repeat: repeat-x;

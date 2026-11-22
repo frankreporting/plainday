@@ -32,7 +32,6 @@ export default class TrailingLinks {
     //
     // It needs Obsidian's own CodeMirror, which it imports; the build leaves it out of main.js, as
     // Obsidian gives it to every plugin.
-    static STYLE_ID = "pm-trailing-links";
     // Gaps and padding around the links, in px, for a first guess at their width until it's measured
     static PILL_PX = 14;
     static CHAR_PX = 7.5;
@@ -43,7 +42,7 @@ export default class TrailingLinks {
     static MAX_PIECEMEAL = 40;
     static REDRAW_MS = 250;
 
-    // The layout, keyed to the classes the extension puts on a line:
+    // The layout is in styles.css, keyed to the classes the extension puts on a line:
     //   .pm-trail-line  the line, with --pm-run-w (the links' width)
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
     //   .pm-trail-run   around the links
@@ -51,85 +50,6 @@ export default class TrailingLinks {
     //                   and .pm-trail-overdue on a due date that's passed; and around a shown task ID,
     //                   with .pm-trail-id
     //   .pm-project-name  a ⭕/🗃️ link's alias, with data-pm-name, drawn as that name
-    static CSS = `
-@property --pm-trail-name-size { syntax: "<length>"; inherits: true; initial-value: 0px; }
-
-.markdown-source-view.is-live-preview {
-    /* The last word keeps room for the links after it, so when they don't fit it wraps with them */
-    & .pm-trail-glue {
-        white-space: nowrap;
-        padding-inline-end: var(--pm-run-w);
-    }
-
-    /* A folded line: Obsidian draws its "…" at the very end, after the room the last word kept.
-       Keep room for the "…" too, and pull it back to sit right after the text. */
-    & .pm-trail-line:has(> .cm-foldPlaceholder) {
-        --pm-fold-w: 1.75em;
-        & .pm-trail-glue { padding-inline-end: calc(var(--pm-run-w) + var(--pm-fold-w)); }
-        & > .cm-foldPlaceholder { margin-inline-start: calc(-1 * (var(--pm-run-w) + var(--pm-fold-w))); }
-    }
-
-    /* The links: a float with no width, so it always fits on the row it's on, the last one. Its
-       pills hang left from the row's right edge, into the room the last word kept. */
-    & .pm-trail-run {
-        float: right;
-        width: 0;
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        min-height: 1lh;
-        text-indent: 0;
-        white-space: nowrap;
-    }
-    & .pm-trail-run > .pm-trail {
-        flex: none;
-        font-size: 0.8em;
-        margin-inline-start: 4px;
-        --pm-trail-name-size: 1em;
-    }
-
-    /* On screen: the project, the due date, the forward date, then the notes at the edge, the ⋯ and then
-       the ↗ to the note it was sent from, as in the line's text: the last mark names where the task came
-       from (Brian, 2026-10-28) */
-    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) { order: 1; }
-    & .pm-trail-run > .pm-trail-due { order: 2; }
-    & .pm-trail-run > .pm-trail-forward { order: 3; }
-    & .pm-trail-run > :is(.pm-trail-note, .pm-trail-from) { order: 4; }
-    /* A task's ID, once the cursor at the line's end shows it, comes last, at the right edge after the
-       links: the caret sits after it there, and ← moves into the links */
-    & .pm-trail-run > .pm-trail-id { order: 5; color: var(--text-faint); }
-
-    /* A project or area link reads as its name: faint, no pill, still a link */
-    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) .cm-hmd-internal-link {
-        background: none !important;
-        padding: 0 !important;
-    }
-    & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) :is(.cm-hmd-internal-link, .cm-underline) {
-        color: var(--text-faint) !important;
-    }
-    & .pm-trail-run .pm-project-name { font-size: 0; }
-    & .pm-trail-run .pm-project-name::before {
-        content: attr(data-pm-name);
-        font-size: var(--pm-trail-name-size);
-    }
-
-    /* The due date: faint, red once it's passed. The inner span too: a link to a day with no note
-       yet is unresolved, and the theme colours that span. */
-    & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
-    & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
-    & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error) !important; }
-
-    /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown */
-    & .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {
-        & .pm-trail-glue { padding-inline-end: 0; white-space: inherit; }
-        & > .cm-foldPlaceholder { margin-inline-start: 0; }
-        & .pm-trail-run { float: none; width: auto; display: inline; min-height: 0; }
-        & .pm-trail { font-size: inherit; margin: 0; }
-        & .pm-project-name { font-size: inherit; }
-        & .pm-project-name::before { content: none; }
-    }
-}
-`;
 
     // A task or event line: a list item with a checkbox
     static TASK_LINE = /^\s*[-*+] \[.\] /;
@@ -335,7 +255,7 @@ export default class TrailingLinks {
         // One registered slot per load of Plainday; a rerun swaps what's in it
         const kept = window.pmTrailingLinks;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
-        const handles = { slot: slot ?? [], refs: [], docs: new Set(), widths: new Map(), size: null, timer: null, midnight: null };
+        const handles = { slot: slot ?? [], refs: [], widths: new Map(), size: null, timer: null, midnight: null };
         window.pmTrailingLinks = handles;
         if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
@@ -440,21 +360,10 @@ export default class TrailingLinks {
             },
         });
 
-        const addStyle = (doc) => {
-            if (handles.docs.has(doc)) return;
-            handles.docs.add(doc);
-            doc.getElementById(T.STYLE_ID)?.remove();
-            const style = doc.createElement("style");
-            style.id = T.STYLE_ID;
-            style.textContent = T.CSS;
-            doc.head.appendChild(style);
-        };
-
         const span = (v) => v.visibleRanges.map((r) => `${v.state.doc.lineAt(r.from).number}-${v.state.doc.lineAt(r.to).number}`).join(",");
 
         const plugin = ViewPlugin.fromClass(class {
             constructor(v) {
-                addStyle(v.dom.ownerDocument);
                 Object.assign(this, build(v));
                 this.span = span(v);
                 if (this.unmeasured) measure(v);
@@ -672,8 +581,6 @@ export default class TrailingLinks {
         handles.refs = [];
         clearTimeout(handles.timer);
         clearTimeout(handles.midnight);
-        for (const doc of handles.docs) doc.getElementById(TrailingLinks.STYLE_ID)?.remove();
-        handles.docs.clear();
         // The slot stays registered for the next run to fill
         handles.slot.length = 0;
         app.workspace.updateOptions();

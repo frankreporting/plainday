@@ -491,7 +491,7 @@ export default class CheckOff {
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
             modal.titleEl.setText(title);
-            const mark = modal.contentEl.createEl("p").createEl("mark", { attr: { style: "background-color: var(--text-highlight-bg); color: var(--text-normal); padding: 0.1em 0.3em; border-radius: var(--radius-s);" } });
+            const mark = modal.contentEl.createEl("p").createEl("mark", { cls: "plainday-task-name" });
             mark.createEl("strong", { text: "Task:" });
             mark.appendText(` ${name}`);
             if (words) modal.contentEl.createEl("p", { text: words });

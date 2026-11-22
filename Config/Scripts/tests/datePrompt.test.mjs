@@ -202,7 +202,8 @@ test("the preview line, and the same date spelled out", () => {
 const harness = (plugin = null) => {
     const frames = [], picks = [], notices = [];
     const el = () => {
-        const e = { style: {}, text: "", listeners: {}, children: [] };
+        const e = { classes: [], text: "", listeners: {}, children: [] };
+        e.addClass = (...c) => { e.classes.push(...c); };
         e.setText = (t) => { e.text = t; };
         e.createDiv = () => { const c = el(); e.children.push(c); return c; };
         e.addEventListener = (type, fn) => { e.listeners[type] = fn; };
