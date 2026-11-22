@@ -72,10 +72,12 @@
      ::after), so no part of a theme's own look for these marks shows through. The :is() lists give the
      reading view's selectors the Live Preview one's weight, which ranks above the themes' rules for
      these marks (Minimal, Things, Baseline) without !important.
-   - One color for all five, the one the theme gives a done box, read on the body: themes set their own
-     colors on these boxes, which would otherwise reach the icons.
+   - Colors from the theme, read on the body, since themes set their own colors on these boxes, which would
+     otherwise reach the icons: the one it gives a done box, for the calendar, the arrow and the started box;
+     its yellow for the goal's trophy, filled, so a goal stands out; its empty box's gray for a canceled box,
+     filled, with a white dash in every theme, so a canceled task fades (Brian, 11/22).
    - The icons are Lucide's calendar, arrow-right and trophy (lucide.dev), as Obsidian ships them, cropped
-     to the glyph so it fills the box. ISC License: Copyright (c) for portions of Lucide are held by Cole
+     to the glyph so it fills the box; the trophy's cup and stem filled in. ISC License: Copyright (c) for portions of Lucide are held by Cole
      Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide
      Contributors 2022. Permission to use, copy, modify, and/or distribute this software for any purpose
      with or without fee is hereby granted, provided that the above copyright notice and this permission
@@ -87,6 +89,9 @@
      THIS SOFTWARE. */
 body.plainday-task-markers {
     --plainday-marker-color: var(--checkbox-color);
+    --plainday-goal-color: var(--color-yellow);
+    --plainday-canceled-color: var(--checkbox-border-color);
+    --plainday-canceled-dash: white;
 }
 
 body.plainday-task-markers [data-task="<"] {
@@ -98,7 +103,7 @@ body.plainday-task-markers [data-task=">"] {
 }
 
 body.plainday-task-markers [data-task="w"] {
-    --plainday-marker-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='1 1 22 22' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10 14.66v1.626a2 2 0 0 1-.976 1.696A5 5 0 0 0 7 21.978'/><path d='M14 14.66v1.626a2 2 0 0 0 .976 1.696A5 5 0 0 1 17 21.978'/><path d='M18 9h1.5a1 1 0 0 0 0-5H18'/><path d='M4 22h16'/><path d='M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z'/><path d='M6 9H4.5a1 1 0 0 1 0-5H6'/></svg>");
+    --plainday-marker-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='1 1 22 22' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9H4.5a1 1 0 0 1 0-5H6'/><path d='M18 9h1.5a1 1 0 0 0 0-5H18'/><path d='M4 22h16'/><path fill='black' d='M6 9a6 6 0 0 0 12 0V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1z'/><path fill='black' d='M10 14.66v1.626a2 2 0 0 1-.976 1.696A5 5 0 0 0 7 21.978H17a5 5 0 0 0-2.024-3.996A2 2 0 0 1 14 16.286V14.66z'/></svg>");
 }
 
 /* The five boxes: the theme's drawing cleared, the box kept at its place and size, an empty box in the
@@ -140,6 +145,15 @@ body.plainday-task-markers :is(
     mask: var(--plainday-marker-icon) center / 100% 100% no-repeat;
 }
 
+/* Goal: the trophy in gold */
+body.plainday-task-markers :is(
+    .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="w"] .task-list-item-checkbox,
+    .markdown-rendered li.task-list-item[data-task="w"] > .task-list-item-checkbox,
+    .markdown-rendered li.task-list-item[data-task="w"] > p > .task-list-item-checkbox
+) {
+    background: var(--plainday-goal-color);
+}
+
 /* Started: the box's left half filled */
 body.plainday-task-markers :is(
     .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="/"] .task-list-item-checkbox,
@@ -149,7 +163,17 @@ body.plainday-task-markers :is(
     background: linear-gradient(to right, var(--plainday-marker-color) 50%, transparent 50%);
 }
 
-/* Canceled: a dash across the middle of the box, like Obsidian's own box that's neither ticked nor empty */
+/* Canceled: the box filled gray, faded, with a dash across its middle, like Obsidian's own box that's neither
+   ticked nor empty */
+body.plainday-task-markers :is(
+    .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] .task-list-item-checkbox,
+    .markdown-rendered li.task-list-item[data-task="-"] > .task-list-item-checkbox,
+    .markdown-rendered li.task-list-item[data-task="-"] > p > .task-list-item-checkbox
+) {
+    border-color: var(--plainday-canceled-color);
+    background: var(--plainday-canceled-color);
+}
+
 body.plainday-task-markers :is(
     .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] .task-list-item-checkbox,
     .markdown-rendered li.task-list-item[data-task="-"] > .task-list-item-checkbox,
@@ -164,7 +188,7 @@ body.plainday-task-markers :is(
     margin: auto;
     border: none;
     border-radius: 2px;
-    background: var(--plainday-marker-color);
+    background: var(--plainday-canceled-dash);
     -webkit-mask: none;
     mask: none;
     transform: none;
