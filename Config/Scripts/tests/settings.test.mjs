@@ -20,7 +20,7 @@ const TEMPLATES = { week: "", month: "", year: "", task: "", log: "" };
 const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
-    editor: { listCursor: true },
+    editor: { listCursor: true, taskMarkers: true },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -29,7 +29,7 @@ const JUNIPER = {
     invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 30",
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
-    editor: { listCursor: true },
+    editor: { listCursor: true, taskMarkers: true },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -52,13 +52,13 @@ test("normalize: each value that reads, else its default", () => {
         invoices: { name: "  Juniper Hale ", address: "418 Larkspur Lane\n\n Maple Falls, ST 00000 ", terms: 30, paymentNote: "\nLine one  \nLine two\n",
             folder: " /Business//Invoices/ ", firstNumber: "1020", lastNumber: "1033" },
         tables: { freezeRows: "2", freezeColumns: 12 },
-        editor: { listCursor: false },
+        editor: { listCursor: false, taskMarkers: false },
     }, billing);
     assert.deepEqual(plain(n), {
         invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "30", paymentNote: "Line one\nLine two",
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
-        editor: { listCursor: false },
+        editor: { listCursor: false, taskMarkers: false },
         calendars: { range: "2 months", list: [], recurring: null },
         folders: FOLDERS,
         templates: TEMPLATES,
@@ -81,6 +81,9 @@ test("normalize: each value that reads, else its default", () => {
     assert.deepEqual(plain(settings.firstNumberOf("")), { number: null, error: null }, "blank isn't a number, and isn't an error either");
     for (const v of [-1, 1.5, "a lot", true]) assert.equal(settings.normalize({ tables: { freezeRows: v } }, billing).tables.freezeRows, 0, String(v));
     for (const v of ["no", 0, null]) assert.equal(settings.normalize({ editor: { listCursor: v } }, billing).editor.listCursor, true, String(v));
+    // Draw task markers (OBS-140): on unless the file says false, so a file from before it turns it on
+    for (const v of ["no", 0, null, undefined]) assert.equal(settings.normalize({ editor: { taskMarkers: v } }, billing).editor.taskMarkers, true, String(v));
+    assert.equal(settings.normalize({ editor: { listCursor: false } }, billing).editor.taskMarkers, true, "a file from before the switch");
 });
 
 test("the demo's data file reads as it's written, so loading and saving it changes nothing", () => {
@@ -130,7 +133,7 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // vault holds `notes` as text, and the notices shown are kept
 function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {}, templater = "" } = {}) {
     const saves = [], notices = [], reads = [];
-    let listCursorRuns = 0;
+    let listCursorRuns = 0, taskMarkerRuns = 0;
     const plugin = {
         manifest: { dir: ".obsidian/plugins/plainday" },
         loadData: async () => (unreadable ? undefined : stored === null ? null : JSON.parse(JSON.stringify(stored))),
@@ -165,10 +168,10 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
         URL,
         crypto: globalThis.crypto,
         Notice: class { constructor(text) { notices.push(text); } },
-        plainday: { plugin, Billing: billing, ListCursor: { invoke: async () => { listCursorRuns++; } } },
+        plainday: { plugin, Billing: billing, ListCursor: { invoke: async () => { listCursorRuns++; } }, TaskMarkers: { invoke: async () => { taskMarkerRuns++; } } },
     });
     const s = new (load("settings.js", "Settings", context))();
-    return { s, plugin, saves, notices, reads, secrets, runs: () => listCursorRuns };
+    return { s, plugin, saves, notices, reads, secrets, runs: () => listCursorRuns, markerRuns: () => taskMarkerRuns };
 }
 // What a device saved before OBS-282: no calendars
 const JUNIPER_BEFORE = { invoices: JUNIPER.invoices, tables: JUNIPER.tables, editor: JUNIPER.editor };
@@ -201,11 +204,11 @@ test("reload: Sync's new data file is read; one caught mid-write keeps what's in
     f.plugin.loadData = async () => undefined;
     await f.s.reload();
     assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor.listCursor]), ["Juniper Hale", 1004, false]);
-    assert.deepEqual([f.notices, f.saves, f.runs()], [[], [], 0], "no notice, nothing written, nothing applied");
+    assert.deepEqual([f.notices, f.saves, f.runs(), f.markerRuns()], [[], [], 0, 0], "no notice, nothing written, nothing applied");
     f.plugin.loadData = async () => ({ invoices: { name: "From the phone" } });
     await f.s.reload();
     assert.equal(f.s.get().invoices.name, "From the phone");
-    assert.equal(f.runs(), 1, "the editor switch applied");
+    assert.deepEqual([f.runs(), f.markerRuns()], [1, 1], "both editor switches applied");
     f.plugin.loadData = async () => null;
     await f.s.reload();
     assert.deepEqual(plain(f.s.get()), { ...DEFAULTS, invoices: { ...DEFAULTS.invoices, lastNumber: 1004 } }, "the file gone: the defaults, but never a lower number");
@@ -228,7 +231,7 @@ test("a data file that doesn't read: the defaults, a notice, and no save over it
     assert.equal(f.s.unreadable, false);
 });
 
-test("raiseLastNumber never lowers the number; set saves one section; replaceWith keeps the higher number and applies the editor switch", async () => {
+test("raiseLastNumber never lowers the number; set saves one section; replaceWith keeps the higher number and applies the editor switches", async () => {
     const f = withPlugin({ stored: JUNIPER });
     await f.s.load();
     await f.s.raiseLastNumber(1000);
@@ -238,10 +241,10 @@ test("raiseLastNumber never lowers the number; set saves one section; replaceWit
     assert.equal(f.saves.at(-1).invoices.lastNumber, 1002);
     await f.s.set("tables", { freezeRows: 1 });
     assert.deepEqual(f.saves.at(-1).tables, { freezeRows: 1, freezeColumns: 0 });
-    await f.s.replaceWith({ ...DEFAULTS, invoices: { ...DEFAULTS.invoices, name: "From the phone", lastNumber: 1001 }, editor: { listCursor: false } });
-    assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor.listCursor]), ["From the phone", 1002, false]);
+    await f.s.replaceWith({ ...DEFAULTS, invoices: { ...DEFAULTS.invoices, name: "From the phone", lastNumber: 1001 }, editor: { listCursor: false, taskMarkers: false } });
+    assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor]), ["From the phone", 1002, { listCursor: false, taskMarkers: false }]);
     assert.deepEqual(f.saves.at(-1), plain(f.s.get()));
-    assert.equal(f.runs(), 1, "ListCursor follows the pasted switch");
+    assert.deepEqual([f.runs(), f.markerRuns()], [1, 1], "ListCursor and TaskMarkers follow the pasted switches");
 });
 
 // ------------------------------------------------------------------ calendars (OBS-282)

@@ -779,6 +779,11 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         (s) => s.addToggle((t) => t.setValue(now().editor.listCursor).onChange((v) => {
                             void store(s, "editor", { listCursor: v }).then(() => plainday.ListCursor.invoke());
                         }))),
+                    // Off, the theme's own look for these markers shows, as without Plainday (OBS-140)
+                    row("Draw task markers", "Show events, forwarded, started and canceled tasks, and goals with their own icons. Turn this off if your theme already draws them.",
+                        (s) => s.addToggle((t) => t.setValue(now().editor.taskMarkers).onChange((v) => {
+                            void store(s, "editor", { taskMarkers: v }).then(() => plainday.TaskMarkers.invoke());
+                        }))),
                 ],
             },
             ...this.calendarSections(store),

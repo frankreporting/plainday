@@ -126,6 +126,7 @@ This section is the spec for how daily notes are written, for you and for any ag
 - `[>]` is always a task, with one exception: an event that moved to another day after you'd added notes under it (see *Calendar sync*).
 - A tick on either line of a sent task checks off both, and a click on a `[>]` box asks before it changes anything: see *Checking off a task*.
 - Other Task Status markers (`[?]` question, `[!]` important, `[I]` idea, `[i]` information, `[b]` bookmark, `["]` quote, `[*]` star…) are annotations with no scheduling meaning.
+- **Plainday draws these markers,** in Live Preview and reading view, the same in every theme: a calendar for `[<]`, an arrow for `[>]` with its text muted, a half-filled box for `[/]`, and a gray box with a white dash for `[-]`, its text muted and struck through. Without that, Obsidian shows every mark but a space as a ticked box. If your theme already draws them, turn *Settings → Plainday → Editor → Draw task markers* off.
 
 ### Events
 
@@ -843,6 +844,7 @@ On a project note, makes a draft invoice from its unbilled time through a date y
 
 These run on their own when Obsidian starts, one after the other once the vault's layout is ready, and again whenever Plainday is reloaded:
 
+- ***TaskMarkers*** draws `[<]`, `[>]`, `[/]` and `[-]` with looks of their own, and an orange trophy for `[w]`, the mark goals will use (see *Line types*), on every device. It only sets a class on each window; the drawing is all in Plainday's `styles.css`, so nothing runs as you type. It runs first, so notes open with their markers drawn. *Settings → Plainday → Editor* turns it off and on, at once in every open note; off, Plainday adds nothing, and the theme's own look shows.
 - ***NewNoteGuard*** keeps Templater's trigger for new notes off notes that aren't new. Obsidian reports a note as created whenever it appears, including one that arrives through Sync, a move or a restore, and Templater applies `Get Template.md` to any note whose body below its properties is empty: a log note with no notes yet, or a person with only properties. A note you make starts empty, so one that appears with properties and nothing below them is held from Templater for a moment, and it's skipped with no write and no notice. It does the same for a note a template has just made and moved (*Convert to project*), which Templater would otherwise run through the templates a second time, and for one Plainday makes with its properties (a task note, a log, a calendar's new day). On every device, once Obsidian has restarted there after an update.
 - ***FinishPeriodicNotes*** finishes every daily, weekly, monthly and yearly note made on this device some other way than by Plainday's commands: by Notebook Navigator's calendar, the Daily notes plugin's *Open today's daily note*, a click on a link to a missing day, or a date typed as a new note's title.
 	- **A note made blank** is finished at once: moved into its folder when it was made elsewhere (unless a note of that name is there already), given that kind of note's template, and its alias, through the editor when the note is open, so the cursor lands below the properties.
@@ -909,6 +911,8 @@ A settings file that doesn't read (a write cut off, a sync conflict) is left as 
 ### Editor
 
 **Keep the cursor after a list line's bullet or checkbox:** *ListCursor* (see *Startup scripts*), on as it comes: in Live Preview, the cursor doesn't rest inside a task's or list item's markdown, so it stays rendered. You can still edit the markdown in Source mode, or select it to copy or delete. Off, none of it runs, and the cursor can rest anywhere on a list line. The switch takes effect at once, in every open note.
+
+**Draw task markers:** *TaskMarkers* (see *Startup scripts*), on as it comes: events, forwarded, started and canceled tasks, and goals show with their own icons, the same in every theme (see *Line types*). Turn it off if your theme or a snippet of yours already draws them: off, Plainday adds nothing, and they look as your theme draws them. The switch takes effect at once, in every open note.
 
 ### Calendars
 
@@ -984,7 +988,7 @@ The periodic notes aren't among them: Plainday makes and finishes those, and kee
 
 - [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived): reads dates typed in other languages, in the languages turned on in its settings (see *Typing a date*), and suggests dates as you type in a note. Plainday reads English dates itself.
 - [Notebook Navigator](https://github.com/johansan/notebook-navigator): a calendar for the periodic notes, and folder notes. The scripts read its week, month and year patterns when it's installed, and new project and area folders get a look in it: a red circle or a green archive, or the look you've given their tag.
-- [Task Status](https://github.com/vburzynski/obsidian-task-status): shows `[<]`, `[>]`, `[-]` and the other markers as their own icons, and `⇧⌘⏎` picks one.
+- [Task Status](https://github.com/vburzynski/obsidian-task-status): a picker for a task's checkbox (`⇧⌘⏎`, or a long press). Plainday draws the markers itself (see *Line types*).
 - [Selectable Tables](https://github.com/frankreporting/selectable-tables): arrow keys select and move through a table's cells, and a table can keep its first rows and columns in view as it scrolls. *Settings → Plainday → Tables* sets a default for the system's tables (see *Freezing tables*).
 
 ## Working on the system

@@ -11,15 +11,18 @@ import MoveToProjectMenu from "./moveToProjectMenu.js";
 import NewNoteGuard from "./newNoteGuard.js";
 import RefoldOnOpen from "./refoldOnOpen.js";
 import SyncArea from "./syncArea.js";
+import TaskMarkers from "./taskMarkers.js";
 import TimeReportOnStartup from "./timeReportOnStartup.js";
 import TrailingLinks from "./trailingLinks.js";
 
 export const CLASSES = {
-    CheckOff, FinishLinkedLogs, FinishPeriodicNotes, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TimeReportOnStartup, TrailingLinks,
+    CheckOff, FinishLinkedLogs, FinishPeriodicNotes, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TaskMarkers, TimeReportOnStartup, TrailingLinks,
 };
 
 // Run once the layout is ready, one after the other, in this order
 export const STARTUP = [
+    // First, so the notes open with their markers drawn
+    "TaskMarkers",
     "NewNoteGuard",
     "FinishPeriodicNotes",
     "FinishLinkedLogs",

@@ -320,13 +320,14 @@ test("its settings load before anything runs; the panel is added; the startup sc
         await layout[0]();
         assert.deepEqual(ran, STARTUP, "and nothing else: the settings notes from before aren't read (OBS-295)");
         assert.deepEqual(plugin.saved, [], "loading saves nothing");
-        // Sync changed the data file: read again, and the editor switch applied
+        // Sync changed the data file: read again, and the editor switches applied
         stored.invoices.name = "From the phone";
         const applied = [];
         window.plainday.ListCursor.invoke = async () => applied.push("ListCursor");
+        window.plainday.TaskMarkers.invoke = async () => applied.push("TaskMarkers");
         await plugin.onExternalSettingsChange();
         assert.equal(window.plainday.Settings.get().invoices.name, "From the phone");
-        assert.deepEqual(applied, ["ListCursor"]);
+        assert.deepEqual(applied, ["ListCursor", "TaskMarkers"]);
     } finally {
         plugin.onunload();
     }
@@ -412,7 +413,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Note templates", ["Task note", "Log"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
-            ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox"]],
+            ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox", "Draw task markers"]],
             ["group", "Calendars", ["Add calendar", "Sync range", "Sync calendars using this device", "Calendar list"]],
             ["group", "Other", ["Error log note"]],
         ]);
@@ -543,6 +544,16 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual(plugin.saved.at(-1).tables, { freezeRows: 0, freezeColumns: 0 });
         assert.ok(!shown[1].visible());
         assert.equal(refreshed, 2, "Obsidian shows and hides them");
+
+        // Editor: Draw task markers saves, then redraws at once (OBS-140)
+        const markers = standInSetting();
+        tab.getSettingDefinitions()[5].items.find((i) => i.name === "Draw task markers").render(markers);
+        assert.equal(markers.control.inputEl.value, true, "on as it comes");
+        const drawn = [];
+        window.plainday.TaskMarkers.invoke = async () => drawn.push(window.plainday.Settings.get().editor.taskMarkers);
+        markers.control.handlers.change(false);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual([plugin.saved.at(-1).editor, drawn], [{ listCursor: true, taskMarkers: false }, [false]]);
         assert.deepEqual(visible(), ["Freeze rows and columns"], "drawn again, the switch reads the saved freeze");
     } finally {
         plugin.onunload();
@@ -1405,7 +1416,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 36);
+    assert.equal(classFiles.length, 37);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);
