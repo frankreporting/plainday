@@ -27,7 +27,8 @@ Everything under "## Time Report" is written by the *Time report* command, not b
 | Add note | Make or link a task's note, or an event's log note | Command palette |
 | Time report | Refresh the reports | Command palette |
 | Invoice | Invoice a project's time, or move an invoice along | Command palette |
-| New note | Type the whole title in the quick switcher, then Shift+Enter: `!project …`, a date + title like `2026-09-21 Kickoff call`, or a plain date like `2026-09-21`, and its template is applied. A task note comes from its line, with *Add note*. (A note made with ⌘N is *Untitled* when the templates look at it.) | `⌘O`, then `⇧↩` |
+| New project | Make a project: a folder with its note. Dates in the name become its start and due: `Harbor Mural 2026-10-01 2026-11-15` | Command palette |
+| New note | Type the whole title in the quick switcher, then Shift+Enter. A plain date like `2026-09-21` makes that day's note. A task note comes from its line, with *Add note*, and an event's log with *New event log*. (A note made with ⌘N is *Untitled* when the templates look at it.) | `⌘O`, then `⇧↩` |
 | Plan | Plan ahead: the next few daily notes side by side | Command palette |
 | Jump to date | Open the note for a date in words: `friday`, `next week`, `oct 2` | `⌘J` |
 

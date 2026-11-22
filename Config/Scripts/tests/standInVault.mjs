@@ -86,12 +86,20 @@ const frontMatter = (text) => {
     const m = text.match(/^---\r?\n(?:([\s\S]*?)\r?\n)?---[^\S\r\n]*(?:\r?\n|$)/);
     return m ? { exists: true, frontmatter: m[1] === undefined ? "" : `${m[1]}\n`, from: m[0].indexOf("\n") + 1, to: m[0].length - m[0].match(/---[^\S\r\n]*(?:\r?\n|$)$/)[0].length, contentStart: m[0].length } : { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
 };
-export const YAML = { getFrontMatterInfo: frontMatter, parseYaml: (y) => parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter, stringifyYaml: (props) => stringifyYaml(props) };
+// parseYaml gives the keys in the text's order, and a `tags` only when the text has one, as YAML does (the metadata
+// cache's frontmatter, below, always has its tags)
+const parseYaml = (y) => {
+    const fm = parseCache(`---\n${y.replace(/\r/g, "")}---\n`).frontmatter;
+    const at = (k) => y.search(new RegExp(`^${k}:`, "m"));
+    return Object.fromEntries(Object.entries(fm).filter(([k]) => at(k) >= 0).sort(([a], [b]) => at(a) - at(b)));
+};
+export const YAML = { getFrontMatterInfo: frontMatter, parseYaml, stringifyYaml: (props) => stringifyYaml(props) };
 export const stringifyYaml = (props) => Object.entries(props).map(([k, v]) => (Array.isArray(v) ? `${k}:\n${v.map((x) => `  - ${x}`).join("\n")}` : `${k}: ${v ?? ""}`)).join("\n") + "\n";
 
 // The metadata cache Obsidian keeps for a note, as far as the scripts read it: frontmatter (tags,
 // status, parent), list items with their checkbox and block ID, every block ID (on a list item or any
 // other line) by its lowercased ID, and its links, whose displayText is a link's alias, or else its text
+const unquote = (v) => (/^"(?:[^"\\]|\\.)*"$/.test(v) ? JSON.parse(v) : /^'.*'$/.test(v) ? v.slice(1, -1) : v);
 export const parseCache = (text) => {
     // Windows line ends read as Obsidian reads them
     const lines = text.split("\n").map((l) => l.replace(/\r$/, ""));
@@ -113,9 +121,9 @@ export const parseCache = (text) => {
                     frontmatter[key] = quoted ? quoted[2] : v.replace(/(^|\s+)#.*$/, "").trim();
                 }
             // A YAML list item, indented or not, as the demo's notes write `tags:` then `- project`
-            } else if (key === "tags" && /^\s*-\s+/.test(l)) frontmatter.tags.push(l.replace(/^\s*-\s+/, "").trim());
-            // An alias list, as PeriodicNotes and Templater write one (OBS-120)
-            else if (key === "aliases" && /^\s*-\s+/.test(l)) frontmatter.aliases = [].concat(frontmatter.aliases || [], l.replace(/^\s*-\s+/, "").trim());
+            } else if (key === "tags" && /^\s*-\s+/.test(l)) frontmatter.tags.push(unquote(l.replace(/^\s*-\s+/, "").trim()));
+            // An alias list, as PeriodicNotes and Templater write one (OBS-120), an item in quotes read without them
+            else if (key === "aliases" && /^\s*-\s+/.test(l)) frontmatter.aliases = [].concat(frontmatter.aliases || [], unquote(l.replace(/^\s*-\s+/, "").trim()));
         }
         start = end + 1;
     }
@@ -150,10 +158,23 @@ export const parseCache = (text) => {
 export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16", nn = NN, lag = false, plant = null, folders: setFolders = {}, aliases = false }) {
     const vault = new Map(Object.entries(notes));
     const folders = new Map();
-    const root = { path: "/", name: "", children: [], isRoot: () => true, parent: null };
+    // A folder's children, as Obsidian keeps them: the notes right in it and the folders right under it, from the
+    // notes' paths and the folders made
+    const childrenOf = (p) => {
+        const prefix = p ? `${p}/` : "";
+        const out = new Map();
+        for (const k of [...vault.keys(), ...[...made].map((m) => `${m}/`)]) {
+            if (!k.startsWith(prefix)) continue;
+            const rest = k.slice(prefix.length), at = rest.indexOf("/");
+            if (at < 0) { if (rest) out.set(rest, fileOf(k)); } else out.set(rest.slice(0, at), folder(prefix + rest.slice(0, at)));
+        }
+        return [...out.values()];
+    };
+    const withChildren = (f) => Object.defineProperty(f, "children", { get: () => childrenOf(f.path === "/" ? "" : f.path), enumerable: true });
+    const root = withChildren({ path: "/", name: "", isRoot: () => true, parent: null });
     const folder = (p) => {
         if (!p) return root;
-        if (!folders.has(p)) folders.set(p, { path: p, name: p.split("/").pop(), children: [], isRoot: () => false, parent: folder(p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "") });
+        if (!folders.has(p)) folders.set(p, withChildren({ path: p, name: p.split("/").pop(), isRoot: () => false, parent: folder(p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "") }));
         return folders.get(p);
     };
     const disk = new Map(vault);
@@ -177,7 +198,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     const offset = (p) => lines.slice(0, p.line).reduce((s, l) => s + l.length + 1, 0) + p.ch;
     const editor = {
         getCursor: (which) => ({ line: cursor, ch: which === "to" && selected ? selected.to : selected ? selected.from : cursorCh ?? lines[cursor]?.length ?? 0 }), setCursor(c) { placed = { line: c.line, ch: c.ch }; }, getSelection: () => (selected ? lines[cursor].slice(selected.from, selected.to) : ""),
-        getLine: (n) => lines[n], lineCount: () => lines.length, getValue: () => lines.join("\n"),
+        getLine: (n) => lines[n], lineCount: () => lines.length, lastLine: () => lines.length - 1, getValue: () => lines.join("\n"), focus() {},
+        getRange: (from, to) => lines.join("\n").slice(offset(from), offset(to)),
         offsetToPos(o) { let line = 0; while (line < lines.length - 1 && o > lines[line].length) { o -= lines[line].length + 1; line++; } return { line, ch: o }; },
         // `origin`, the edit's tag (CodeMirror's userEvent), recorded: the system's writes carry Schedule.ORIGIN
         replaceRange(text, from, to = from, origin = undefined) {
@@ -320,6 +342,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
         TaskChange: make("taskChange", "TaskChange"), Billing: make("billing", "Billing"), SyncArea: make("syncArea", "SyncArea"),
         PeriodicNotes: make("periodicNotes", "PeriodicNotes"), Plan: make("plan", "Plan"), EventLog: make("eventLog", "EventLog"),
+        ProjectNotes: make("projectNotes", "ProjectNotes"), ConvertToProject: make("convertToProject", "ConvertToProject"),
         CheckOff: make("checkOff", "CheckOff"), CalendarSync: make("calendarSync", "CalendarSync"),
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });

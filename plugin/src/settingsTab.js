@@ -1003,11 +1003,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             });
         };
 
-        // The Task and Log templates a task note and a log are made with (OBS-283). Their names are what they make,
-        // and their default is the path the command had written into it. Both are optional (OBS-121, OBS-122).
-        /** @type {Record<"task" | "log", string>} */
-        const made = { task: "Task note", log: "Log" };
-        /** @param {"task" | "log"} kind */
+        // The Task, Log, Project and Area templates a task note, a log, a project and an area are made with (OBS-283,
+        // OBS-123). Their names are what they make, and their default is the template's name in the vault's template
+        // folder. All four are optional (OBS-121, OBS-122, OBS-123).
+        /** @type {Record<"task" | "log" | "project" | "area", string>} */
+        const made = { task: "Task note", log: "Log", project: "Project note", area: "Area note" };
+        /** @type {Record<"task" | "log" | "project" | "area", string>} */
+        const madeWhat = { task: "task notes", log: "logs", project: "projects", area: "areas" };
+        /** @param {"task" | "log" | "project" | "area"} kind */
         const madeField = (kind) => pathField(made[kind], "", {
             saved: () => now().templates[kind],
             read: (v) => {
@@ -1019,8 +1022,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             placeholder: () => settings.defaultTemplatePath(kind),
             note: (value) => {
                 const path = value || settings.defaultTemplatePath(kind);
-                // A task note or a log is made without one (OBS-121, OBS-122)
-                if (missingNote(path)) return `“${path}” isn't in the vault, so ${kind === "task" ? "task notes" : "logs"} are made without a template.`;
+                // A task note, a log, a project or an area is made without one (OBS-121, OBS-122, OBS-123)
+                if (missingNote(path)) return `“${path}” isn't in the vault, so ${madeWhat[kind]} are made without a template.`;
                 const file = this.app.vault.getFileByPath(path);
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
@@ -1141,7 +1144,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             },
             {
                 heading: "Note templates",
-                rows: [madeField("task"), madeField("log")],
+                rows: [madeField("task"), madeField("log"), madeField("project"), madeField("area")],
             },
             {
                 heading: "Other",

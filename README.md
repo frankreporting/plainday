@@ -92,7 +92,7 @@ All of them are in the command palette as "Plainday: …". [The manual's *Comman
 | Add project link | Says which project or area a task belongs to, on every line of the task |
 | Move to project | Moves the note you're on into a project or area, and its tasks follow |
 | New project, New area | Makes a project or an area: a folder with its note, in your projects folder |
-| Convert to project | Turns the selected lines into a new project |
+| Convert to project | Turns the selected text into a new project, and links it there |
 | Toggle time entry | Starts or stops a timer on the task or event you're on; anywhere else, picks one |
 | Jump to date | Opens the note for a date in words: `friday`, `next week`, `oct 2` |
 | Plan | Opens the next 2 to 5 daily notes side by side |

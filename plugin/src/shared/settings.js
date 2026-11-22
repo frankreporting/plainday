@@ -41,9 +41,10 @@ export default class Settings {
     //   - templates (OBS-283): what each kind of note Plainday makes is made from. The weekly, monthly
     //     and yearly ones are used in the "daily-notes" source, and blank means Weekly Note, Monthly Note
     //     or Yearly Note in Templater's template folder. `task` and `log` are the Task and Log templates
-    //     AddTaskNote runs, so no template path is written into a command. Blank means the template's own
-    //     name (TEMPLATE_NAMES) in the vault's template folder, which Templater keeps, else at the top of
-    //     the vault (defaultTemplatePath); the panel shows it. Projects and areas get theirs with OBS-123.
+    //     AddTaskNote runs, `project` and `area` the Project and Area templates ProjectNotes runs (OBS-123),
+    //     so no template path is written into a command. Blank means the template's own name
+    //     (TEMPLATE_NAMES) in the vault's template folder, which Templater keeps, else at the top of the
+    //     vault (defaultTemplatePath); the panel shows it.
     //
     // Whatever comes in, from the data file or a copy from another device, goes through normalize(),
     // so a value that doesn't read becomes its default and the rest can trust what they get.
@@ -104,16 +105,18 @@ export default class Settings {
     // What each template a command makes a note from is called. Where it sits is the vault's own
     // template folder, which Templater keeps, else the top of the vault — never a folder of this
     // repository's (Brian, 2026-11-17).
-    static TEMPLATE_NAMES = { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
+    static TEMPLATE_NAMES = { task: "Task", log: "Log", project: "Project", area: "Area", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" };
     // The error log note a blank setting means: at the top of the vault, in every vault (OBS-295)
     static ERROR_LOG = "Plainday error log.md";
     // The properties Plainday writes itself into each kind of note it makes, which a template's own
     // would give way to (Settings → Plainday → Note templates warns). Weekly and monthly notes get their
     // alias (PeriodicNotes, OBS-120), yearly notes nothing, task notes their tag, `parent` and `due`
     // (AddTaskNote.createTaskNote, OBS-121), logs their `parent`, `date`, `time`, `endTime` and `who` (EventLog,
-    // OBS-122). List properties are combined with a template's, not replaced, so they never warn.
-    /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log", string[]>>} */
-    static WRITES = { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"] };
+    // OBS-122). List properties are combined with a template's, not replaced, so they never warn. A project's or an
+    // area's template may set any of Plainday's other properties (a `rate_type`, a `status`), so they never warn
+    // either (ProjectNotes, OBS-123).
+    /** @type {Partial<Record<"week" | "month" | "year" | "task" | "log" | "project" | "area", string[]>>} */
+    static WRITES = { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"], project: [], area: [] };
     static COMBINED = ["tags", "aliases"];
     // What loading says when the saved Projects, Inbox or archive didn't read: at the start, and when
     // Sync brings such a file
@@ -143,7 +146,7 @@ export default class Settings {
      *   editor: { listCursor: boolean, taskMarkers: boolean },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
      *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
-     *   templates: { week: string, month: string, year: string, task: string, log: string },
+     *   templates: { week: string, month: string, year: string, task: string, log: string, project: string, area: string },
      * }}
      * @typedef {{ id: string, name: string, account: string, address: string, on: boolean }} Calendar
      */
@@ -154,7 +157,7 @@ export default class Settings {
             editor: { listCursor: true, taskMarkers: true },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
             folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
-            templates: { week: "", month: "", year: "", task: "", log: "" },
+            templates: { week: "", month: "", year: "", task: "", log: "", project: "", area: "" },
         };
     }
 
@@ -240,7 +243,7 @@ export default class Settings {
             if (read.folder && !read.error) out.folders[key] = read.folder;
         }
         if (this.foldersProblem(out.folders, billing)) Object.assign(out.folders, Settings.FOLDERS);
-        for (const key of /** @type {const} */ (["task", "log"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
+        for (const key of /** @type {const} */ (["task", "log", "project", "area"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
         for (const unit of Settings.PERIODS) {
             const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
             // A weekly, monthly or yearly folder in Projects, the Inbox or the archive, or holding one, is
@@ -507,7 +510,7 @@ export default class Settings {
     /**
      * Where a template of `name` sits when its field is blank: in the vault's own template folder, which
      * Templater keeps, else at the top of the vault. The panel shows it, and the commands use it.
-     * @param {"task" | "log" | "week" | "month" | "year"} kind
+     * @param {"task" | "log" | "project" | "area" | "week" | "month" | "year"} kind
      * @returns {string}
      */
     defaultTemplatePath(kind) {

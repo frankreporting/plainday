@@ -21,7 +21,9 @@ import ConvertToProject from "./convertToProject.js";
 import Invoice from "./invoice.js";
 import JumpToDate from "./jumpToDate.js";
 import MoveToProject from "./moveToProject.js";
+import NewArea from "./newArea.js";
 import NewEventLog from "./newEventLog.js";
+import NewProject from "./newProject.js";
 import Plan from "./plan.js";
 import Schedule from "./schedule.js";
 import DueDate from "./setDueDate.js";
@@ -30,8 +32,8 @@ import ToggleTimeEntry from "./toggleTimeEntry.js";
 import ViewErrorLogs from "./viewErrorLogs.js";
 
 export const CLASSES = {
-    AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, NewEventLog, Plan,
-    Schedule, TimeReport, ToggleTimeEntry, ViewErrorLogs,
+    AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, NewArea, NewEventLog,
+    NewProject, Plan, Schedule, TimeReport, ToggleTimeEntry, ViewErrorLogs,
 };
 
 export const COMMANDS = [
@@ -41,6 +43,8 @@ export const COMMANDS = [
     { id: "new-event-log", name: "New event log", script: "NewEventLog", icon: "notebook-pen" },
     { id: "add-project-link", name: "Add project link", script: "AddProjectLink", icon: "circle" },
     { id: "move-to-project", name: "Move to project", script: "MoveToProject", icon: "folder-input" },
+    { id: "new-project", name: "New project", script: "NewProject", icon: "circle-plus" },
+    { id: "new-area", name: "New area", script: "NewArea", icon: "package-plus" },
     { id: "convert-to-project", name: "Convert to project", script: "ConvertToProject", icon: "folder-plus" },
     { id: "toggle-time-entry", name: "Toggle time entry", script: "ToggleTimeEntry", icon: "timer" },
     { id: "jump-to-date", name: "Jump to date", script: "JumpToDate", icon: "calendar-search" },

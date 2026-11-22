@@ -259,33 +259,19 @@ test("OBS-55: no template asks for a project", () => {
     assert.ok(!fs.existsSync(new URL("../Templater/pickParent.js", here)), "the picker script is gone");
     // The Log template is content only: Plainday makes the log (EventLog, OBS-122)
     assert.equal(read("Log"), "", "the repository's Log template is empty");
-    // A new project or area gets its folder at the top of Projects/, and its note in it
+    // The Project and Area templates are content only: Plainday makes the project or area (ProjectNotes, OBS-123)
     for (const name of ["Project", "Area"]) {
-        const template = read(name);
-        assert.match(template, /const path = "Projects\/" \+ cleanTitle;/, `${name}: the top of Projects`);
-        assert.match(template, /await tp\.file\.move\(path \+ "\/" \+ cleanTitle\);/, `${name}: the note is the folder's note`);
-        assert.doesNotMatch(template, /\d\d Projects\//, `${name}: no numbered folder from before OBS-81`);
+        assert.equal(read(name), '---\nid: <% tp.date.now("YYYYMMDDHHmmssSS") %>\n---\n', `the repository's ${name} template holds only its id`);
     }
-    assert.match(read("Project"), /tR \+= "parent: \\n";/, "a new project's parent is empty until it's filed");
+    assert.ok(!fs.existsSync(new URL("../Templater/folderLook.js", here)), "the folder look moved into ProjectNotes");
+    assert.ok(!fs.existsSync(new URL("../Templater/showNewNote.js", here)), "no template calls showNewNote any more");
 });
 
-test("OBS-55: a new project or area never takes a name another note already has (a task note: createTaskNote's tests)", () => {
-    for (const name of ["Project", "Area"]) {
-        const template = fs.readFileSync(new URL(`../../Templates/${name}.md`, here), "utf8");
-        const check = template.indexOf("f.basename.toLowerCase() ===");
-        assert.ok(check > 0, `${name} checks for a note of that name anywhere`);
-        assert.match(template.slice(check - 120, check), /f !== tp\.config\.target_file/, `${name}: not counting itself`);
-        assert.match(template.slice(check, check + 400), /new Notice\(why, 10000\);\s*throw new Error\(why\)/, `${name}: says so and stops`);
-        assert.ok(check < template.indexOf("await tp.file.move("), `${name}: before the move`);
-    }
-    // The Area template's "🗃️.Name" titles give the plain name, not a URL-encoded one
-    const area = fs.readFileSync(new URL("../../Templates/Area.md", here), "utf8");
-    const nameLine = area.split("\n").find((l) => /^const cleanTitle = /.test(l));
-    const nameOf = (title) => vm.runInNewContext(`const fromAlias = /^🗃\\uFE0F?\\./u.test(tp.file.title); ` + nameLine + " cleanTitle", { tp: { file: { title } } });
-    assert.equal(nameOf("🗃️.Home Stuff"), "Home Stuff");
-    assert.equal(nameOf("🗃.Garden"), "Garden");
-    assert.equal(nameOf("!area Finance"), "Finance");
-    assert.doesNotMatch(area, /encodeURIComponent/);
+test("Get Template has no !project, !area or 🗃️ route: New project, New area and Convert to project make them (OBS-123)", () => {
+    const route = fs.readFileSync(new URL("../../Templates/Get Template.md", here), "utf8");
+    const code = route.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+    assert.doesNotMatch(code, /!project|!area|🗃|\[\[Project\]\]|\[\[Area\]\]/, "no route by title, and neither template is included");
+    assert.match(code, /tp\.file\.include\("\[\[Empty Note\]\]"\)/, "such a title gets the Empty Note template, like any other");
 });
 
 test("linktextFor: the note's name, or its path only when another note really shares the name", () => {
