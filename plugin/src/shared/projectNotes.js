@@ -1,4 +1,4 @@
-import { ButtonComponent, Modal, moment, Notice, stringifyYaml, TextComponent } from "obsidian";
+import { ButtonComponent, getFrontMatterInfo, Modal, moment, Notice, stringifyYaml, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class ProjectNotes {
@@ -31,6 +31,8 @@ export default class ProjectNotes {
         project: { icon: "circle", color: "#ef4444" },
         area: { icon: "archive", color: "#168a42" },
     };
+    // What New project's box says about dates
+    static DATES_HINT = "Optional start and due dates, as YYYY-MM-DD: Harbor Mural 2026-10-01 2026-11-15";
     // How long make() waits for the metadata cache to read a new note before opening it anyway
     static READ_MS = 1000;
 
@@ -163,7 +165,8 @@ export default class ProjectNotes {
         const notes = plainday.PeriodicNotes;
         const { props, body } = notes.parts(notes.merge(text, filled));
         const fixed = this.ownValues(props ?? {}, own);
-        const ordered = {};
+        // A template's `id` first, as every note's (Brian, 11/22), then Plainday's, then the template's others
+        const ordered = "id" in fixed ? { id: fixed.id } : {};
         for (const key of Object.keys(own)) ordered[key] = fixed[key];
         for (const [key, value] of Object.entries(fixed)) if (!(key in ordered)) ordered[key] = value;
         return this.noteText(ordered, body);
@@ -217,10 +220,28 @@ export default class ProjectNotes {
         const fixed = this.ownValues(front, own);
         const same = (key) => JSON.stringify(front[key] ?? null) === JSON.stringify(fixed[key] ?? null);
         const changed = Object.keys(fixed).filter((key) => !same(key));
-        if (!changed.length) return;
-        await app.fileManager.processFrontMatter(file, (f) => {
-            for (const key of changed) f[key] = fixed[key] === "" ? null : fixed[key];
-        });
+        if (changed.length) {
+            await app.fileManager.processFrontMatter(file, (f) => {
+                for (const key of changed) f[key] = fixed[key] === "" ? null : fixed[key];
+            });
+        }
+        await this.idFirst(file);
+    }
+
+    // Moves a one-line `id` to the top of the note's properties, as every note has it (Brian, 11/22): Templater adds a
+    // template's new properties after the note's
+    async idFirst(file) {
+        const move = (text) => {
+            const info = getFrontMatterInfo(text);
+            if (!info.exists) return text;
+            const lines = text.slice(info.from, info.to).split("\n");
+            const at = lines.findIndex((l) => /^id:\s*\S/.test(l));
+            if (at <= 0 || /^\s/.test(lines[at + 1] ?? "")) return text;
+            lines.unshift(...lines.splice(at, 1));
+            return text.slice(0, info.from) + lines.join("\n") + text.slice(info.to);
+        };
+        const text = await app.vault.read(file);
+        if (move(text) !== text) await app.vault.process(file, move);
     }
 
     // Takes a template's cursor markers out of the note and remembers where the first one was (the lowest
@@ -301,7 +322,9 @@ export default class ProjectNotes {
                 onOpen() { requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
             })(app);
             modal.titleEl.setText(k.title);
-            const input = new TextComponent(modal.contentEl).setPlaceholder(kind === "project" ? "Project name, and a start and due date if you like" : "Area name").setValue(value);
+            // How to give a project its dates, which a placeholder would hide once you type (Brian, 11/22)
+            if (kind === "project") modal.contentEl.createEl("p", { cls: "setting-item-description", text: ProjectNotes.DATES_HINT });
+            const input = new TextComponent(modal.contentEl).setPlaceholder(kind === "project" ? "Project name" : "Area name").setValue(value);
             input.inputEl.addClass("plainday-wide-input");
             const why = modal.contentEl.createDiv({ cls: "setting-item-description plainday-caution plainday-name-problem" });
             const accept = () => {

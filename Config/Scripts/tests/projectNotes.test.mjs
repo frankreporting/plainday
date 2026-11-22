@@ -240,7 +240,7 @@ test("another plugin makes the folder's note as the folder appears (Folder Notes
 });
 
 test("the Project template without Templater: a plain one filled in and combined, Plainday's alias first, the name's dates and its own values kept; one with Templater code is left out, with a notice", async () => {
-    const tpl = "---\nstatus: Active\nrate_type: hourly\nstart: 2020-01-01\nwho:\nparent:\naliases:\n  - Mural\ntopic: Murals\n---\n## {{title}}\n\nStarted {{date}}\n";
+    const tpl = "---\nstatus: Active\nrate_type: hourly\nstart: 2020-01-01\nwho:\nparent:\naliases:\n  - Mural\ntopic: Murals\nid: 20260916\n---\n## {{title}}\n\nStarted {{date}}\n";
     const v = standIn({ notes: { ...NOTES, [TPL]: tpl } });
     const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural 2026-10-01" });
     const text = v.notes()[file.path];
@@ -248,6 +248,7 @@ test("the Project template without Templater: a plain one filled in and combined
     assert.deepEqual(fm.aliases, ["⭕.Harbor Mural", "Mural"], "Plainday's alias first");
     assert.deepEqual([fm.status, fm.rate_type, fm.start, fm.topic, fm.include_subprojects], ["Active", "hourly", "2026-10-01", "Murals", "false"], "the template's values fill or replace Plainday's, but not the name's dates");
     assert.match(text, /\ninclude_subprojects: false\ntopic: Murals\n---\n## Harbor Mural\n\nStarted 2026-09-16\n$/, "the template's other properties after Plainday's, its text filled in");
+    assert.match(text, /^---\nid: "?20260916"?\naliases:\n/, "its id first");
     assert.deepEqual(v.notices, []);
     // With Templater code and no Templater: made without it
     const w = standIn({ notes: { ...NOTES, [TPL]: '---\nid: <% tp.date.now("YYYYMMDDHHmmssSS") %>\n---\n' } });
@@ -271,6 +272,7 @@ test("the Project template through Templater: run on the closed note, then the n
     const text = v.notes()[file.path];
     const fm = props(text);
     assert.deepEqual([fm.status, fm.start, fm.id, fm.include_subprojects], ["Active", "2026-10-01", "2026091612000000", "false"]);
+    assert.ok(text.startsWith("---\nid: 2026091612000000\naliases:\n"), "the template's id first, as in every note");
     assert.doesNotMatch(text, /<%/, "no Templater code left in the note (OBS-177)");
     const at = v.plainday.ProjectNotes.cursorAt;
     assert.equal(at.path, file.path);

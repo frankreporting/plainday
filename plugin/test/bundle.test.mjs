@@ -410,7 +410,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
             ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
-            ["group", "Note templates", ["Task note", "Log", "Project note", "Area note"]],
+            ["group", "Note templates", ["Tasks", "Logs", "Projects", "Areas"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox", "Draw task markers"]],
@@ -426,7 +426,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Task note", "Log", "Project note", "Area note", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Tasks", "Logs", "Projects", "Areas", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
             "a row whose name says what it is carries no description (Brian, 11/16 and 11/17)");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
@@ -877,21 +877,21 @@ test("Settings → Plainday → Note templates: the Task note, Log, Project note
     await plugin.onload();
     try {
         const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
-        assert.deepEqual(items.map((i) => i.name), ["Task note", "Log", "Project note", "Area note"]);
+        assert.deepEqual(items.map((i) => i.name), ["Tasks", "Logs", "Projects", "Areas"]);
         const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
-        const t = draw("Task note");
+        const t = draw("Tasks");
         assert.equal(t.control.inputEl.value, "", "blank as it comes");
         assert.equal(t.control.inputEl.placeholder, "Templates/Task.md", "Templater's folder, not this repository's");
         assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
         // The Log's default isn't in this vault, and a log is made without one too (OBS-122)
-        assert.equal(draw("Log").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
+        assert.equal(draw("Logs").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
         // So are projects and areas (OBS-123), whose templates may set any property Plainday writes
-        assert.equal(draw("Project note").warning(), "“Templates/Project.md” isn't in the vault, so projects are made without a template.");
-        assert.equal(draw("Area note").warning(), "“Templates/Area.md” isn't in the vault, so areas are made without a template.");
-        assert.equal(draw("Project note").control.inputEl.placeholder, "Templates/Project.md");
+        assert.equal(draw("Projects").warning(), "“Templates/Project.md” isn't in the vault, so projects are made without a template.");
+        assert.equal(draw("Areas").warning(), "“Templates/Area.md” isn't in the vault, so areas are made without a template.");
+        assert.equal(draw("Projects").control.inputEl.placeholder, "Templates/Project.md");
         // A task note is made without one (OBS-121), so a missing Task template only says so
         files.delete(task.path);
-        assert.equal(draw("Task note").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
+        assert.equal(draw("Tasks").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
         files.set(task.path, task);
         t.type("Templates/My task");
         t.leave();

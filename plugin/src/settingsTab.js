@@ -1007,7 +1007,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // OBS-123). Their names are what they make, and their default is the template's name in the vault's template
         // folder. All four are optional (OBS-121, OBS-122, OBS-123).
         /** @type {Record<"task" | "log" | "project" | "area", string>} */
-        const made = { task: "Task note", log: "Log", project: "Project note", area: "Area note" };
+        // Named for what they make, without "note": the section says Note templates (Brian, 11/22)
+        const made = { task: "Tasks", log: "Logs", project: "Projects", area: "Areas" };
         /** @type {Record<"task" | "log" | "project" | "area", string>} */
         const madeWhat = { task: "task notes", log: "logs", project: "projects", area: "areas" };
         /** @param {"task" | "log" | "project" | "area"} kind */
@@ -1029,7 +1030,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
             },
             list: (input) => new NoteSuggest(this.app, input, "", (f) => settings.notePathOf(f).error === null),
-            was: (value) => `The ${made[kind].toLowerCase()} template stays ${code(value || settings.defaultTemplatePath(kind))}.`,
+            was: (value) => `The template for ${madeWhat[kind]} stays ${code(value || settings.defaultTemplatePath(kind))}.`,
         });
 
         // Periodic notes: a page of its own under Folders, whose first row is which calendar owns them
