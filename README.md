@@ -1,200 +1,169 @@
-# Obsidian PM
+# Plainday
 
-An [Obsidian](https://obsidian.md) vault set up for daily planning, projects and tasks, log notes, calendar events, and time tracking with reports, timesheets and invoices, built from Templater templates and the scripts in Plainday, the plugin this repository builds.
+A Markdown planner for [Obsidian](https://obsidian.md). Plainday lets you track tasks, projects, and events entirely in Markdown, and it converts your plaintext timestamps into timesheets and invoices. It also syncs your calendars' events into clean, simple bullets in your daily notes. Think of Plainday as a set of superpowers for your periodic notes. It works with Obsidian's own links, properties and Bases, and if you turn it off, your notes are still completely readable.
 
-This repository **is** a vault: the system in `Config/`, plus made-up sample notes (a small freelance practice over a couple of weeks) so there's something to try the moment you open it. It's a working reference: it assumes the folder layout and conventions below.
+### Highlights:
 
-This README covers trying it and installing it. **[The manual](<Config/Manual.md>)** (`Config/Manual.md`) is the full description: how daily notes are written, what every command and script does to them, and how the time report and calendar sync decide what they do.
+- **Tasks are plain Markdown checklists,** in daily, weekly, monthly and yearly notes.
+- **A task can have its own note** for more context, or not: it's optional.
+- **Projects and areas** organize tasks, as in Things and the [PARA method](https://fortelabs.com/blog/para/).
+- **Time is tracked** with timestamps in a bullet under each task or event.
+- **Calendars sync** from their private links, on a computer, phone or tablet. An event is another checkbox, `[<]`, above the tasks in your daily note.
+- **Timesheets and invoices** come from the same time entries, billable or not.
+- **Shortcuts do the text wrangling:** schedule a task, set a due date, make a project, move a task to a project or area, start and stop a timer, and more.
+- **Every date prompt takes plain words:** `friday`, `next week`, `oct 2`.
+- **A task knows every line it's on.** Move today's task to another project, and every other day you worked on it follows.
 
-## Try it
-
-1. Clone or download this repository into a folder named `Plainday Demo`, for example `git clone https://github.com/frankreporting/plainday.git "Plainday Demo"`, and in Obsidian choose **Open folder as vault**. Obsidian names a vault after its folder.
-2. **Settings → Community plugins:** turn on community plugins, then install and enable:
-	- [Templater](https://github.com/SilentVoid13/Templater), whose settings for this vault are already in the repository
-	- [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)
-	- [BRAT](https://github.com/TfTHacker/obsidian42-brat), which installs Plainday until the community directory lists it
-3. **Install Plainday:** run **BRAT: Plugins: Add a beta plugin for testing (with or without version)** from the command palette, enter `frankreporting/plainday`, choose *Latest version*, leave *Enable after installing the plugin* on, and click *Add plugin*. BRAT installs the latest release into `.obsidian/plugins/plainday/` and keeps it up to date.
-4. **Settings → Templater:** turn on **Trigger Templater on new file creation**. Templater keeps that switch per device, so it isn't in the repository, and without it new notes don't get their templates.
-5. **Settings → Core plugins:** make sure **Daily notes** and **Bases** are on.
-6. **Settings → Files and links:** set **Default location for new notes** to **In the folder specified below**, and choose `Inbox`.
-7. **Optional hotkeys** (Settings → Hotkeys, search "Plainday"): *Toggle time entry* `⌘T` (it replaces Obsidian's New tab shortcut), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P`, *Move to project* `⌥⌘M`, and *Daily notes: Open today's daily note*.
-8. Open `Welcome.md`.
-
-Plainday's own settings are in **Settings → Plainday**: its folders (projects, the Inbox, the archive and the error log, which come as the sample notes have them), a *Periodic notes* page where you choose whether the Daily notes plugin and Plainday or Notebook Navigator owns the daily, weekly, monthly and yearly notes, the Task and Log templates, your details for invoices and the folder they go in, the tables' freeze, the cursor on list lines, the calendars for the calendar sync, by their private links (kept in each device's secret storage, never in the vault), and how far ahead it syncs, and Copy and Paste for a backup or another device. The demo's are filled in, with invented details. The manual's *Settings* says what each does.
-
-**Calendars:** in *Settings → Plainday → Calendars*, *Add calendar* takes a calendar's private link: Google Calendar's *Secret address in iCal format* (on the web, the calendar's settings, *Integrate calendar*), iCloud's *Public Calendar* link (share the calendar in Calendar), or Outlook's published *ICS* link (*Settings → Calendar → Shared calendars → Publish a calendar*); *How to get the links*, in the panel, says the same. Then *Plainday: Sync calendars* downloads them and writes their events into your daily notes, each event line ending in its event's ID. The calendar keeps each line's time and title current; your project links, time entries and notes on it are kept. One device does this, the one you add your first calendar on (*Sync calendars using this device*), and Sync brings the events to your others. For now you run it; syncing on its own, on a schedule, is coming. Each link works like a password, so it's kept in that device's secret storage, and *Copy* and *Paste* carry it to another device. Tested with Google and iCloud private links and calendars published from Outlook; Outlook isn't fully tested (see the manual). **Network:** Plainday goes over the network only to download the calendar links you add, and sends nothing.
-
-Optional: `[!metadata]` callouts are styled by `Config/Scripts/Style Settings/callouts.css` once you copy it into `.obsidian/snippets/` and turn it on under Appearance → CSS snippets. Invoices print laid out by `Config/Scripts/Style Settings/pm-invoice.css`, and `pm-timesheet.css` beside it shades each day of a timesheet as a band; copy and turn them on the same way. [Task Status](https://github.com/ebullient/obsidian-task-status) shows the extra checkbox markers (`[<]`, `[>]`, `[-]`) as their own icons, and [Notebook Navigator](https://github.com/johansan/notebook-navigator) adds a calendar for the periodic notes (choose it in *Settings → Plainday → Folders → Periodic notes* and Plainday reads its folders and templates for all four note types) and shows new project and area folders with a red circle or a green archive. With [Selectable Tables](https://github.com/frankreporting/selectable-tables), the reports', timesheets' and invoices' tables can keep their header and first column in view as they scroll: set it in *Settings → Plainday → Tables* (see the manual's *Freezing tables*).
-
-The Obsidian command-line tool (`obsidian …`) can run the commands from a terminal.
-
-Nothing here backs your vault up. Use Obsidian Sync's version history, Time Machine, or a backup tool of your choice.
-
-## Folder structure
-
-The sample notes use this layout. Area and project names are yours to choose; the top-level folders are the ones Plainday's settings come with (the manual's *Settings → Folders* says what can change, and what waits for notes made in code).
-
-```
-Archive/                           finished projects, moved here whole; excluded from search, kept in reports
-Config/                            the system
-  Bases/                           Bases views (and the Invoices base, in a vault with no invoice folder)
-  Scripts/                         Templater user scripts, tests
-  Templates/                       Templater templates
-Inbox/                             new notes that haven't been filed
-Projects/
-  Projects.base                    the projects, active and inactive, opened as a file (Bases)
-  Freelance/                       an area: folder + folder note tagged #area
-    Freelance.md
-    Kestrel Outfitters 2026/       a project: folder + folder note tagged #project
-      Kestrel Outfitters 2026.md
-      Kestrel Outfitters 2026 timesheet.md   every entry, with its invoice (the time report writes it)
-      Draft homepage wireframes.md a task note (#task)
-      ›logs/                       log notes for the project
-        2026-09-14 Homepage review with Imogen.md
-      Kestrel Fall Catalog/        a sub-project: a project folder inside a project
-    Pinecrest Library Brochure/
-  Household/                       an area with only task notes, and time of its own
-  Personal/
-    Garden Club Newsletter/
-    Block Party Poster/
-Reference/
-  Entities/                        organizations
-  Invoices/                        every invoice, with Invoices.base as the folder's note (the invoice folder in Settings → Plainday)
-    1001-KES.md
-  Notes/                           general notes
-  People/                          people
-  Planner/
-    days/  weeks/  months/  years/ periodic notes (YYYY-MM-DD, 2026w38, 2026-09, 2026)
-Welcome.md                         start here
-plugin/                            Plainday: its build, tests and source (src/), the class files in src/commands/, startup/ and shared/
-manifest.json, package.json        Plainday's manifest, and its build (npm run build)
-versions.json                      each release's oldest Obsidian (npm version)
-eslint.config.mjs                  Obsidian's lint (npm run lint); its baseline is .github/ci/eslint-suppressions.json
-jsconfig.json                      the code the community directory's scan reviews
-```
-
-Every note inside an area or project has a `parent` property linking the folder note above it, kept current when notes move; aliases mark note types in the Quick Switcher (`⭕.Area.Project`, `🗃️.Area`). The manual's *Folder structure*, *Naming conventions* and *Areas, projects and task notes* have the rest.
-
-## Creating notes: the title picks the template
-
-New notes run `Get Template.md`, which picks a template from the title you type. A title that's a date (`2026-09-15`, `2026w38`, `2026-09`, `2026`) isn't routed there: Plainday files that note in its folder and gives it its alias (`9/15/26 Tuesday`, `Week of 9/13/26`, `September 2026`), as it does every daily, weekly, monthly and yearly note (the manual's *The periodic notes*). Task notes and event logs aren't made by title either: *Add note* on a task line makes a task note, and on an event line a log, with their properties, filed in the line's project, and *New event log* makes a log for an event you name (the manual's *Add note* and *Log notes*). A title like `2026-09-15 Kickoff call` is a plain note.
-
-| Title | Template | Result |
-| --- | --- | --- |
-| `!project Launch plan` | Project | New project folder and folder note at the top of `Projects/`, to be moved under an area with *Move to project*; dates become `start`/`due` |
-| `!area Finance` or `🗃️.Finance` | Area | New area folder and folder note at the top of `Projects/` |
-| `!person Jane Doe` / `!entity Acme` | Person / Entity | Contact note in `People` / `Entities` |
-| anything else | Empty Note | `id` and `tags` frontmatter |
-
-Templater user scripts (`Config/Scripts/Templater/`): `showNewNote` (redraws properties and places the cursor after the Project or Area template moves a note), `arrivedNote` (tells a note that arrived with its properties from a new, empty one).
-
-## Daily notes
-
-A daily note is one checklist, events first, then tasks; anything else goes under `## Notes`.
+A day in a daily note:
 
 ```markdown
-- [<] 9:00am	Team standup
-	- 9:30am
-- [<] 1:30pm	Kickoff call [[Kestrel Outfitters 2026|⭕]] [[2026-09-15 Kickoff call|⋯]]
-	- 1:30pm - 2:15pm
-- [<] 3:00pm	Delivery window ℹ️
-	- 5:00pm
-- [<] 4:00pm	Vendor demo [[Kestrel Outfitters 2026|⭕]]
-	- 4:30pm: 🆓 not billing this one
-- [<] Printer call [[Pinecrest Library Brochure|⭕]] [[2026-09-15 Printer call|⋯]]
-- [ ] Draft the proposal [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft the proposal|⋯]]
+- [<] 9:30am	Kestrel standup [[Kestrel Outfitters 2026|⭕]] ^e-q7m2xk
+	- 10:00am
+- [/] Draft the proposal [[2026-09-18|🚩 9/18]] [[Kestrel Outfitters 2026|⭕]] [[Draft the proposal|⋯]]
 	- 9:40am - 11:05am: outline
 	- 3:00pm - 3:30pm: 🆓 fixing my own mistake
-- [x] Redo the nav I broke 🆓 [[Kestrel Outfitters 2026|⭕]]
-	- 5:00pm - 5:20pm
-- [>] Send the invoice [[Pinecrest Library Brochure|⭕]] [[Send the invoice|⋯]]
-- [ ] Pick the paper stock [[Pinecrest Library Brochure|⭕]] [[Write brochure copy#^p7d2qe|↗]] ^p7d2qe
+- [x] Pick the paper stock [[Pinecrest Library Brochure|⭕]]
+- [ ] Water the plants
 ```
 
-`[<]` is an event (never checked off), `[ ]` open, `[/]` started, `[x]` done, `[>]` forwarded to another day, `[-]` canceled. An event is its start time, a tab and its title, with its end time on the line under it. Time entries (`- 9:40am - 11:05am`) go under a task or event, and 🆓 marks time you won't bill. Links at the end of a line say where the time counts: `⭕` a project or `🗃️` an area (an area's own time is a row of its own in the reports, never a total of its projects), then `⋯` the line's own note (a task's note, or an event's log note), filed in that project, and `↗` the note *Schedule* sent the line from, if any. The note link comes last but for the task's ID (`^k3x9m2`, which Schedule adds and links the task's lines by), and a `🚩 M/D` due date and the forward date (just the date, linked to the task's line on the day it went to) come first. A link in the text is part of the title, even a link to a project.
+`[<]` is an event, with its end time under it, `[ ]` an open task, `[/]` started, `[x]` done, `[>]` sent to another day and `[-]` canceled. ⭕ links the project the time counts for, 🚩 the due date and ⋯ the task's own note, and 🆓 marks time you won't bill. **[The manual](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md)** describes it all: [the daily notes](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#daily-notes), what each command does, and how the time report and the calendar sync decide what they write.
 
-The manual's *Daily notes* section is the full spec, and the one agents follow: line types, events, time entries and billing, the time report, Schedule, log notes, the calendar sync and folding.
+## Install
+
+In Obsidian, open **Settings → Community plugins**, turn community plugins on, then **Browse**, search for **Plainday**, install it and turn it on. It works on a computer, phone or tablet.
+
+For beta builds, install [BRAT](https://github.com/TfTHacker/obsidian42-brat), run **BRAT: Plugins: Add a beta plugin for testing** from the command palette, enter `frankreporting/plainday`, and choose *Latest version*.
+
+Plainday needs no other plugin. It finds your daily notes where the core Daily notes plugin puts them, or where Notebook Navigator's calendar does if you choose it (*Settings → Plainday → Folders → Periodic notes*). These plugins add to it:
+
+- **[Templater](https://github.com/SilentVoid13/Templater)** runs the Templater code in your own templates for task notes, logs, projects, areas and periodic notes. Without it, a template's `{{title}}`, `{{date}}` and `{{time}}` are filled in.
+- **[Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)** reads dates in languages other than English, and suggests dates as you type in a note. Plainday reads English dates itself.
+- **[Notebook Navigator](https://github.com/johansan/notebook-navigator)** gives the periodic notes a calendar, new project and area folders their look (a red circle or a green archive) and a new `›logs` folder a clock, with *Move to project…* in its menus.
+- **[Task Status](https://github.com/vburzynski/obsidian-task-status)** adds a picker for a task's checkbox (`⇧⌘⏎`, or a long press). Plainday draws the markers itself.
+- **[Selectable Tables](https://github.com/frankreporting/selectable-tables)** allows you to set a default for frozen header rows and columns in the tables found in reports, timesheets, and invoices.
+
+## How your notes are organized
+
+```
+Projects/                                  your areas and projects
+├── 🗃️ Freelance/                          an area: a folder, with a folder note tagged #area
+│   ├── Freelance.md
+│   ├── ⭕ Kestrel Outfitters 2026/        a project in the area: a folder note tagged #project
+│   │   ├── Kestrel Outfitters 2026.md
+│   │   ├── Draft homepage wireframes.md   a task's own note
+│   │   └── ›logs/                         the project's event logs
+│   └── ⭕ Pinecrest Library Brochure/
+│       └── Pinecrest Library Brochure.md
+└── 🗃️ Household/                          another area
+    └── Household.md
+Inbox/                                     notes Plainday makes before you file them
+Reference/                                 everything else you keep, and the periodic notes
+└── Planner/
+    ├── days/2026-09-15.md
+    ├── weeks/2026w38.md
+    ├── months/2026-09.md
+    └── years/2026.md
+Archive/                                   finished projects, moved here whole
+```
+
+In the tree, 🗃️ marks an area and ⭕ a project; the folders' names are plain. The organization principle is very much based on the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that project or area's folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. You can define your own folder names in the settings.
+
+## Getting started
+
+1. Open today's daily note: the Daily notes plugin's *Open today's daily note*, or *Plainday: Jump to date* and type `today`.
+2. Make a project with *Plainday: New project*.
+3. Type a task, `- [ ] Draft the proposal`, and with the cursor on it run *Add project link* to put it in the project.
+4. Run *Toggle time entry* on the task to start a timer, and again to stop it. The time goes under the task.
+5. Run *Schedule* to move the task to another day: type `friday`.
+6. Run *Time report*: the project's note gets its totals, and the day's week, month and year theirs.
+
+Plainday sets no hotkeys. These are suggested (*Settings → Hotkeys*, search "Plainday"): *Toggle time entry* `⌘T` (in place of Obsidian's New tab), *Schedule* `⌘S`, *Due date* `⇧⌘D`, *Jump to date* `⌘J`, *Add project link* `⌥⌘P` and *Move to project* `⌥⌘M`.
 
 ## Commands
 
-Run from the command palette ("Plainday: Add note"), a hotkey, or the command line with the command's id, the name in lower case with hyphens: `obsidian command id=plainday:add-note` (*Sync calendars* is `plainday:sync-calendars`). Plainday is the plugin this repository builds from its scripts.
+All of them are in the command palette as "Plainday: …". [The manual's *Commands*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#commands) says exactly what each one does.
 
-| Command | Suggested hotkey | What it does |
-| --- | --- | --- |
-| Schedule | `⌘S` | Moves a task to another day, or into a weekly, monthly or yearly note; on a nested task it moves the task above it. One already worked on stays behind as `[>]`, sharing the task's ID with the new line; a task sent out of a project or other note keeps the date it went to at the end of its line; a finished task reopens |
-| Due date | `⇧⌘D` | Sets the `🚩 M/D` due date on every line of the task, replacing one already there, and its task note's `due` |
-| Add note | | Links the task to its own note, creating it in the project or area the line names (or in `Inbox`), and puts its ⋯ on every line of the task; on an event line, links a log note |
-| New event log | | Asks for an event's title and makes its log on the day you're on (or today), linked from that day's event line, and opens it |
-| Add project link | `⌥⌘P` | On a line in a daily, weekly, monthly or yearly note, says which project (`⭕`) or area (`🗃️`) its task belongs to: every line of the task changes, its note moves with the task note or log it's a subtask of, and its line in a project note goes to the new `## To Do`. It asks before a note leaves a project or time moves, and refuses to move billed time |
-| Move to project | `⌥⌘M` | Moves the note you're on (or Notebook Navigator's selection) into a project or area, and its tasks and subtasks follow: a log into its `›logs/`, a project with its whole folder. Picking the project a note is already in puts its lines right. Also *Move to project…* in the file menus |
-| Toggle time entry | `⌘T` | Starts or stops a time entry under the task or event you're on; anywhere else, picks a running timer or one of today's items |
-| Plan | | Opens the next 2–5 daily notes side by side |
-| Convert to project | | Turns the selection into a new project folder and note |
-| Sync calendars | | Downloads your calendars from their private links and writes their events into daily notes, keeping each event's time and title current and your additions as they are |
-| Time report | | Writes time summaries into project and area notes and weekly, monthly and yearly notes, and each project's timesheet note, and lists every Problem in the error log |
-| View error logs | | Opens the error log: every Problem the time report and the calendar sync found, one line per kind per note |
-| Invoice | | On a project note, makes a draft invoice from its unbilled time, through a date you pick (on a flat-fee project, records the day its fee was earned); on an invoice, rebuilds, checks, or marks it sent, paid or canceled |
-
-The manual's *Commands* section says exactly what each one does.
-
-Startup scripts (run when Obsidian starts):
-
-| Script | What it does |
+| Command | What it does |
 | --- | --- |
-| SyncArea | Updates `parent` when notes or folders move |
-| RefoldOnOpen | Folds a daily note's items as it opens (folded by default) |
-| MoveToProjectMenu | Puts *Move to project…* in Notebook Navigator's and Obsidian's file menus |
-| TrailingLinks | Draws the 🚩, forward date, ⭕, 🗃️, ⋯ and ↗ links that end a task or event line small, at the right of the line, and hides a task's or event's ID until the cursor reaches it (Live Preview) |
-| CheckOff | A tick on either line of a sent task (its `[>]` source line or its open line on a day) checks off both, where they are, and a click on a `[>]` box asks first: Mark done, Cancel it or Do nothing |
-| TimeReportOnStartup | Refreshes the time reports (desktop only) once the vault is indexed. While the scripts are still loading, it waits a few seconds for them, and otherwise skips with a console warning |
+| Schedule | Moves a task to another day, or into a weekly, monthly or yearly note. A task you've worked on leaves a `[>]` line behind |
+| Due date | Sets a task's 🚩 due date, on every line of the task and in its note |
+| Add note | Makes a task's own note, or an event's log, in its project or area |
+| New event log | Makes a log for an event you name, linked from its line |
+| Add project link | Says which project or area a task belongs to, on every line of the task |
+| Move to project | Moves the note you're on into a project or area, and its tasks follow |
+| New project, New area | Makes a project or an area: a folder with its note, in your projects folder |
+| Convert to project | Turns the selected lines into a new project |
+| Toggle time entry | Starts or stops a timer on the task or event you're on; anywhere else, picks one |
+| Jump to date | Opens the note for a date in words: `friday`, `next week`, `oct 2` |
+| Plan | Opens the next 2 to 5 daily notes side by side |
+| Sync calendars | Downloads your calendars and writes their events into your daily notes |
+| Time report | Writes time totals into project, area, weekly, monthly and yearly notes, and each project's timesheet |
+| Invoice | Makes a draft invoice from a project's unbilled time, or marks an invoice sent, paid or canceled |
+| View error logs | Opens the list of Problems the time report and the calendar sync found |
+| Rename periodic notes | After you change how daily, weekly, monthly or yearly notes are named, renames them and the wikilinks to them, once you've seen what will change |
 
-## Scripts outside Obsidian
+The Obsidian command-line tool runs them from a terminal too: `obsidian command id=plainday:add-note`.
 
-| Script | What it does |
-| --- | --- |
-| `Scripts/dev-vault.sh` | For working on the system: tests one pull request at a time in the clone, opened in Obsidian as its own vault. `test <branch> [--plan <note>]` checks the branch out detached, reloads, and opens the test plan; `done` restores every tracked note, waits for the app to stop writing, and returns to a pulled `main`; `status`. It installs a pre-commit hook that refuses commits from the clone. Never copied into a vault |
-| `Scripts/update-vault.mjs` | Copies the system's files from the clone's `main` into a vault that uses the system: `node Config/Scripts/update-vault.mjs --vault <folder> [--dry-run]` from the clone (see *Using it for your own notes*). Never copied into a vault |
+## Settings
 
-## Raycast
+Everything is in **Settings → Plainday**: the folders for projects, the Inbox and the archive, and where the periodic notes go; your templates for each kind of note; your details for invoices and the folder they go in; the tables; the editor; and your calendars. *Copy* and *Paste*, at the top, carry the settings to another device or keep a backup. The copy holds your calendar links, so keep it private. [The manual's *Settings*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#settings) says what each one does.
 
-*Obsidian PM for Raycast*, a separate extension that isn't published yet, runs the same timers from Raycast without opening Obsidian. **Timer** shows the running timer in Raycast's root search (`⏱ 0:42 · Draft the proposal`) and stops it when selected; **Start Timer** lists today's open tasks and events. Starting a timer stops the running one, so only one runs. It edits today's daily note with its own copy of `timeReport.js`, the logic behind ⌘T, kept in step with this repository's `main`.
+## Calendars
 
-## Tests
+Plainday reads a calendar from its private link. In **Settings → Plainday → Calendars**, *Add calendar* takes the link, and *How to get the links*, beside it, says where each provider keeps it:
 
-From the vault root, with Node 20 or later:
+- **Google Calendar:** on the web, the calendar's settings, *Integrate calendar → Secret address in iCal format*. On a work or school account, the admin can turn these addresses off; ask them.
+- **iCloud:** share the calendar in Calendar and turn on *Public Calendar*. Anyone with that link can read the calendar, as with Google's secret address.
+- **Outlook:** *Settings → Calendar → Shared calendars → Publish a calendar*, the *ICS* link.
+- **A calendar someone shares with you** has no link you can use: ask its owner for one. A calendar you subscribe to has its own web address.
 
-```
-node --test "Config/Scripts/tests/*.test.mjs"
-```
+Then *Sync calendars* downloads them and writes their events into your daily notes. Events arrive when you run it; syncing on a schedule is coming. For now, only one device can sync, and your other devices pick up the events through whatever vault sync you use.
 
-For Plainday, `npm ci` once in a worktree (never in a folder Obsidian opens as a vault), then `npm run build` builds `main.js` and `npm test` tests the bundle: every class made by name, every command added with its id, the startup scripts in order, every class file a module of one shape, importing what it uses, and no line that reaches for the CustomJS plugin, which ran the scripts before Plainday. `npm run lint` runs Obsidian's lint, the rules the community directory's scan runs, with Obsidian's types for the code `jsconfig.json` names for the scan: Plainday's own code passes clean, and the scripts' errors from before the lint are a baseline that only shrinks (`CLAUDE.md`, *Lint*).
+Each link works like a password, so Plainday keeps it in that device's secret storage, never in a note or its settings file, and *Paste* carries it to another device. The sync is tested with Google and iCloud private links and calendars published from Outlook. Outlook isn't fully tested (see *Known limitations*); if you sync an Outlook calendar, please [open an issue](https://github.com/frankreporting/plainday/issues) saying what you see. [The manual's *Calendar sync*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#calendar-sync) has the rest.
 
-The scripts are loaded in Node, each class file and Templater script on its own, and the parts that don't need a running Obsidian are tested with made-up data. `demoVault.test.mjs` also checks the sample notes: every link and `parent` resolves, and the time reports in them are exactly what the scripts render (so opening the vault doesn't rewrite them). After a change to the reports, `node "Config/Scripts/tests/demo/renderReports.mjs"` re-renders them. Checks against your own vault's data can go in `*.private.*` files, which git ignores.
+## Privacy and your files
 
-## Working on it
+- **Network:** Plainday goes online only to download the calendar links you add, and sends nothing.
+- **No account, no payment, no ads, no telemetry.**
+- **Only your vault:** Plainday reads and writes files only inside your vault. Its settings are in its own data file there (`.obsidian/plugins/plainday/`), calendar links in each device's secret storage, and what the syncing device remembers about events in Obsidian's storage on that device.
+- **What it changes on its own:**
+	- on a computer, as the vault opens, the time report's blocks in project, area and periodic notes and the timesheets, making a weekly, monthly or yearly note it needs, and its list of Problems in the error log note;
+	- a new daily, weekly, monthly or yearly note's alias and folder;
+	- a note's `parent` property when the note moves;
+	- a sent task's other line when you tick one of its lines.
 
-Changes go through pull requests from a git worktree outside the vault, and are tested one at a time in the clone itself, opened in Obsidian as a vault of its own and driven by `dev-vault.sh`. See `CLAUDE.md` for the workflow and the privacy rule: nothing from a real vault (note names, people, clients, amounts) in code, tests, sample notes, commits or PRs.
+Everything else it writes because you ran a command.
 
-GitHub Actions (`.github/workflows/ci.yml`) checks every pull request: the tests above, that Plainday builds, its bundle tests and Obsidian's lint pass, what merging would release, that every script still loads, that the tracked settings parse, that nothing personal is in the diff or the PR text, and that the PR links its Linear issue and says what the docs need. The checks are Node scripts in `.github/ci/`, each with its inputs described at the top. Merging a pull request that raises Plainday's version publishes a release (`.github/workflows/release.yml`); `CLAUDE.md` (*Releases*) says how to cut one.
+## Known limitations
 
-### Using it for your own notes
+- **A tick in a hover preview, a canvas card or a note embedded in another changes only that line.** A sent task then shows done on one line and open on its other, which the time report lists under Problems. Tick a sent task in its own tab instead ([*Checking off a task*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#checking-off-a-task)).
+- **Calendars sync only when you run *Sync calendars*, and from one device** ([*Calendar sync*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#calendar-sync)).
+- **Outlook isn't fully tested.** An all-day repeating event from an Outlook calendar doesn't sync. A published Outlook calendar carries no guests, so an invitation you declined there still shows. A calendar published from your own Outlook or Microsoft 365 account hasn't been tried ([*Calendar sync*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#calendar-sync)).
+- **A periodic note's name must hold its whole date.** Notes named without part of it, such as a week named `W40` in its year's folder, aren't found, and the settings say so ([*Periodic notes*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#periodic-notes)).
 
-Don't make your own vault a copy of this repository: it carries the sample notes, and their paths (daily notes, weekly notes, `Projects/`) would collide with yours.
+## Try the demo vault
 
-Instead, install Plainday in your vault, clone this repository somewhere outside it, and copy the rest of the system (the templates, the Templater scripts and the manual) into your vault with `Config/Scripts/update-vault.mjs`:
+This repository is also a vault: a made-up freelancer's notes from late August to mid-September 2026. Every person, client, amount and event in it is invented. To try it:
 
-1. Install Templater, Natural Language Dates (Revived) and BRAT, then Plainday through BRAT, as in *Try it* (steps 2 and 3). BRAT keeps Plainday up to date. Before your first invoice, add your name and choose an invoice folder in **Settings → Plainday → Invoices**.
-2. From the clone, with Node 20 or later: `node Config/Scripts/update-vault.mjs --vault <your vault's folder> --dry-run` lists what it would copy and writes nothing. Without `--dry-run`, it copies.
-3. Set Templater and the Daily notes plugin up as the demo's are: their settings are `.obsidian/plugins/templater-obsidian/data.json` and `.obsidian/daily-notes.json` in the clone. The script leaves your Obsidian settings alone.
+1. Clone it into a folder named `Plainday Demo`: `git clone https://github.com/frankreporting/plainday.git "Plainday Demo"`.
+2. In Obsidian, choose **Open folder as vault** and pick that folder.
+3. Install Plainday as above. Its settings for the demo are already there, with invented details.
+4. Open `Welcome.md`.
 
-What it copies: everything the repository has under `Config/` (the manual included) but the tests and the two scripts for working on the system, plus `README.md` and `CLAUDE.md`. It takes them from the clone's `main` as git has it, not from the clone's folder, which may have a branch checked out, and it refuses until `main` is pulled (`git pull --ff-only`). What it never touches: your notes, your own files inside `Config/` (the repository doesn't know about them, your own tests included), and your Obsidian settings. The demo's two bases outside `Config/`, `Projects/Projects.base` and `Reference/Invoices/Invoices.base`, aren't copied either: put a copy beside your projects and your invoices once, and the views you give them stay yours.
-
-A file you've edited yourself is never overwritten: it's listed, and stays as it is (to take the repository's version, delete yours and run the script again). Nothing is ever removed: a file the repository has dropped is listed once and stays in your vault as yours. Your vault's `Config/Scripts/update-manifest.json`, which isn't in the repository, records what was copied, which is how your edits are told apart from an old version. If a copy stops partway, the record says what landed, and the next run picks up from there.
-
-Run it again whenever you want the latest. Some versions change how your notes are written and come with a one-time conversion to run after installing; the manual says when and how (for the line marks: *Links at the end of a line*, *The marks before*). Until it has run, the time report, invoices and the calendar sync write nothing and say why.
+Don't make your own vault a copy of this repository: the sample notes' paths would collide with your notes.
 
 ## License
 
-[MIT](LICENSE). The sample notes are invented and covered by the same license.
+[MIT](https://github.com/frankreporting/plainday/blob/main/LICENSE). The sample notes are covered by the same license.
 
-Plainday's `main.js` also holds [ical.js](https://github.com/kewisch/ical.js) 2.2.1, which reads calendar feeds, under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/). Its notice is at the top of `main.js`, and its source is in its repository.
+Plainday also ships code from other projects, each under its own license, with its notice at the top of the file:
+
+- [ical.js](https://github.com/kewisch/ical.js) 2.2.1, which reads calendar feeds, in `main.js`, under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/). Its source is in its repository.
+- [chrono-node](https://github.com/wanasit/chrono) 2.10.3, which reads typed dates, in `main.js`, under the MIT License, with English rules from Natural Language Dates (Revived), also MIT.
+- Icons from [Lucide](https://lucide.dev) for the task markers, in `styles.css`, under the ISC License.
+
+## Working on Plainday
+
+The plugin's code is in `plugin/src/`. In a clone that Obsidian doesn't open as a vault, with Node 20 or later, run `npm ci` once; then `npm run build` builds `main.js`, `npm test` tests it, and `npm run lint` runs Obsidian's lint. `node --test "Config/Scripts/tests/*.test.mjs"` runs the rest of the tests. GitHub Actions runs all of them on every pull request.
+
+[`CLAUDE.md`](https://github.com/frankreporting/plainday/blob/main/CLAUDE.md) has the workflow and the privacy rule: nothing from a real vault in code, tests, sample notes, commits or pull requests. [The manual's *Working on the system*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#working-on-the-system) has the rest, including the script that copies this repository's templates and manual into a vault of your own.

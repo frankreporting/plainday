@@ -188,7 +188,7 @@ test("demo vault: the archived project's entries count in the August, week 35 an
     assert.ok(plan.targets.sheet.includes("Archive/Freelance/Marlowe Bakery Rebrand/Marlowe Bakery Rebrand timesheet.md"));
 });
 
-test("demo vault: every convention the README describes shows up at least once", () => {
+test("demo vault: every convention the manual describes shows up at least once", () => {
     const days = dailyNotes(vault).map((n) => n.text).join("\n");
     const entries = plan.model.entries;
     assert.match(days, /^- \[<\] \d{1,2}:\d{2}[ap]m\t/m, "event line");
