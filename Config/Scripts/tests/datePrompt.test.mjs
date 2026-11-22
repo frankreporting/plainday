@@ -1,16 +1,14 @@
 // Tests for plugin/src/shared/datePrompt.js and jumpToDate.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// The date plugin's answers come from datePrompt.revived.json, recorded from Natural Language Dates
-// (Revived) itself with a fixed clock, so these check the prompt against what the plugin really says.
+// The reader's answers come from datePrompt.revived.json, recorded from Natural Language Dates
+// (Revived) itself with a fixed clock (recordedReader.mjs). Plainday's own reader gives the same
+// answers but for the phrases plugin/test/dateWords.test.mjs names, which reads with the real one, so
+// these check the date box against what a reader really says.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
-
-const here = new URL(".", import.meta.url);
-const read = (f) => fs.readFileSync(new URL(f, here), "utf8");
-const FIX = JSON.parse(read("datePrompt.revived.json"));
+import { RECORD as FIX, recordedReader } from "./recordedReader.mjs";
 
 const SUN = "2026-09-27", MON = "2026-09-21", SAT = "2026-09-26";
 
@@ -26,34 +24,11 @@ const { dp } = load();
 const TimeReport = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({}));
 const tr = new TimeReport();
 
-// Revived as the fixture recorded it on `day`; a phrase it doesn't have fails the test
+// A reader with Revived's recorded answers on `day`; a phrase the record doesn't have fails the test
 const missing = [];
-const revived = (day) => {
-    const rows = FIX.days[day];
-    const row = (t) => rows[t] ?? (missing.push(`${day} ${t}`), { parseDate: null, period: { date: day, granularity: "day" }, chronoDate: null, chronoWords: [] });
-    const local = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
-    return {
-        settings: { weekStart: "locale-default" },
-        parseDate: (t) => {
-            const r = row(t);
-            return { moment: r.parseDate ? { isValid: () => true, format: () => r.parseDate } : { isValid: () => false } };
-        },
-        parser: {
-            getParsedPeriod: (t) => ({ date: local(row(t).period.date), granularity: row(t).period.granularity }),
-            getParsedDateResult: (t, now, opts) => {
-                assert.equal(opts?.forwardDate, true, "asks chrono the way Revived's fallback does");
-                return row(t).chronoDate ? local(row(t).chronoDate) : null;
-            },
-            // Each stretch of words read; the longest says which of year, month and day it stated
-            getParsedResult: (t) => row(t).chronoWords.map((text) => {
-                const best = row(t).chronoBest;
-                return { text, start: { isCertain: (part) => (best && best.text === text ? !!best[part] : false) } };
-            }),
-        },
-    };
-};
+const revived = (day) => recordedReader(day, missing);
 const got = (r) => r && `${r.unit} ${r.date}${r.readAs ? ` (read as "${r.readAs}")` : ""}`;
-const at = (day, text, opts = {}) => got(dp.read(revived(day), text, { today: day, ...opts }));
+const at = (day, text, opts = {}) => got(dp.readWith(revived(day), text, { today: day, ...opts }));
 const jump = (day, text, opts = {}) => at(day, text, { periods: true, nearest: true, ...opts });
 
 test("a bare weekday is the coming one, today included (OBS-58)", () => {
@@ -72,9 +47,9 @@ test("a bare weekday is the coming one, today included (OBS-58)", () => {
     assert.equal(at(SUN, "next friday"), "day 2026-10-09", "Revived's weeks start Sunday: next week's Friday");
 });
 
-test("words Revived doesn't know aren't read as today (it answers with right now)", () => {
+test("words a reader doesn't know aren't read as today (it answers with right now)", () => {
     for (const day of [SUN, MON, SAT]) {
-        for (const typo of ["fridya", "tomorow", "asdf", "end of month", "tomorow at 5pm"]) {
+        for (const typo of ["fridya", "tomorow", "asdf", "tomorow at 5pm"]) {
             assert.equal(FIX.days[day][typo].parseDate, day, `the fixture shows Revived answering today for ${typo}`);
             assert.equal(at(day, typo), null, `${day} ${typo}`);
             assert.equal(jump(day, typo), null, `${day} ${typo}, jumping`);
@@ -83,8 +58,8 @@ test("words Revived doesn't know aren't read as today (it answers with right now
 });
 
 test("when only some of the words were read, the result says which", () => {
-    assert.equal(at(SUN, "end of october"), `day 2026-10-01 (read as "october")`);
-    assert.equal(dp.describe(dp.read(revived(SUN), "end of october", { today: SUN }), SUN), `Thu 10/1 · in 4 days · read as "october"`);
+    assert.equal(at(SUN, "mid october"), `day 2026-10-01 (read as "october")`);
+    assert.equal(dp.describe(dp.readWith(revived(SUN), "mid october", { today: SUN }), SUN), `Thu 10/1 · in 4 days · read as "october"`);
     assert.equal(at(SUN, "tomorow at 5pm"), null, "read as \"at 5pm\", which is today: refused");
 });
 
@@ -137,24 +112,66 @@ test("jumping: a periodic note's own name is read first, and never reaches the p
     assert.deepEqual(missing, [], "every phrase is in the fixture");
 });
 
-test("the original plugin works too: no periods, and it already rejects what it can't read", () => {
-    const original = {
-        parseDate: (t) => ({ moment: t === "friday" ? { isValid: () => true, format: () => "2026-09-25" } : { isValid: () => false } }),
-        parser: {},
-    };
-    assert.equal(dp.read(original, "friday", { today: SUN })?.date, "2026-09-25");
-    assert.equal(dp.read(original, "fridya", { today: SUN }), null);
-    assert.equal(dp.read(original, "", { today: SUN }), null);
-    assert.equal(dp.read(null, "friday", { today: SUN }), null);
+test("nothing typed, or no reader, reads as nothing", () => {
+    assert.equal(dp.readWith(revived(SUN), "", { today: SUN }), null);
+    assert.equal(dp.readWith(revived(SUN), "   ", { today: SUN }), null);
+    assert.equal(dp.readWith(null, "friday", { today: SUN }), null);
 });
 
-test("the plugin: Revived first, then the original, then nothing", () => {
+test("Revived is asked only when it's on; the original Natural Language Dates never is", () => {
     const withPlugins = (on) => load({ app: { plugins: { getPlugin: (id) => on[id] ?? null } } }).dp;
     const rev = { parseDate() {} }, orig = { parseDate() {} };
-    assert.equal(withPlugins({ "nldates-revived": rev, "nldates-obsidian": orig }).plugin(), rev);
-    assert.equal(withPlugins({ "nldates-obsidian": orig }).plugin(), orig);
-    assert.equal(withPlugins({ "nldates-revived": {} }).plugin(), null, "no parseDate, no use");
-    assert.equal(withPlugins({}).plugin(), null);
+    assert.equal(withPlugins({ "nldates-revived": rev, "nldates-obsidian": orig }).revived(), rev);
+    assert.equal(withPlugins({ "nldates-obsidian": orig }).revived(), null, "the original reads a bare weekday as last week's");
+    assert.equal(withPlugins({ "nldates-revived": {} }).revived(), null, "no parseDate, no use");
+    assert.equal(withPlugins({}).revived(), null);
+});
+
+// Plainday's own reader, and Revived when it's on, each with the recorded answers, saying which
+// phrases reached it. `own` (a set) is what Plainday's reader knows; every other phrase reads as
+// nothing there, the way a word in another language does.
+const twoReaders = ({ own, revivedOn = true, day = SUN }) => {
+    const asked = { own: [], revived: [] };
+    const reader = (who, knows) => {
+        const r = revived(day);
+        const only = (t) => (knows(t) ? t : "asdf");
+        return {
+            settings: r.settings,
+            parseDate: (t) => { asked[who].push(t); return r.parseDate(only(t)); },
+            parser: {
+                getParsedPeriod: (t) => r.parser.getParsedPeriod(only(t)),
+                getParsedDateResult: (t, now, opts) => r.parser.getParsedDateResult(only(t), now, opts),
+                getParsedResult: (t) => r.parser.getParsedResult(only(t)),
+            },
+        };
+    };
+    const plainday = { DateWords: { at: () => reader("own", (t) => own.has(t)) } };
+    const rev = reader("revived", () => true);
+    const { dp: box } = load({ plainday, app: { plugins: { getPlugin: (id) => (revivedOn && id === "nldates-revived" ? rev : null) } } });
+    return { asked, read: (t, opts = {}) => got(box.read(t, { today: day, ...opts })) };
+};
+
+test("the date box reads with Plainday's reader first, and Revived reads only what it can't (OBS-139)", () => {
+    // Revived's record stands in for a French word Plainday's reader can't read: "friday" for it
+    const english = new Set(["next week", "tomorrow", "10/2"]);
+    const r = twoReaders({ own: english });
+    assert.equal(r.read("tomorrow"), "day 2026-09-28");
+    assert.equal(r.read("next week", { periods: true }), "week 2026-10-04");
+    assert.deepEqual(r.asked.revived, [], "an English word never reaches Revived");
+    assert.equal(r.read("friday"), "day 2026-10-02", "a word Plainday can't read goes to Revived when it's on");
+    assert.deepEqual(r.asked.revived, ["friday"]);
+    assert.equal(r.read("fridya"), null, "with Revived on, a typo is still not a date");
+    assert.equal(r.read("week of friday", { periods: true }), "week 2026-10-02", "\"week of\" a word only Revived reads");
+
+    const off = twoReaders({ own: english, revivedOn: false });
+    assert.equal(off.read("friday"), null, "Revived off: not a date");
+    assert.equal(off.read("tomorrow"), "day 2026-09-28", "and English reads the same without it");
+});
+
+test("a reading Plainday's reader makes in part stays its own, not Revived's", () => {
+    const r = twoReaders({ own: new Set(["mid october"]) });
+    assert.equal(r.read("mid october"), `day 2026-10-01 (read as "october")`);
+    assert.deepEqual(r.asked.revived, []);
 });
 
 test("the preview line, and the same date spelled out", () => {
@@ -181,7 +198,8 @@ test("the preview line, and the same date spelled out", () => {
 
 // ---------------------------------------------------------------- the prompt itself
 
-const harness = (plugin) => {
+// The prompt, reading with the recorded answers as Plainday's own reader, and `plugin` as Revived
+const harness = (plugin = null) => {
     const frames = [], picks = [], notices = [];
     const el = () => {
         const e = { style: {}, text: "", listeners: {}, children: [] };
@@ -210,6 +228,7 @@ const harness = (plugin) => {
     const { dp } = load({
         notices,
         moment,
+        plainday: { DateWords: { at: () => revived(SUN) } },
         app: { plugins: { getPlugin: (id) => (id === "nldates-revived" ? plugin : null), plugins: {} } },
         requestAnimationFrame: (fn) => frames.push(fn),
         Modal, TextComponent,
@@ -220,7 +239,7 @@ const harness = (plugin) => {
 };
 
 test("prompt: the preview follows the typing, and Enter on a word it can't read picks nothing", () => {
-    const h = harness(revived(SUN));
+    const h = harness();
     const modal = h.dp.open("Due date", h.onPick);
     const preview = modal.contentEl.children[0];
     h.type("fridya");
@@ -241,7 +260,7 @@ test("prompt: the preview follows the typing, and Enter on a word it can't read 
 });
 
 test("prompt: a pick that fails can be tried again", async () => {
-    const h = harness(revived(SUN));
+    const h = harness();
     let tries = 0;
     h.dp.open("Schedule for", () => { tries++; if (tries === 1) throw new Error("boom"); });
     h.type("friday");
@@ -250,7 +269,7 @@ test("prompt: a pick that fails can be tried again", async () => {
     assert.equal(tries, 2);
     assert.deepEqual(h.notices, ["Schedule for failed — check console"]);
     let later = 0;
-    const h2 = harness(revived(SUN));
+    const h2 = harness();
     h2.dp.open("Schedule for", async () => { later++; if (later === 1) throw new Error("async boom"); });
     h2.type("friday");
     h2.enter();
@@ -259,10 +278,15 @@ test("prompt: a pick that fails can be tried again", async () => {
     assert.equal(later, 2);
 });
 
-test("prompt: without a date plugin, a notice and no modal", () => {
+test("prompt: without Natural Language Dates, it opens and reads all the same, and asks for nothing (OBS-139)", () => {
     const h = harness(null);
-    assert.equal(h.dp.open("Schedule for", h.onPick), null);
-    assert.deepEqual(h.notices, ["Turn on Natural Language Dates (Revived) in Community plugins"]);
+    const modal = h.dp.open("Schedule for", h.onPick);
+    assert.ok(modal);
+    h.type("friday");
+    assert.equal(modal.contentEl.children[0].text, "Fri 10/2 · in 5 days");
+    h.enter();
+    assert.deepEqual(h.picks, ["2026-10-02"]);
+    assert.deepEqual(h.notices, []);
 });
 
 // ---------------------------------------------------------------- week rules and JumpToDate
@@ -322,13 +346,13 @@ test("JumpToDate: where each kind of date's note is, named in the user's locale"
 });
 
 test("the warm-up reads a few words once per session, and a failure in it is harmless", () => {
-    const { dp: fresh } = load();
     const seen = [];
     const nld = { parseDate: (t) => { seen.push(t); if (t === "friday") throw new Error("boom"); return { moment: { isValid: () => false } }; }, parser: {} };
-    fresh.warmUp(nld);
+    const { dp: fresh } = load({ plainday: { DateWords: { at: () => nld } }, app: { plugins: { getPlugin: () => null } } });
+    fresh.warmUp();
     assert.ok(seen.includes("warm up") && seen.includes("next week"), "reads words of each kind");
     const count = seen.length;
-    fresh.warmUp(nld);
+    fresh.warmUp();
     assert.equal(seen.length, count, "only once");
 });
 
@@ -384,7 +408,7 @@ test("JumpToDate: weekly notes count ISO weeks when their pattern says GGGG or W
 });
 
 test("prompt: a label follows the preview (a week's note name)", () => {
-    const h = harness(revived(SUN));
+    const h = harness();
     const modal = h.dp.open("Jump to", h.onPick, { periods: true, name: (t) => (t === "w41" ? { date: "2026-10-04", unit: "week" } : null), label: (r) => (r.unit === "week" ? "2026w41" : null) });
     const preview = modal.contentEl.children[0];
     h.type("w41");

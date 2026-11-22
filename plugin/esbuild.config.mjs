@@ -11,7 +11,11 @@
 // the host exports it as `calendarWorkerSource`, from the module "plainday:calendar-worker", which
 // only this build provides (workerPlugin()). ical.js is under the Mozilla Public License 2.0. Its
 // notice doesn't survive bundling by itself, so the build puts one at the top of main.js and of the
-// worker's script, naming where its source is (notices()).
+// worker's script, naming where its source is (icalNotice()).
+//
+// Typed dates are read with chrono-node's English (OBS-139), which main.js bundles too, and English
+// rules copied from Natural Language Dates (Revived) (plugin/src/shared/dateWords.js), both under
+// the MIT License, whose notice main.js carries next, with both copyrights (mitNotice()).
 //
 // The class files are written for Plainday alone (OBS-257). A line that still reaches for the
 // CustomJS plugin, by its id or one of its command ids, or for its global or its `customJS` name,
@@ -34,13 +38,32 @@ export const SRC = path.join(here, "src");
 export const OUTFILE = path.join(ROOT, "main.js");
 // What Plainday ships beside main.js; styles.css only once there is one
 const RELEASE = ["manifest.json", "styles.css"];
-// The notices for what the build bundles from node_modules, at the top of main.js: the package as
-// installed, its license, and where its source is, as the MPL asks of a copy in another form
+// The notices for what the build bundles from node_modules, at the top of main.js: ical.js's, then
+// the MIT notice for chrono-node and Revived's rules. The worker carries only ical.js's.
 export function notices(root = ROOT) {
+    return `${icalNotice(root)}\n${mitNotice(root)}`;
+}
+
+// ical.js as installed, its license, and where its source is, as the MPL asks of a copy in another
+// form
+export function icalNotice(root = ROOT) {
     const ical = JSON.parse(fs.readFileSync(path.join(root, "node_modules", "ical.js", "package.json"), "utf8"));
     return `/*! Plainday bundles ical.js ${ical.version} (https://github.com/kewisch/ical.js), whose source is`
         + " there, under the Mozilla Public License, v. 2.0 (https://mozilla.org/MPL/2.0/)."
         + " Portions Copyright (C) Philipp Kewisch. */";
+}
+
+// chrono-node as installed, and the rules copied from Revived, with both copyright lines and the MIT
+// License's permission notice, as it asks of every copy, taken from chrono-node's own LICENSE
+export function mitNotice(root = ROOT) {
+    const dir = path.join(root, "node_modules", "chrono-node");
+    const chrono = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    const license = fs.readFileSync(path.join(dir, "LICENSE.txt"), "utf8");
+    const permission = license.slice(license.indexOf("Permission is hereby granted")).trim();
+    return `/*! Plainday bundles chrono-node ${chrono.version} (https://github.com/wanasit/chrono), Copyright (c) 2014,`
+        + " Wanasit Tanakitrungruang, and reads dates in English with rules from Natural Language Dates (Revived)"
+        + " (https://github.com/Amato21/nldates-revived), Copyright (c) 2021 Argentina Ortega Sáinz. Both are under"
+        + ` the MIT License:\n\n${permission}\n*/`;
 }
 
 // What no line in a class file may say: the CustomJS plugin by its id, one of its command ids, its
@@ -107,7 +130,7 @@ export async function workerSource(src = SRC) {
         format: "iife",
         platform: "browser",
         target: "es2022",
-        banner: { js: notices() },
+        banner: { js: icalNotice() },
         write: false,
         metafile: true,
         logLevel: "silent",
@@ -160,8 +183,8 @@ export function options({ src = SRC, outfile = OUTFILE, watch = false, logLevel 
         // esbuild names each file in main.js in a comment, relative to this folder: the repository's
         // root, wherever the build starts, so a build anywhere matches the release (OBS-230)
         absWorkingDir: ROOT,
-        // ical.js comes from the repository's node_modules, also for a copy of plugin/src/ built
-        // elsewhere (the bundle tests build one in a temporary folder)
+        // ical.js and chrono-node come from the repository's node_modules, also for a copy of
+        // plugin/src/ built elsewhere (the bundle tests build one in a temporary folder)
         nodePaths: [path.join(ROOT, "node_modules")],
         bundle: true,
         format: "cjs",

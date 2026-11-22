@@ -682,12 +682,12 @@ Each command has its own icon, from the icons Obsidian ships with. It shows when
 
 ### Typing a date
 
-*Schedule*, *Due date*, *Jump to date* and *Invoice* ask for a date in words, and Natural Language Dates reads them. The line under the box shows the date they mean as you type (`Fri 10/2 · in 5 days`), and Enter takes it.
+*Schedule*, *Due date*, *Jump to date* and *Invoice* ask for a date in words, in English, and Plainday reads them itself. The line under the box shows the date they mean as you type (`Fri 10/2 · in 5 days`), and Enter takes it.
 
-- **Words it can't read:** the line says "Not a date I can read", and Enter does nothing but say so. Natural Language Dates (Revived) answers with today for words it doesn't know, so a typo like `fridya` would otherwise pick today.
-- **Words it only partly read:** the line says which (`Thu 10/1 · in 4 days · read as "october"` for `end of october`), and Enter takes that date. A partial reading that comes out as today (`tomorow at 5pm` read as `at 5pm`) counts as unreadable.
+- **Words it can't read:** the line says "Not a date I can read", and Enter does nothing but say so, so a typo like `fridya` never picks today.
+- **Words it only partly read:** the line says which (`Thu 10/1 · in 4 days · read as "october"` for `mid october`), and Enter takes that date. A partial reading that comes out as today (`tomorow at 5pm` read as `at 5pm`) counts as unreadable.
 - **Weeks start on the day your settings say:** with Notebook Navigator as the periodic notes' source (*Settings → Plainday → Folders → Periodic notes*), its calendar **Locale** (Settings → Notebook Navigator → Calendar), where *System default* means Obsidian's language, or Obsidian's language when its **Periodic notes locale** is set to follow Obsidian. Otherwise Obsidian's language decides, and the weekly, monthly and yearly notes are named `gggg[w]ww`, `YYYY-MM` and `YYYY`. English starts weeks on Sunday. This is the week `next week` means, and the one Notebook Navigator's weekly notes cover.
-- **Revived or the original:** either plugin works, and only one can be on at a time. Use Revived: the original reads a bare weekday as last week's (`friday` on a Monday gives the Friday before).
+- **Other languages:** with [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived) on, words Plainday can't read go to it, so the languages turned on in its settings work too (`lundi prochain`, `demain`, `nächsten Montag`). English reads the same with it or without it. Weeks and months in other languages work only in part: in *Jump to date*, `la semaine prochaine` opens a day, not the weekly note.
 
 What the words mean, typed on Sunday 9/27/26:
 
@@ -698,6 +698,7 @@ What the words mean, typed on Sunday 9/27/26:
 | `next friday` | Fri 10/9 | Next week's, so on a Sunday it's 12 days away; `friday` is the one you usually want |
 | `last friday` | Fri 9/25 | Last week's: on a Saturday, 8 days back |
 | `tomorrow`, `in 3 days`, `in 2 weeks` | Mon 9/28, Wed 9/30, Sun 10/11 | Counted from today |
+| `end of month`, `end of october` | Wed 9/30, Sat 10/31 | The month's last day |
 | `10/2`, `oct 2` | Fri 10/2 | The next 10/2: a date already past this year is next year's, so give the year (`9/1/26`) for one behind you. *Jump to date* and *Invoice* take the closer one instead: `9/16` is 11 days back, not next year's |
 | `next week`, `this week` | Week starting 10/4, Week starting 9/27 | The weekly note, for *Schedule* and *Jump to date*. *Due date* takes a day: the first of next week, by your week setting, or today for this week |
 | `week of oct 5` | Week starting 10/4 | The weekly note holding that day. *Due date* takes the first day of that week |
@@ -810,14 +811,13 @@ Asks how many days (2–5) and opens that many consecutive daily notes side by s
 Asks for a date (see *Typing a date*) and opens its note in the pane you're in; `⌘↵` opens it in a split to the right.
 
 - **A day** opens its daily note. **`this`, `next` or `last` with `week`, `month` or `year`** opens the weekly, monthly or yearly note, named and filed by Notebook Navigator's week, month and year patterns (else `weeks/gggg[w]ww`, `months/YYYY-MM` and `years/YYYY` beside the daily notes).
-- **Weeks** start on the day your settings say (see *Typing a date*), so `next week` is always the week after this one's note. Revived's own weeks start on Monday, which on a Sunday would land in this week's note; *Jump to date* counts the weeks from today instead. A week written with its year (`2026-W41`) is the one holding that ISO week's Monday.
+- **Weeks** start on the day your settings say (see *Typing a date*), so `next week` is always the week after this one's note, counted from today. A week written with its year (`2026-W41`) is the one holding that ISO week's Monday.
 - **A week or a month in words:** `week of oct 5` (or of any date: `week of friday`, or `week starting oct 4`) opens the weekly note holding that day, and the preview says when it starts and names it (`Week starting 10/4 · 2026w41`). `w38`, `wk 38` or `week 38` is week 38, counted the way the weekly notes count, and `sep`, `sept`, `september` or `9/2026` is that month. They mean this year unless a year comes before or after: `w1 2027`, `2027 w1`, `Sep 2027`. (*Schedule* takes the next one instead.)
 - **A periodic note's own name** opens it too, spelled the way the patterns spell it: `2026w41`, `2026-10`, `2027`.
 - **A quarter** (`Q4`, `next quarter`) opens the daily note of its first day: there are no quarterly notes.
 - **A month and day without a year** (`9/16`, `sep 16`) is whichever is closer, this year's or next year's, since jumping goes back as often as forward. Schedule and *Due date* take the next one.
-- **With the original Natural Language Dates**, words always mean a day, so `next week` opens a daily note; a note's own name still works.
 - **A note that doesn't exist yet** is made after asking, as every periodic note is (see *The periodic notes*): in the folder *Settings → Plainday → Folders → Periodic notes* gives it, with its alias, then that kind of note's template if it has anything in it. With the Daily notes plugin and Plainday, that's the Daily notes plugin's template for a day and Plainday's own weekly, monthly or yearly template (else *Weekly Note*, *Monthly Note* or *Yearly Note* in Templater's folder); with Notebook Navigator, its own template for that calendar. With Templater on, a template runs through it, and its properties are combined with the alias; without Templater, its `{{title}}`, `{{date}}` and `{{time}}` are filled in, and one holding Templater code isn't used, with a notice. Tick **Don't ask again on this device** to skip the question from then on; while it's skipped, the prompt says so and offers **Ask again**. If a template moves the note somewhere other than its folder, a notice says so: make the two agree, or Plainday won't find the note next time.
-- It replaces the *Natural Language Date* command of the Jump-to-Date plugin, which only works with the original Natural Language Dates plugin. If `⌘J` runs that command, move the hotkey to *Plainday: Jump to date*.
+- It replaces the *Natural Language Date* command of the Jump-to-Date plugin, and needs no date plugin. If `⌘J` runs that command, move the hotkey to *Plainday: Jump to date*.
 
 ### Convert to project
 
@@ -978,10 +978,11 @@ New notes run `Get Template.md`, which picks a template from the title; the READ
 
 ## Plugins
 
-**Required:** Plainday, the plugin this repository builds from the class files in `plugin/src/`, installed through BRAT from the repository's releases until the community directory lists it (see the README); Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived), and the core Daily notes and Bases plugins. The original Natural Language Dates works in Revived's place, but reads a bare weekday as last week's; only one of the two can be on at a time.
+**Required:** Plainday, the plugin this repository builds from the class files in `plugin/src/`, installed through BRAT from the repository's releases until the community directory lists it (see the README); Templater (script folder `Config/Scripts/Templater`, trigger on new file creation); and the core Daily notes and Bases plugins.
 
 **Recommended:**
 
+- [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived): reads dates typed in other languages, in the languages turned on in its settings (see *Typing a date*), and suggests dates as you type in a note. Plainday reads English dates itself.
 - [Notebook Navigator](https://github.com/johansan/notebook-navigator): a calendar for the periodic notes, and folder notes. The scripts read its week, month and year patterns when it's installed, and new project and area folders get a look in it: a red circle or a green archive, or the look you've given their tag.
 - [Task Status](https://github.com/ebullient/obsidian-task-status): shows `[<]`, `[>]`, `[-]` and the other markers as their own icons, and `⇧⌘⏎` picks one.
 - [Selectable Tables](https://github.com/frankreporting/selectable-tables): arrow keys select and move through a table's cells, and a table can keep its first rows and columns in view as it scrolls. *Settings → Plainday → Tables* sets a default for the system's tables (see *Freezing tables*).

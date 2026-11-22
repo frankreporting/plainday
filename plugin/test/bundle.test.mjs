@@ -1365,12 +1365,30 @@ test("main.js starts with ical.js's license notice, and holds ical.js", async ()
     assert.match(text, /node_modules\/ical\.js\/dist\/ical\.js/, "esbuild's comment naming the bundled file");
     // In the calendar reader's worker, which starts with the notice too, and which main.js carries
     const { code } = await workerSource();
-    assert.ok(code.startsWith(first), code.slice(0, 120));
+    assert.ok(code.startsWith(`${first}\n`), code.slice(0, 120));
+    assert.doesNotMatch(code, /chrono-node/, "the worker holds ical.js only");
     assert.match(code, /self\.onmessage/);
     // main.js carries it as text, as esbuild writes a string: the notice a second time, and the
     // worker's message handler
     assert.equal(text.split("Plainday bundles ical.js").length - 1, 2, "the notice, in main.js and in the worker's script");
     assert.match(text, /self\.onmessage = \(event\) =>/);
+});
+
+test("main.js carries the MIT notice for chrono-node and Revived's date rules next, and holds chrono-node's English only (OBS-139)", () => {
+    const text = fs.readFileSync(BUNDLE, "utf8");
+    const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, "node_modules", "chrono-node", "package.json"), "utf8"));
+    const lines = text.split("\n");
+    assert.ok(lines[1].startsWith(`/*! Plainday bundles chrono-node ${version} (https://github.com/wanasit/chrono), Copyright (c) 2014, Wanasit Tanakitrungruang,`), lines[1]);
+    assert.match(lines[1], /Natural Language Dates \(Revived\) \(https:\/\/github\.com\/Amato21\/nldates-revived\), Copyright \(c\) 2021 Argentina Ortega Sáinz/);
+    const end = lines.indexOf("*/");
+    const notice = lines.slice(1, end + 1).join("\n");
+    assert.match(notice, /^Permission is hereby granted, free of charge/m);
+    assert.match(notice, /The above copyright notice and this permission notice shall be included in/);
+    assert.match(notice, /THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND/);
+    assert.match(text, /node_modules\/chrono-node\/dist\/esm\/locales\/en\//, "chrono-node's English");
+    for (const other of ["de", "fr", "ja", "nl", "pt", "zh", "ru", "es", "uk", "it", "sv"]) {
+        assert.doesNotMatch(text, new RegExp(`node_modules/chrono-node/dist/esm/locales/${other}/`), `no ${other}`);
+    }
 });
 
 test("a worker that doesn't build stops the build, and names its files for npm run dev to watch", async () => {
@@ -1386,7 +1404,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 35);
+    assert.equal(classFiles.length, 36);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

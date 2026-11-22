@@ -2,41 +2,51 @@ import { getLanguage, Modal, moment, Notice, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
 export default class DatePrompt {
-    // The date prompt behind Schedule, Due and JumpToDate: type a date in words, see the date it
-    // means while you type, and Enter hands it on. Natural Language Dates reads the words. Revived
-    // comes first: it reads a bare weekday as the coming one, where the original plugin gives last
-    // week's (OBS-58). Only one of the two can be on at a time; either works here.
-    static PLUGINS = ["nldates-revived", "nldates-obsidian"];
+    // The date prompt behind Schedule, Due, JumpToDate and Invoice: type a date in words, see the
+    // date it means while you type, and Enter hands it on. Plainday reads English words itself
+    // (DateWords, OBS-139), as Natural Language Dates (Revived) reads them. Words it can't read go to
+    // Revived when it's on, which reads the other languages turned on in its settings. The original
+    // Natural Language Dates isn't asked: it reads a bare weekday as last week's (OBS-58).
+    static REVIVED = "nldates-revived";
 
-    // Revived's first parse after it loads takes about 150ms (its date parser warming up); every one
-    // after that well under 1ms. It's paid once, just after the first prompt opens, so the first key
-    // typed doesn't wait for it.
+    // The first reading after Plainday loads takes about 20ms (chrono-node warming up), and Revived's
+    // first about 150ms; every one after that about a millisecond. It's paid once, just after the
+    // first prompt opens, so the first key typed doesn't wait for it.
     static warmed = false;
 
     static DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-    // The date plugin that's on, or null
-    plugin() {
-        for (const id of DatePrompt.PLUGINS) {
-            const p = app.plugins?.getPlugin?.(id);
-            if (typeof p?.parseDate === "function") return p;
-        }
-        return null;
+    // Natural Language Dates (Revived) when it's on, or null
+    revived() {
+        const p = app.plugins?.getPlugin?.(DatePrompt.REVIVED);
+        return typeof p?.parseDate === "function" ? p : null;
     }
 
-    // What `text` names: { date: "YYYY-MM-DD", unit, m, readAs } with unit "day", "week", "month" or
-    // "year" and `m` the date as a moment, or null when it isn't a date. `readAs` is set when only
-    // some of the words were read ("end of october" is read as "october").
+    // What `text` names, as readWith() says: read by Plainday's own reader, and when that can't read
+    // the words, by Revived when it's on (another language: "lundi prochain"). Options as in
+    // readWith().
+    read(text, opts = {}) {
+        const now = opts.now ?? new Date();
+        const own = this.readWith(plainday.DateWords.at(now), text, { ...opts, now });
+        if (own) return own;
+        const revived = this.revived();
+        return revived ? this.readWith(revived, text, { ...opts, now }) : null;
+    }
+
+    // What `text` names, read by `nld`, a reader with Revived's three answers (Plainday's own,
+    // DateWords.at(), or Revived itself): { date: "YYYY-MM-DD", unit, m, readAs } with unit "day",
+    // "week", "month" or "year" and `m` the date as a moment, or null when it isn't a date. `readAs`
+    // is set when only some of the words were read ("mid october" is read as "october").
     // - `periods` (JumpToDate): a week, month or year counts as itself, and `date` is a day in it.
     //   Without it, a period is a day: its first, or today for "this week".
     // - `weekStart` (0 is Sunday): the day weeks start on, from weekRules().
     // - `name(text)`: reads a periodic note's own name first, as { date, unit }.
     // - `nearest` (JumpToDate): a month and day without a year ("9/16", "sep 16") is whichever is
-    //   closer, this year's or the next, where Revived always takes the next one.
+    //   closer, this year's or the next, where the readers always take the next one.
     // "week of <a date>" is the week that date is in.
     // - `today` and `now` are for tests.
-    read(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = moment().format("YYYY-MM-DD"), now = new Date() } = {}) {
+    readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = moment().format("YYYY-MM-DD"), now = new Date() } = {}) {
         const t = String(text ?? "").trim();
         if (!t || !nld) return null;
 
@@ -47,7 +57,7 @@ export default class DatePrompt {
         // note, or its first day)
         const weekOf = t.match(/^(?:the\s+)?(?:week|wk)\s+(?:of|starting)\s+(.+)$/i);
         if (weekOf) {
-            const day = this.read(nld, weekOf[1], { weekStart, nearest, today, now });
+            const day = this.readWith(nld, weekOf[1], { weekStart, nearest, today, now });
             if (!day) return null;
             return periods ? this.result(day.date, "week") : this.result(DatePrompt.weekFirst(day.date, weekStart), "day");
         }
@@ -58,8 +68,7 @@ export default class DatePrompt {
         if (!m?.isValid?.()) return null;
         const date = m.format("YYYY-MM-DD");
 
-        // Revived says when the words name a whole period ("next week", "this month"); the original
-        // plugin doesn't, and everything is a day
+        // The reader says when the words name a whole period ("next week", "this month")
         let period;
         try { period = nld.parser?.getParsedPeriod?.(t, nld.settings?.weekStart) ?? null; } catch (e) { period = null; }
         if (period && period.granularity !== "day" && typeof period.date?.getTime === "function" && !isNaN(period.date.getTime())) {
@@ -80,9 +89,9 @@ export default class DatePrompt {
             return this.result(start, "day");
         }
 
-        // Revived reads words it doesn't know as right now ("fridya" is today), and when its date parser
-        // (chrono) reads only some of them, drops the rest ("tomorow at 5pm" is today at 5pm, "end of
-        // october" is 10/1). Say what was read, and don't take today unless all of it was.
+        // Both readers read words they don't know as right now ("fridya" is today), and when their date
+        // parser (chrono) reads only some of them, drop the rest ("tomorow at 5pm" is today at 5pm,
+        // "mid october" is 10/1). Say what was read, and don't take today unless all of it was.
         const chrono = this.chronoRead(nld, t, now);
         if (chrono) {
             const partial = chrono.date === date && !!chrono.words && DatePrompt.squash(chrono.words) !== DatePrompt.squash(t);
@@ -98,9 +107,9 @@ export default class DatePrompt {
         return this.result(date, "day");
     }
 
-    // What Revived's date parser makes of the words: { date, words, yearless } (the day, or null; the
-    // longest stretch of the words it read; and whether all of them name a month and a day but no
-    // year), or null with the original plugin, which has no such parser
+    // What the reader's date parser makes of the words: { date, words, yearless } (the day, or null;
+    // the longest stretch of the words it read; and whether all of them name a month and a day but no
+    // year), or null for a reader without one
     chronoRead(nld, text, now) {
         const parser = nld.parser;
         if (typeof parser?.getParsedDateResult !== "function") return null;
@@ -196,24 +205,22 @@ export default class DatePrompt {
         return `${DatePrompt.DAYS[dow]}, ${DatePrompt.MONTHS[mo - 1]} ${d}, ${y}`;
     }
 
-    // Read a few words of each kind once, so neither Revived's first-parse cost nor the first run of
-    // each path is paid on a keystroke. A word it doesn't know goes through every step, down to its
-    // date parser.
-    warmUp(nld) {
+    // Read a few words of each kind once, so neither chrono-node's first-parse cost nor the first run
+    // of each path is paid on a keystroke. A word it doesn't know goes through every step, down to
+    // its date parser, and on to Revived when it's on.
+    warmUp() {
         if (DatePrompt.warmed) return;
         DatePrompt.warmed = true;
         for (const text of ["warm up", "f", "friday", "next week", "in 2 days", "oct 2"]) {
-            try { this.read(nld, text); this.describe(this.read(nld, text)); } catch (e) { /* only a warm-up */ }
+            try { this.describe(this.read(text)); } catch (e) { /* only a warm-up */ }
         }
     }
 
     // Opens the prompt. `onPick(result, modal, event)` runs on Enter and closes the modal itself; if it
     // fails, Enter can be tried again. `periods`, `name` and `nearest` as in read(); `label(result)` adds a word
     // to the preview. `extra(contentEl, { focus })` adds anything under the preview, and `focus()`
-    // puts the cursor back in the box. Returns the modal, or null when no date plugin is on.
+    // puts the cursor back in the box. Returns the modal.
     open(title, onPick, { periods = false, name = null, nearest = false, label = null, extra } = {}) {
-        const nld = this.plugin();
-        if (!nld) { new Notice("Turn on Natural Language Dates (Revived) in Community plugins"); return null; }
         let weekStart = 0;
         try { weekStart = this.weekRules().weekStart; } catch (e) { weekStart = 0; }
 
@@ -230,7 +237,7 @@ export default class DatePrompt {
         let picked = false;
         const update = () => {
             const text = input.getValue();
-            result = this.read(nld, text, { periods, weekStart, name, nearest });
+            result = this.read(text, { periods, weekStart, name, nearest });
             const more = result ? label?.(result) : null;
             preview.setText(!text.trim() ? "" : result ? `${this.describe(result, undefined, weekStart)}${more ? ` · ${more}` : ""}` : "Not a date I can read");
         };
@@ -257,7 +264,7 @@ export default class DatePrompt {
         // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
         // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
         // Then warm the parser up, in the next task, once the box is drawn and focused.
-        modal.onOpen = () => requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); setTimeout(() => this.warmUp(nld), 0); });
+        modal.onOpen = () => requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); setTimeout(() => this.warmUp(), 0); });
         modal.open();
         return modal;
     }
