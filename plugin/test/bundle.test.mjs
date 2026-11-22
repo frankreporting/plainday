@@ -457,6 +457,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.equal(folder.s.control.inputEl.value, "Reference/Invoices", "and the field goes back to the saved folder on leaving it");
         folder.s.type("../x");
         assert.match(folder.s.warning(), /^Not used: it isn't a folder in the vault/);
+        folder.s.type("Config/Invoices");
+        assert.equal(folder.s.warning(), "", "a folder named Config is like any other (OBS-295)");
         folder.s.type("Business/Invoices");
         folder.s.leave();
         await new Promise((r) => setTimeout(r, 0));

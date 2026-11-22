@@ -210,7 +210,7 @@ test("fresh and toastText count only what's new: a line that went from 2 to 3 is
 });
 
 // write, toast and open against a stub of the little of `app` they use, with the error log note where
-// Plainday's settings put it (OBS-283): Config/Error Log.md in a vault from before
+// Plainday's settings put it (OBS-283): Config/Error Log.md, as the demo names it
 const harness = ({ text = null, path = "Config/Error Log.md" } = {}) => {
     const state = { text, created: [], folders: [], notices: [], opened: [] };
     const file = () => (state.text === null ? null : { path });
