@@ -1,6 +1,8 @@
 # Plainday
 
-A Markdown planner for [Obsidian](https://obsidian.md). Plainday lets you plan entirely in Markdown and get clear reports of your time. It turns checklists into timesheets and invoices, and syncs your calendars' events into your daily notes. If you already plan in periodic notes, think of Plainday as a set of superpowers for them. It works with Obsidian's own links, properties and Bases, and if you turn it off, your notes stay as they are: plain Markdown, readable without it.
+A Markdown planner for [Obsidian](https://obsidian.md). Plainday lets you track tasks, projects, and events entirely in Markdown, and it converts your plaintext timestamps into timesheets and invoices. It also syncs your calendars' events into clean, simple bullets in your daily notes. Think of Plainday as a set of superpowers for your periodic notes. It works with Obsidian's own links, properties and Bases, and if you turn it off, your notes are still completely readable.
+
+### Highlights:
 
 - **Tasks are plain Markdown checklists,** in daily, weekly, monthly and yearly notes.
 - **A task can have its own note** for more context, or not: it's optional.
@@ -38,7 +40,7 @@ Plainday needs no other plugin. It finds your daily notes where the core Daily n
 - **[Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)** reads dates in languages other than English, and suggests dates as you type in a note. Plainday reads English dates itself.
 - **[Notebook Navigator](https://github.com/johansan/notebook-navigator)** gives the periodic notes a calendar, and new project and area folders their look (a red circle or a green archive), with *Move to project…* in its menus.
 - **[Task Status](https://github.com/vburzynski/obsidian-task-status)** adds a picker for a task's checkbox (`⇧⌘⏎`, or a long press). Plainday draws the markers itself.
-- **[Selectable Tables](https://github.com/frankreporting/selectable-tables)** keeps the header and first column of the reports', timesheets' and invoices' tables in view as they scroll (*Settings → Plainday → Tables*).
+- **[Selectable Tables](https://github.com/frankreporting/selectable-tables)** allows you to set a default for frozen header rows and columns in the tables found in reports, timesheets, and invoices.
 
 ## How your notes are organized
 
@@ -64,7 +66,7 @@ Reference/                              everything else you keep, and the period
 Archive/                                finished projects, moved here whole
 ```
 
-It's the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. The folder names are yours: *Settings → Plainday → Folders*.
+The organization principle is very much based on the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that project or area's folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. You can define your own folder names in the settings.
 
 ## Getting started
 
@@ -115,7 +117,7 @@ Plainday reads a calendar from its private link. In **Settings → Plainday → 
 - **Outlook:** *Settings → Calendar → Shared calendars → Publish a calendar*, the *ICS* link.
 - **A calendar someone shares with you** has no link you can use: ask its owner for one. A calendar you subscribe to has its own web address.
 
-Then *Sync calendars* downloads them and writes their events into your daily notes. Events arrive when you run it; syncing on a schedule is coming. One device does it, the one you add your first calendar on, and Obsidian Sync carries the events to your others. Your project links, time entries and notes on an event's line are kept.
+Then *Sync calendars* downloads them and writes their events into your daily notes. Events arrive when you run it; syncing on a schedule is coming. For now, only one device can sync, and your other devices pick up the events through whatever vault sync you use.
 
 Each link works like a password, so Plainday keeps it in that device's secret storage, never in a note or its settings file, and *Paste* carries it to another device. The sync is tested with Google and iCloud private links and calendars published from Outlook. Outlook isn't fully tested (see *Known limitations*); if you sync an Outlook calendar, please [open an issue](https://github.com/frankreporting/plainday/issues) saying what you see. [The manual's *Calendar sync*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#calendar-sync) has the rest.
 
