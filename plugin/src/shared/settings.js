@@ -12,7 +12,8 @@ export default class Settings {
     //     panel shows; and the last number given, which it doesn't: Invoice raises it, so a deleted
     //     invoice's number is never given again, and typing a first number sets it to one less.
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
-    //   - editor: whether ListCursor runs (OBS-221).
+    //   - editor: whether ListCursor runs (OBS-221), and whether Plainday draws the task markers
+    //     (`taskMarkers`, TaskMarkers, OBS-140).
     //   - calendars (OBS-282): how far ahead Sync calendars writes events (`range`), and the calendars
     //     added by their private links, each { id, name, account, address, on }: `address` is your email
     //     address on that calendar, by which the calendar reader leaves out an invitation you declined. A calendar's link is never here: it's in this device's secret storage, under
@@ -139,7 +140,7 @@ export default class Settings {
      * @returns {{
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
-     *   editor: { listCursor: boolean },
+     *   editor: { listCursor: boolean, taskMarkers: boolean },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
      *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
      *   templates: { week: string, month: string, year: string, task: string, log: string },
@@ -150,7 +151,7 @@ export default class Settings {
         return {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
-            editor: { listCursor: true },
+            editor: { listCursor: true, taskMarkers: true },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
             folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
             templates: { week: "", month: "", year: "", task: "", log: "" },
@@ -259,6 +260,7 @@ export default class Settings {
         out.tables.freezeRows = this.frozenOf(tables.freezeRows).number;
         out.tables.freezeColumns = this.frozenOf(tables.freezeColumns).number;
         if (typeof editor.listCursor === "boolean") out.editor.listCursor = editor.listCursor;
+        if (typeof editor.taskMarkers === "boolean") out.editor.taskMarkers = editor.taskMarkers;
         const calendars = obj(r.calendars);
         out.calendars.range = this.rangeOf(calendars.range) ?? Settings.DEFAULT_RANGE;
         // Each calendar with an ID that can name its link, once; only the keys a calendar has, so no
@@ -976,7 +978,7 @@ export default class Settings {
     /**
      * Makes this device's settings the copy's (pasted() keeps the higher invoice number), saves, keeps
      * the copy's links in this device's secret storage, blanks every other calendar link this device
-     * keeps, and applies the editor switch. A calendar the copy has without a link keeps the one this
+     * keeps, and applies the editor switches. A calendar the copy has without a link keeps the one this
      * device has, if any. A copy from before there were calendars (`withCalendars` false) leaves this
      * device's calendars and links as they are. A save that fails changes nothing.
      * @param {ReturnType<Settings["defaults"]>} copy
@@ -1002,9 +1004,10 @@ export default class Settings {
             for (const id of this.storedIds()) if (!kept.has(id)) this.forgetLink(id);
         }
         await plainday.ListCursor?.invoke();
+        await plainday.TaskMarkers?.invoke();
     }
 
-    // Sync changed the data file: read it again, and apply the editor switch. A file caught mid-write (or
+    // Sync changed the data file: read it again, and apply the editor switches. A file caught mid-write (or
     // not downloaded yet) reads as undefined: the settings in memory stay until it reads. The last invoice
     // number stays the higher of the two. A file with no calendars, from a device on a release before
     // them, keeps this device's, and is written again with them, so they're there at the next start;
@@ -1043,5 +1046,6 @@ export default class Settings {
         if (keep || keepFolders || dropped || keepRecurring) await this.save();
         else { this.calendarsSaved = nowCalendars; this.foldersSaved = nowFolders; }
         await plainday.ListCursor?.invoke();
+        await plainday.TaskMarkers?.invoke();
     }
 }

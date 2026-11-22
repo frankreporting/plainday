@@ -16,7 +16,8 @@
     "freezeColumns": 0
   },
   "editor": {
-    "listCursor": true
+    "listCursor": true,
+    "taskMarkers": true
   },
   "calendars": {
     "range": "2 months",
