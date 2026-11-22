@@ -74,10 +74,10 @@
      these marks (Minimal, Things, Baseline) without !important.
    - Colors from the theme, read on the body, since themes set their own colors on these boxes, which would
      otherwise reach the icons: the one it gives a done box, for the calendar, the arrow and the started box;
-     its yellow for the goal's trophy, filled, so a goal stands out; its empty box's gray for a canceled box,
+     its orange for the goal's trophy, filled, so a goal stands out, as Baseline draws its own (Brian, 11/22); its empty box's gray for a canceled box,
      filled, with a white dash in every theme, so a canceled task fades (Brian, 11/22).
    - The icons are Lucide's calendar, arrow-right and trophy (lucide.dev), as Obsidian ships them, cropped
-     to the glyph so it fills the box; the trophy's cup and stem filled in. ISC License: Copyright (c) for portions of Lucide are held by Cole
+     to the glyph and its line so it fills the box with nothing cut off; the trophy's cup and stem filled in. ISC License: Copyright (c) for portions of Lucide are held by Cole
      Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide
      Contributors 2022. Permission to use, copy, modify, and/or distribute this software for any purpose
      with or without fee is hereby granted, provided that the above copyright notice and this permission
@@ -89,13 +89,13 @@
      THIS SOFTWARE. */
 body.plainday-task-markers {
     --plainday-marker-color: var(--checkbox-color);
-    --plainday-goal-color: var(--color-yellow);
+    --plainday-goal-color: var(--color-orange);
     --plainday-canceled-color: var(--checkbox-border-color);
     --plainday-canceled-dash: white;
 }
 
 body.plainday-task-markers [data-task="<"] {
-    --plainday-marker-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='1.5 1.5 21 21' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 2v4'/><path d='M16 2v4'/><rect x='3' y='4' width='18' height='18' rx='2'/><path d='M3 10h18'/></svg>");
+    --plainday-marker-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='1 1 22 22' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 2v4'/><path d='M16 2v4'/><rect x='3' y='4' width='18' height='18' rx='2'/><path d='M3 10h18'/></svg>");
 }
 
 body.plainday-task-markers [data-task=">"] {
@@ -145,7 +145,7 @@ body.plainday-task-markers :is(
     mask: var(--plainday-marker-icon) center / 100% 100% no-repeat;
 }
 
-/* Goal: the trophy in gold */
+/* Goal: the trophy in orange gold */
 body.plainday-task-markers :is(
     .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="w"] .task-list-item-checkbox,
     .markdown-rendered li.task-list-item[data-task="w"] > .task-list-item-checkbox,
@@ -201,6 +201,22 @@ body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm
     color: var(--text-muted);
 }
 
-body.plainday-task-markers :is(.markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line, .markdown-rendered li.task-list-item)[data-task="-"] {
+body.plainday-task-markers .markdown-rendered li.task-list-item[data-task="-"] {
     text-decoration: line-through;
+}
+
+/* In Live Preview the strike is a line drawn behind the text instead, since Chrome strikes no tab
+   character, and an event's time and title are split by one. Each span of the line's text carries it, and
+   no strike of the line's own (a theme's or a snippet's) doubles it. The links TrailingLinks moves to
+   the right edge and the fold's "…" are left out. */
+body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] {
+    text-decoration: none;
+}
+
+body.plainday-task-markers .markdown-source-view.mod-cm6.is-live-preview .cm-line.HyperMD-task-line[data-task="-"] > span:not(.pm-trail-run, .cm-foldPlaceholder) {
+    background-image: linear-gradient(var(--text-muted), var(--text-muted));
+    background-position: 0 55%;
+    background-size: 100% 1px;
+    background-repeat: repeat-x;
+    background-clip: content-box;
 }
