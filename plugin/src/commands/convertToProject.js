@@ -39,7 +39,7 @@ export default class ConvertToProject {
         const link = name === title || !this.labelable(title) ? `[[${file.basename}]]` : `[[${file.basename}|${title}]]`;
         if (editor.getRange(from, to) === selection) {
             // Keep any spaces that were selected around the name
-            editor.replaceRange(selection.replace(title, link), from, to);
+            editor.replaceRange(selection.replace(title, () => link), from, to);
         } else {
             new Notice(`Made [[${file.basename}]], but the text changed, so the link wasn't put in`);
         }

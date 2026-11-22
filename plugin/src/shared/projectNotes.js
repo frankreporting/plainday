@@ -110,12 +110,13 @@ export default class ProjectNotes {
         notes.hold(file.path);
         if (templater) await this.withTemplater(templater, tpl, file, own);
         if (unused) new Notice(`${tpl.basename} holds Templater code and Templater is off, so the new ${kind} was made without it.`);
-        await this.takeCursor(file);
         try {
             await this.look(file, kind);
         } catch (e) {
             console.error(`ProjectNotes: couldn't give ${folder} its look in Notebook Navigator`, e);
         }
+        // After the look, which Navigator can write into the note's properties
+        await this.takeCursor(file);
         return file;
     }
 

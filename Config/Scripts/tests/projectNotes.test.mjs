@@ -312,6 +312,11 @@ test("Convert to project: the selection becomes a link to the new project, made 
     assert.deepEqual(asked, [["project", "Kestrel Outfitters 2026", "A note named “Kestrel Outfitters 2026” already exists. Give this one another name."]]);
     assert.equal(w.notes()[DAY], "- [ ] Plan the [[Kestrel Outfitters 2027|Kestrel Outfitters 2026]] launch\n");
     assert.ok(w.notes()["Projects/Kestrel Outfitters 2027/Kestrel Outfitters 2027.md"]);
+    // A name with a $ in it is linked as it is
+    const y = standIn({ notes: { ...NOTES, [DAY]: "- [ ] Raise $$ for the mural\n" }, open: DAY, at: 0 });
+    y.select(12, 14);
+    await y.plainday.ConvertToProject.invoke();
+    assert.equal(y.notes()[DAY], "- [ ] Raise [[$$]] for the mural\n", "not read as a replacement pattern");
     // Esc: nothing made, the line as it was
     const x = standIn({ notes: { ...NOTES, [DAY]: "- [ ] Q4: launch\n" }, open: DAY, at: 0 });
     x.plainday.ProjectNotes.ask = async () => null;
