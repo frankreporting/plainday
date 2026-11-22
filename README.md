@@ -45,28 +45,28 @@ Plainday needs no other plugin. It finds your daily notes where the core Daily n
 ## How your notes are organized
 
 ```
-Projects/                               your areas and projects
-├── Freelance/                          an area: a folder, with a folder note tagged #area
+Projects/                                  your areas and projects
+├── 🗃️ Freelance/                          an area: a folder, with a folder note tagged #area
 │   ├── Freelance.md
-│   ├── Kestrel Outfitters 2026/        a project in the area: a folder note tagged #project
+│   ├── ⭕ Kestrel Outfitters 2026/        a project in the area: a folder note tagged #project
 │   │   ├── Kestrel Outfitters 2026.md
 │   │   ├── Draft homepage wireframes.md   a task's own note
-│   │   └── ›logs/                      the project's event logs
-│   └── Pinecrest Library Brochure/
+│   │   └── ›logs/                         the project's event logs
+│   └── ⭕ Pinecrest Library Brochure/
 │       └── Pinecrest Library Brochure.md
-└── Household/                          another area
+└── 🗃️ Household/                          another area
     └── Household.md
-Inbox/                                  notes Plainday makes before you file them
-Reference/                              everything else you keep, and the periodic notes
+Inbox/                                     notes Plainday makes before you file them
+Reference/                                 everything else you keep, and the periodic notes
 └── Planner/
     ├── days/2026-09-15.md
     ├── weeks/2026w38.md
     ├── months/2026-09.md
     └── years/2026.md
-Archive/                                finished projects, moved here whole
+Archive/                                   finished projects, moved here whole
 ```
 
-The organization principle is very much based on the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that project or area's folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. You can define your own folder names in the settings.
+In the tree, 🗃️ marks an area and ⭕ a project; the folders' names are plain. The organization principle is very much based on the [PARA method](https://fortelabs.com/blog/para/) (Projects, Areas, Resources, Archive), plus periodic notes to plan in. A task belongs to a project or area by the ⭕ or 🗃️ link on its line, and its own note, if it has one, goes in that project or area's folder. Every note in an area or project has a `parent` property linking the folder note above it, kept current as notes move. You can define your own folder names in the settings.
 
 ## Getting started
 
