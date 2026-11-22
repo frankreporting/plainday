@@ -13,7 +13,7 @@ export default class Invoice {
     //
     // The note is the invoice: its properties say what the Invoices base lists (its status is
     // `invoice_status`, OBS-117, and its project is the one `parent` links to, OBS-114), its body is what
-    // Export to PDF prints (laid out by pm-invoice.css, with no links in it), and a folded Billed
+    // Export to PDF prints (laid out by styles.css, with no links in it), and a folded Billed
     // entries callout at its end, which doesn't print, is its own copy of every entry it bills
     // (Billing reads and writes it). Your details come from Settings → Plainday (plainday.Settings),
     // which a new invoice needs your name and the invoice folder from; the code, billing name and address of whoever is billed from the note the project's
@@ -717,7 +717,7 @@ export default class Invoice {
             modal.titleEl.setText(title);
             modal.contentEl.createEl("p", { text: description });
             const input = new TextComponent(modal.contentEl).setValue(value);
-            input.inputEl.style.width = "100%";
+            input.inputEl.addClass("plainday-wide-input");
             const error = modal.contentEl.createDiv({ cls: "setting-item-description" });
             const accept = () => {
                 const v = input.getValue().trim();
@@ -818,7 +818,7 @@ export default class Invoice {
             })(app);
             modal.titleEl.setText(`Invoice ${tr.basename(project)} through ${this.md(through)}?`);
             // Selectable, so a missing entry's task and note can be copied back into its daily note
-            modal.contentEl.style.userSelect = "text";
+            modal.contentEl.addClass("plainday-selectable");
             const section = (title, items) => {
                 if (!items.length) return;
                 modal.contentEl.createEl("h4", { text: title });

@@ -102,7 +102,7 @@ export default class TimeReport {
     static CREATED_KEY = "time-report-created-notes";
     // A project's timesheet note sits beside it, named after it: "Kestrel Outfitters 2026 timesheet"
     static SHEET = " timesheet";
-    // Every timesheet carries this class, for the day bands of pm-timesheet.css (OBS-242)
+    // Every timesheet carries this class, for the day bands in styles.css (OBS-242)
     static SHEET_CLASS = "pm-timesheet";
     // A timesheet's summary line, its numbers aside (tableHeading), whichever kinds of time it names: its one
     // table's heading. It had two tables before OBS-242, Billable time and 🆓 time.

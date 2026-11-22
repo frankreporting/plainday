@@ -48,7 +48,7 @@ test("each prompt focuses its control from onOpen, a frame later", () => {
 const harness = () => {
     const log = [];
     const frames = [];
-    const el = (name) => ({ style: {}, focus: () => log.push(`focus ${name}`) });
+    const el = (name) => ({ addClass() {}, focus: () => log.push(`focus ${name}`) });
     class Modal {
         constructor() { this.titleEl = { setText() {} }; this.contentEl = {}; this.scope = { register() {} }; }
         onOpen() {}

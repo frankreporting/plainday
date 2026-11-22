@@ -227,10 +227,8 @@ export default class DatePrompt {
         const modal = new Modal(app);
         modal.titleEl.setText(title);
         const input = new TextComponent(modal.contentEl);
-        input.inputEl.style.width = "100%";
-        const preview = modal.contentEl.createDiv({ cls: "setting-item-description" });
-        preview.style.marginTop = "0.5em";
-        preview.style.minHeight = "1.5em";
+        input.inputEl.addClass("plainday-wide-input");
+        const preview = modal.contentEl.createDiv({ cls: "setting-item-description plainday-date-preview" });
         extra?.(modal.contentEl, { focus: () => input.inputEl.focus() });
 
         let result = null;

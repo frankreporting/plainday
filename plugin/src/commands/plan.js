@@ -16,7 +16,7 @@ export default class Plan {
         const dropdown = new DropdownComponent(modal.contentEl);
         for (let i = min; i <= max; i++) dropdown.addOption(String(i), `${i} days`);
         dropdown.setValue(String(min));
-        dropdown.selectEl.style.width = "100%";
+        dropdown.selectEl.addClass("plainday-wide-input");
 
         const run = (days) => { modal.close(); this.openDays(days); };
 

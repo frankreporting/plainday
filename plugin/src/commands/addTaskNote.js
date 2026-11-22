@@ -514,7 +514,7 @@ export default class AddTaskNote {
             const pick = (c) => { choice = c; modal.close(); };
             const kind = note ? this.kindOf(note) : "Task";
             modal.titleEl.setText(title ?? `Move ${kind.toLowerCase()}?`);
-            const mark = modal.contentEl.createEl("p").createEl("mark", { attr: { style: "background-color: var(--text-highlight-bg); color: var(--text-normal); padding: 0.1em 0.3em; border-radius: var(--radius-s);" } });
+            const mark = modal.contentEl.createEl("p").createEl("mark", { cls: "plainday-task-name" });
             mark.createEl("strong", { text: `${label ?? kind}:` });
             mark.appendText(` ${name ?? note?.basename ?? ""}`);
             const said = words ?? (kind === "Area" ? "Its time, and its projects', stays their own."

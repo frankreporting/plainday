@@ -1,17 +1,2 @@
 {
-  "plugin/src/commands/invoice.js": {
-    "obsidianmd/no-static-styles-assignment": {
-      "count": 2
-    }
-  },
-  "plugin/src/commands/plan.js": {
-    "obsidianmd/no-static-styles-assignment": {
-      "count": 1
-    }
-  },
-  "plugin/src/shared/datePrompt.js": {
-    "obsidianmd/no-static-styles-assignment": {
-      "count": 3
-    }
-  }
 }

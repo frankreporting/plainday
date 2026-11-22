@@ -1,6 +1,6 @@
 // Tests for plugin/src/startup/trailingLinks.js. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
-// Only the text rules are pure; the editor extension and its CSS are checked in a dev vault.
+// Only the text rules are pure; the editor extension and its CSS, in styles.css, are checked in a dev vault.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,6 +9,8 @@ import { classScript } from "../../../plugin/classShape.mjs";
 import { periodicNames } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
+// The layout, in Plainday's styles.css (OBS-200; a style element the script added until then)
+const CSS = fs.readFileSync(new URL("../../../styles.css", import.meta.url), "utf8");
 const TrailingLinks = vm.runInContext(classScript("trailingLinks.js") + "\n;TrailingLinks", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
 // Values made in the script's own context, as plain ones this file can compare
 const plain = (x) => JSON.parse(JSON.stringify(x));
@@ -114,18 +116,17 @@ test("trail: past a hand-made ID too, and an ID with no links before it isn't a 
 });
 
 test("CSS: the forward date sits after the due date, faint (OBS-185)", () => {
-    assert.match(TrailingLinks.CSS, /\.pm-trail-due \{ order: 2; \}/);
-    assert.match(TrailingLinks.CSS, /\.pm-trail-forward \{ order: 3; \}/);
-    assert.match(TrailingLinks.CSS, /\.pm-trail-forward :is\(\.cm-hmd-internal-link, \.cm-underline\) \{ color: var\(--text-faint\) !important; \}/);
+    assert.match(CSS, /\.pm-trail-due \{ order: 2; \}/);
+    assert.match(CSS, /\.pm-trail-forward \{ order: 3; \}/);
+    assert.match(CSS, /\.pm-trail-forward :is\(\.cm-hmd-internal-link, \.cm-underline\) \{ color: var\(--text-faint\) !important; \}/);
 });
 
 test("CSS: the ⋯ and then the ↗ are drawn last, at the edge after the due and forward dates (OBS-208, Brian 2026-10-28)", () => {
-    const css = classScript("trailingLinks.js");
-    assert.match(css, /:is\(\.pm-trail-note, \.pm-trail-from\) \{ order: 4; \}/);
+    assert.match(CSS, /:is\(\.pm-trail-note, \.pm-trail-from\) \{ order: 4; \}/);
 });
 
 test("CSS: a shown task ID comes last in the run, after the links (OBS-185)", () => {
-    assert.match(TrailingLinks.CSS, /\.pm-trail-run > \.pm-trail-id \{ order: 5;/);
+    assert.match(CSS, /\.pm-trail-run > \.pm-trail-id \{ order: 5;/);
 });
 
 // ---------------------------------------------------------------- blockId
