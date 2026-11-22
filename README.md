@@ -38,7 +38,7 @@ Plainday needs no other plugin. It finds your daily notes where the core Daily n
 
 - **[Templater](https://github.com/SilentVoid13/Templater)** runs the Templater code in your own templates for task notes, logs, projects, areas and periodic notes. Without it, a template's `{{title}}`, `{{date}}` and `{{time}}` are filled in.
 - **[Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)** reads dates in languages other than English, and suggests dates as you type in a note. Plainday reads English dates itself.
-- **[Notebook Navigator](https://github.com/johansan/notebook-navigator)** gives the periodic notes a calendar, and new project and area folders their look (a red circle or a green archive), with *Move to project…* in its menus.
+- **[Notebook Navigator](https://github.com/johansan/notebook-navigator)** gives the periodic notes a calendar, new project and area folders their look (a red circle or a green archive) and a new `›logs` folder a clock, with *Move to project…* in its menus.
 - **[Task Status](https://github.com/vburzynski/obsidian-task-status)** adds a picker for a task's checkbox (`⇧⌘⏎`, or a long press). Plainday draws the markers itself.
 - **[Selectable Tables](https://github.com/frankreporting/selectable-tables)** allows you to set a default for frozen header rows and columns in the tables found in reports, timesheets, and invoices.
 
