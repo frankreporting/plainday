@@ -948,7 +948,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const beside = { week: "weeks", month: "months", year: "years" };
         const asBefore = () => plainday.TimeReport.periodFolders({ asBefore: true });
         // What a weekly, monthly or yearly folder takes: blank (as before), or a folder as the vault spells
-        // it that isn't Config, Projects, the Inbox or the archive, holds one, or sits inside one
+        // it that isn't Projects, the Inbox or the archive, holds one, or sits inside one
         /** @param {string} v @param {boolean} [own] a folder from the vault, already spelled as it is there @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
         const periodRead = (v, own = false) => {
             const got = billing.pathOf(v);

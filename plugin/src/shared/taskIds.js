@@ -399,9 +399,9 @@ export default class TaskIds {
     // A new ID that no block in the vault has: one lookup per draw, and the first draw almost always
     // does
     freshId() {
-        // Taken anywhere in the vault but Config, in the system or not, so a note moved in later can't
-        // bring a second task with the same ID (OBS-208)
-        const taken = (id) => app.vault.getMarkdownFiles().some((f) => !f.path.startsWith("Config/") && this.lineIn(f, id));
+        // Taken anywhere in the vault, in the system or not, so a note moved in later can't bring a
+        // second task with the same ID (OBS-208)
+        const taken = (id) => app.vault.getMarkdownFiles().some((f) => this.lineIn(f, id));
         for (;;) {
             const id = TaskIds.newId(new Set(), this.random ?? Math.random);
             if (!taken(id)) return id;

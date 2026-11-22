@@ -63,9 +63,10 @@ test("normalize: each value that reads, else its default", () => {
         folders: FOLDERS,
         templates: TEMPLATES,
     });
-    for (const folder of ["../x", "Config/Invoices", "Archive", ".hidden", "a\nb", 7, ["Invoices"]]) {
+    for (const folder of ["../x", "Archive", ".hidden", "a\nb", 7, ["Invoices"]]) {
         assert.equal(settings.normalize({ invoices: { folder } }, billing).invoices.folder, "", String(folder));
     }
+    assert.equal(settings.normalize({ invoices: { folder: "Config/Invoices" } }, billing).invoices.folder, "Config/Invoices", "a folder named Config is like any other (OBS-295)");
     for (const lastNumber of [-1, 1.5, "abc", "1,033", 1000000, true, null, ""]) {
         assert.equal(settings.normalize({ invoices: { lastNumber } }, billing).invoices.lastNumber, 1000, String(lastNumber));
     }
@@ -85,68 +86,10 @@ test("normalize: each value that reads, else its default", () => {
 test("the demo's data file reads as it's written, so loading and saving it changes nothing", () => {
     const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
     const normalized = settings.normalize(JSON.parse(text), billing);
-    assert.deepEqual(plain(normalized), JUNIPER, "the demo's invented details");
+    // The demo keeps its error log in Config, by naming it (OBS-295)
+    assert.deepEqual(plain(normalized), { ...JUNIPER, folders: { ...FOLDERS, errorLog: "Config/Error Log.md" } }, "the demo's invented details");
     // Obsidian's saveData writes JSON.stringify(data, null, 2)
     assert.equal(JSON.stringify(normalized, null, 2), text);
-});
-
-// ------------------------------------------------------------------ the old settings notes
-
-const INVOICE_NOTE = { props: { id: 2026091210000000, tags: null, name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"],
-    terms: "Net 30", payment_note: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", last_number: 1001 } };
-
-test("fromOldNotes: Invoice Settings and Table Settings, as the notes held them", () => {
-    const r = settings.fromOldNotes({ invoice: INVOICE_NOTE, table: { props: { freeze_rows: 1, freeze_columns: "1" } } }, billing);
-    assert.deepEqual(plain(r), { settings: { ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }, read: ["invoice", "table"], bad: [], capped: [] });
-    // the address as lines, numbers as text, the freeze blank
-    const lines = settings.fromOldNotes({ invoice: { props: { name: "J", address: "a\nb", last_number: "1033" } }, table: { props: { freeze_rows: null, freeze_columns: "" } } }, billing);
-    assert.deepEqual(plain(lines.settings.invoices.address), ["a", "b"]);
-    assert.equal(lines.settings.invoices.lastNumber, 1033);
-    assert.deepEqual(plain(lines.settings.tables), { freezeRows: 0, freezeColumns: 0 });
-    assert.deepEqual(plain(lines.bad), []);
-    // a property spelled in another case, as the old notes were read
-    const cased = settings.fromOldNotes({ invoice: { props: { Name: "Juniper Hale", Last_Number: 1033 } }, table: { props: { Freeze_Rows: 1 } } }, billing);
-    assert.deepEqual(plain([cased.settings.invoices.name, cased.settings.invoices.lastNumber, cased.settings.tables.freezeRows]), ["Juniper Hale", 1033, 1]);
-});
-
-test("fromOldNotes: a freeze over 9 is 9, and the notice says so", () => {
-    const r = settings.fromOldNotes({ table: { props: { freeze_rows: 12, freeze_columns: 1 } } }, billing);
-    assert.deepEqual(plain([r.settings.tables, r.bad, r.capped]), [{ freezeRows: 9, freezeColumns: 1 }, [], ["`freeze_rows` in Table Settings (12)"]]);
-    assert.equal(settings.movedNotice(r),
-        "Plainday moved your table settings into Settings → Plainday. It no longer reads Table Settings; you can delete it.\n\n"
-        + "Plainday freezes at most 9 rows or columns, so this is 9 now: `freeze_rows` in Table Settings (12).");
-});
-
-test("fromOldNotes: no notes reads nothing; a blank folder or number starts from the defaults, unnamed", () => {
-    assert.deepEqual(plain(settings.fromOldNotes({}, billing)), { settings: DEFAULTS, read: [], bad: [], capped: [] });
-    const blank = settings.fromOldNotes({ invoice: { props: { name: "J", folder: null, last_number: null } } }, billing);
-    assert.deepEqual(plain([blank.settings.invoices.folder, blank.settings.invoices.lastNumber, blank.bad, blank.read]), ["", 1000, [], ["invoice"]]);
-});
-
-test("fromOldNotes: a value that doesn't read keeps its default, and is named", () => {
-    const r = settings.fromOldNotes({
-        invoice: { props: { ...INVOICE_NOTE.props, folder: "../x", last_number: "abc" } },
-        table: { props: { freeze_rows: "a lot", freeze_columns: 2 } },
-    }, billing);
-    assert.equal(r.settings.invoices.folder, "");
-    assert.equal(r.settings.invoices.lastNumber, 1000);
-    assert.equal(r.settings.invoices.name, "Juniper Hale", "the rest still reads");
-    assert.deepEqual(plain(r.settings.tables), { freezeRows: 0, freezeColumns: 2 });
-    assert.deepEqual(plain(r.bad), ["`folder` in Invoice Settings (../x)", "`last_number` in Invoice Settings (abc)", "`freeze_rows` in Table Settings (a lot)"]);
-    const unreadable = settings.fromOldNotes({ invoice: { error: "bad indentation" }, table: { error: "bad" } }, billing);
-    assert.deepEqual(plain(unreadable), { settings: DEFAULTS, read: ["invoice", "table"], bad: ["Invoice Settings' properties", "Table Settings' properties"], capped: [] });
-});
-
-test("movedNotice: what moved, that the notes can go, and what didn't read", () => {
-    assert.equal(settings.movedNotice({ read: [], bad: [] }), null);
-    assert.equal(settings.movedNotice({ read: ["invoice", "table"], bad: [] }),
-        "Plainday moved your invoice and table settings into Settings → Plainday. It no longer reads Invoice Settings or Table Settings; you can delete them.");
-    assert.equal(settings.movedNotice({ read: ["table"], bad: [] }),
-        "Plainday moved your table settings into Settings → Plainday. It no longer reads Table Settings; you can delete it.");
-    assert.equal(settings.movedNotice({ read: ["invoice"], bad: ["`folder` in Invoice Settings (../x)"] }),
-        "Plainday moved your invoice settings into Settings → Plainday. It no longer reads Invoice Settings; you can delete it.\n\n"
-        + "This didn't read, so it starts from the default: `folder` in Invoice Settings (../x).");
-    assert.match(settings.movedNotice({ read: ["invoice"], bad: ["a", "b"] }), /These didn't read, so they start from the default: a, b\.$/);
 });
 
 // ------------------------------------------------------------------ another device
@@ -222,22 +165,6 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
         URL,
         crypto: globalThis.crypto,
         Notice: class { constructor(text) { notices.push(text); } },
-        // As Obsidian's: the frontmatter between the first two ---, and YAML enough for these notes
-        getFrontMatterInfo: (text) => { const m = String(text).match(/^---\n([\s\S]*?)\n---/); return { exists: !!m, frontmatter: m ? m[1] : "" }; },
-        parseYaml: (yaml) => {
-            const out = {};
-            let list = null;
-            for (const line of yaml.split("\n")) {
-                const item = line.match(/^ {2}- (.*)$/);
-                if (item && list) { out[list].push(item[1]); continue; }
-                const m = line.match(/^([\w-]+):\s*(.*)$/);
-                if (!m) throw new Error(`can't read ${line}`);
-                list = m[2] === "" ? m[1] : null;
-                out[m[1]] = m[2] === "" ? (list ? [] : null) : /^\d+$/.test(m[2]) ? Number(m[2]) : m[2];
-            }
-            for (const [k, v] of Object.entries(out)) if (Array.isArray(v) && !v.length) out[k] = null;
-            return out;
-        },
         plainday: { plugin, Billing: billing, ListCursor: { invoke: async () => { listCursorRuns++; } } },
     });
     const s = new (load("settings.js", "Settings", context))();
@@ -245,9 +172,6 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
 }
 // What a device saved before OBS-282: no calendars
 const JUNIPER_BEFORE = { invoices: JUNIPER.invoices, tables: JUNIPER.tables, editor: JUNIPER.editor };
-const INVOICE_TEXT = "---\nid: 2026091210000000\ntags:\nname: Juniper Hale\naddress:\n  - 418 Larkspur Lane\n  - Maple Falls, ST 00000\nterms: Net 30\n"
-    + "payment_note: Please pay by bank transfer within 30 days.\nfolder: Reference/Invoices\nlast_number: 1001\n---\nYour details for invoices.\n";
-const TABLE_TEXT = "---\nid: 2026110312000000\ntags:\nfreeze_rows: 1\nfreeze_columns: 1\n---\nHow the tables come out.\n";
 
 test("load: the saved settings, normalized; the defaults on a device with none saved", async () => {
     const none = withPlugin();
@@ -261,36 +185,14 @@ test("load: the saved settings, normalized; the defaults on a device with none s
     assert.deepEqual(some.saves, [], "loading never writes");
 });
 
-test("readOldNotes: on a device with none saved, the old notes once, saved, and one notice; the notes stay", async () => {
-    const f = withPlugin({ notes: { "Config/Invoice Settings.md": INVOICE_TEXT, "Config/Table Settings.md": TABLE_TEXT } });
+test("load: the settings notes from before, in Config, are left alone: nothing read, saved or said (OBS-295)", async () => {
+    const f = withPlugin({ notes: {
+        "Config/Invoice Settings.md": "---\nname: Juniper Hale\n---\n", "Config/Table Settings.md": "---\nfreeze_rows: 2\n---\n",
+        "Config/Calendar Sync.md": "Sync range: 3 weeks\n",
+    } });
     await f.s.load();
-    await f.s.readOldNotes();
-    assert.deepEqual(f.saves, [{ ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }]);
-    assert.deepEqual(plain(f.s.get()), f.saves[0]);
-    assert.equal(f.notices.length, 1);
-    assert.match(f.notices[0], /^Plainday moved your invoice and table settings into Settings → Plainday\. It no longer reads Invoice Settings or Table Settings; you can delete them\.$/);
-    // never again: a reload, or a later load, finds settings saved
-    await f.s.readOldNotes();
-    assert.deepEqual([f.saves.length, f.notices.length, f.reads.length], [1, 1, 2]);
-});
-
-test("readOldNotes: a device with settings saved reads nothing; one with no notes writes nothing, and reads them once they arrive", async () => {
-    const saved = withPlugin({ stored: JUNIPER, notes: { "Config/Invoice Settings.md": INVOICE_TEXT.replace("Juniper Hale", "Someone Else") } });
-    await saved.s.load();
-    await saved.s.readOldNotes();
-    assert.deepEqual([saved.saves, saved.notices, saved.reads], [[], [], []]);
-    assert.equal(saved.s.get().invoices.name, "Juniper Hale", "the note's name changes nothing");
-    const notes = {};
-    const fresh = withPlugin({ notes });
-    await fresh.s.load();
-    await fresh.s.readOldNotes();
-    assert.deepEqual([fresh.saves, fresh.notices, fresh.s.saved], [[], [], false], "nothing to move: no file written over one Sync may still bring");
-    // Sync brings the note later: the next load reads it
-    notes["Config/Invoice Settings.md"] = INVOICE_TEXT;
-    await fresh.s.load();
-    await fresh.s.readOldNotes();
-    assert.equal(fresh.saves.length, 1);
-    assert.equal(fresh.s.get().invoices.name, "Juniper Hale");
+    assert.deepEqual(plain(f.s.get()), DEFAULTS);
+    assert.deepEqual([f.reads, f.saves, f.notices], [[], [], []]);
 });
 
 test("reload: Sync's new data file is read; one caught mid-write keeps what's in memory", async () => {
@@ -313,43 +215,17 @@ test("reload: Sync's new data file is read; one caught mid-write keeps what's in
     assert.equal(f.s.get().invoices.lastNumber, 1004);
 });
 
-test("readOldNotes: a data file Sync brings while the notes are read wins over them", async () => {
-    const f = withPlugin({ notes: { "Config/Invoice Settings.md": INVOICE_TEXT } });
-    await f.s.load();
-    // Sync delivers the other device's file during the note's read, which reload() loads
-    const original = f.s.fromOldNotes.bind(f.s);
-    f.s.fromOldNotes = (...a) => { f.s.data = { ...f.s.get(), invoices: { ...f.s.get().invoices, name: "From the phone" } }; f.s.saved = true; return original(...a); };
-    await f.s.readOldNotes();
-    assert.deepEqual([f.saves, f.notices], [[], []]);
-    assert.equal(f.s.get().invoices.name, "From the phone");
-});
-
-test("a data file that doesn't read: the defaults, a notice, and neither the old notes nor a save over it", async () => {
-    const f = withPlugin({ unreadable: true, notes: { "Config/Invoice Settings.md": INVOICE_TEXT } });
+test("a data file that doesn't read: the defaults, a notice, and no save over it", async () => {
+    const f = withPlugin({ unreadable: true });
     await f.s.load();
     assert.deepEqual(plain(f.s.get()), DEFAULTS);
     assert.equal(f.notices.length, 1);
     assert.match(f.notices[0], /^Plainday couldn't read its settings file, \.obsidian\/plugins\/plainday\/data\.json, so it's using the defaults\. It leaves the file as it is until you change a setting/);
-    await f.s.readOldNotes();
-    assert.deepEqual([f.saves, f.reads, f.notices.length], [[], [], 1], "the old notes aren't read over it, and nothing is saved");
+    assert.deepEqual([f.saves, f.notices.length], [[], 1], "nothing is saved");
     // A change you make saves, as you asked
     await f.s.set("invoices", { name: "Juniper Hale" });
     assert.equal(f.saves.length, 1);
     assert.equal(f.s.unreadable, false);
-});
-
-test("readOldNotes: a bad value is named in the notice; properties that don't read leave the defaults", async () => {
-    const bad = withPlugin({ notes: { "Config/Invoice Settings.md": INVOICE_TEXT.replace("folder: Reference/Invoices", "folder: ../x") } });
-    await bad.s.load();
-    await bad.s.readOldNotes();
-    assert.equal(bad.s.get().invoices.folder, "");
-    assert.equal(bad.s.get().invoices.name, "Juniper Hale");
-    assert.match(bad.notices[0], /^Plainday moved your invoice settings into Settings → Plainday\. It no longer reads Invoice Settings; you can delete it\.\n\nThis didn't read, so it starts from the default: `folder` in Invoice Settings \(\.\.\/x\)\.$/);
-    const broken = withPlugin({ notes: { "Config/Table Settings.md": "---\nfreeze_rows 1\n---\n" } });
-    await broken.s.load();
-    await broken.s.readOldNotes();
-    assert.deepEqual(plain(broken.s.get().tables), DEFAULTS.tables);
-    assert.match(broken.notices[0], /`?Table Settings' properties/);
 });
 
 test("raiseLastNumber never lowers the number; set saves one section; replaceWith keeps the higher number and applies the editor switch", async () => {
@@ -411,19 +287,6 @@ test("addressOf: your email address on a calendar, one, in lower case; anything 
         assert.deepEqual(plain(settings.addressOf(v)), { address: "", bad: true }, v);
     }
     assert.deepEqual(plain(settings.addressOf(["a@example.com"])), { address: "", bad: false }, "not text: nothing");
-});
-
-test("rangeFromNote and rangeNotice: the Calendar Sync note's line, read once", () => {
-    const note = "---\nid: 1\n---\n\n## Range\n\nSync range: 3 weeks\n\nHow far ahead to sync…\n\n## Calendars\n";
-    assert.deepEqual(plain(settings.rangeFromNote(note)), { range: "3 weeks" });
-    assert.deepEqual(plain(settings.rangeFromNote("Sync range:  1 Month  ")), { range: "1 month" });
-    assert.deepEqual(plain(settings.rangeFromNote("Sync range: 5 weeks")), { bad: "`Sync range` in Calendar Sync (5 weeks)" });
-    assert.equal(settings.rangeFromNote("## Calendars\n- [x] Home\n"), null, "no line, nothing to move");
-    assert.equal(settings.rangeNotice({ range: "3 weeks" }),
-        "Plainday moved your calendar sync range, 3 weeks, into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.");
-    assert.equal(settings.rangeNotice({ bad: "`Sync range` in Calendar Sync (5 weeks)" }),
-        "Plainday moved your calendar sync range into Settings → Plainday → Calendars. Sync calendars no longer reads the Sync range line in Calendar Sync, which still lists your calendars.\n\n"
-        + "This didn't read, so it starts from the default, 2 months: `Sync range` in Calendar Sync (5 weeks).");
 });
 
 test("addCalendar, editCalendar, removeCalendar: the link only in secret storage, never in the data file", async () => {
@@ -519,60 +382,6 @@ test("Copy carries each calendar's link beside the settings; Paste stores them, 
     assert.deepEqual(plain([old.settings?.calendars, old.links]), [{ range: "2 months", list: [], recurring: null }, {}]);
 });
 
-test("readOldNotes: settings saved before OBS-282 read the Calendar Sync note's range once, and say so", async () => {
-    const notes = { "Config/Calendar Sync.md": "---\nid: 1\n---\n\n## Range\n\nSync range: 3 weeks\n\n## Calendars\n" };
-    const f = withPlugin({ stored: JUNIPER_BEFORE, notes });
-    await f.s.load();
-    assert.equal(f.s.get().calendars.range, "2 months", "until the note is read");
-    await f.s.readOldNotes();
-    assert.equal(f.s.get().calendars.range, "3 weeks");
-    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [], recurring: null } }], "the rest as it was");
-    assert.deepEqual(f.notices, [settings.rangeNotice({ range: "3 weeks" })]);
-    assert.deepEqual(f.reads, ["Config/Calendar Sync.md"], "Invoice Settings and Table Settings aren't read again");
-    await f.s.readOldNotes();
-    assert.deepEqual([f.saves.length, f.notices.length, f.reads.length], [1, 1, 1], "once");
-    // A later load finds calendars saved: the note's line, changed, changes nothing
-    notes["Config/Calendar Sync.md"] = notes["Config/Calendar Sync.md"].replace("3 weeks", "1 week");
-    f.plugin.loadData = async () => f.saves[0];
-    await f.s.load();
-    await f.s.readOldNotes();
-    assert.deepEqual([f.s.get().calendars.range, f.reads.length], ["3 weeks", 1]);
-});
-
-test("readOldNotes: a new device reads all three notes at once, with one notice; a bad range is named", async () => {
-    const f = withPlugin({ notes: {
-        "Config/Invoice Settings.md": INVOICE_TEXT, "Config/Table Settings.md": TABLE_TEXT,
-        "Config/Calendar Sync.md": "## Range\n\nSync range: 5 weeks\n",
-    } });
-    await f.s.load();
-    await f.s.readOldNotes();
-    assert.deepEqual(f.saves, [{ ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }], "the default range");
-    assert.equal(f.notices.length, 1);
-    assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice", "table"], bad: [] })}\n\n${settings.rangeNotice({ bad: "`Sync range` in Calendar Sync (5 weeks)" })}`);
-});
-
-test("readOldNotes: no range line, calendars already saved, or a data file that doesn't read: the note isn't read over them", async () => {
-    const none = withPlugin({ stored: JUNIPER_BEFORE, notes: { "Config/Calendar Sync.md": "## Calendars\n" } });
-    await none.s.load();
-    await none.s.readOldNotes();
-    assert.deepEqual([none.saves, none.notices], [[], []], "no line: nothing to move, and nothing written");
-    const saved = withPlugin({ stored: JUNIPER, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
-    await saved.s.load();
-    await saved.s.readOldNotes();
-    assert.deepEqual([saved.saves, saved.reads, saved.s.get().calendars.range], [[], [], "2 months"]);
-    const broken = withPlugin({ unreadable: true, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
-    await broken.s.load();
-    await broken.s.readOldNotes();
-    assert.deepEqual([broken.saves, broken.reads], [[], []]);
-    // Sync brings a data file while the note is read: it wins
-    const raced = withPlugin({ stored: JUNIPER_BEFORE, notes: { "Config/Calendar Sync.md": "Sync range: 1 week\n" } });
-    await raced.s.load();
-    const original = raced.s.rangeFromNote.bind(raced.s);
-    raced.s.rangeFromNote = (t) => { raced.s.calendarsSaved = true; return original(t); };
-    await raced.s.readOldNotes();
-    assert.deepEqual([raced.saves, raced.notices], [[], []]);
-});
-
 test("the demo's data file holds no calendar, and no link", () => {
     const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
     assert.deepEqual(JSON.parse(text).calendars, { range: "2 months", list: [], recurring: null });
@@ -643,19 +452,6 @@ test("reload: a data file from a device on a release before calendars leaves thi
     assert.deepEqual(plain(f.s.get().calendars), { range: "1 week", list: [], recurring: null }, "one that has calendars is taken as it is");
 });
 
-test("readOldNotes: a new device with only the Calendar Sync note uses its range but writes nothing, and saves it with the invoice notes when they arrive", async () => {
-    const notes = { "Config/Calendar Sync.md": "Sync range: 3 weeks\n" };
-    const f = withPlugin({ notes });
-    await f.s.load();
-    await f.s.readOldNotes();
-    assert.deepEqual([f.saves, f.notices, f.s.get().calendars.range, f.s.saved], [[], [], "3 weeks", false], "no file written over one Sync may still bring");
-    notes["Config/Invoice Settings.md"] = INVOICE_TEXT;
-    await f.s.load();
-    await f.s.readOldNotes();
-    assert.deepEqual(f.saves, [{ ...JUNIPER, calendars: { range: "3 weeks", list: [], recurring: null } }]);
-    assert.equal(f.notices[0], `${settings.movedNotice({ read: ["invoice"], bad: [] })}\n\n${settings.rangeNotice({ range: "3 weeks" })}`);
-});
-
 // ------------------------------------------------------------------ calendars: the second review (OBS-282)
 
 test("each vault names its links with a key of its own, so two vaults on one phone never touch each other's", async () => {
@@ -710,10 +506,9 @@ test("reload: a file with no calendars from an older device keeps this device's,
     await f.s.reload();
     assert.deepEqual(plain(f.saves.at(-1).calendars), { range: "1 week", list: [{ id: "abc", name: "Studio", account: "", address: "", on: true }], recurring: null });
     assert.equal(f.saves.at(-1).invoices.lastNumber, 1007, "the rest is the other device's");
-    // The next start reads what was written back, and nothing from the old note
+    // The next start reads what was written back
     f.plugin.loadData = async () => f.saves.at(-1);
     await f.s.load();
-    await f.s.readOldNotes();
     assert.deepEqual(plain([f.s.get().calendars.range, f.s.get().calendars.list.map((c) => c.name), f.notices]), ["1 week", ["Studio"], []]);
     // A device that never had calendars takes such a file as it is, and writes nothing
     const g = withPlugin({ stored: JUNIPER_BEFORE });
@@ -755,16 +550,19 @@ test("normalize: each folder that reads, a note's path with .md, blank for what 
     // One that doesn't read keeps its default; the others stay
     assert.deepEqual(plain(settings.normalize({ folders: { projects: "../x", inbox: "Waiting" } }, billing).folders).inbox, "Waiting");
     assert.equal(settings.normalize({ folders: { projects: "../x" } }, billing).folders.projects, "Projects");
-    // Inside one another, the same twice, or inside Config: all three go back to the defaults
-    for (const folders of [{ projects: "Work", inbox: "Work/Inbox" }, { inbox: "Projects" }, { archive: "Projects/Old" }, { projects: "Config/Projects" }, { inbox: "projects" }]) {
+    // Inside one another or the same twice: all three go back to the defaults
+    for (const folders of [{ projects: "Work", inbox: "Work/Inbox" }, { inbox: "Projects" }, { archive: "Projects/Old" }, { inbox: "projects" }]) {
         assert.deepEqual(plain(Object.fromEntries(["projects", "inbox", "archive"].map((k) => [k, settings.normalize({ folders }, billing).folders[k]]))), plain(Settings.FOLDERS), JSON.stringify(folders));
     }
     // The invoice folder can't be in the archive, as it's set
     assert.equal(settings.normalize({ folders: { archive: "Old" }, invoices: { folder: "Old/Invoices" } }, billing).invoices.folder, "");
     assert.equal(settings.normalize({ folders: { archive: "Old" }, invoices: { folder: "Archive/Invoices" } }, billing).invoices.folder, "Archive/Invoices");
+    // A folder named Config is like any other (OBS-295)
+    assert.deepEqual(plain(settings.normalize({ folders: { projects: "Config/Projects", inbox: "Config/Inbox", archive: "config/old" } }, billing).folders),
+        { ...FOLDERS, projects: "Config/Projects", inbox: "Config/Inbox", archive: "config/old" });
 });
 
-test("foldersProblem: the one you change, said plainly; the vault's top and Config refused; none for three apart", () => {
+test("foldersProblem: the one you change, said plainly; the vault's top refused; none for three apart", () => {
     const f = (o) => ({ ...Settings.FOLDERS, ...o });
     assert.equal(settings.foldersProblem(f({}), billing), null);
     assert.equal(settings.foldersProblem(f({ projects: "Work", inbox: "Waiting", archive: "Old" }), billing), null);
@@ -772,7 +570,7 @@ test("foldersProblem: the one you change, said plainly; the vault's top and Conf
     assert.deepEqual(plain(settings.foldersProblem(f({ projects: "Work", inbox: "Work/Waiting" }), billing, "projects")), { key: "projects", problem: "Inbox (Work/Waiting) is inside it" });
     assert.deepEqual(plain(settings.foldersProblem(f({ archive: "Inbox" }), billing, "archive")), { key: "archive", problem: "it's the Inbox folder already" });
     assert.deepEqual(plain(settings.foldersProblem(f({ inbox: "" }), billing, "inbox")), { key: "inbox", problem: "a folder is needed: notes can't go at the top of the vault" });
-    assert.deepEqual(plain(settings.foldersProblem(f({ archive: "config/old" }), billing, "archive")), { key: "archive", problem: "it's inside Config, the system's own folder" });
+    assert.equal(settings.foldersProblem(f({ archive: "config/old" }), billing, "archive"), null, "a folder named Config is like any other (OBS-295)");
     assert.match(settings.foldersProblem(f({ projects: "a/../b" }), billing, "projects").problem, /^it isn't a folder in the vault/);
     assert.equal(settings.foldersProblem(f({ projects: "Work", inbox: "Workshop" }), billing), null, "whole folder names");
 });
@@ -785,22 +583,16 @@ test("notePathOf: a note's path, with .md added; blank is none; anything else is
     assert.match(settings.notePathOf("../x", billing).error, /^isn't a note in the vault/);
 });
 
-test("errorLogPath: the setting's; else Config/Error Log.md in a vault from before (the note or the Config folder is there); else Plainday error log.md at the top", async () => {
-    const before = withPlugin({ notes: { "Config/Error Log.md": "" } });
-    assert.equal(before.s.errorLogPath(), "Config/Error Log.md");
-    const config = withPlugin({ notes: { "Config/Templates/Task.md": "" } });
-    assert.equal(config.s.errorLogPath(), "Config/Error Log.md", "a vault from before whose log isn't made yet");
-    const fresh = withPlugin({ notes: { "Welcome.md": "" } });
-    assert.equal(fresh.s.errorLogPath(), "Plainday error log.md");
-    // A log made at the top stays there when a Config folder turns up later
-    const later = withPlugin({ notes: { "Plainday error log.md": "", "Config/My notes.md": "" } });
-    assert.equal(later.s.errorLogPath(), "Plainday error log.md");
-    const both = withPlugin({ notes: { "Plainday error log.md": "", "Config/Error Log.md": "" } });
-    assert.equal(both.s.errorLogPath(), "Config/Error Log.md", "the older log first");
-    const chosen = withPlugin({ stored: { folders: { errorLog: "Logs/Problems.md" } }, notes: { "Config/Error Log.md": "" } });
+test("errorLogPath: the setting's, else Plainday error log.md at the top, in every vault, whatever a Config folder holds (OBS-295)", async () => {
+    for (const notes of [{ "Welcome.md": "" }, { "Config/Error Log.md": "" }, { "Config/Templates/Task.md": "" }, { "Plainday error log.md": "", "Config/Error Log.md": "" }]) {
+        const f = withPlugin({ notes });
+        assert.equal(f.s.errorLogPath(), "Plainday error log.md", Object.keys(notes).join(", "));
+        assert.equal(f.s.defaultErrorLogPath(), "Plainday error log.md", "what blank means, for the panel");
+    }
+    const chosen = withPlugin({ stored: { folders: { errorLog: "Config/Error Log.md" } }, notes: { "Config/Error Log.md": "" } });
     await chosen.s.load();
-    assert.equal(chosen.s.errorLogPath(), "Logs/Problems.md");
-    assert.equal(chosen.s.defaultErrorLogPath(), "Config/Error Log.md", "what blank would mean, for the panel");
+    assert.equal(chosen.s.errorLogPath(), "Config/Error Log.md", "named in the setting, as the demo names it");
+    assert.equal(chosen.s.defaultErrorLogPath(), "Plainday error log.md");
 });
 
 test("templateWarning: the properties a template sets that Plainday writes itself; list properties are combined, never warned about", () => {
@@ -854,15 +646,16 @@ test("folders: the Inbox is Plainday's own, whatever Obsidian's Default location
     assert.doesNotMatch(fs.readFileSync(new URL("../../../plugin/src/shared/settings.js", import.meta.url), "utf8"), /newFileFolderPath|newFileLocation/);
 });
 
-test("normalize: a weekly, monthly or yearly folder in Projects, the Inbox, the archive or Config, or holding one, is as before", () => {
+test("normalize: a weekly, monthly or yearly folder in Projects, the Inbox or the archive, or holding one, is as before", () => {
     const n = (folders) => plain(settings.normalize({ folders }, billing).folders);
     assert.equal(n({ week: "Archive/Weeks" }).week, "");
-    assert.equal(n({ month: "Config/Months" }).month, "");
+    assert.equal(n({ month: "Config/Months" }).month, "Config/Months", "a folder named Config is like any other (OBS-295)");
     assert.equal(n({ year: "Projects" }).year, "");
     assert.equal(n({ week: "Planner", projects: "Planner/Projects" }).week, "", "one that holds Projects");
     assert.equal(n({ week: "Old/Weeks", archive: "Old" }).week, "", "the archive as it's set");
     assert.equal(n({ week: "Archive/Weeks", archive: "Old" }).week, "Archive/Weeks", "Archive is only a folder once the archive is elsewhere");
     assert.deepEqual(plain(settings.overlap("Reference/Planner/weeks")), null);
+    assert.deepEqual(plain(settings.overlap("Config/Weeks")), null);
     assert.deepEqual(plain(settings.overlap("Inbox/Weeks")), { name: "Inbox", folder: "Inbox", how: "in" });
 });
 

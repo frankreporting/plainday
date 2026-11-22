@@ -347,11 +347,12 @@ test("folderOf: a folder setting as a vault path; blank is none; anything else i
         assert.equal(r.folder, "", raw);
         assert.match(r.error, /holds a character Plainday can't link to, one of \[ \] # \^/, raw);
     }
-    // the system's folder and the archive are often excluded, where a base can't list them
-    for (const raw of ["Config/Invoices", "config", "Archive/Invoices"]) {
-        assert.match(billing.folderOf(raw, "Archive").error, /is inside (Config|config|Archive), where invoices don't belong/, raw);
+    // the archive is often excluded, where a base can't list it
+    assert.match(billing.folderOf("Archive/Invoices", "Archive").error, /is inside Archive, where invoices don't belong/);
+    // a folder named Config is like any other (OBS-295)
+    for (const raw of ["Config/Invoices", "config", "Business/Config/Invoices"]) {
+        assert.deepEqual(plain(billing.folderOf(raw, "Archive")), { folder: raw, error: null }, raw);
     }
-    assert.equal(billing.folderOf("Business/Config/Invoices", "Archive").error, null, "only at the top");
     // the archive as Settings → Plainday → Folders has it (OBS-283), anywhere it is, in any case
     assert.deepEqual(plain(billing.folderOf("Old/Invoices", "Old")), { folder: "", error: "is inside Old, where invoices don't belong (Old/Invoices)", taken: "Old" });
     assert.equal(billing.folderOf("work/old", "Work/Old").taken, "Work/Old");

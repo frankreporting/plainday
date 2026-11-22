@@ -2,9 +2,9 @@ import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
 // The error log (OBS-218): every Problem the system found, in one note (Settings → Plainday →
-// Folders → Error log note, OBS-283: `Config/Error Log.md` in a vault from before), one line per kind of Problem per note (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to
-// start from. The detail stays in the reports' Problems callouts; the log is the index across the
-// system. Each command that finds
+// Folders → Error log note, OBS-283), one line per kind of Problem per note
+// (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to start from. The detail stays in the
+// reports' Problems callouts; the log is the index across the system. Each command that finds
 // Problems (the time report, the calendar sync) rewrites its own section whole on every run, so a
 // fixed Problem leaves the log the next time that command runs; a section is only written when its
 // list changed. A run that finds a line the log didn't have, or a higher count, shows one toast
@@ -227,8 +227,8 @@ export default class ErrorLog {
         }), 0);
     }
 
-    // The error log note, as Settings → Plainday → Folders has it (OBS-283): Config/Error Log.md in a
-    // vault from before, Plainday error log.md at the top of a new one, unless you choose another
+    // The error log note, as Settings → Plainday → Folders has it (OBS-283): Plainday error log.md at
+    // the top of the vault, unless you choose another
     path() {
         return plainday.Settings.errorLogPath();
     }

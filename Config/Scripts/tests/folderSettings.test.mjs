@@ -67,7 +67,7 @@ test("SyncArea leaves a note moved into the archive as set alone, as it leaves o
     const sync = v.plainday.SyncArea, file = (p) => v.app.vault.getFileByPath(p);
     assert.equal(sync.ignored(file("Old/Kestrel notes.md")), true);
     assert.equal(sync.ignored(file("Archive/Other.md")), false, "Archive is only a folder now");
-    assert.equal(sync.ignored({ path: "Config/Templates/Task.md" }), true, "Config stays out by name");
+    assert.equal(sync.ignored({ path: "Config/Clients/Loose note.md" }), false, "a folder named Config is like any other (OBS-295)");
 });
 
 test("the time report, with the folders moved: a line whose note waits in Waiting is listed, by that name, and a project in Work counts", () => {

@@ -306,7 +306,7 @@ test("the startup scripts wait for the layout, then run one after the other in t
     }
 });
 
-test("its settings load before anything runs; the panel is added; the old notes are read once the layout is ready, before the startup scripts (OBS-281)", async () => {
+test("its settings load before anything runs; the panel is added; the startup scripts run once the layout is ready (OBS-281)", async () => {
     const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices", lastNumber: 1001 } };
     const { plugin, layout } = load(BUNDLE, { stored });
     await plugin.onload();
@@ -316,10 +316,9 @@ test("its settings load before anything runs; the panel is added; the old notes 
         assert.equal(plugin.tabs.length, 1);
         assert.equal(plugin.tabs[0].plugin, plugin, "Settings → Plainday");
         const ran = [];
-        window.plainday.Settings.readOldNotes = async () => ran.push("readOldNotes");
         for (const name of STARTUP) window.plainday[name].invoke = async () => ran.push(name);
         await layout[0]();
-        assert.deepEqual(ran, ["readOldNotes", ...STARTUP]);
+        assert.deepEqual(ran, STARTUP, "and nothing else: the settings notes from before aren't read (OBS-295)");
         assert.deepEqual(plugin.saved, [], "loading saves nothing");
         // Sync changed the data file: read again, and the editor switch applied
         stored.invoices.name = "From the phone";
@@ -333,7 +332,7 @@ test("its settings load before anything runs; the panel is added; the old notes 
     }
 });
 
-test("a device with no settings saved and no old notes starts from the defaults, and writes nothing", async () => {
+test("a device with no settings saved starts from the defaults, and writes nothing", async () => {
     const { plugin, layout, notices } = load();
     await plugin.onload();
     try {
@@ -341,8 +340,8 @@ test("a device with no settings saved and no old notes starts from the defaults,
         assert.equal(window.plainday.Settings.saved, false);
         for (const name of STARTUP) window.plainday[name].invoke = async () => {};
         await layout[0]();
-        assert.deepEqual(plugin.saved, [], "nothing to move, so no file written over one Sync may still bring");
-        assert.deepEqual(notices, [], "no old notes, nothing to say");
+        assert.deepEqual(plugin.saved, [], "no file written over one Sync may still bring");
+        assert.deepEqual(notices, [], "nothing to say");
     } finally {
         plugin.onunload();
     }
@@ -474,7 +473,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.equal(saved()?.folder, "Clients/Inv");
         // The folder list offers only folders the field takes, with Invoices first, and closes after a pick
         const suggest = suggests.at(-1);
-        assert.deepEqual(suggest.getSuggestions(""), ["Invoices", "Business/Invoices"]);
+        assert.deepEqual(suggest.getSuggestions(""), ["Invoices", "Business/Invoices", "Config"], "a folder named Config is like any other (OBS-295)");
         assert.deepEqual(suggest.getSuggestions("bus"), ["Business/Invoices"]);
         folder.s.settingEl.isConnected = true;
         suggest.picked("Business/Invoices");
@@ -599,7 +598,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         inbox.s.type("");
         assert.equal(inbox.s.warning(), "Not used: a folder is needed: notes can't go at the top of the vault. Inbox stays `Inbox`.");
         inbox.s.type("Config/Inbox");
-        assert.match(inbox.s.warning(), /^Not used: it's inside Config, the system's own folder/);
+        assert.equal(inbox.s.warning(), "“Config/Inbox” doesn't exist yet. Plainday will create it when it first files a note there.", "a folder named Config is like any other (OBS-295)");
         inbox.s.type("Waiting");
         inbox.s.leave();
         await new Promise((r) => setTimeout(r, 0));
@@ -685,13 +684,13 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         week.s.type("Old/Weeks");
         assert.equal(week.s.warning(), "Not used: it's inside Archive (Old). Weekly notes stay `Planner/Weeks`.");
         week.s.type("Config");
-        assert.equal(week.s.warning(), "Not used: it's the Config folder. Weekly notes stay `Planner/Weeks`.");
+        assert.equal(week.s.warning(), "", "a folder named Config is like any other (OBS-295)");
 
-        // The error log note: blank is Config/Error Log.md, in a vault with a Config folder
+        // The error log note: blank is Plainday error log.md, in a vault with a Config folder too (OBS-295)
         const log = draw("Error log note");
-        assert.equal(log.s.control.inputEl.placeholder, "Config/Error Log.md");
+        assert.equal(log.s.control.inputEl.placeholder, "Plainday error log.md");
         log.s.type("Reference/Notes");
-        assert.equal(log.s.warning(), "Not used: it's a note of yours with sections of its own, which the error log would move. The error log stays `Config/Error Log.md`.");
+        assert.equal(log.s.warning(), "Not used: it's a note of yours with sections of its own, which the error log would move. The error log stays `Plainday error log.md`.");
         log.s.type("Logs/Old log");
         assert.equal(log.s.warning(), "", "an error log already made is fine");
         log.s.type("Logs/Empty");

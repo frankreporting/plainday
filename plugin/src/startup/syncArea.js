@@ -7,16 +7,14 @@ export default class SyncArea {
     // folder note (Folder/Folder.md) tagged #project or #area. A folder note looks from the
     // folder above its own, so a moved project points at its new parent. Notes that land
     // outside any project or area, or anywhere in the archive (Settings → Plainday → Folders,
-    // OBS-283) or Config, are left untouched,
-    // and renaming a folder in place changes nothing (Obsidian updates the links itself).
+    // OBS-283), are left untouched, and renaming a folder in place changes nothing (Obsidian updates
+    // the links itself).
     // An invoice is never touched either: its `parent` is the project it bills (OBS-114), fixed
     // when it's made, so moving the note mustn't change what it bills.
     // `parent` was called `area` until OBS-175: a moved note that still has `area` gets `parent` in
     // its place, in the same spot in the frontmatter.
     // Runs on every device, and each one only ever sees its own moves: Obsidian Sync delivers
     // a move made elsewhere as a delete plus a new file, not a rename (verified 2026-09-11).
-    // Config, the system's folder in a vault from before; the archive is added as it's set
-    static IGNORED = ["Config/"];
     static DEBOUNCE_MS = 300;
     // Templater moves notes mid-template and rewrites them when it finishes; wait for that.
     static TEMPLATER_WAIT_MS = 120000;
@@ -30,9 +28,9 @@ export default class SyncArea {
         window.syncAreaRef = app.vault.on("rename", (file, oldPath) => this.onRename(file, oldPath));
     }
 
-    // Whether a note is in the archive or Config, where nothing moves it
+    // Whether a note is in the archive, where nothing moves it
     ignored(file) {
-        return SyncArea.IGNORED.some((p) => file.path.startsWith(p)) || file.path.startsWith(`${plainday.Settings.folders().archive}/`);
+        return file.path.startsWith(`${plainday.Settings.folders().archive}/`);
     }
 
     deconstructor() {

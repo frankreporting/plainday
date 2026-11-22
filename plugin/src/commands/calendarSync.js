@@ -62,8 +62,6 @@ export default class CalendarSync {
     static CACHE_VERSION = 3;
     // The last run's report on this device, for the window OBS-276 adds
     static LAST = "plainday-calendar-last";
-    // The Calendar Sync note from before OBS-275, read once for recurring events' projects, and left
-    static OLD_NOTE = "Config/Calendar Sync.md";
     // How long an event must stay gone, across two reads, before its line is marked canceled
     static MISSING_MS = 10 * 60 * 1000;
     // How long the sync works before it hands the app a turn (breathe)
@@ -193,7 +191,6 @@ export default class CalendarSync {
             // Events each calendar still has, outside the range: their lines aren't taken for canceled
             feed.outside = new Set(ok.flatMap(({ calendar, got }) => (got.outside ?? []).map((key) => `${calendar.id}|${key}`)));
             const selected = new Set(ok.map((r) => r.calendar.id));
-            await this.recurringFromNote();
             await this.handOver(feed, selected, cache);
             const applied = performance.now();
             const series = await this.seriesProjects(feed, selected, cache);
@@ -362,8 +359,8 @@ export default class CalendarSync {
     // This device's cache remembers that title by series ID, so a series whose title changes (a
     // birthday with an age in it, say) has its entry renamed and keeps its project. Two series with the
     // same title share an entry. A series' links go on a line when the sync first writes it. Choosing a
-    // series' projects in the panel comes with OBS-276; until then they're the ones the Calendar Sync
-    // note gave (recurringFromNote).
+    // series' projects in the panel comes with OBS-276; until then they're the ones already in
+    // Plainday's settings.
     async seriesProjects(feed, selected, cache) {
         const named = new Map();   // series ID -> title; the feed is sorted by start
         for (const event of feed.events) {
@@ -439,26 +436,6 @@ export default class CalendarSync {
             mapping.set(title, { links: all, key: all.join(" ") });
         }
         return mapping;
-    }
-
-    // Once, on a device whose settings have no recurring list yet (saved before OBS-275): the ⭕ and 🗃️
-    // links after each series under the Calendar Sync note's `## Recurring events`, into Plainday's
-    // settings. The note isn't changed, and isn't read again.
-    async recurringFromNote() {
-        const settings = plainday.Settings;
-        if (settings.get().calendars.recurring !== null) return;
-        const file = app.vault.getFileByPath(CalendarSync.OLD_NOTE);
-        const text = file ? await app.vault.read(file) : "";
-        const list = [];
-        let inside = false;
-        for (const line of text.split("\n")) {
-            if (/^##\s/.test(line)) { inside = line.trim() === "## Recurring events"; continue; }
-            const item = inside && line.match(/^\s*[-*+]\s+(.*\S)\s*$/);
-            if (!item) continue;
-            const { rest, projects } = this.splitProjects(item[1]);
-            if (rest && projects.length) list.push({ title: rest, links: projects });
-        }
-        await settings.set("calendars", { recurring: settings.recurringOf(list) ?? [] });
     }
 
     // MARK: event line IDs
@@ -1348,18 +1325,6 @@ export default class CalendarSync {
     }
 
     // MARK: what you add to an event line
-
-    // "Title [[A|⭕]] [[B|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]", "[[B|⭕]]"] }
-    splitProjects(text) {
-        let rest = text.trimEnd();
-        const projects = [];
-        let link;
-        while ((link = rest.match(CalendarSync.PROJECT_LINK))) {
-            projects.unshift(link[0].trim());
-            rest = rest.slice(0, link.index);
-        }
-        return { rest: rest.trim(), projects };
-    }
 
     // "Title ℹ️ 🆓 [[A|⭕]]" -> { rest: "Title", projects: ["[[A|⭕]]"], free: true, nonbillable: true, log: null }:
     // the ⭕ links, the free mark and your 🆓 come off the end, in any order. A title that is only

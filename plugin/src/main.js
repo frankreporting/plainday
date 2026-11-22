@@ -8,8 +8,7 @@
 //   src/startup/index.js gives;
 // - a script that throws shows a notice and logs the error, and never stops the next one;
 // - its settings (shared/settings.js), loaded before any of that, and the panel that shows them in
-//   Settings → Plainday (src/settingsTab.js). On a device with no settings saved, the old settings
-//   notes are read once the layout is ready, before the startup scripts (OBS-281).
+//   Settings → Plainday (src/settingsTab.js).
 // Unloading the plugin runs every class's deconstructor(), so the listeners the startup scripts
 // keep go with it. Obsidian itself removes the commands and editor extensions.
 import { Notice, Plugin } from "obsidian";
@@ -69,8 +68,6 @@ export default class Plainday extends Plugin {
         this.app.workspace.onLayoutReady(async () => {
             // Unloaded before the layout was ready
             if (window.plainday !== plainday) return;
-            // The settings notes from before, read once, before a startup script reads the settings
-            await this.attempt("reading the old settings notes", () => plainday.Settings.readOldNotes());
             for (const name of STARTUP) {
                 // Unloaded while an earlier one ran
                 if (window.plainday !== plainday) return;

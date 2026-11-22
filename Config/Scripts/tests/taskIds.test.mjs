@@ -131,7 +131,7 @@ const LOOK = {
 };
 const at = (lines) => plain(lines.map((l) => `${l.file.path}:${l.line}:${l.task}`).sort());
 
-test("linesOf: every line ending in the ID, from the cache, with its checkbox; Config and notes outside the system left out (OBS-208)", () => {
+test("linesOf: every line ending in the ID, from the cache, with its checkbox; notes outside the system, such as a template, left out (OBS-208)", () => {
     const t = standIn({ notes: LOOK }).plainday.TaskIds;
     assert.deepEqual(at(t.linesOf("k3x9m2")), [`${KES}:5:>`, `${D8}:0: `]);
     assert.deepEqual(at(t.linesOf("Ab3-x9")), [`${D8}:1: `], "a mixed-case ID from Copy link to block");
@@ -200,6 +200,13 @@ test("allIds and freshId: every list item's ID; a new one no block has", () => {
     let draws = 0;
     t.random = () => (draws++ < 6 ? 0 : 0.99);
     assert.equal(t.freshId(), "999999", "aaaaaa is taken, even outside the system, so the next draw");
+});
+
+test("freshId: an ID in a note in a folder named Config is taken too (OBS-295)", () => {
+    const t = standIn({ notes: { ...LOOK, "Config/Gear list.md": "- [ ] Pack the tent ^aaaaaa\n" } }).plainday.TaskIds;
+    let draws = 0;
+    t.random = () => (draws++ < 6 ? 0 : 0.99);
+    assert.equal(t.freshId(), "999999");
 });
 
 test("kindOf: daily, weekly, monthly and yearly notes, and any other note", () => {
