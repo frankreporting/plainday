@@ -4,7 +4,7 @@ tags:
 ---
 # Welcome to the demo vault
 
-This is a small, made-up vault that shows the Obsidian PM system at work: a freelancer's notes from late August to mid-September 2026. Every person, client, amount and event in it is invented. For installing the plugins and setting up your own vault, see [[README]]; for how everything works, see the [[Manual]].
+This is a small, made-up vault that shows Plainday at work: a freelancer's notes from late August to mid-September 2026. Every person, client, amount and event in it is invented. For installing Plainday, and what it does and doesn't do yet, see the [[README]]; for how everything works, see the [[Manual]].
 
 ## Where to look first
 
@@ -33,4 +33,4 @@ Everything under "## Time Report" is written by the *Time report* command, not b
 
 Run the task commands with the cursor on a task line. *Toggle time entry* times tasks in today's daily note; press it again to stop. In the command palette, the commands are "Plainday: …".
 
-The calendar sync (*Sync calendars*) reads macOS calendars, so it needs setup first; see [[README]].
+The calendar sync (*Sync calendars*) reads your calendars from their private links, which you add in *Settings → Plainday → Calendars* first; see [[README#Calendars|the README's Calendars]].
