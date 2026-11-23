@@ -41,6 +41,7 @@ const typeChecked = warn(Object.assign({}, ...tseslint.configs.recommendedTypeCh
 // files' do, so a file cleared of the scan's warnings stays clear. Each of OBS-318's sub-issues adds the
 // files it types; the files that never had a warning are here from the start.
 export const TYPED = [
+    "plugin/src/commands/addTaskNote.js",
     "plugin/src/commands/convertToProject.js",
     "plugin/src/commands/newArea.js",
     "plugin/src/commands/newEventLog.js",
@@ -49,6 +50,7 @@ export const TYPED = [
     "plugin/src/commands/viewErrorLogs.js",
     "plugin/src/shared/refoldDailyNotes.js",
     "plugin/src/shared/snapshotDailyNotes.js",
+    "plugin/src/shared/taskChange.js",
     "plugin/src/startup/finishLinkedLogs.js",
     "plugin/src/startup/refoldOnOpen.js",
     "plugin/src/startup/taskMarkers.js",
