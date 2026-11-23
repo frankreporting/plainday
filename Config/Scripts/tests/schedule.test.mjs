@@ -5,11 +5,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withFolders, YAML } from "./standInVault.mjs";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
 // Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn) and the
 // calendar sync, whose top list placeInTopList writes into (OBS-280)
-const statics = vm.createContext({ plainday: withFolders({}) });
+const statics = withWindow(vm.createContext({ plainday: withFolders({}) }));
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
 statics.plainday.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
 statics.plainday.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
@@ -80,7 +80,7 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
         },
     };
     const plainday = {};
-    const context = vm.createContext({ ...YAML, MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } });
+    const context = withWindow(vm.createContext({ ...YAML, MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } }));
     const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {
         Settings: make("settings", "Settings"),
@@ -425,7 +425,7 @@ test("reopenIn: the moving line takes the place of the day's [>], done or cancel
 });
 
 test("Schedule writes ↗ back to the note a line was sent from (OBS-208); it reads a line's ⋯ through AddTaskNote", () => {
-    const Schedule = vm.runInContext(code + "\n;Schedule", vm.createContext({}));
+    const Schedule = vm.runInContext(code + "\n;Schedule", withWindow(vm.createContext({})));
     assert.equal(Schedule.NOTE_MARK, "⋯");
     assert.equal(Schedule.FROM_MARK, "↗");
     assert.equal(Schedule.NOTE_LINK, undefined, "AddTaskNote.NOTE_LINK is the pattern (noteLink.test.mjs)");
@@ -451,7 +451,7 @@ const withVault = (paths) => {
             getFirstLinkpathDest: (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase()) ?? null,
         },
     };
-    const context = vm.createContext({ app, plainday: withFolders({}), getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) });
+    const context = withWindow(vm.createContext({ app, plainday: withFolders({}), getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`) }));
     const AddTaskNote = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", context);
     context.plainday.AddTaskNote = new AddTaskNote();
     return { schedule: new (vm.runInContext(code + "\n;Schedule", context))(), file: (p) => files.find((f) => f.path === p) };

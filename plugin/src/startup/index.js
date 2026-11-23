@@ -6,6 +6,7 @@
 import CheckOff from "./checkOff.js";
 import FinishLinkedLogs from "./finishLinkedLogs.js";
 import FinishPeriodicNotes from "./finishPeriodicNotes.js";
+import InvoicePrint from "./invoicePrint.js";
 import ListCursor from "./listCursor.js";
 import MoveToProjectMenu from "./moveToProjectMenu.js";
 import NewNoteGuard from "./newNoteGuard.js";
@@ -16,7 +17,7 @@ import TimeReportOnStartup from "./timeReportOnStartup.js";
 import TrailingLinks from "./trailingLinks.js";
 
 export const CLASSES = {
-    CheckOff, FinishLinkedLogs, FinishPeriodicNotes, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TaskMarkers, TimeReportOnStartup, TrailingLinks,
+    CheckOff, FinishLinkedLogs, FinishPeriodicNotes, InvoicePrint, ListCursor, MoveToProjectMenu, NewNoteGuard, RefoldOnOpen, SyncArea, TaskMarkers, TimeReportOnStartup, TrailingLinks,
 };
 
 // Run once the layout is ready, one after the other, in this order
@@ -30,6 +31,7 @@ export const STARTUP = [
     "RefoldOnOpen",
     "MoveToProjectMenu",
     "TrailingLinks",
+    "InvoicePrint",
     "ListCursor",
     "CheckOff",
     "TimeReportOnStartup",

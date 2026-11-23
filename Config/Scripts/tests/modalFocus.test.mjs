@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { classFiles, classScript } from "../../../plugin/classShape.mjs";
+import { classFiles, classScript, withWindow } from "../../../plugin/classShape.mjs";
 
 // Each class file by its name, as a script: its imports read from the context's globals
 const scripts = classFiles().map((f) => f.split("/")[1]);
@@ -61,12 +61,12 @@ const harness = () => {
         setValue(v) { this.value = v; return this; }
         getValue() { return this.value; }
     }
-    const ctx = vm.createContext({
+    const ctx = withWindow(vm.createContext({
         app: {},
         Notice: class {},
         requestAnimationFrame: (fn) => frames.push(fn),
         Modal, DropdownComponent,
-    });
+    }));
     return { log, frames, ctx };
 };
 

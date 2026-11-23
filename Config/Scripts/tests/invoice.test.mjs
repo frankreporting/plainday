@@ -7,11 +7,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { compactTable, obsidianPadded } from "./tables.mjs";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 import { frontmatter } from "./demo/renderReports.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, withWindow(vm.createContext({})));
 const tr = new (load("timeReport.js", "TimeReport"))();
 const billing = new (load("billing.js", "Billing"))();
 const inv = new (load("invoice.js", "Invoice"))();
@@ -237,8 +237,8 @@ test("Invoice without your name or the invoice folder says so before asking anyt
     const notices = [], made = [], asked = [];
     let invoices = { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 };
     const app = { vault: { create: async (p) => { made.push(p); }, createFolder: async (p) => { made.push(p); } } };
-    const context = vm.createContext({ app, setTimeout, Notice: class { constructor(t) { notices.push(t); } },
-        plainday: { Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } } });
+    const context = withWindow(vm.createContext({ app, setTimeout, Notice: class { constructor(t) { notices.push(t); } },
+        plainday: { Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } } }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     await invoice.create(WEB, tr, billing, index);
     assert.deepEqual(notices, ["Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again"]);
@@ -349,12 +349,12 @@ test("suggestCode and nameFor", () => {
 test("Invoice on an invoice note reads its properties from its text and offers what fits its status", async () => {
     const notices = [], offered = [];
     const text = inv.noteText(DATA(), tr, billing);
-    const context = vm.createContext({
+    const context = withWindow(vm.createContext({
         app: { metadataCache: { getFileCache: () => null } }, setTimeout,
         Notice: class { constructor(t) { notices.push(t); } },
         getFrontMatterInfo: (t) => { const m = String(t).match(/^---\n([\s\S]*?)\n---/); return { exists: !!m, frontmatter: m ? m[1] : "" }; },
         parseYaml: (yaml) => frontmatter(`---\n${yaml}\n---\n`),
-    });
+    }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     invoice.pickAction = async (inv, choices) => { offered.push([inv.name, inv.status, choices.map(([k]) => k)]); return null; };
     // The note as the editor holds it, and the vault's index
@@ -442,7 +442,7 @@ test("askDate: a month and day without a year is the closer one, since billing l
             return modal;
         },
     };
-    const context = vm.createContext({ setTimeout, plainday: { DatePrompt } });
+    const context = withWindow(vm.createContext({ setTimeout, plainday: { DatePrompt } }));
     const src = classScript("invoice.js");
     const asking = new (vm.runInContext(`${src}\n;Invoice`, context))();
     assert.equal(await asking.askDate("Bill through"), "2026-09-16");
@@ -475,9 +475,9 @@ test("Invoice on a flat project asks when its fee was earned, and sets `earned` 
     };
     let pick = null;
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { if (pick !== null) this.onChooseItem(this.getItems()[pick]); this.onClose(); } };
-    const context = vm.createContext({ app, setTimeout, clearTimeout, moment: () => ({ format: () => "2026-10-11" }),
+    const context = withWindow(vm.createContext({ app, setTimeout, clearTimeout, moment: () => ({ format: () => "2026-10-11" }),
         Notice: class { constructor(t) { notices.push(t); events.push("notice"); } },
-        plainday: { DatePrompt }, Platform: { isDesktop: false }, FuzzySuggestModal });
+        plainday: { DatePrompt }, Platform: { isDesktop: false }, FuzzySuggestModal }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     await invoice.create(POSTER, tr, billing, idx);
     assert.deepEqual(written, [POSTER]);
@@ -518,7 +518,7 @@ const withApp = ({ saved = null, view = null } = {}) => {
         workspace: { getLeavesOfType: () => (view ? [{ view }] : []) },
         foldManager: { load: () => saved, save: async (file, info) => { saves.push(info); } },
     };
-    const context = vm.createContext({ app, Notice: class { constructor(text) { notices.push(text); } }, setTimeout });
+    const context = withWindow(vm.createContext({ app, Notice: class { constructor(text) { notices.push(text); } }, setTimeout }));
     const src = classScript("invoice.js");
     return { invoice: new (vm.runInContext(`${src}\n;Invoice`, context))(), notices, saves };
 };
@@ -611,7 +611,7 @@ test("pickProject: lists the projects with unbilled time; a leftover billed_thro
     const items = [];
     // Esc as soon as it opens: the list is what it offered
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const context = withWindow(vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     for (const value of [undefined, "2026-09-02", "soon"]) {
         const idx = tr.makeIndex(INDEX_NOTES.map((n) => (n.path === WEB && value ? { ...n, props: { ...n.props, billed_through: value } } : n)));
@@ -629,7 +629,7 @@ test("pickProject: lists the projects with unbilled time; a leftover billed_thro
 test("pickProject: an archived project with unbilled time isn't offered (OBS-213)", async () => {
     const items = [];
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const context = withWindow(vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     const ARCH = "Archive/Work/Harbor Stills/Harbor Stills.md";
     const idx = tr.makeIndex([...INDEX_NOTES, { path: ARCH, tags: ["project"], props: { rate: 100, rate_type: "hourly" } }]);
@@ -646,7 +646,7 @@ test("pickProject: an archived project with unbilled time isn't offered (OBS-213
 test("pickProject: a live project under an archived parent is offered on its own, never through the parent (OBS-213)", async () => {
     const items = [];
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { items.push(...this.getItems()); this.onClose(); } };
-    const context = vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal });
+    const context = withWindow(vm.createContext({ app: {}, setTimeout, Notice: class { hide() {} }, FuzzySuggestModal }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     const OLD = "Archive/Work/Old Client/Old Client.md", KID = "Projects/Work/Kid/Kid.md";
     const idx = tr.makeIndex([...INDEX_NOTES,

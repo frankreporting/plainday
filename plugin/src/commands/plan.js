@@ -28,7 +28,7 @@ export default class Plan {
 
         // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
         // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
-        modal.onOpen = () => requestAnimationFrame(() => dropdown.selectEl.focus());
+        modal.onOpen = () => window.requestAnimationFrame(() => dropdown.selectEl.focus());
         modal.open();
     }
 

@@ -34,7 +34,7 @@ export default class MoveToProjectMenu {
         if (!state) return;
         for (const ref of state.refs) app.workspace.offref(ref);
         for (const off of state.offs) off();
-        clearTimeout(state.timer);
+        window.clearTimeout(state.timer);
         window.moveToProjectMenu = null;
     }
 
@@ -47,12 +47,12 @@ export default class MoveToProjectMenu {
         if (!api?.menus) {
             // A layout change (tries 1) leaves a pending retry running
             if (tries > 1) {
-                clearTimeout(state.timer);
-                state.timer = setTimeout(() => this.addToNavigator(state, tries - 1), MoveToProjectMenu.RETRY_MS);
+                window.clearTimeout(state.timer);
+                state.timer = window.setTimeout(() => this.addToNavigator(state, tries - 1), MoveToProjectMenu.RETRY_MS);
             }
             return;
         }
-        clearTimeout(state.timer);
+        window.clearTimeout(state.timer);
         for (const off of state.offs) off();
         state.offs = [
             api.menus.registerFileMenu(({ addItem, file, selection }) => this.add(addItem, selection?.files?.length ? selection.files : [file])),

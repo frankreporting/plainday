@@ -1,6 +1,7 @@
 import { editorInfoField, editorLivePreviewField, Keymap, moment } from "obsidian";
 import { Decoration, EditorView, keymap, ViewPlugin } from "@codemirror/view";
 import { EditorSelection, EditorState, Prec, StateEffect, Transaction } from "@codemirror/state";
+import { foldedRanges } from "@codemirror/language";
 import { app, plainday } from "../host.js";
 
 export default class TrailingLinks {
@@ -43,7 +44,7 @@ export default class TrailingLinks {
     static REDRAW_MS = 250;
 
     // The layout is in styles.css, keyed to the classes the extension puts on a line:
-    //   .pm-trail-line  the line, with --pm-run-w (the links' width)
+    //   .pm-trail-line  the line, with --pm-run-w (the links' width); .pm-trail-folded while it's folded
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
     //   .pm-trail-run   around the links
     //   .pm-trail       around each link, with .pm-trail-due / -forward / -note / -project / -area,
@@ -154,6 +155,20 @@ export default class TrailingLinks {
 
     // Where the text's last word starts (a link ending the text is one word), or -1 when there's
     // no text between `bodyFrom` and `end`. That word wraps with the run.
+    // Whether a fold starts at `pos`, a line's end: CodeMirror folds a list item from the end of its
+    // line, where Obsidian then draws its "…" (OBS-203: the line's class says so, for styles.css, which
+    // would otherwise need :has to see the "…"). `folds` is CodeMirror's foldedRanges.
+    /** @param {{ between(from: number, to: number, f: (from: number, to: number) => void | false): void }} folds @param {number} pos @returns {boolean} */
+    static folded(folds, pos) {
+        let found = false;
+        folds.between(pos, pos, (from) => {
+            if (from !== pos) return;
+            found = true;
+            return false;
+        });
+        return found;
+    }
+
     static lastWordStart(text, bodyFrom, end) {
         if (end <= bodyFrom) return -1;
         const before = text.slice(0, end);
@@ -278,6 +293,7 @@ export default class TrailingLinks {
             const today = moment().format("YYYY-MM-DD");
             // The names of periodic notes read as the settings are now, once for the lines drawn
             const read = T.reader();
+            const folds = foldedRanges(v.state);
             const outer = [], inner = [];
             let unmeasured = false;
             for (const { from, to } of ranges) {
@@ -311,7 +327,7 @@ export default class TrailingLinks {
                     const guess = shown.reduce((w, s) => w + T.PILL_PX + T.CHAR_PX * s.text.length, 0) + (idText ? T.PILL_PX + T.CHAR_PX * idText.length : 0);
                     const width = Math.ceil((handles.widths.get(sig) ?? guess) + T.GAP_PX);
 
-                    outer.push(Decoration.line({ class: "pm-trail-line", attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
+                    outer.push(Decoration.line({ class: T.folded(folds, line.to) ? "pm-trail-line pm-trail-folded" : "pm-trail-line", attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
                     const word = T.lastWordStart(line.text, t.bodyFrom, t.textEnd);
                     if (word >= 0) {
                         // The space before the links too, so a struck-through line has no stray dash
@@ -356,7 +372,7 @@ export default class TrailingLinks {
             write: (found, wv) => {
                 if (!found.length) return;
                 for (const [sig, w] of found) handles.widths.set(sig, w);
-                setTimeout(() => wv.dispatch({ effects: refresh.of(null) }));
+                window.setTimeout(() => wv.dispatch({ effects: refresh.of(null) }));
             },
         });
 
@@ -378,8 +394,11 @@ export default class TrailingLinks {
                     handles.widths.clear();
                     handles.size = size;
                 }
+                // A line folded or unfolded redraws too, for its class (.pm-trail-folded). An edit maps the
+                // folds, so they're compared only when nothing was typed: an edit redraws its lines anyway
                 const full = now !== this.span || u.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)))
-                    || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false);
+                    || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false)
+                    || (!u.docChanged && foldedRanges(u.startState) !== foldedRanges(u.state));
                 this.span = now;
                 if (!full && !u.docChanged) {
                     // The cursor moved: redraw the lines it left and reached, when they have a hidden ID
@@ -551,8 +570,8 @@ export default class TrailingLinks {
         // A note moved, renamed, retagged or given an alias changes a name; a theme or snippet
         // change changes the widths
         const later = () => {
-            clearTimeout(handles.timer);
-            handles.timer = setTimeout(redrawAll, T.REDRAW_MS);
+            window.clearTimeout(handles.timer);
+            handles.timer = window.setTimeout(redrawAll, T.REDRAW_MS);
         };
         handles.refs.push(
             app.vault.on("rename", later),
@@ -566,7 +585,7 @@ export default class TrailingLinks {
         // A due date turns red at midnight
         const atMidnight = () => {
             const next = moment().add(1, "day").startOf("day").add(1, "second");
-            handles.midnight = setTimeout(() => {
+            handles.midnight = window.setTimeout(() => {
                 redrawAll();
                 atMidnight();
             }, next.diff(moment()));
@@ -579,8 +598,8 @@ export default class TrailingLinks {
         if (!handles) return;
         for (const ref of handles.refs) ref.e.offref(ref);
         handles.refs = [];
-        clearTimeout(handles.timer);
-        clearTimeout(handles.midnight);
+        window.clearTimeout(handles.timer);
+        window.clearTimeout(handles.midnight);
         // The slot stays registered for the next run to fill
         handles.slot.length = 0;
         app.workspace.updateOptions();

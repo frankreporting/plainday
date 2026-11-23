@@ -225,7 +225,7 @@ export default class RefoldDailyNotes {
         const deadline = Date.now() + RefoldDailyNotes.RELOAD_WAIT_MS;
         while (view.getViewData() !== text) {
             if (Date.now() > deadline) return false;
-            await new Promise((r) => setTimeout(r, 100));
+            await new Promise((r) => window.setTimeout(r, 100));
         }
         return true;
     }

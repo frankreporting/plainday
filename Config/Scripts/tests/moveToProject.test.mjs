@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+import { classScript, readIndex, withWindow } from "../../../plugin/classShape.mjs";
 import { withFolders } from "./standInVault.mjs";
 const { COMMANDS } = readIndex("commands").exports;
 const { STARTUP } = readIndex("startup").exports;
@@ -17,11 +17,11 @@ const { STARTUP } = readIndex("startup").exports;
 const here = new URL(".", import.meta.url);
 const notices = [];
 const logged = [];
-const context = vm.createContext({
+const context = withWindow(vm.createContext({
     plainday: withFolders({}), app: null, window: {}, setTimeout, clearTimeout,
     console: { ...console, info: (...a) => logged.push(a) },
     Notice: class { constructor(message) { notices.push(message); } },
-});
+}));
 const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, context);
 const AddTaskNote = load("addTaskNote.js", "AddTaskNote");
 const AddProjectLink = load("addProjectLink.js", "AddProjectLink");

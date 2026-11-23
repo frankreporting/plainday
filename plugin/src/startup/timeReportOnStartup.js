@@ -41,10 +41,10 @@ export default class TimeReportOnStartup {
             ? new Promise((resolve) => cache.onCleanCache(() => resolve(true)))
             : (async () => {
                 // Fallback if Obsidian drops onCleanCache: poll its own indexing state
-                while (!(cache.initialized && !cache.inProgressTaskCount)) await new Promise((r) => setTimeout(r, 250));
+                while (!(cache.initialized && !cache.inProgressTaskCount)) await new Promise((r) => window.setTimeout(r, 250));
                 return true;
             })();
-        const timeout = new Promise((resolve) => setTimeout(() => resolve(false), TimeReportOnStartup.INDEX_WAIT_MS));
+        const timeout = new Promise((resolve) => window.setTimeout(() => resolve(false), TimeReportOnStartup.INDEX_WAIT_MS));
         return Promise.race([clean, timeout]);
     }
 
@@ -52,7 +52,7 @@ export default class TimeReportOnStartup {
     async missing() {
         const missing = () => TimeReportOnStartup.NEEDS.filter((name) => !plainday?.[name]);
         const deadline = Date.now() + TimeReportOnStartup.READY_WAIT_MS;
-        while (missing().length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250));
+        while (missing().length && Date.now() < deadline) await new Promise((r) => window.setTimeout(r, 250));
         return missing();
     }
 }

@@ -506,10 +506,10 @@ export default class AddTaskNote {
         return new Promise((resolve) => {
             let choice = null;
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(choice), 0); }
+                onClose() { window.setTimeout(() => resolve(choice), 0); }
                 // Move is the default: focused, so Enter or Space takes it; Tab reaches the other.
                 // Focused once the modal is open, not straight after open() (OBS-50)
-                onOpen() { requestAnimationFrame(() => move.buttonEl.focus()); }
+                onOpen() { window.requestAnimationFrame(() => move.buttonEl.focus()); }
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
             const kind = note ? this.kindOf(note) : "Task";
@@ -577,7 +577,7 @@ export default class AddTaskNote {
                 getItemText(f) { return aliasOf(f); }
                 onChooseItem(f) { picked = f; }
                 // Obsidian closes the modal before it reports the choice
-                onClose() { setTimeout(() => resolve(picked), 0); }
+                onClose() { window.setTimeout(() => resolve(picked), 0); }
             })(app);
             modal.setPlaceholder(placeholder ?? `Which project or area is "${name}" for? (Esc: cancel)`);
             modal.open();

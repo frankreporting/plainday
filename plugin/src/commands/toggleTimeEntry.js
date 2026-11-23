@@ -111,7 +111,7 @@ export default class ToggleTimeEntry {
                 getItemText(item) { return item.label; }
                 onChooseItem(item, evt) { chosen = true; resolve({ item, go: !!evt && !!Keymap.isModEvent(evt) }); }
                 // Obsidian closes the modal before it reports the choice
-                onClose() { setTimeout(() => { if (!chosen) resolve(null); }, 0); }
+                onClose() { window.setTimeout(() => { if (!chosen) resolve(null); }, 0); }
             })(app);
             modal.setPlaceholder(placeholder);
             modal.setInstructions([{ command: "↵", purpose: "toggle" }, { command: "⌘ ↵", purpose: "go to line" }]);

@@ -310,10 +310,10 @@ export default class ProjectNotes {
         return new Promise((resolve) => {
             let answer = null;
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(answer), 0); }
+                onClose() { window.setTimeout(() => resolve(answer), 0); }
                 // Focused once the modal is open, not straight after open(), so the hotkey's key doesn't land in the
                 // note (OBS-50)
-                onOpen() { requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
+                onOpen() { window.requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
             })(app);
             modal.titleEl.setText(k.title);
             const input = new TextComponent(modal.contentEl).setPlaceholder(kind === "project" ? "Project name" : "Area name").setValue(value);
@@ -360,16 +360,16 @@ export default class ProjectNotes {
         };
         place();
         // Obsidian can put the cursor in the title as the note opens
-        setTimeout(place, 300);
+        window.setTimeout(place, 300);
     }
 
     // Resolves once the metadata cache has the note's properties, or after READ_MS
     read(file) {
         if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
         return new Promise((resolve) => {
-            const done = () => { app.metadataCache.offref(ref); clearTimeout(timer); resolve(); };
+            const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
             const ref = app.metadataCache.on("changed", (changed) => { if (changed === file || changed?.path === file.path) done(); });
-            const timer = setTimeout(done, ProjectNotes.READ_MS);
+            const timer = window.setTimeout(done, ProjectNotes.READ_MS);
         });
     }
 }
