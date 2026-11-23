@@ -37,11 +37,13 @@ import tseslint from "typescript-eslint";
 const warn = (rules) => Object.fromEntries(Object.entries(rules).map(([k, v]) => [k, v === "off" || v === 0 ? v : Array.isArray(v) ? ["warn", ...v.slice(1)] : "warn"]));
 const typeChecked = warn(Object.assign({}, ...tseslint.configs.recommendedTypeChecked.map((c) => c.rules ?? {})));
 
-// The class files that carry types (OBS-318), whose warnings fail lint's second run as Plainday's own
-// files' do, so a file cleared of the scan's warnings stays clear. Each of OBS-318's sub-issues adds the
-// files it types; the files that never had a warning are here from the start.
+// The class files that carry types (OBS-318), and the calendar worker's (OBS-327), whose warnings fail
+// lint's second run as Plainday's own files' do, so a file cleared of the scan's warnings stays clear.
+// Each of OBS-318's sub-issues adds the files it types; the files that never had a warning are here
+// from the start.
 export const TYPED = [
     "plugin/src/commands/addTaskNote.js",
+    "plugin/src/commands/calendarSync.js",
     "plugin/src/commands/convertToProject.js",
     "plugin/src/commands/jumpToDate.js",
     "plugin/src/commands/newArea.js",
@@ -50,6 +52,7 @@ export const TYPED = [
     "plugin/src/commands/plan.js",
     "plugin/src/commands/schedule.js",
     "plugin/src/commands/viewErrorLogs.js",
+    "plugin/src/shared/calendarFeed.js",
     "plugin/src/shared/datePrompt.js",
     "plugin/src/shared/dateWords.js",
     "plugin/src/shared/eventLog.js",
@@ -65,6 +68,8 @@ export const TYPED = [
     "plugin/src/startup/refoldOnOpen.js",
     "plugin/src/startup/taskMarkers.js",
     "plugin/src/startup/timeReportOnStartup.js",
+    "plugin/src/worker/calendarRead.js",
+    "plugin/src/worker/calendarWorker.js",
 ];
 // In them, the type checks, but for the rules the scan doesn't report (OBS-314): a warning there
 // would fail CI over something the directory never shows

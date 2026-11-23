@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import { calendarWorkerSource } from "../host.js";
 
+/** @import { RequestUrlResponse } from "obsidian" */
 /**
  * A calendar as Plainday's settings have it, as far as a read needs it (its link is never among these).
  * @typedef {{ id?: string | null, name?: string | null, account?: string | null, address?: string | null }} FeedCalendar
@@ -22,6 +23,13 @@ import { calendarWorkerSource } from "../host.js";
  * window, and how long each part took; or why it couldn't be read, with the download's status code.
  * @typedef {{ name: string, events: FeedEvent[], failed: { uid: string, title: string | null }[], outside: string[], stats: Record<string, number>, problem?: undefined, status?: undefined }} FeedRead
  * @typedef {{ problem: string, status?: number, name?: undefined, events?: undefined, failed?: undefined, outside?: undefined, stats?: undefined }} FeedProblem
+ *
+ * A download (download): the feed's text and the answer's status code, or why it failed
+ * @typedef {{ text: string, status: number, problem?: undefined } | { problem: string, status: number | null, text?: undefined }} Download
+ *
+ * What the worker is given to read a feed with (read): the calendar as the events carry it, the window
+ * as ms, and whose declined invitations are left out
+ * @typedef {{ id: string | null, name: string | null, account: string | null }} EventCalendar
  *
  * The whole events file, as the Mac's fetcher wrote it (feed); the sync adds the keys of events each
  * calendar has outside the window (`outside`).
@@ -69,6 +77,7 @@ export default class CalendarFeed {
     static DEAD = [401, 403, 404, 410];
     static GOOGLE = /^https?:\/\/(?:www\.)?(?:calendar\.)?google\.com\/calendar\/ical\/([^/?#]+)\//i;
     // The account Add calendar suggests for a link, by the server it's on; blank for any other
+    /** @type {[RegExp, string][]} */
     static ACCOUNTS = [
         [/(?:^|\.)google\.com$/i, "Google"],
         [/(?:^|\.)icloud\.com$/i, "iCloud"],
@@ -95,20 +104,27 @@ export default class CalendarFeed {
     // The feed's text, or the problem: "dead" for an answer that says the link stopped working,
     // "unreachable" for any other failure, no answer, or none within TIMEOUT_MS, and "unreadable"
     // for an answer that isn't a calendar. Never the link, nor an error that could carry it.
+    /**
+     * @param {string} link
+     * @returns {Promise<Download>}
+     */
     async download(link) {
+        /** @type {number} */
         let timer;
+        /** @type {Promise<undefined>} */
         const timeout = new Promise((resolve) => { timer = window.setTimeout(() => resolve(undefined), CalendarFeed.TIMEOUT_MS); });
         // A request that fails after the timeout has won is caught too, so its error, which can
         // carry the address, never reaches the console as an unhandled rejection
         const request = Promise.resolve()
             .then(() => requestUrl({ url: this.url(link), method: "GET", throw: false }))
-            .catch(() => null);
+            .catch(() => /** @type {RequestUrlResponse | null} */ (null));
         const response = await Promise.race([request, timeout]);
         window.clearTimeout(timer);
         if (!response) return { problem: "unreachable", status: null };
         const status = Number(response.status) || null;
         if (CalendarFeed.DEAD.includes(status)) return { problem: "dead", status };
         if (!status || status < 200 || status >= 300) return { problem: "unreachable", status };
+        /** @type {string} */
         let text;
         try {
             text = response.text;
@@ -189,6 +205,10 @@ export default class CalendarFeed {
     }
 
     // Whether text starts as a calendar does (after any byte-order mark, which trimStart takes)
+    /**
+     * @param {unknown} text
+     * @returns {text is string}
+     */
     isCalendar(text) {
         return typeof text === "string" && /^BEGIN:VCALENDAR[ \t]*\r?\n/i.test(text.trimStart().slice(0, 40));
     }
@@ -214,6 +234,11 @@ export default class CalendarFeed {
     // Whose declined invitations are left out: your email address on the calendar, from Plainday's
     // settings, when you've given one; else the calendar's own, when its link says it (owner()); else
     // none, and every invitation is read (OBS-282)
+    /**
+     * @param {FeedCalendar} [calendar]
+     * @param {string | null} [link]
+     * @returns {string[] | null}
+     */
     owners(calendar = {}, link = null) {
         const given = typeof calendar?.address === "string" ? calendar.address.trim().replace(/^mailto:/i, "").toLowerCase() : "";
         if (given) return [given];
@@ -225,20 +250,26 @@ export default class CalendarFeed {
     // `calendar` is the calendar's { id, name, account, address } in Plainday's settings, `window`
     // from window(), and `link` the link it came from, which says whose calendar it is when it's
     // Google's and the calendar has no address of yours (owners()).
+    /**
+     * @param {string} text
+     * @param {{ calendar?: FeedCalendar, window: FeedWindow, link?: string | null }} options
+     * @returns {Promise<FeedRead | FeedProblem>}
+     */
     async read(text, { calendar = {}, window: range, link = null }) {
         if (!this.isCalendar(text)) return { problem: "unreadable" };
         const started = performance.now();
-        let url = null, worker = null;
+        let url = /** @type {string | null} */ (null), worker = /** @type {Worker | null} */ (null);
         try {
-            url = URL.createObjectURL(new Blob([calendarWorkerSource], { type: "text/javascript" }));
+            // The build provides the worker's script as text (host.js), which the types can't see
+            url = URL.createObjectURL(new Blob([/** @type {string} */ (calendarWorkerSource)], { type: "text/javascript" }));
             worker = new Worker(url);
         } catch {
             if (url) URL.revokeObjectURL(url);
             return { problem: "unreadable" };
         }
         return new Promise((resolve) => {
-            let timer = null, done = false;
-            const finish = (result) => {
+            let timer = /** @type {number | null} */ (null), done = false;
+            const finish = (/** @type {FeedRead | FeedProblem} */ result) => {
                 if (done) return;
                 done = true;
                 window.clearTimeout(timer);
@@ -248,7 +279,7 @@ export default class CalendarFeed {
                 resolve(result && typeof result === "object" ? result : { problem: "unreadable" });
             };
             timer = window.setTimeout(() => finish({ problem: "slow" }), CalendarFeed.READ_LIMIT_MS);
-            worker.onmessage = (event) => finish(event.data);
+            worker.onmessage = (/** @type {MessageEvent<FeedRead | FeedProblem>} */ event) => finish(event.data);
             worker.onerror = () => finish({ problem: "unreadable" });
             worker.onmessageerror = () => finish({ problem: "unreadable" });
             // Only what the reader needs, as text: a calendar's settings may hold more (its link)
@@ -269,8 +300,12 @@ export default class CalendarFeed {
 
     // A calendar's ID, name and account, as text, as the events carry them: the sync matches events
     // to calendars by ID
+    /**
+     * @param {FeedCalendar} [calendar]
+     * @returns {EventCalendar}
+     */
     calendarOf(calendar = {}) {
-        const text = (value) => (value === undefined || value === null ? null : String(value));
+        const text = (/** @type {unknown} */ value) => (value === undefined || value === null ? null : String(value));
         return { id: text(calendar.id), name: text(calendar.name), account: text(calendar.account) };
     }
 
@@ -313,17 +348,29 @@ export default class CalendarFeed {
     }
 
     // A day as YYYY-MM-DD, in this device's time zone
+    /**
+     * @param {Date} d
+     * @returns {string}
+     */
     date(d) {
         return `${d.getFullYear()}-${this.pad(d.getMonth() + 1)}-${this.pad(d.getDate())}`;
     }
 
     // An instant as local time with its offset, as moment().format() writes it: 2026-11-13T09:30:00-05:00
+    /**
+     * @param {Date} d
+     * @returns {string}
+     */
     stamp(d) {
         const offset = -d.getTimezoneOffset();
         const abs = Math.abs(offset);
         return `${this.date(d)}T${this.pad(d.getHours())}:${this.pad(d.getMinutes())}:${this.pad(d.getSeconds())}${offset < 0 ? "-" : "+"}${this.pad(Math.floor(abs / 60))}:${this.pad(abs % 60)}`;
     }
 
+    /**
+     * @param {number} n
+     * @returns {string}
+     */
     pad(n) {
         return String(n).padStart(2, "0");
     }
