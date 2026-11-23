@@ -607,6 +607,7 @@ const taskNoteApp = ({ notes = {}, templates = {}, templater = false, aliases = 
             createFolder: async (p) => { calls.push(`folder ${p}`); folders.add(p); },
             create: async (p, t) => { if (text.has(p)) throw new Error("File already exists."); calls.push(`create ${p}`); text.set(p, t); return fileOf(p); },
             read: async (f) => text.get(f.path),
+            process: async (f, fn) => { calls.push(`process ${f.path}`); text.set(f.path, fn(text.get(f.path))); },
         },
         metadataCache: {
             fileToLinktext: (f) => f.basename,
@@ -638,6 +639,8 @@ const taskNoteApp = ({ notes = {}, templates = {}, templater = false, aliases = 
     const ctx = vm.createContext({ app, normalizePath: (p) => p, moment: momentOn("2026-09-16"), stringifyYaml: YAML.stringifyYaml, console: { error: () => {} }, Notice: class { constructor(m) { notices.push(m); } }, plainday: withFolders({}) });
     const PeriodicNotes = vm.runInContext(classScript("periodicNotes.js") + "\n;PeriodicNotes", vm.createContext({ app, plainday: {}, moment: momentOn("2026-09-16"), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, ...YAML }));
     ctx.plainday.PeriodicNotes = new PeriodicNotes();
+    // ProjectNotes for its idFirst, the real one (OBS-317)
+    ctx.plainday.ProjectNotes = new (vm.runInContext(classScript("projectNotes.js") + "\n;ProjectNotes", vm.createContext({ app, plainday: ctx.plainday, ...YAML })))();
     const Fresh = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx);
     return { add: new Fresh(), text: (p) => text.get(p), calls, notices, home: fileOf("Projects/Home/Home.md") };
 };
@@ -681,26 +684,36 @@ test("createTaskNote cleans the name for any caller and leaves its dates off; a 
     assert.deepEqual(f.notices, ['A note named "Order toner" already exists, so no task note was made: open that one, or give this one another name']);
 });
 
-test("the Task template, when there is one: through Templater it adds its properties, and Plainday's parent and due stay; without Templater a plain one is filled in, one with Templater code is skipped (OBS-121)", async () => {
+test("the Task template, when there is one: through Templater it adds its properties, Plainday's parent and due stay, and its id goes first; without Templater a plain one is filled in, one with Templater code is skipped (OBS-121, OBS-317)", async () => {
     const TPL = "Config/Templates/Task.md", home = { "Projects/Home/Home.md": "" };
-    // Templater on: the repository's template adds its `id`; Plainday's properties are as it wrote them
+    // Templater on: the repository's template adds its `id`, last; it goes first, and Plainday's properties are as
+    // it wrote them
     const repo = fs.readFileSync(new URL("../../Templates/Task.md", here), "utf8");
     const run = (t) => t.replace(/<% tp\.date\.now\("YYYYMMDDHHmmssSS"\) %>/, "2026091612000000");
     let f = taskNoteApp({ notes: home, templates: { [TPL]: repo }, templater: run });
     await f.add.createTaskNote("Order toner 2026-09-30", f.home);
-    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md", `template ${TPL} on Projects/Home/Order toner.md`], "nothing put back: the template sets none of Plainday's");
-    assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\nparent: "[[Home]]"\ndue: 2026-09-30\nid: 2026091612000000\n---\n');
-    // A template that sets parent and due, and a tag: Plainday's parent and due are put back, the tags combined
-    const theirs = '---\ntags: [work]\nparent: "[[Somewhere]]"\ndue: 2027-01-01\nstatus: To Do\n---\nNotes\n';
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md", `template ${TPL} on Projects/Home/Order toner.md`, "process Projects/Home/Order toner.md"],
+        "nothing put back, since the template sets none of Plainday's; then its id moved up");
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\nid: 2026091612000000\ntags:\n  - task\nparent: "[[Home]]"\ndue: 2026-09-30\n---\n');
+    // A template that sets parent and due, a tag and an id: Plainday's parent and due are put back, the tags
+    // combined, and its id first
+    const theirs = '---\ntags: [work]\nparent: "[[Somewhere]]"\ndue: 2027-01-01\nstatus: To Do\nid: 2026091612000000\n---\nNotes\n';
     f = taskNoteApp({ notes: home, templates: { [TPL]: theirs }, templater: (t) => t });
     await f.add.createTaskNote("Order toner", f.home);
     const made = f.text("Projects/Home/Order toner.md");
-    assert.match(made, /\nparent: "?\[\[Home\]\]"?\n/);
-    assert.match(made, /\ndue:\s*\n/, "Plainday's empty due, not the template's");
-    assert.match(made, /tags:\n  - task\n  - work\n/);
-    assert.match(made, /\nstatus: To Do\n/);
-    assert.ok(made.endsWith("---\nNotes\n"));
+    assert.equal(made, '---\nid: 2026091612000000\ntags:\n  - task\n  - work\nparent: "[[Home]]"\ndue:\nstatus: To Do\n---\nNotes\n',
+        "its id first; Plainday's parent and empty due, not the template's; the tags combined; nothing else moved");
     assert.deepEqual(f.notices, []);
+    // Through Templater, a template without an id: as before, nothing moved
+    f = taskNoteApp({ notes: home, templates: { [TPL]: "---\nstatus: To Do\n---\n" }, templater: (t) => t });
+    await f.add.createTaskNote("Order toner", f.home);
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md", `template ${TPL} on Projects/Home/Order toner.md`]);
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\nparent: "[[Home]]"\ndue:\nstatus: To Do\n---\n');
+    // Templater off, a plain template with an id: its id first, in the one write
+    f = taskNoteApp({ notes: home, templates: { [TPL]: "---\nstatus: To Do\nid: {{date:YYYY}}09161200\n---\n" } });
+    await f.add.createTaskNote("Order toner", f.home);
+    assert.deepEqual(f.calls, ["create Projects/Home/Order toner.md"]);
+    assert.equal(f.text("Projects/Home/Order toner.md"), '---\nid: 202609161200\ntags:\n  - task\nparent: "[[Home]]"\ndue:\nstatus: To Do\n---\n');
     // Templater off, a plain template: its properties and text go in with Plainday's, in the one write
     const plain = "---\nstatus: To Do\ntags: [work]\nparent: \"[[Somewhere]]\"\n---\nMade {{date}} for {{title}}\n";
     f = taskNoteApp({ notes: home, templates: { [TPL]: plain } });

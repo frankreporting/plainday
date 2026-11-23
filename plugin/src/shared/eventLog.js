@@ -286,7 +286,7 @@ export default class EventLog {
 
     // The Log template run on the log through Templater, which adds the template's properties to Plainday's and its
     // text after them; then Plainday's values again where the template set its own, its alias first and `log` among
-    // the tags
+    // the tags; then the template's `id` first
     async withTemplater(templater, tpl, file, own) {
         const notes = plainday.PeriodicNotes;
         await templater.write_template_to_file(tpl, file);
@@ -296,28 +296,34 @@ export default class EventLog {
         const same = (key) => String(front[key] ?? "") === own[key];
         const aliases = [].concat(front.aliases ?? []), tags = [].concat(front.tags ?? []);
         const tagged = tags.some((t) => String(t).toLowerCase() === "log");
-        if (EventLog.OWN.every(same) && aliases[0] === own.alias && tagged) return;
-        await app.fileManager.processFrontMatter(file, (f) => {
-            for (const key of EventLog.OWN) if (String(f[key] ?? "") !== own[key]) f[key] = own[key] || null;
-            const others = [].concat(f.aliases ?? []).filter((a) => a !== null && a !== "" && a !== own.alias);
-            f.aliases = [own.alias, ...others];
-            const more = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
-            if (!more.some((t) => String(t).toLowerCase() === "log")) f.tags = ["log", ...more];
-        });
+        if (!EventLog.OWN.every(same) || aliases[0] !== own.alias || !tagged) {
+            await app.fileManager.processFrontMatter(file, (f) => {
+                for (const key of EventLog.OWN) if (String(f[key] ?? "") !== own[key]) f[key] = own[key] || null;
+                const others = [].concat(f.aliases ?? []).filter((a) => a !== null && a !== "" && a !== own.alias);
+                f.aliases = [own.alias, ...others];
+                const more = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
+                if (!more.some((t) => String(t).toLowerCase() === "log")) f.tags = ["log", ...more];
+            });
+        }
+        // Templater adds a template's new properties last; its `id` goes first, as in every note (OBS-317)
+        await plainday.ProjectNotes.idFirst(file);
     }
 
-    // A new log's text, `own` its alias, `parent` (a link, or ""), `date`, `time`, `endTime` and `who`: Plainday's
-    // properties in the order the Log template wrote them, then `extra` (a template's other properties), then `body`
+    // A new log's text, `own` its alias, `parent` (a link, or ""), `date`, `time`, `endTime` and `who`: a template's
+    // `id` first, as in every note (OBS-317), then Plainday's properties in the order the Log template wrote them,
+    // then `extra` (a template's other properties), then `body`
     noteText(own, { aliases = [own.alias], tags = ["log"], extra = {}, body = "" } = {}) {
         const scalar = (v) => plainday.PeriodicNotes.scalar(String(v));
         // A time as the Log template and the calendar sync write it, bare: `9:00am` reads back as that text
         const bare = (key) => (own[key] ? `${key}: ${/^\d{1,2}:\d{2}[ap]m$/i.test(own[key]) ? own[key] : scalar(own[key])}` : `${key}:`);
+        const { id, ...others } = extra;
         const lines = [
-            "---", "aliases:", ...aliases.map((a) => `  - ${scalar(a)}`), "tags:", ...tags.map((t) => `  - ${scalar(t)}`),
+            "aliases:", ...aliases.map((a) => `  - ${scalar(a)}`), "tags:", ...tags.map((t) => `  - ${scalar(t)}`),
             own.parent ? `parent: ${JSON.stringify(own.parent)}` : "parent:", bare("date"), bare("time"), bare("endTime"), bare("who"),
         ];
-        const more = Object.keys(extra).length ? stringifyYaml(extra) : "";
-        return `${lines.join("\n")}\n${more}---\n${body}`;
+        const first = "id" in extra ? stringifyYaml({ id }) : "";
+        const more = Object.keys(others).length ? stringifyYaml(others) : "";
+        return `---\n${first}${lines.join("\n")}\n${more}---\n${body}`;
     }
 
     // `text` with a template's text, `filled`, added, without Templater: the properties combined as
