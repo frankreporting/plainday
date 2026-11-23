@@ -1,6 +1,18 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { Model } from "../commands/timeReport.js" */
+/**
+ * One Problem as the log lists it: its kind, the link to the note to start from, and that note's
+ * name; a line's worth of them, with how many (`count`) and how many are new (`added`, fresh).
+ * @typedef {{ kind: string, link: string, name: string }} ErrorItem
+ * @typedef {ErrorItem & { count: number, added?: number }} ErrorGroup
+ *
+ * A section of the log note: its text, and its lines by key ("Bad formatting · [[2026-09-16]]") with
+ * their counts.
+ * @typedef {{ body: string, lines: Map<string, number> }} ErrorSection
+ */
+
 // The error log (OBS-218): every Problem the system found, in one note (Settings → Plainday →
 // Folders → Error log note, OBS-283), one line per kind of Problem per note
 // (`- Bad formatting (2) · [[2026-09-16]]`), linking the note to start from. The detail stays in the
@@ -68,6 +80,11 @@ export default class ErrorLog {
     // whether or not it names a project; their lines link the project's note, whose Problems callout
     // names the invoice and links the daily note to fix (Brian, 2026-10-29), else the invoice. A task Problem is listed once, at its line's note, not again
     // under each project; time with no project isn't a Problem here: errands have none on purpose.
+    /**
+     * @param {Model} model
+     * @param {(path: string) => string} link
+     * @returns {ErrorGroup[]}
+     */
     fromModel(model, link) {
         const out = [];
         const add = (kind, path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
@@ -112,6 +129,10 @@ export default class ErrorLog {
     }
 
     // [{ kind, link, name }] as one line's worth each, [{ kind, link, name, count }], in the log's order
+    /**
+     * @param {ErrorItem[]} items
+     * @returns {ErrorGroup[]}
+     */
     group(items) {
         const byKey = new Map();
         for (const i of items) {
@@ -136,6 +157,10 @@ export default class ErrorLog {
     }
 
     // The note's sections as Map(section → { body, lines: Map(key → count) })
+    /**
+     * @param {string} text
+     * @returns {Map<string, ErrorSection>}
+     */
     sections(text) {
         const out = new Map();
         const body = this.split(text).body;
@@ -196,6 +221,12 @@ export default class ErrorLog {
 
     // Writes `section` from this run's groups, when its list changed, and returns the new ones. Only
     // a device that may create the note does when it's missing (the desktop, as for periodic notes).
+    /**
+     * @param {string} section
+     * @param {ErrorGroup[]} groups
+     * @param {{ create?: boolean }} [options]
+     * @returns {Promise<ErrorGroup[]>}
+     */
     async write(section, groups, { create = false } = {}) {
         const path = this.path();
         const file = app.vault.getFileByPath(path);
@@ -215,6 +246,10 @@ export default class ErrorLog {
     }
 
     // One toast for a run's new lines, with a link to the log
+    /**
+     * @param {string} source
+     * @param {ErrorGroup[]} fresh
+     */
     toast(source, fresh) {
         if (!fresh.length) return;
         const words = this.toastText(source, fresh);

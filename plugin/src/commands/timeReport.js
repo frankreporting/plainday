@@ -1,6 +1,110 @@
 import { getFrontMatterInfo, moment, Notice, parseYaml, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { CachedMetadata } from "obsidian" */
+/** @import { Period, Unit } from "../shared/datePrompt.js" */
+/** @import { BilledChange, BilledRow, Invoice, Ledger } from "../shared/billing.js" */
+/** @import Billing from "../shared/billing.js" */
+/** @import Schedule from "./schedule.js" */
+/**
+ * A link's name, or its path's last part, read as a periodic note's: { unit, date } (the period's
+ * first day), or null (reader).
+ * @typedef {(linktext: string) => Period | null} NameReader
+ *
+ * What the report reads of a note (scan): each line as Obsidian shows it, the lines where nothing
+ * shows, where the frontmatter ends (-1 for none), the report marker lines and their blocks, and
+ * what's left open at the end.
+ * @typedef {{ visible: string[], hidden: boolean[], frontmatterEnd: number, starts: number[], ends: number[], blocks: { start: number, end: number }[], unclosed: { line: number, what: string }[] }} Scan
+ *
+ * The links that end a line (lineLinks): ⭕ and 🗃️, ⋯, ↗ and 🚩, each { target, alias }, and the
+ * link an old event's title is wrapped in.
+ * @typedef {{ target: string, alias: string }} LineLink
+ * @typedef {{ marks: LineLink[], notes: LineLink[], from: LineLink[], due: LineLink[], title: LineLink | null }} LineLinks
+ *
+ * Where the time on a line counts (resolve), and what the line disagrees with: two project links,
+ * or a ⭕ against its own note's project.
+ * @typedef {{ links?: string[], note?: string, noteProject?: string | null, lineProject: string, event: boolean }} Conflict
+ * @typedef {{ project: string | null, archived: boolean, live: string | null, conflict: Conflict | null }} Place
+ *
+ * What the report asks about notes, by path (appIndex, makeIndex): `kind` is "day", "week",
+ * "month", "year" or "other", `props` a note's frontmatter.
+ * @typedef {{
+ *   exists(path: string): boolean, isProject(path: string): boolean, isArea(path: string): boolean,
+ *   isInvoice(path: string): boolean, isTimesheet(path: string): boolean, isTaskNote(path: string): boolean,
+ *   isLog(path: string): boolean, kind(path: string): string, inSystem(path: string): boolean,
+ *   inInbox(path: string): boolean, paths(): string[], parentLink(path: string): string | null,
+ *   props?(path: string): Record<string, unknown>, linkDest(linktext: string, fromPath: string): string | null,
+ * }} ReportIndex
+ *
+ * A note the report reads: a daily note, with its date (build), or any note whose lines are checked.
+ * @typedef {{ date: string, path: string, text: string }} DayNote
+ * @typedef {{ path: string, text: string, date?: string | null, kind?: string }} ReadNote
+ *
+ * An invoice note as readInvoices finds it, for Billing to read.
+ * @typedef {{ path: string, props: Record<string, unknown>, text: string, tagged: boolean, error: string | null }} InvoiceNote
+ *
+ * A line of a nest, as the report quotes it: its text as shown, and its line from 1.
+ * @typedef {{ body: string, line: number }} Context
+ *
+ * A time entry: its daily note's date and line (from 1), its start and end in minutes after that
+ * day's midnight (an end past midnight is over 1440), and the project it counts toward. An ended
+ * busy event's span is one too, with its line's times and text.
+ * @typedef {{
+ *   date: string, line: number, path?: string, project?: string | null, archived?: boolean, subTask?: boolean,
+ *   start: number, end: number, minutes: number, crossesMidnight: boolean, free: boolean, note: string, task: string,
+ *   context: Context[], top?: number | null, startText?: string, endText?: string, text?: string,
+ *   billable?: boolean, disputed?: boolean, report?: Entry,
+ * }} Entry
+ *
+ * A timed event line, and what's under it (parseNote): its start and end in minutes, null when
+ * there's none.
+ * @typedef {{
+ *   date: string, line: number, start: number | null, startText: string, end: number | null, endText: string | null,
+ *   endBare: boolean, endNote: string, endFree: boolean, endStray: boolean, lineFree: boolean, lineStray: boolean,
+ *   free: boolean, ranges: boolean, minutes: number, text: string, context: Context[], top: number | null,
+ *   subTask: boolean, crossesMidnight?: boolean, path?: string, project?: string | null, archived?: boolean,
+ * }} ReportEvent
+ *
+ * A Problem on a line: its kind, the words a report says, and the line. `group` names a Problem
+ * about a whole task, said once.
+ * @typedef {{
+ *   date: string, line: number, kind: string, message: string, text: string, path?: string, note?: string, unit?: Unit,
+ *   projects?: (string | null)[], context?: Context[], top?: number | null, start?: number | null, rule?: string,
+ *   group?: string, lead?: string, title?: string, other?: { path: string, line: number },
+ * }} Problem
+ *
+ * A Problem on a project's own note: a setting, a loop of parents, an invoice, or a line that
+ * disagrees with itself (`conflict`, on each project it names; `side` says which).
+ * @typedef {{ kind: string, date: string, path: string, line: number, text: string, event: boolean, lineProject: string, side: "line" | "note", links?: string[], note?: string, noteProject?: string | null, inbox?: boolean }} LineConflict
+ * @typedef {{
+ *   project: string | null, parent?: string | null, message?: string, said?: string, only?: string,
+ *   invoice?: Invoice, noProject?: boolean, problem?: string | null, change?: BilledChange, twice?: { row: BilledRow, invoices: Invoice[] },
+ *   kind?: string, path?: string, line?: number, rule?: string, group?: string, named?: string | null, folder?: string | null,
+ *   conflict?: LineConflict,
+ * }} ProjectProblem
+ *
+ * A project's money (moneyOf): its rate, `rate_type`, Rate label, cap in minutes, the rate that
+ * values non-billable time, a flat fee and the day it was earned.
+ * @typedef {{ rate: number | null, type: string | null, label: string, capMinutes: number | null, invest: number | null, fee: number | null, earned: string | null }} Money
+ *
+ * The report's model (build), with the invoice notes attached (attachBilling) and the tables'
+ * default freeze (currentModel).
+ * @typedef {{
+ *   entries: Entry[], billingEntries: Entry[], disputed: Entry[], problems: Problem[], parent: Map<string, string | null>,
+ *   projectProblems: ProjectProblem[], money: Map<string, Money>, events: ReportEvent[], areas: Set<string>,
+ *   billing?: { billing: Billing, invoices: Invoice[], ledger: Ledger, index: ReportIndex, byInvoice: Map<Invoice, BilledChange[]> },
+ *   tables?: unknown,
+ * }} Model
+ *
+ * The cursor's place in a note, and what the timer hotkey does (toggleEntry): a start's edit is
+ * `from`, `to`, `text` and `cursor`, a stop's `line` and `text`.
+ * @typedef {{ line: number, ch: number }} Cursor
+ * @typedef {{ text: string, from?: Cursor, to?: Cursor, cursor?: Cursor, line?: number }} EntryEdit
+ * @typedef {{
+ *   action?: "start" | "stop", edit?: EntryEdit, status?: { line: number, text: string }, summary?: string,
+ *   jump?: Cursor, choose?: { line: number, label: string }[], pick?: boolean, elsewhere?: boolean, error?: string,
+ * }} Toggle
+ */
 export default class TimeReport {
     // Time reports built from the time entries in daily notes. Runs at startup on the desktop
     // (TimeReportOnStartup), and as the command "Plainday: Time report". It writes only to these
@@ -219,6 +323,7 @@ export default class TimeReport {
         return w;
     }
 
+    /** @param {string} text */
     lines(text) {
         return text.split(/\r?\n/);
     }
@@ -228,6 +333,10 @@ export default class TimeReport {
     // `- [ ] Task  [[P]]`. Returns { visible: [text per line], hidden: [true where nothing shows],
     // frontmatterEnd (line or -1), starts, ends (report marker lines), blocks: [{ start, end }]
     // (each start paired with the next end), unclosed: [{ line, what }] }.
+    /**
+     * @param {string[]} lines
+     * @returns {Scan}
+     */
     scan(lines) {
         const visible = lines.slice();
         const hidden = new Array(lines.length).fill(false);
@@ -306,6 +415,7 @@ export default class TimeReport {
     // What a line is: "entry" (a whole range), "open" (running clock), "rangeish" (a bullet that
     // looks like a range but doesn't match), "item" (any other list item), "event" (an old-style
     // meeting line), "heading" or "text"
+    /** @param {string} line */
     classify(line) {
         const bullet = line.match(TimeReport.BULLET);
         if (bullet) {
@@ -581,6 +691,10 @@ export default class TimeReport {
     // A task or event line as plain text for a table: no checkbox, event time, symbol links or
     // date breadcrumbs; other links show their alias. A 🆓 comes out: a timesheet shows it in its own
     // column (OBS-242).
+    /**
+     * @param {string} body
+     * @returns {string}
+     */
     taskText(body) {
         const read = this.reader();
         // A moved event's link to its new day (its time follows), or a breadcrumb from before task IDs (a day)
@@ -630,6 +744,10 @@ export default class TimeReport {
     // Time counts toward a project or an area (OBS-51). An area (#area) takes time linked to it, or to
     // a note filed straight under it, as its own row, but it's never a parent: projects inside it
     // don't add up into it, so it isn't a total of anything.
+    /**
+     * @param {string} path
+     * @param {ReportIndex} index
+     */
     counts(path, index) {
         return index.isProject(path) || index.isArea(path);
     }
@@ -655,6 +773,10 @@ export default class TimeReport {
         return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
     }
 
+    /**
+     * @param {string} path
+     * @returns {string}
+     */
     basename(path) {
         return path.split("/").pop().replace(/\.md$/, "");
     }
@@ -672,6 +794,10 @@ export default class TimeReport {
     // `area`, which is read when a note has no `parent`, so a vault works before its notes are renamed.
     // A note's `parent` link from its frontmatter (`area` on older notes), or null. One pass over
     // the keys, since the report asks for every note's
+    /**
+     * @param {Record<string, unknown> | null | undefined} fm
+     * @returns {string | null}
+     */
     parentValue(fm) {
         if (!fm) return null;
         let parent, area;
@@ -700,6 +826,11 @@ export default class TimeReport {
 
     // The project or area a note belongs to: itself if it's one, else the nearest project or area
     // folder note above it. Its `parent` says nothing (rule 3).
+    /**
+     * @param {string} path
+     * @param {ReportIndex} index
+     * @returns {string | null}
+     */
     projectOfNote(path, index) {
         const counts = (p) => this.counts(p, index);
         if (counts(path)) return path;
@@ -722,6 +853,11 @@ export default class TimeReport {
     // links, due: its 🚩 links, title: the link an old event's title is wrapped in, or null }, each
     // { target, alias }. Only the run of links that ends the line counts, stepping over the free mark
     // and 🆓 among them, and a block ID after them; a link in the text is part of the title.
+    /**
+     * @param {string} body
+     * @param {NameReader} [read]
+     * @returns {LineLinks}
+     */
     lineLinks(body, read) {
         const marks = [], own = [], from = [], due = [];
         let rest = body.trimEnd().replace(TimeReport.BLOCK_ID, "").trimEnd();
@@ -785,6 +921,14 @@ export default class TimeReport {
     //             `lineProject`, and `event` for an event line, as the Problem is worded for one.
     // In a note that isn't a daily, weekly, monthly or yearly note a line has no project of its own, and
     // a line whose top isn't a checklist or event line at the left edge isn't defined in the system.
+    /**
+     * @param {(n: number) => string | undefined} lineAt
+     * @param {number} i
+     * @param {string} path
+     * @param {ReportIndex} index
+     * @param {number} [top]
+     * @returns {Place}
+     */
     resolve(lineAt, i, path, index, top = this.nestTop(lineAt, i)) {
         if (index.kind(path) === "other") return TimeReport.NO_PLACE;
         const line = lineAt(top);
@@ -815,6 +959,12 @@ export default class TimeReport {
     // A line's own notes, as `links` (lineLinks) gives them: what its ⋯ links, and the log an older
     // event's title is wrapped in, when that note is in the system or in Archive. A ⋯ to any other note
     // is a reference, which nothing compares, and a ↗ is read by nobody (rule 4, *Words*).
+    /**
+     * @param {LineLinks} links
+     * @param {string} path
+     * @param {ReportIndex} index
+     * @returns {string[]}
+     */
     ownNote(links, path, index) {
         return [...links.notes, ...(links.title ? [links.title] : [])]
             .map((l) => (this.isDateLink(l.target) ? null : index.linkDest(l.target, path)))
@@ -825,6 +975,14 @@ export default class TimeReport {
     // periodic notes, the one its note is in (rule 4). With `live`, for a command, an archived ⭕ is passed
     // over; the task checks read the line as the report counts it, archived projects included (OBS-213).
     // Where the line disagrees with itself it's the ⭕, so the checks don't list the line a second time.
+    /**
+     * @param {{ path: string }} note
+     * @param {number} i
+     * @param {string[]} lines
+     * @param {ReportIndex} index
+     * @param {boolean} [live]
+     * @returns {string | null}
+     */
     lineProject(note, i, lines, index, live = true) {
         if (index.kind(note.path) === "other") return this.projectOfNote(note.path, index);
         const where = this.resolve((n) => lines[n], i, note.path, index);
@@ -1292,6 +1450,10 @@ export default class TimeReport {
         return !!path && !!folder && path.startsWith(`${folder}/`);
     }
 
+    /**
+     * @param {string} path
+     * @returns {boolean}
+     */
     isArchived(path) {
         return this.inFolder(path, this.systemFolders().archive);
     }
@@ -1327,6 +1489,11 @@ export default class TimeReport {
         return Number.isFinite(n) && n > 0 ? n : null;
     }
 
+    /**
+     * @param {Record<string, unknown>} props
+     * @param {string} name
+     * @returns {unknown}
+     */
     prop(props, name) {
         const key = Object.keys(props ?? {}).find((k) => k.toLowerCase() === name);
         return key ? props[key] : undefined;
@@ -1335,6 +1502,12 @@ export default class TimeReport {
     // notes: [{ date: "YYYY-MM-DD", path, text }]. With `now` ({ date, minutes }), entries and events
     // that haven't ended yet are left out, and don't overlap anything; without it everything counts.
     // `checked` is every note whose lines the own-note check reads (taskNotes), `notes` by default.
+    /**
+     * @param {DayNote[]} notes
+     * @param {ReportIndex} index
+     * @param {{ now?: { date: string, minutes: number } | null, checked?: ReadNote[] }} [options]
+     * @returns {Model}
+     */
     build(notes, index, { now = null, checked = notes } = {}) {
         // The week settings are read again for each report
         this.cal = null;
@@ -1571,6 +1744,12 @@ export default class TimeReport {
 
     // Invoice notes as Billing reads them, in number order, then path, so the first invoice to bill an entry
     // is always the same one, whatever order the vault lists its files in
+    /**
+     * @param {InvoiceNote[]} notes
+     * @param {ReportIndex} index
+     * @param {Billing} billing
+     * @returns {Invoice[]}
+     */
     readBilled(notes, index, billing) {
         return notes.map((n) => billing.readInvoice(n, this, index))
             .sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }) || a.path.localeCompare(b.path));
@@ -1670,6 +1849,7 @@ export default class TimeReport {
     // path's last part, in; { unit, date } (the period's first day) or null out. The one a run took when it
     // began (refresh, currentModel), else Plainday's (PeriodicNotes.reader), else plainName where Plainday
     // isn't loaded. Every TaskIds helper the report calls is handed it.
+    /** @returns {NameReader} */
     reader() {
         return this.runRead ?? plainday?.PeriodicNotes?.reader?.() ?? TimeReport.plainName;
     }
@@ -1941,6 +2121,7 @@ export default class TimeReport {
         return Math.ceil(minutes / step) * step;
     }
 
+    /** @param {number} minutes */
     hours(minutes) {
         return (minutes / 60).toFixed(2);
     }
@@ -2022,6 +2203,7 @@ export default class TimeReport {
         return t;
     }
 
+    /** @param {number} cents */
     money(cents) {
         const [whole, frac] = (cents / 100).toFixed(2).split(".");
         return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${frac}`;
@@ -3106,6 +3288,11 @@ export default class TimeReport {
 
     // Last line of a task's sub-bullets, across blank lines between them, and comment-only lines no deeper
     // than the task (one indented under it is part of it)
+    /**
+     * @param {string[]} lines
+     * @param {number} anchor
+     * @returns {number}
+     */
     subtreeEnd(lines, anchor) {
         const w = this.indentWidth(lines[anchor]);
         let k = anchor;
@@ -3128,6 +3315,11 @@ export default class TimeReport {
     // skipped, as parseNote skips them, and so are blank and comment-only lines; a paragraph or heading
     // at the left edge ends the walk. `lineAt(n)` gives line n, so an editor's lines are read one at a
     // time, never the whole note. Pure.
+    /**
+     * @param {(n: number) => string | undefined} lineAt
+     * @param {number} i
+     * @returns {number}
+     */
     nestTop(lineAt, i) {
         const isBox = (l) => /^\s*[-*+]\s+\[.\]/.test(l);
         let top = i, width = this.indentWidth(lineAt(i));
@@ -3150,6 +3342,10 @@ export default class TimeReport {
     // Line `i` through nestTop, for every command (rule 5): { at, line, box, event }, the top's index and
     // text, its checkbox character (null for a line with none) and what kind of event it is (eventKind;
     // null for a task). `lines` is an array, or a function giving line n.
+    /**
+     * @param {string[] | ((n: number) => string)} lines
+     * @param {number} i
+     */
     topOf(lines, i) {
         const lineAt = typeof lines === "function" ? lines : (n) => lines[n];
         const at = this.nestTop(lineAt, i);
@@ -3162,6 +3358,7 @@ export default class TimeReport {
     // its date in front and then the event's time and a tab; "canceled" for a [-] line it wrote, the
     // event's time and a tab first; "meeting" for a line in the form days used before August 2025, at
     // the left edge with no bullet and its time first (classify's "event").
+    /** @param {string} line */
     eventKind(line) {
         const m = line.match(/^\s*[-*+]\s+\[(.)\]\s*(.*)$/);
         if (!m) return this.classify(line).kind === "event" ? "meeting" : null;
@@ -3267,6 +3464,14 @@ export default class TimeReport {
     // isn't a daily note). With `canStart` false (a note other than today's daily note, where the
     // report wouldn't count the time), a start becomes { pick: true, elsewhere: true }: the dropdown
     // of today's note instead. Stops still work.
+    /**
+     * @param {string[]} lines
+     * @param {number} cursorLine
+     * @param {string} now
+     * @param {number} [daysAgo]
+     * @param {boolean} [canStart]
+     * @returns {Toggle}
+     */
     toggleEntry(lines, cursorLine, now, daysAgo = 0, canStart = true) {
         const all = this.openLines(lines);
         if (all.includes(cursorLine)) return this.stopToggle(lines, cursorLine, now, daysAgo);
@@ -3307,6 +3512,11 @@ export default class TimeReport {
 
     // Where the cursor goes on a line you jump to: right after the dash on an entry, where its end
     // time is typed, else the end of the line
+    /**
+     * @param {string[]} lines
+     * @param {number} line
+     * @returns {Cursor}
+     */
     lineCursor(lines, line) {
         const start = this.classify(lines[line]).kind !== "entry" ? lines[line].match(TimeReport.ENTRY_START) : null;
         return { line, ch: start ? start[0].length : lines[line].length };
@@ -3411,6 +3621,7 @@ export default class TimeReport {
     }
 
     // Rebuilds every report. `quiet` (the startup run) shows a notice only when something needs you.
+    /** @param {{ quiet?: boolean }} options */
     async refresh({ quiet }) {
         if (window.timeReportRunning) { if (!quiet) new Notice("The time report is already running"); return; }
         window.timeReportRunning = true;
@@ -3545,6 +3756,10 @@ export default class TimeReport {
 
     // A daily note's date, for one the report's list doesn't hold: its name read as a day's (reader), not taken
     // from the name as it is; the name itself when it doesn't read as one
+    /**
+     * @param {string} path
+     * @returns {string}
+     */
     dailyDate(path) {
         const name = this.basename(path);
         const day = this.reader()(name);
@@ -3733,6 +3948,10 @@ export default class TimeReport {
     // still say what's been billed. An invoice is tagged `invoice` in its frontmatter, as the Invoice
     // command writes it; an inline #invoice (a daily note mentioning one) doesn't make a note one.
     // [{ path, props, text }]
+    /**
+     * @param {Billing} [billing]
+     * @returns {Promise<InvoiceNote[]>}
+     */
     async readInvoices(billing = plainday.Billing) {
         // A note where invoices are filed (an invoices/ folder, or the invoice folder in Settings → Plainday) that still
         // has its Billed entries counts too, flagged, so an invoice whose tag or frontmatter got lost
@@ -3761,6 +3980,10 @@ export default class TimeReport {
     }
 
     // A note's tags from its cache, frontmatter and inline, lowercased, without the #
+    /**
+     * @param {Pick<CachedMetadata, "frontmatter" | "tags">} cache
+     * @returns {string[]}
+     */
     tagsOf(cache) {
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
@@ -3892,6 +4115,7 @@ export default class TimeReport {
         return { file };
     }
 
+    /** @returns {ReportIndex} */
     appIndex() {
         const cacheOf = (path) => {
             const f = app.vault.getFileByPath(path);
@@ -3942,12 +4166,17 @@ export default class TimeReport {
 
     // A line the one-time conversion reads (TaskIds.linkBackPass): a list line, or a meeting line in the
     // form days used before August 2025
+    /** @param {string} line */
     convertible(line) {
         return /^\s*[-*+] /.test(line) || this.eventKind(line) === "meeting";
     }
 
     // How many lines of `daily` ([{ text }]) the one-time conversion would change (TaskIds.linkBackPass):
     // a convertible line whose run ends in a 🗒️ or 🔗 link, the marks before OBS-208
+    /**
+     * @param {{ text: string }[]} daily
+     * @returns {number}
+     */
     oldMarkLines(daily) {
         const T = plainday?.TaskIds?.constructor;
         const read = this.reader();
@@ -3962,6 +4191,10 @@ export default class TimeReport {
 
     // How many lines in all the daily notes, timed or not, the one-time conversion would still change:
     // the calendar sync and the Log template wait while there are any (OBS-208)
+    /**
+     * @param {Schedule} [schedule]
+     * @returns {Promise<number>}
+     */
     async oldMarksLeft(schedule = plainday.Schedule) {
         let n = 0;
         for (const f of app.vault.getMarkdownFiles()) {

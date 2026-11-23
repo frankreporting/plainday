@@ -1,6 +1,12 @@
 import { MarkdownView, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/**
+ * A log make() found or made: its note, and whether it was made just now.
+ * @typedef {{ file: TFile, made: boolean }} LogMade
+ */
+
 export default class EventLog {
     // Event logs, made in code (OBS-122), as the Log template made them before: a log is named with its day, spelled
     // the way the daily notes are named (OBS-300), and its event's title ("2026-09-17 Kestrel standup" in the demo,
@@ -18,11 +24,17 @@ export default class EventLog {
     constructor() {
         // The logs being made now, by name: a second call for the same log gets the first one's, and FinishLinkedLogs
         // leaves these alone
+        /** @type {Map<string, Promise<LogMade | null>>} */
         this.making = new Map();
     }
 
     // A log's name for `title` on `date` (YYYY-MM-DD): the day's name, as its daily note is named (OBS-300), a space,
     // and the title cleaned as AddTaskNote cleans a note's name
+    /**
+     * @param {string} date
+     * @param {string} title
+     * @returns {string}
+     */
     nameFor(date, title) {
         return `${plainday.PeriodicNotes.where("day", date).name} ${plainday.AddTaskNote.fileName(title)}`;
     }
@@ -30,6 +42,10 @@ export default class EventLog {
     // A log's day and title, read from its name: { date (YYYY-MM-DD), title }, or null when the name doesn't start
     // with a day's name, as the daily notes are named, a space and a title (OBS-300). The day is the part before the
     // first space that reads as one, so a day's name with spaces in it ("17 September 2026") reads too.
+    /**
+     * @param {string | null | undefined} name
+     * @returns {{ date: string, title: string } | null}
+     */
     dayOf(name) {
         name = String(name ?? "");
         const read = plainday.PeriodicNotes.reader();
@@ -46,6 +62,10 @@ export default class EventLog {
     // { file, made }, or null when there's no title. `name` is the log's name when an event line already links one by
     // another name, and `time` the start to prefer when several lines have the title. The event line links the log
     // (recordEvent), and the log takes its times from it.
+    /**
+     * @param {{ date: string, title: string, name?: string | null, time?: string }} log
+     * @returns {Promise<LogMade | null>}
+     */
     async make({ date, title, name = null, time = "" }) {
         title = String(title ?? "").trim();
         name ??= this.nameFor(date, title);
@@ -63,6 +83,10 @@ export default class EventLog {
 
     // A note an event line's ⋯ links, made blank just now some other way (FinishLinkedLogs): it becomes that log, filled
     // and filed as make() would make it. Returns "finished", or null when no event line links it or it isn't blank.
+    /**
+     * @param {TFile | null} file
+     * @returns {Promise<"finished" | null>}
+     */
     async finish(file) {
         const named = file ? this.dayOf(file.basename) : null;
         if (!named || this.making.has(file.basename)) return null;
@@ -142,6 +166,7 @@ export default class EventLog {
         return { status, name: file.basename, path: file.path, ...more };
     }
 
+    /** @param {TFile} file */
     async open(file) {
         const leaf = app.workspace.getLeaf(false);
         await leaf.openFile(file, { state: { mode: "source" }, eState: { focus: true } });

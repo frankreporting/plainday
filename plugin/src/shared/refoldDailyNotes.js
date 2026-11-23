@@ -1,6 +1,24 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile, WorkspaceLeaf } from "obsidian" */
+/** @import { Fold, FoldView, MomentFn } from "../host.js" */
+/**
+ * What a device remembers of a daily note (a snapshot): when it was taken, the note's line count,
+ * whether its frontmatter was collapsed, and each item with sub-bullets, by line, text (checkbox
+ * status blanked) and whether it was folded. Snapshots are kept by path.
+ * @typedef {{ from: number, text: string, folded: boolean }} SnapItem
+ * @typedef {{ taken: number, lines: number, props: boolean, items: SnapItem[] }} Snapshot
+ * @typedef {Record<string, Snapshot>} Snapshots
+ *
+ * Why a note is refolded: "open" (a note being opened), "sync" (the command after
+ * SnapshotDailyNotes) or "command" (the command on its own)
+ * @typedef {"open" | "sync" | "command"} Mode
+ *
+ * A leaf, when its view is a Markdown view (each use checks its type first)
+ * @typedef {WorkspaceLeaf & { view: FoldView }} FoldLeaf
+ */
+
 export default class RefoldDailyNotes {
     // Obsidian saves each note's folds per device as {folds, lines} and ignores them once the
     // note's line count stops matching, which is what happens when something outside Obsidian
@@ -36,7 +54,7 @@ export default class RefoldDailyNotes {
     static KEEP_DAYS = 31;
 
     async invoke() {
-        const started = app.loadLocalStorage(RefoldDailyNotes.SYNC_KEY);
+        const started = /** @type {number | null} */ (app.loadLocalStorage(RefoldDailyNotes.SYNC_KEY));
         const mode = started && Date.now() - started < RefoldDailyNotes.SYNC_WINDOW_MS ? "sync" : "command";
         app.saveLocalStorage(RefoldDailyNotes.SYNC_KEY, null);
         let refolded = 0;
@@ -50,11 +68,13 @@ export default class RefoldDailyNotes {
         if (refolded) new Notice(`Refolded ${refolded} daily note${refolded === 1 ? "" : "s"}`);
     }
 
+    /** @param {TFile | null} file */
     async onOpen(file) {
         if (this.isDaily(file)) await this.refold(file, "open");
     }
 
     // Snapshot a note you're leaving: from its open view if it still has one, else its saved folds
+    /** @param {TFile} file */
     async onLeave(file) {
         if (!this.isDaily(file) || !app.vault.getFileByPath(file.path)) return;
         const view = this.viewsOf(file)[0];
@@ -67,11 +87,13 @@ export default class RefoldDailyNotes {
 
     // Snapshot every open daily note: as Obsidian quits, and for the SnapshotDailyNotes command,
     // which also marks a sync as started so the refold afterwards can trust these snapshots
+    /** @param {boolean} [forSync] */
     snapshotOpen(forSync = false) {
         for (const file of this.openDailyNotes()) this.snapshotView(this.viewsOf(file)[0]);
         if (forSync) app.saveLocalStorage(RefoldDailyNotes.SYNC_KEY, Date.now());
     }
 
+    /** @param {FoldView} view */
     snapshotView(view) {
         this.remember(view.file, view.getViewData(), view.currentMode.getFoldInfo?.()?.folds ?? []);
     }
@@ -79,6 +101,11 @@ export default class RefoldDailyNotes {
     // Returns true if the note's folds changed; in "sync" and "command" an open editor gets its folds
     // again either way. `mode` is "open" (a note being opened), "sync" (the command after
     // SnapshotDailyNotes) or "command" (the command on its own).
+    /**
+     * @param {TFile} file
+     * @param {Mode} mode
+     * @returns {Promise<boolean>}
+     */
     async refold(file, mode) {
         const text = await app.vault.read(file);
         const lines = text.split("\n");
@@ -86,6 +113,7 @@ export default class RefoldDailyNotes {
         // Only a view showing exactly what's on disk can take new folds (applyFoldInfo does
         // nothing unless `lines` matches); one that never catches up is being typed in, so leave it
         const views = this.viewsOf(file);
+        /** @type {FoldView[]} */
         const ready = [];
         for (const view of views) if (await this.catchesUp(view, text)) ready.push(view);
         if (views.length && !ready.length) return false;
@@ -96,8 +124,9 @@ export default class RefoldDailyNotes {
         const savedOk = !!saved && saved.lines === lines.length;
         const snap = this.snapshots()[file.path];
         const editor = mode === "open" ? null : ready[0] ?? null;
-        const shown = editor ? editor.currentMode.getFoldInfo?.() ?? { folds: [] } : null;
+        const shown = editor ? editor.currentMode.getFoldInfo?.() ?? { folds: /** @type {Fold[]} */ ([]) } : null;
 
+        /** @type {Set<number> | null} */
         let fold = null;      // lines to fold, or null to leave the note as it is
         let props = false;    // whether the frontmatter stays collapsed
         if (editor) {
@@ -128,7 +157,7 @@ export default class RefoldDailyNotes {
 
         // Nothing to write when the saved record already says this (an empty list is saved as
         // no record) and, for an open note, the editor already shows it
-        const key = (fs) => JSON.stringify(fs.map((f) => [f.from, f.to]).sort((a, b) => a[0] - b[0]));
+        const key = (/** @type {Fold[]} */ fs) => JSON.stringify(fs.map((f) => [f.from, f.to]).sort((a, b) => a[0] - b[0]));
         const recordOk = folds.length ? savedOk && key(saved.folds) === key(folds) : !saved;
         const changed = !(recordOk && (!editor || key(shown.folds) === key(folds)));
         if (!changed && !editor) return false;
@@ -147,6 +176,11 @@ export default class RefoldDailyNotes {
     }
 
     // Whether every item sits on the line, with the text, the snapshot saw it
+    /**
+     * @param {Snapshot} snap
+     * @param {Fold[]} foldable
+     * @param {string[]} lines
+     */
     unchanged(snap, foldable, lines) {
         return snap.lines === lines.length && snap.items.length === foldable.length &&
             foldable.every((r, i) => (snap.items[i].from ?? r.from) === r.from &&
@@ -155,8 +189,15 @@ export default class RefoldDailyNotes {
 
     // Pairs each foldable item with the snapshot by text, in order. `known` maps an item's line
     // to whether it was folded; `fresh` holds the lines of items the snapshot doesn't have.
+    /**
+     * @param {Fold[]} foldable
+     * @param {string[]} lines
+     * @param {Snapshot} snap
+     */
     match(foldable, lines, snap) {
+        /** @type {Map<number, boolean>} */
         const known = new Map();
+        /** @type {Set<number>} */
         const fresh = new Set();
         let next = 0;
         for (const r of foldable) {
@@ -170,11 +211,20 @@ export default class RefoldDailyNotes {
     }
 
     // Without a snapshot to compare against, events are the items known to belong folded
+    /**
+     * @param {Fold[]} foldable
+     * @param {string[]} lines
+     */
     events(foldable, lines) {
         // (a canceled event, marked [-] by the calendar sync, is still an event)
         return foldable.filter((r) => /^\s*[-*+]\s+(?:\[<\]|\[-\]\s+(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)/i.test(lines[r.from])).map((r) => r.from);
     }
 
+    /**
+     * @param {TFile} file
+     * @param {string} text
+     * @param {Fold[]} folds
+     */
     remember(file, text, folds) {
         const lines = text.split("\n");
         const folded = new Set(folds.map((f) => f.from));
@@ -188,39 +238,52 @@ export default class RefoldDailyNotes {
         };
         // Drop snapshots of notes that are gone or too old for an outside change to matter
         const { format } = plainday.Schedule.dailyOpts();
-        const cutoff = moment().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
+        const cutoff = /** @type {MomentFn} */ (moment)().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
         for (const path of Object.keys(store)) {
-            const date = moment(path.split("/").pop().replace(/\.md$/, ""), format, true);
+            const date = /** @type {MomentFn} */ (moment)(path.split("/").pop().replace(/\.md$/, ""), format, true);
             if (!app.vault.getFileByPath(path) || (date.isValid() && date.isBefore(cutoff))) delete store[path];
         }
         app.saveLocalStorage(RefoldDailyNotes.STORE, store);
     }
 
+    /** @returns {Snapshots} */
     snapshots() {
-        return app.loadLocalStorage(RefoldDailyNotes.STORE) ?? {};
+        return /** @type {Snapshots | null} */ (app.loadLocalStorage(RefoldDailyNotes.STORE)) ?? {};
     }
 
+    /** @param {TFile | null} file */
     isDaily(file) {
         return !!file && file.extension === "md" && plainday.Schedule.isDailyNote(file);
     }
 
+    /** @returns {Set<TFile>} */
     openDailyNotes() {
+        /** @type {Set<TFile>} */
         const files = new Set();
-        app.workspace.iterateAllLeaves((leaf) => {
+        app.workspace.iterateAllLeaves((/** @type {FoldLeaf} */ leaf) => {
             if (leaf.view?.getViewType?.() === "markdown" && this.isDaily(leaf.view.file)) files.add(leaf.view.file);
         });
         return files;
     }
 
+    /**
+     * @param {TFile} file
+     * @returns {FoldView[]}
+     */
     viewsOf(file) {
+        /** @type {FoldView[]} */
         const views = [];
-        app.workspace.iterateAllLeaves((leaf) => {
+        app.workspace.iterateAllLeaves((/** @type {FoldLeaf} */ leaf) => {
             if (leaf.view?.getViewType?.() === "markdown" && leaf.view.file === file) views.push(leaf.view);
         });
         return views;
     }
 
     // An open note reloads a moment after an outside change; true once the view shows `text`
+    /**
+     * @param {FoldView} view
+     * @param {string} text
+     */
     async catchesUp(view, text) {
         const deadline = Date.now() + RefoldDailyNotes.RELOAD_WAIT_MS;
         while (view.getViewData() !== text) {
@@ -230,11 +293,13 @@ export default class RefoldDailyNotes {
         return true;
     }
 
+    /** @param {Fold} f */
     static isProps(f) {
         return f.from === 0 && f.to === 0;   // collapsed frontmatter marker
     }
 
     // An item's line with its checkbox status blanked, so ticking a task off doesn't make it new
+    /** @param {string} line */
     static norm(line) {
         return line.replace(/^(\s*[-*+]\s+\[).\]/, "$1]").trimEnd();
     }

@@ -1,6 +1,8 @@
 import { ButtonComponent, getFrontMatterInfo, Modal, moment, Notice, stringifyYaml, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+
 export default class ProjectNotes {
     // Projects and areas, made in one place (OBS-123): New project, New area and Convert to project call make(),
     // and so can a picker or a base later (OBS-141, OBS-173). The Project and Area templates' Templater code did
@@ -49,6 +51,11 @@ export default class ProjectNotes {
     // Why `typed` can't name a new project or area, or "" when it can. The note would take over the links of a
     // note that has its name (Obsidian resolves a shared name to the shortest path), and the time on them; a
     // folder of its name in Projects may hold a folder note of its own already.
+    /**
+     * @param {string} typed
+     * @param {"project" | "area"} [kind]
+     * @returns {string}
+     */
     problem(typed, kind = "project") {
         const raw = String(typed ?? "").trim();
         const name = this.nameOf(raw);
@@ -73,6 +80,10 @@ export default class ProjectNotes {
 
     // Makes the project or area `name` (as typed) and resolves to its note, not
     // opened. Throws when the name can't be used (problem()), for a caller that didn't ask first.
+    /**
+     * @param {{ kind?: "project" | "area", name: string }} note
+     * @returns {Promise<TFile>}
+     */
     async make({ kind = "project", name: typed }) {
         const why = this.problem(typed, kind);
         if (why) throw new Error(why);
@@ -224,6 +235,7 @@ export default class ProjectNotes {
 
     // Moves a one-line `id` to the top of the note's properties, as every note has it (Brian, 11/22): Templater adds a
     // template's new properties after the note's
+    /** @param {TFile} file */
     async idFirst(file) {
         const move = (text) => {
             const info = getFrontMatterInfo(text);
@@ -294,6 +306,10 @@ export default class ProjectNotes {
     // ---------------------------------------------------------------- the commands' side
 
     // New project and New area: asks for a name, makes it, and opens its note
+    /**
+     * @param {"project" | "area"} kind
+     * @returns {Promise<TFile | null>}
+     */
     async create(kind) {
         const typed = await this.ask(kind);
         if (typed === null) return null;
@@ -305,6 +321,12 @@ export default class ProjectNotes {
     // The name box: resolves to a name that can be used, as typed, or null when it's closed. A name that can't be
     // used keeps the box open with the name in it and a line saying why (problem()). `value` is the name to start
     // with, and `reason` the line to show at once (Convert to project's selection, and why it can't be used).
+    /**
+     * @param {"project" | "area"} kind
+     * @param {string} [value]
+     * @param {string} [reason]
+     * @returns {Promise<string | null>}
+     */
     ask(kind, value = "", reason = "") {
         const k = ProjectNotes.KINDS[kind];
         return new Promise((resolve) => {

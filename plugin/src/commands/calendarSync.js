@@ -1,6 +1,12 @@
 import { moment, Notice, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/**
+ * What ends an event line's title (splitTail): the title without it, its ⭕ and 🗃️ links as written,
+ * whether it carries the free mark (ℹ️) and your 🆓, and its log's link as written, or null.
+ * @typedef {{ rest: string, projects: string[], free: boolean, nonbillable: boolean, log: string | null }} EventTail
+ */
+
 export default class CalendarSync {
     // Writes calendar events into daily notes and keeps them current. A convention says which part of
     // an event line is whose, so the sync never has to guess (OBS-275, Part 2 of OBS-231's plan, 11/19):
@@ -241,6 +247,7 @@ export default class CalendarSync {
     }
 
     // A calendar's link changed (Settings.storeLink): it's no longer the one that stopped working
+    /** @param {string} id */
     linkChanged(id) {
         // A run working now loaded the cache before this; it leaves this calendar's flag off when it saves
         (this.changedLinks ??= new Map()).set(id, Date.now());
@@ -252,6 +259,10 @@ export default class CalendarSync {
 
     // Whether a calendar's link stopped working on this device at the last sync that read it, for the
     // settings panel
+    /**
+     * @param {string} id
+     * @returns {boolean}
+     */
     deadLink(id) {
         return !!this.loadCache().dead[id];
     }
@@ -1165,6 +1176,10 @@ export default class CalendarSync {
     // The checklist the note opens with: after the frontmatter, before any heading, and starting
     // at the first thing in the note. A list under `## Notes`, or a second group below a label,
     // is not it.
+    /**
+     * @param {string[]} lines
+     * @returns {{ first: number, end: number } | null}
+     */
     checklist(lines) {
         const start = this.afterFrontmatter(lines);
         let limit = lines.length;
@@ -1204,6 +1219,11 @@ export default class CalendarSync {
         return false;
     }
 
+    /**
+     * @param {string[]} lines
+     * @param {string[]} block
+     * @returns {string}
+     */
     insert(lines, block) {
         // A note just made from a template that Templater hasn't run yet holds raw code (`<%`), which
         // becomes its properties: above it, the events would end up above them (Schedule.placeInTopList)
@@ -1330,6 +1350,11 @@ export default class CalendarSync {
     // the ⭕ links, the free mark and your 🆓 come off the end, in any order. A title that is only
     // a mark keeps it. With `note`, a note link at the end comes off too, as `log` (the link as
     // written); without it, it stays in `rest`, which is how CalNav reads a line.
+    /**
+     * @param {string} text
+     * @param {boolean} [note]
+     * @returns {EventTail}
+     */
     splitTail(text, note = false) {
         let rest = this.bare(text).trimEnd();
         const projects = [];
@@ -1363,6 +1388,10 @@ export default class CalendarSync {
     }
 
     // A line as it reads: [[note|alias]] becomes alias, [[note]] becomes note
+    /**
+     * @param {string} text
+     * @returns {string}
+     */
     display(text) {
         return text.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1").trim();
     }
@@ -1370,6 +1399,10 @@ export default class CalendarSync {
     // A newline or tab in a title would break the line format, and nothing would match it again
     // A title ending in ℹ️ or 🆓 would read as the marks, or in ` ^v2` as a block ID, and the line
     // would never read the same again
+    /**
+     * @param {{ title?: string | null }} event
+     * @returns {string}
+     */
     title(event) {
         return (event.title || "").replace(/\s+/g, " ").replace(/(?:\s+(?:(?:🆓|ℹ)\uFE0F?|\^[A-Za-z0-9-]+))+$/u, "").trim() || "(untitled)";
     }
@@ -1406,6 +1439,10 @@ export default class CalendarSync {
         return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((line, i) => line === b[i]);
     }
 
+    /**
+     * @param {string[]} lines
+     * @returns {number}
+     */
     afterFrontmatter(lines) {
         if (lines[0]?.trim() !== "---") return 0;
         const close = lines.findIndex((l, i) => i > 0 && l.trim() === "---");

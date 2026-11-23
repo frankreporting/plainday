@@ -1,6 +1,8 @@
 import { MarkdownView, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+
 export default class ConvertToProject {
     // Turns the selected text into a project (OBS-123): makes it as New project does, straight in its folder at the
     // top of the Projects folder (ProjectNotes.make), without opening it, then swaps the selection for a link to
@@ -27,12 +29,13 @@ export default class ConvertToProject {
             name = await notes.ask("project", title.replace(/\s+/g, " "), why);
             if (name === null) return;
         }
+        /** @type {TFile} */
         let file;
         try {
             file = await notes.make({ kind: "project", name });
         } catch (e) {
             console.error("ConvertToProject: couldn't make the project", e);
-            new Notice(`Couldn't make the project: ${e.message}`);
+            new Notice(`Couldn't make the project: ${/** @type {Error} */ (e).message}`);
             return;
         }
 
@@ -46,6 +49,7 @@ export default class ConvertToProject {
     }
 
     // Whether `text` can be a link's label: not when it holds a line break, a | or brackets that would end the link
+    /** @param {string} text */
     labelable(text) {
         return !/[\r\n|]|\]\]|\[\[/.test(text);
     }

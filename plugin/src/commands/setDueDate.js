@@ -47,6 +47,11 @@ export default class DueDate {
 
     // Where a cursor at `ch` ends up after that change: on the same words, ahead of a 🚩 added right
     // where it is. One inside a replaced 🚩 goes to the start of the new one.
+/**
+ * @param {number} ch
+ * @param {{ from: number, to: number, text: string }} change
+ * @returns {number}
+ */
     cursorAfter(ch, { from, to, text }) {
         return ch <= from ? ch : ch < to ? from : ch + text.length - (to - from);
     }
@@ -234,6 +239,11 @@ export default class DueDate {
     // plain (empty, or a date, quoted or not) followed by another key or the end, which is replaced, or no `due`
     // at all, which is added last. Anything else (a quoted key, a comment, a value over several lines, no
     // properties block) is null, so it can never write YAML that Obsidian can't read: that `due` is set by hand.
+/**
+ * @param {string} text
+ * @param {string} date
+ * @returns {{ text?: string, same?: boolean } | null}
+ */
     static withDue(text, date) {
         const lines = text.split("\n");
         const bare = (l) => l.replace(/\r$/, "");

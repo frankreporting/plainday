@@ -1,5 +1,12 @@
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, TFile } from "obsidian" */
+/**
+ * The window, which holds this script's listeners so a second run can undo the first (and an earlier
+ * version's single handle)
+ * @typedef {Window & { refoldOnOpenRefs?: EventRef[] | null, refoldOnOpenRef?: EventRef | null }} HandleWindow
+ */
+
 export default class RefoldOnOpen {
     // Startup script: keeps daily notes folded as they're opened, and snapshots them as they're
     // left or Obsidian quits (see RefoldDailyNotes), on every device.
@@ -8,7 +15,7 @@ export default class RefoldOnOpen {
         // however often it runs (same as SyncArea)
         this.deconstructor();
         let current = app.workspace.getActiveFile();
-        window.refoldOnOpenRefs = [
+        /** @type {HandleWindow} */ (window).refoldOnOpenRefs = [
             app.workspace.on("file-open", (file) => {
                 const left = current;
                 current = file;
@@ -22,12 +29,16 @@ export default class RefoldOnOpen {
     }
 
     deconstructor() {
-        for (const ref of window.refoldOnOpenRefs ?? []) app.workspace.offref(ref);
-        if (window.refoldOnOpenRef) app.workspace.offref(window.refoldOnOpenRef);   // earlier version's handle
-        window.refoldOnOpenRefs = null;
-        window.refoldOnOpenRef = null;
+        for (const ref of /** @type {HandleWindow} */ (window).refoldOnOpenRefs ?? []) app.workspace.offref(ref);
+        if (/** @type {HandleWindow} */ (window).refoldOnOpenRef) app.workspace.offref(/** @type {HandleWindow} */ (window).refoldOnOpenRef);   // earlier version's handle
+        /** @type {HandleWindow} */ (window).refoldOnOpenRefs = null;
+        /** @type {HandleWindow} */ (window).refoldOnOpenRef = null;
     }
 
+    /**
+     * @param {"onOpen" | "onLeave" | "snapshotOpen"} method
+     * @param {...(TFile | null)} args
+     */
     run(method, ...args) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin) return;

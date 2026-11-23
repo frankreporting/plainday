@@ -1,6 +1,12 @@
 import { ButtonComponent, FuzzySuggestModal, Modal, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { CachedMetadata, Editor, EditorPosition, TFile } from "obsidian" */
+/**
+ * A ⭕ project or 🗃️ area link at the end of a line (trailingProjectLinks): the link as written and
+ * the note it names.
+ * @typedef {{ raw: string, linkpath: string }} ProjectLink
+ */
 export default class AddTaskNote {
     // "- [ ]", "- [x]", "- [<]", … at the start of a line
     static CHECKBOX = /^\s*[-*+]\s+\[(.)\] ?/;
@@ -175,6 +181,11 @@ export default class AddTaskNote {
     }
 
     // The project or area a line of a daily note at `path` says, for a event log (EventLog), or null
+/**
+ * @param {string} lineText
+ * @param {string} path
+ * @returns {TFile | null}
+ */
     lineHomeIn(lineText, path) {
         return this.lineHomeAt([lineText], 0, path);
     }
@@ -389,6 +400,11 @@ export default class AddTaskNote {
     }
 
     // Whether line `at` of the note open in `editor` is hidden from the system, in a code block or a comment
+/**
+ * @param {Editor} editor
+ * @param {number} at
+ * @returns {boolean}
+ */
     hiddenAt(editor, at) {
         const tr = plainday?.TimeReport;
         if (!tr) return false;
@@ -399,6 +415,13 @@ export default class AddTaskNote {
     // The cursor where it was, on the same words, once line `at` has gone through `texts` (each a whole line):
     // a change at its end leaves it, and text taken away from under it leaves it where that text was. Run
     // from a line under the task, it stays there (OBS-224).
+/**
+ * @param {Editor} editor
+ * @param {EditorPosition} cursor
+ * @param {number} at
+ * @param {...string} texts
+ * @returns {void}
+ */
     keepCursor(editor, cursor, at, ...texts) {
         if (cursor.line !== at) return editor.setCursor(cursor);
         let ch = cursor.ch;
@@ -421,12 +444,20 @@ export default class AddTaskNote {
 
     // The project or area `file` is filed in: the nearest folder note above it tagged #project or
     // #area, finished or not, or itself for one of those. Null outside any.
+/**
+ * @param {TFile} file
+ * @returns {TFile | null}
+ */
     filedIn(file) {
         return this.isHomeNote(file) ? file : this.filedAbove(file);
     }
 
     // The project or area above `file`: the nearest folder note above it tagged #project or #area, finished or
     // not. Null outside any.
+/**
+ * @param {TFile} file
+ * @returns {TFile | null}
+ */
     filedAbove(file) {
         for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
             const folderNote = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
@@ -440,6 +471,13 @@ export default class AddTaskNote {
     // run of links that ends the line (⋯, ↗, 🚩, ⭕, 🗃️, and the ℹ️ and 🆓 marks among them), or at its
     // end when that run has none, so the note links stay last (OBS-90, OBS-208). A block ID stays at the very end. With no
     // `link`, only `drop` comes off. Trailing spaces go; an event's tab after its time stays.
+/**
+ * @param {string} lineText
+ * @param {string | null} link
+ * @param {string[]} [drop]
+ * @param {{ inRun?: boolean }} [options]
+ * @returns {string}
+ */
     withHome(lineText, link, drop = [], { inRun = false } = {}) {
         let bare = (inRun ? lineText : this.withoutLinks(lineText, drop)).replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
@@ -463,6 +501,10 @@ export default class AddTaskNote {
     }
 
     // Whether `file`, a link's target looked up by name, is `note`
+/**
+ * @param {TFile | null} file
+ * @param {TFile} note
+ */
     isSameNote(file, note) {
         return !!file && (file === note || file.path === note.path);
     }
@@ -471,18 +513,25 @@ export default class AddTaskNote {
     // has the same name. Decided from the vault's file list, which is current the moment a note is made,
     // moved or trashed. Obsidian's own shortest-link lookup once wrote a full path for a note whose
     // name was unique, seconds after a cancelled attempt had trashed a note of that name.
+/**
+ * @param {{ path: string, basename: string }} note
+ * @param {string[]} paths
+ * @returns {string}
+ */
     linktextFor(note, paths) {
         const name = note.basename.toLowerCase();
         const clash = paths.some((p) => p !== note.path && p.split("/").pop().replace(/\.md$/, "").toLowerCase() === name);
         return clash ? note.path.replace(/\.md$/, "") : note.basename;
     }
 
+/** @returns {null} */
     cancelled() {
         new Notice("No project or area picked, so nothing changed");
         return null;
     }
 
     // What a note is, as the question names it: "Log", "Task", "Area", "Project" or "Note"
+/** @param {TFile} note */
     kindOf(note) {
         const cache = app.metadataCache.getFileCache(note);
         const tags = cache ? this.tagsOf(cache) : [];
@@ -491,6 +540,7 @@ export default class AddTaskNote {
     }
 
     // A project or area with its 🗃️ or ⭕, for the question
+/** @param {TFile | null} file */
     markOf(file) {
         return file ? `${this.isArea(file) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${file.basename}` : "No project or area";
     }
@@ -502,6 +552,13 @@ export default class AddTaskNote {
     // label), then what follows from it, with no days or lines: the system takes care of those, and `from` and
     // `to` were just picked (Brian, 2026-11-03). The buttons: Leave it or Cancel, then Move. MoveToProject asks
     // for a project or area too, whose `from` can be null (nothing above it).
+/**
+ * @param {TFile | null} note
+ * @param {TFile | null} from
+ * @param {TFile} to
+ * @param {{ title?: string | null, label?: string | null, name?: string | null, words?: string | string[] | null, cancel?: string }} [options]
+ * @returns {Promise<"move" | "leave" | null>}
+ */
     confirmMove(note, from, to, { title = null, label = null, name = null, words = null, cancel = "Leave it" } = {}) {
         return new Promise((resolve) => {
             let choice = null;
@@ -534,6 +591,7 @@ export default class AddTaskNote {
     }
 
     // Whether a home note is an area (tagged #area) rather than a project
+/** @param {TFile} file */
     isArea(file) {
         const cache = app.metadataCache.getFileCache(file);
         return !!cache && this.tagsOf(cache).includes("area");
@@ -541,6 +599,7 @@ export default class AddTaskNote {
 
     // A event log: a note tagged #log, or any note in a `›logs` folder. Logs are filed in their
     // project's `›logs`, so one waiting in Inbox still goes there when it's moved.
+/** @param {TFile} file */
     isLog(file) {
         if (this.isLogsFolderName(file.parent?.name)) return true;
         const cache = app.metadataCache.getFileCache(file);
@@ -548,12 +607,20 @@ export default class AddTaskNote {
     }
 
     // The suffix link for a home: [[Project|⭕]] or [[Area|🗃️]], with `linktext` as linktextFor gives it
+/**
+ * @param {TFile} home
+ * @param {string} linktext
+ */
     homeLink(home, linktext) {
         return `[[${linktext}|${this.isArea(home) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK}]]`;
     }
 
     // A note's tags: frontmatter `tags` or `tag` (list or string) and inline #tags, lowercased,
     // without the #
+/**
+ * @param {CachedMetadata} cache
+ * @returns {string[]}
+ */
     tagsOf(cache) {
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
@@ -565,6 +632,11 @@ export default class AddTaskNote {
     // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject use it,
     // leaving out the ones they can't file into (`exclude(file)` true); MoveToProject asks its own question
     // (`placeholder`).
+/**
+ * @param {string} name
+ * @param {{ exclude?: (file: TFile) => boolean, placeholder?: string | null }} [options]
+ * @returns {Promise<TFile | null>}
+ */
     pickHome(name, { exclude = () => false, placeholder = null } = {}) {
         const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
         const items = app.vault.getMarkdownFiles()
@@ -585,6 +657,7 @@ export default class AddTaskNote {
     }
 
     // An area or project note still in progress (exact #area or #project, as SyncArea checks)
+/** @param {TFile} file */
     isHome(file) {
         const cache = app.metadataCache.getFileCache(file);
         if (!cache || this.isFinished(cache)) return false;
@@ -593,6 +666,10 @@ export default class AddTaskNote {
 
     // A project or area is finished when its `status` is Done or Canceled, in any case (Cancelled
     // too). Finished ones drop out of the menus that file and link notes.
+/**
+ * @param {Pick<CachedMetadata, "frontmatter"> | null | undefined} cache
+ * @returns {boolean}
+ */
     isFinished(cache) {
         return [].concat(cache?.frontmatter?.status ?? [])
             .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
@@ -608,16 +685,25 @@ export default class AddTaskNote {
     }
 
     // Whether a folder's name makes it a logs folder: `›logs`, in any case
+/** @param {string | null | undefined} name */
     isLogsFolderName(name) {
         return String(name ?? "").toLowerCase() === AddTaskNote.LOGS_FOLDER;
     }
 
     // The logs folder of `home` (an area or project note); see logsFolderIn
+/**
+ * @param {TFile} home
+ * @returns {string}
+ */
     logsFolder(home) {
         return this.logsFolderIn(home.parent.path);
     }
 
     // The `›logs` folder in the folder at `parent`: the one it has, spelled as it is, or where a new one goes
+/**
+ * @param {string} parent
+ * @returns {string}
+ */
     logsFolderIn(parent) {
         const path = `${parent}/${AddTaskNote.LOGS_FOLDER}`;
         return (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path))?.path ?? path;
@@ -625,6 +711,10 @@ export default class AddTaskNote {
 
     // Makes the folder at `path` unless it's there. A logs folder made this way gets Notebook
     // Navigator's history icon, when Navigator is installed.
+/**
+ * @param {string} path
+ * @returns {Promise<void>}
+ */
     async makeFolder(path) {
         if (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path)) return;
         const made = await app.vault.createFolder(path);
@@ -641,6 +731,10 @@ export default class AddTaskNote {
 
     // The ⭕ project and 🗃️ area links in the run of links that ends a line: [{ raw, linkpath }], in
     // line order. Only these say where the line's time goes (OBS-90); one in the text is its title's.
+/**
+ * @param {string} lineText
+ * @returns {ProjectLink[]}
+ */
     trailingProjectLinks(lineText) {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
@@ -845,6 +939,11 @@ export default class AddTaskNote {
     // The target of the note link in the run of links that ends `lineText` (the first, when there are
     // several: its ⋯, else its ↗), or null when that run has none. `link` picks one mark: OWN_NOTE_LINK
     // for its own note only (Schedule, OBS-208).
+/**
+ * @param {string} lineText
+ * @param {RegExp} [link]
+ * @returns {string | null}
+ */
     trailingNote(lineText, link = AddTaskNote.NOTE_LINK) {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
@@ -859,6 +958,11 @@ export default class AddTaskNote {
     // `lineText` with `link`, a ↗ to the note it was sent from, in its run (OBS-208): after its ⋯, else
     // after its ⭕ or 🗃️, else at the end, before a block ID. A ↗ it had already gives way: a line was
     // sent from one note.
+/**
+ * @param {string} lineText
+ * @param {string} link
+ * @returns {string}
+ */
     withFrom(lineText, link) {
         let bare = lineText.replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
@@ -893,6 +997,11 @@ export default class AddTaskNote {
     }
 
     // `lineText` with `link` at its end, before a block ID if it ends in one
+/**
+ * @param {string} lineText
+ * @param {string} link
+ * @returns {string}
+ */
     endWith(lineText, link) {
         const bare = lineText.replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
@@ -933,6 +1042,10 @@ export default class AddTaskNote {
     // slash or bar becomes "-", characters a file name or a link can't hold are dropped, and so are dots
     // and spaces at the end. Cleaning a name twice changes nothing. The line keeps its text as typed
     // (OBS-111).
+/**
+ * @param {string} title
+ * @returns {string}
+ */
     fileName(title) {
         return title.replace(/\s*:\s*/g, " - ").replace(/[\\/|]/g, "-").replace(/[*"<>?#^[\]]/g, "")
             .replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
@@ -987,6 +1100,10 @@ export default class AddTaskNote {
     }
 
     // The column right after a line's checkbox and the space that follows it: "- [ ] |Task"
+/**
+ * @param {string} lineText
+ * @returns {number}
+ */
     afterCheckbox(lineText) {
         const match = lineText.match(AddTaskNote.CHECKBOX);
         return match ? match[0].length : 0;
@@ -994,6 +1111,7 @@ export default class AddTaskNote {
 
     // The day of the daily note open now, read by its name as every link to a day is (OBS-297, OBS-300), else
     // today: YYYY-MM-DD
+    /** @returns {string} */
     dailyNoteDate() {
         const file = app.workspace.getActiveFile();
         const period = file ? plainday.PeriodicNotes.periodOfName(file.basename) : null;

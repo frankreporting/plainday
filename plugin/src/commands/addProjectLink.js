@@ -51,6 +51,11 @@ export default class AddProjectLink {
 
     // The line with `link` as its one ⭕ or 🗃️, before the note link that ends it, or at the end with no
     // trailing space. Any in the run of links that ends it come off; one in its text is part of the title.
+/**
+ * @param {string} lineText
+ * @param {string} link
+ * @returns {string}
+ */
     placed(lineText, link) {
         const helper = plainday.AddTaskNote;
         return helper.withHome(lineText, link, helper.trailingProjectLinks(lineText).map((l) => l.raw), { inRun: true });

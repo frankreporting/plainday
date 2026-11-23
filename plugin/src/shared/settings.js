@@ -175,11 +175,19 @@ export default class Settings {
     }
 
     // A note's text: each line trimmed at its end, blank lines at the start and end dropped
+    /**
+     * @param {unknown} v
+     * @returns {string}
+     */
     multiline(v) {
         return typeof v === "string" ? v.split(/\r?\n/).map((l) => l.trimEnd()).join("\n").trim() : "";
     }
 
     // A list of lines, from a list or from text with one item per line: trimmed, blanks dropped
+    /**
+     * @param {unknown} v
+     * @returns {string[]}
+     */
     lines(v) {
         return [].concat(v ?? []).flatMap((x) => (typeof x === "string" || typeof x === "number" ? String(x).split(/\r?\n/) : []))
             .map((x) => x.trim()).filter(Boolean);
@@ -331,6 +339,10 @@ export default class Settings {
     // after them, from the first with a date in it, are `dateFolders`, a format of their own ("YYYY/MM"),
     // "" for none; the part after the last `/` is the name's `format`. A `/` inside [brackets] is text,
     // as moment reads it: "[periodic/months]/YYYY-MM" is the folder "periodic/months".
+    /**
+     * @param {string} pattern
+     * @returns {{ folder: string, dateFolders: string, format: string }}
+     */
     static splitPattern(pattern) {
         const text = String(pattern ?? "");
         // Most formats have no folders, and this runs for every note in a pass over the vault

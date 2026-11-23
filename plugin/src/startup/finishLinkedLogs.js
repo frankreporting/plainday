@@ -1,5 +1,11 @@
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, TFile } from "obsidian" */
+/**
+ * The window, which holds this script's listener so a second run can undo the first
+ * @typedef {Window & { finishLinkedLogsRef?: EventRef | null }} HandleWindow
+ */
+
 export default class FinishLinkedLogs {
     // Startup script (OBS-122): a click on an event line's ⋯ link to a log that isn't made yet makes a blank note of
     // that name, which becomes the log at once (EventLog.finish): Plainday's properties, the Log template, and filed
@@ -15,14 +21,19 @@ export default class FinishLinkedLogs {
     async invoke() {
         // The handle lives on window, so a second run undoes the first (as NewNoteGuard does)
         this.deconstructor();
-        window.finishLinkedLogsRef = app.vault.on("create", (file) => this.onCreate(file));
+        /** @type {HandleWindow} */ (window).finishLinkedLogsRef = app.vault.on("create", (/** @type {TFile} */ file) => this.onCreate(file));
     }
 
     deconstructor() {
-        if (window.finishLinkedLogsRef) app.vault.offref(window.finishLinkedLogsRef);
-        window.finishLinkedLogsRef = null;
+        if (/** @type {HandleWindow} */ (window).finishLinkedLogsRef) app.vault.offref(/** @type {HandleWindow} */ (window).finishLinkedLogsRef);
+        /** @type {HandleWindow} */ (window).finishLinkedLogsRef = null;
     }
 
+    // `file` is anything the vault made: a folder has no extension, so it stops at the first check
+    /**
+     * @param {TFile} file
+     * @param {number} [now]
+     */
     onCreate(file, now = Date.now()) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin || file?.extension !== "md") return null;
@@ -32,6 +43,10 @@ export default class FinishLinkedLogs {
     }
 
     // Returns what happened, for tests: "finished" or null
+    /**
+     * @param {TFile} file
+     * @returns {Promise<string | null>}
+     */
     async later(file) {
         const notes = plainday.PeriodicNotes;
         await FinishLinkedLogs.sleep(FinishLinkedLogs.HOLD_AFTER_MS);
@@ -44,6 +59,10 @@ export default class FinishLinkedLogs {
         }
     }
 
+    /**
+     * @param {number} ms
+     * @returns {Promise<void>}
+     */
     static sleep(ms) {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
     }

@@ -1,6 +1,8 @@
 import { moment } from "obsidian";
 import { chronoEn } from "../host.js";
 
+/** @import { DateReader } from "../host.js" */
+
 // Plainday's own reader of dates typed in words, in English (OBS-139): the date box behind Schedule,
 // Due date, Jump to date and Invoice reads with it (DatePrompt).
 //
@@ -18,6 +20,7 @@ import { chronoEn } from "../host.js";
 // box reads both the same way: parseDate(text), parser.getParsedPeriod(text), and
 // parser.getParsedDateResult(text, ref, opts) with parser.getParsedResult(text). Dates are plain
 // Dates, on the computer's clock and time zone, as Revived's are.
+
 export default class DateWords {
     // The words for each unit, as Revived spells them in English. `m` is both a minute and a month:
     // Revived's last word for it wins, a month.
@@ -44,6 +47,10 @@ export default class DateWords {
     // ---------------------------------------------------------------- what DatePrompt asks
 
     // Revived's three answers, read by this reader with `now` as the clock
+    /**
+     * @param {Date} [now]
+     * @returns {DateReader}
+     */
     at(now = new Date()) {
         return {
             // Revived's plugin.parseDate: the period's first day for a week, month or year, else the day

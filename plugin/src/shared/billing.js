@@ -1,3 +1,38 @@
+/** @import TimeReport from "../commands/timeReport.js" */
+/** @import { ReportIndex } from "../commands/timeReport.js" */
+/**
+ * A Billed entries row as an invoice keeps it: its daily note's date, its start and end in minutes
+ * after that day's midnight (an end past midnight is over 1440), its minutes, the minutes billed and
+ * the rate in cents, its project's link text as written (`project`) and the path it points to
+ * (`projectPath`, set once its invoice is read), and its task and note.
+ * @typedef {{ date: string, start: number, end: number, minutes: number, billed: number, cents: number, project: string | null, projectPath?: string | null, task: string, note: string }} BilledRow
+ *
+ * An invoice note as Billing reads it (readInvoice): `status` lowercase ("draft", "sent", "paid",
+ * "canceled" or a word of your own), `project` the path of the project it bills, or null, `problem`
+ * why it can't be trusted, or null.
+ * @typedef {{
+ *   path: string, name: string, number: string, status: string, unread: boolean,
+ *   paid: string | null, invoiceDate: string | null, periodStart: string | null, periodEnd: string | null,
+ *   project: string | null, rows: BilledRow[], bad: { line: number, text: string }[],
+ *   labeled: { line: number, text: string, date: string, shows: string }[], problem: string | null,
+ *   hours: number | null, total: number | null,
+ * }} Invoice
+ *
+ * What's billed (ledger): each billed entry by its key ("2026-09-11 780 870") and by date, the
+ * invoices that bill (not the canceled ones), and the keys billed twice.
+ * @typedef {{ invoice: Invoice, row: BilledRow }} BilledHit
+ * @typedef {{ byKey: Map<string, BilledHit>, byDate: Map<string, BilledHit[]>, twice: { row: BilledRow, invoices: Invoice[] }[], invoices: Invoice[] }} Ledger
+ *
+ * An entry as Billing places it: its date, start and end, and the project it counts toward
+ * (TimeReport's entries carry more).
+ * @typedef {{ date: string, start: number, end: number, project?: string | null }} BillingEntry
+ *
+ * A billed row that changed since its invoice was made (invoiceChanges), with the entry it matches now.
+ * @typedef {{ row: BilledRow, kind: string, entry?: BillingEntry }} BilledChange
+ *
+ * Where an entry stands (standing): billed, changed since it was billed, or open.
+ * @typedef {{ kind: "billed" | "changed", invoice: Invoice, row: BilledRow } | { kind: "open", invoice?: undefined, row?: undefined }} Standing
+ */
 export default class Billing {
     // What's been billed, and where each time entry stands (OBS-5). An invoice note keeps its own copy
     // of every entry it bills, in a folded "Billed entries" section at its end. This class writes and
@@ -300,6 +335,12 @@ export default class Billing {
     // invoices are filed), no table, a row that doesn't read, a date row labeled with another day than the one
     // it links (OBS-298), no column names, no rows, or rows that don't add up to its `hours` and `total`. Its
     // rows still count as billed either way, a labeled row's on the day it links.
+    /**
+     * @param {{ path: string, props?: Record<string, unknown>, text?: string, tagged?: boolean, error?: string | null }} note
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @returns {Invoice}
+     */
     readInvoice({ path, props = {}, text = "", tagged = true, error = null }, tr, index) {
         const p = (name) => tr.prop(props ?? {}, name);
         const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
@@ -345,6 +386,11 @@ export default class Billing {
     // live ones), and twice (a key already billed, on another invoice or on the same one:
     // [{ row, invoices: [first, second] }]). Canceled invoices bill nothing; `except` leaves one out
     // (a draft being rebuilt).
+    /**
+     * @param {Invoice[]} invoices
+     * @param {{ except?: string | null }} [options]
+     * @returns {Ledger}
+     */
     ledger(invoices, { except = null } = {}) {
         const byKey = new Map(), byDate = new Map(), twice = [], live = [];
         for (const invoice of invoices) {
@@ -379,6 +425,11 @@ export default class Billing {
     // setting does (pathOf), and can't be inside the archive (`archive`, the archive folder as
     // Settings → Plainday → Folders has it, OBS-283), so an invoice never lands outside the vault, in
     // a hidden folder, or where a base can't list it.
+    /**
+     * @param {unknown} raw
+     * @param {string | null} [archive]
+     * @returns {{ folder: string, error: string | null, taken?: string }}
+     */
     folderOf(raw, archive = null) {
         const read = this.pathOf(raw);
         if (!read.folder) return read;
@@ -393,6 +444,10 @@ export default class Billing {
     // Any folder setting as a vault path (OBS-283): { folder, error }, with "" for none. Outer and
     // doubled slashes go. A part that's blank, `.`, `..`, starts with a dot or has spaces around it, a
     // character a link or a file name can't hold, or a value that isn't one line of text is an error.
+    /**
+     * @param {unknown} raw
+     * @returns {{ folder: string, error: string | null }}
+     */
     pathOf(raw) {
         if (raw === undefined || raw === null) return { folder: "", error: null };
         const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
@@ -416,6 +471,7 @@ export default class Billing {
     // mentions them isn't one). Any row is enough, column names or not, text between them or not: a
     // table that came apart from its heading is a Problem, where missing it would let its entries be
     // billed again. A heading with no table under it bills nothing.
+    /** @param {string} text */
     hasBilled(text) {
         const lines = String(text ?? "").split(/\r?\n/);
         const at = lines.findIndex((l) => this.isHeading(l));
@@ -426,6 +482,10 @@ export default class Billing {
     // Where invoices are filed: a note in a folder named `invoices`, in any case, or anywhere under
     // `folder` (whole folder names, any case). TimeReport counts an untagged note there as an
     // invoice when it still has its Billed entries.
+    /**
+     * @param {string} path
+     * @param {string} [folder]
+     */
     inInvoiceFolder(path, folder = "") {
         const parts = String(path).split("/");
         if (parts.length > 1 && parts.at(-2).toLowerCase() === "invoices") return true;
@@ -441,6 +501,11 @@ export default class Billing {
     //   open      none of these
     // Overlaps are checked on the day before and after too, for entries that cross midnight; touching
     // (one ends when the other starts) isn't overlapping.
+    /**
+     * @param {BillingEntry} e
+     * @param {Ledger} ledger
+     * @returns {Standing}
+     */
     standing(e, ledger) {
         const hit = ledger.byKey.get(this.key(e));
         if (hit) return hit.row.projectPath && e.project && hit.row.projectPath !== e.project ? { kind: "changed", ...hit } : { kind: "billed", ...hit };

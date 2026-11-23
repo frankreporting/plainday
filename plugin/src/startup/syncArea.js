@@ -1,6 +1,8 @@
 import { getFrontMatterInfo, Notice, parseYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+
 export default class SyncArea {
     // Startup script: when notes move to another folder (one at a time or as a whole folder),
     // points their `parent` property at the nearest project or area above them, i.e. the first
@@ -100,6 +102,7 @@ export default class SyncArea {
     }
 
     // Returns true if the note's parent was written
+    /** @param {TFile} file @param {boolean} templated @returns {Promise<boolean>} */
     async sync(file, templated) {
         if (app.vault.getAbstractFileByPath(file.path) !== file) return false; // deleted since
         if (this.ignored(file)) return false; // moved again since
