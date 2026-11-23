@@ -1,5 +1,13 @@
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, TFile } from "obsidian" */
+/**
+ * The window, which holds this script's listeners so a second run can undo the first
+ * @typedef {Window & { finishPeriodicNotesCreateRef?: EventRef | null, finishPeriodicNotesRef?: EventRef | null, finishPeriodicNotesOpenRef?: EventRef | null }} HandleWindow
+ * What happened to a note, for tests
+ * @typedef {"finished" | "left" | "waiting" | null} Outcome
+ */
+
 export default class FinishPeriodicNotes {
     // Startup script (OBS-120): finishes every daily, weekly, monthly and yearly note made on this device some
     // other way than by Plainday's own commands (which finish theirs as they make them, PeriodicNotes.ensure):
@@ -24,26 +32,33 @@ export default class FinishPeriodicNotes {
 
     constructor() {
         // Notes their maker wrote into, made here since Plainday started, waiting for you to leave them
+        /** @type {Set<TFile>} */
         this.waiting = new Set();
     }
 
     async invoke() {
         // The handles live on window, so a second run undoes the first (as NewNoteGuard does)
         this.deconstructor();
-        window.finishPeriodicNotesCreateRef = app.vault.on("create", (file) => this.onCreate(file));
-        window.finishPeriodicNotesOpenRef = app.workspace.on("file-open", (file) => this.onOpen(file));
+        /** @type {HandleWindow} */ (window).finishPeriodicNotesCreateRef = app.vault.on("create", (/** @type {TFile} */ file) => this.onCreate(file));
+        /** @type {HandleWindow} */ (window).finishPeriodicNotesOpenRef = app.workspace.on("file-open", (file) => this.onOpen(file));
     }
 
     deconstructor() {
         // `finishPeriodicNotesRef` is a build's from before the leave rule
-        for (const key of ["finishPeriodicNotesCreateRef", "finishPeriodicNotesRef"]) {
-            if (window[key]) app.vault.offref(window[key]);
-            window[key] = null;
+        for (const key of /** @type {const} */ (["finishPeriodicNotesCreateRef", "finishPeriodicNotesRef"])) {
+            if (/** @type {HandleWindow} */ (window)[key]) app.vault.offref(/** @type {HandleWindow} */ (window)[key]);
+            /** @type {HandleWindow} */ (window)[key] = null;
         }
-        if (window.finishPeriodicNotesOpenRef) app.workspace.offref(window.finishPeriodicNotesOpenRef);
-        window.finishPeriodicNotesOpenRef = null;
+        if (/** @type {HandleWindow} */ (window).finishPeriodicNotesOpenRef) app.workspace.offref(/** @type {HandleWindow} */ (window).finishPeriodicNotesOpenRef);
+        /** @type {HandleWindow} */ (window).finishPeriodicNotesOpenRef = null;
     }
 
+    // `file` is anything the vault made: a folder has no extension, so it stops at the first check
+    /**
+     * @param {TFile} file
+     * @param {number} [now]
+     * @returns {Promise<Outcome> | null}
+     */
     onCreate(file, now = Date.now()) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin || file?.extension !== "md") return null;
@@ -65,6 +80,10 @@ export default class FinishPeriodicNotes {
     }
 
     // Returns what happened, for tests: "finished", "left", "waiting" or null
+    /**
+     * @param {TFile} file
+     * @returns {Promise<Outcome>}
+     */
     async later(file) {
         const notes = plainday.PeriodicNotes;
         await FinishPeriodicNotes.sleep(FinishPeriodicNotes.HOLD_AFTER_MS);
@@ -83,13 +102,18 @@ export default class FinishPeriodicNotes {
     }
 
     // Another note opened: every note waiting for you to leave it, but the one opened, gets its alias
+    /**
+     * @param {TFile | null} opened
+     * @returns {Promise<"finished" | "later" | "left" | "gone" | null>[]}
+     */
     onOpen(opened) {
         if (!plainday.plugin || !this.waiting?.size) return [];
+        /** @type {Promise<"finished" | "later" | "left" | "gone" | null>[]} */
         const runs = [];
         for (const file of [...this.waiting]) {
             if (file === opened) continue;
             this.waiting.delete(file);
-            runs.push(this.left(file).catch((e) => {
+            runs.push(this.left(file).catch(/** @returns {null} */ (e) => {
                 console.error(`FinishPeriodicNotes: couldn't finish ${file.path}`, e);
                 return null;
             }));
@@ -99,6 +123,10 @@ export default class FinishPeriodicNotes {
 
     // Returns what happened, for tests: "finished", "later" (waiting again), "left" (not a periodic note where
     // it is now) or "gone"
+    /**
+     * @param {TFile} file
+     * @returns {Promise<"finished" | "later" | "left" | "gone">}
+     */
     async left(file) {
         const notes = plainday.PeriodicNotes;
         if (app.vault.getFileByPath(file.path) !== file) return "gone";
@@ -113,6 +141,10 @@ export default class FinishPeriodicNotes {
         return "finished";
     }
 
+    /**
+     * @param {number} ms
+     * @returns {Promise<void>}
+     */
     static sleep(ms) {
         return new Promise((resolve) => window.setTimeout(resolve, ms));
     }

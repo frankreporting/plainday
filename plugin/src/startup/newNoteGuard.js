@@ -1,5 +1,16 @@
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, TFile } from "obsidian" */
+/**
+ * The guard with the notes it holds, by path, and the timer that lets each go: hold() makes the map
+ * the first time it holds a note
+ * @typedef {NewNoteGuard & { holds?: Map<string, number> }} Holding
+ *
+ * The window, which holds this script's listeners so a second run can undo the first, and the notes
+ * created empty on this device, which Get Template's check reads
+ * @typedef {Window & { newNoteGuardRef?: EventRef | null, newNoteGuardTemplateRef?: EventRef | null, newNoteGuardMadeHere?: WeakSet<TFile> }} HandleWindow
+ */
+
 export default class NewNoteGuard {
     // Startup script (OBS-171): keeps Templater's trigger for new notes off notes that aren't new.
     //
@@ -36,14 +47,14 @@ export default class NewNoteGuard {
         // The handles live on window, so a second run undoes the first: a single listener of each,
         // however often it runs (as SyncArea does)
         this.deconstructor();
-        window.newNoteGuardRef = app.vault.on("create", (file) => this.onCreate(file));
-        window.newNoteGuardTemplateRef = app.workspace.on("templater:new-note-from-template", (e) => this.onTemplated(e?.file));
+        /** @type {HandleWindow} */ (window).newNoteGuardRef = app.vault.on("create", (/** @type {TFile} */ file) => this.onCreate(file));
+        /** @type {HandleWindow} */ (window).newNoteGuardTemplateRef = app.workspace.on("templater:new-note-from-template", (/** @type {{ file?: TFile } | undefined} */ e) => this.onTemplated(e?.file));
     }
 
     deconstructor() {
-        if (window.newNoteGuardRef) app.vault.offref(window.newNoteGuardRef);
-        if (window.newNoteGuardTemplateRef) app.workspace.offref(window.newNoteGuardTemplateRef);
-        window.newNoteGuardRef = window.newNoteGuardTemplateRef = null;
+        if (/** @type {HandleWindow} */ (window).newNoteGuardRef) app.vault.offref(/** @type {HandleWindow} */ (window).newNoteGuardRef);
+        if (/** @type {HandleWindow} */ (window).newNoteGuardTemplateRef) app.workspace.offref(/** @type {HandleWindow} */ (window).newNoteGuardTemplateRef);
+        /** @type {HandleWindow} */ (window).newNoteGuardRef = /** @type {HandleWindow} */ (window).newNoteGuardTemplateRef = null;
         // Holds an earlier run made aren't let go here: their own timers do it, so a rerun while
         // synced notes arrive (a script update among them) doesn't drop them early
     }
@@ -52,6 +63,10 @@ export default class NewNoteGuard {
     // nothing below them. A new note is empty. A note with text below its properties is left to
     // Templater, which then only runs any template commands in it (a daily note made by the Daily
     // notes plugin needs that). Templater/arrivedNote.js has the same rule for Get Template.
+    /**
+     * @param {unknown} text
+     * @returns {boolean}
+     */
     static arrived(text) {
         const s = String(text ?? "");
         const m = s.match(NewNoteGuard.FRONTMATTER);
@@ -59,6 +74,7 @@ export default class NewNoteGuard {
     }
 
     // Templater's set of files it's still writing, or null when Templater is off or has changed
+    /** @returns {Set<string> | null} */
     pending() {
         const set = app.plugins.plugins["templater-obsidian"]?.templater?.files_with_pending_templates;
         return ["has", "add", "delete"].every((m) => typeof set?.[m] === "function") ? set : null;
@@ -67,6 +83,10 @@ export default class NewNoteGuard {
     // Lists `path` in Templater's set for HOLD_MS, or for HOLD_MS more when this already holds it.
     // Only holds this made are ever taken off: an entry Templater (or a template) put there is
     // left alone.
+    /**
+     * @this {Holding}
+     * @param {string} path
+     */
     hold(path) {
         const pending = this.pending();
         if (!pending || !path) return;
@@ -77,6 +97,10 @@ export default class NewNoteGuard {
         this.holds.set(path, window.setTimeout(() => this.release(path), NewNoteGuard.HOLD_MS));
     }
 
+    /**
+     * @this {Holding}
+     * @param {string} path
+     */
     release(path) {
         if (!this.holds?.has(path)) return;
         window.clearTimeout(this.holds.get(path));
@@ -84,14 +108,19 @@ export default class NewNoteGuard {
         this.pending()?.delete(path);
     }
 
-    // A note appeared: held when it already has properties and nothing below them
+    // A note appeared: held when it already has properties and nothing below them. `file` is anything the
+    // vault made: a folder has no extension, so it stops at the first check.
+    /**
+     * @this {Holding}
+     * @param {TFile} file
+     */
     async onCreate(file) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin) return;
         if (file?.extension !== "md") return;
         // By the file itself, not its path: a new note is often renamed straight away
         if (file.stat?.size === 0) {
-            (window.newNoteGuardMadeHere ??= new WeakSet()).add(file);
+            (/** @type {HandleWindow} */ (window).newNoteGuardMadeHere ??= new WeakSet()).add(file);
             return;
         }
         if (!file.stat?.size || file.stat.size > NewNoteGuard.MAX_SIZE) return;
@@ -108,6 +137,10 @@ export default class NewNoteGuard {
 
     // Templater has written a template into a note (made from a template, or by its trigger): once it
     // has let the note go, hold it where it is now, through the trigger's 300ms check
+    /**
+     * @this {Holding}
+     * @param {TFile | undefined} file
+     */
     onTemplated(file) {
         if (!plainday.plugin || !file?.path) return;
         const started = Date.now();
