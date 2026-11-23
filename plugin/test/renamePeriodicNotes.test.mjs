@@ -56,7 +56,7 @@ function cacheOf(text) {
 
 // Plainday's classes on a stand-in vault of `notes` (path → text), with Navigator's patterns. `open` is a
 // note open in an editor. Returns the vault's notes as they are after each call, and the notices.
-function vault(notes, { patterns = {}, open = null } = {}) {
+function vault(notes, { patterns = {}, open = null, daily = { format: "YYYY-MM-DD", folder: DAYS } } = {}) {
     const files = new Map(Object.entries(notes));
     const made = new Set();
     const handles = new Map();
@@ -94,7 +94,7 @@ function vault(notes, { patterns = {}, open = null } = {}) {
         save: async () => { files.set(open, editorText); },
     };
     const app = {
-        internalPlugins: { plugins: { "daily-notes": { instance: { options: { format: "YYYY-MM-DD", folder: DAYS } } } } },
+        internalPlugins: { plugins: { "daily-notes": { instance: { options: daily } } } },
         plugins: { plugins: { "notebook-navigator": { settings: {
             calendarIntegrationMode: "notebook-navigator", vaultProfiles: [{ periodicNotesFolder: PLANNER }],
             calendarCustomFilePattern: "[days]/YYYY-MM-DD", calendarCustomWeekPattern: "[weeks]/gggg[w]ww",
@@ -172,7 +172,7 @@ test("which notes: those under the folder named strictly in the old format; othe
     assert.deepEqual(plain(p.notes.map((n) => `${n.rel} → ${n.path}`)), [`2026-09-17 → ${DAYS}/17-09-2026.md`, `2026-09-18 → ${DAYS}/18-09-2026.md`]);
     assert.equal(p.dest, DAYS);
     const shown = v.R.describe(p).map((l) => l.text);
-    assert.match(shown[0], /^Renames 2 daily notes, such as 2026-09-18 → 18-09-2026 \(Friday, September 18, 2026\), into `Reference\/Planner\/days`\.$/);
+    assert.match(shown[0], /^Renames 2 daily notes, such as 2026-09-18 → 18-09-2026 \(Friday, September 18, 2026\), into Reference\/Planner\/days\.$/);
 });
 
 test("the links follow: label, heading, block, \\| and ! kept; a path keeps a path; a day with no note is renamed too", async () => {
@@ -254,6 +254,19 @@ test("a week is renamed by its fourth day: weeks from Sunday to ISO weeks name t
     const p = v.plan({ unit: "week", folder: WEEKS, from: "gggg[w]ww", to: "GGGG-[W]WW" });
     assert.deepEqual(plain(p.notes.map((n) => `${n.rel} → ${n.name}`)), ["2026w38 → 2026-W38", "2027w01 → 2026-W53"]);
     assert.match(v.R.describe(p)[0].text, /such as 2027w01 → 2026-W53 \(the week of Sunday, December 27, 2026\)/);
+});
+
+test("a week format with a day in it names the week from its first day, as Plainday names weeks", () => {
+    const v = vault({ [`${WEEKS}/2026w38.md`]: "" }, { patterns: { calendarCustomWeekPattern: "[weeks]/[Week of] YYYY-MM-DD" } });
+    const p = v.plan({ unit: "week", folder: WEEKS, from: "gggg[w]ww", to: "[Week of] YYYY-MM-DD" });
+    assert.deepEqual(plain(p.notes.map((n) => n.name)), ["Week of 2026-09-13"]);
+});
+
+test("the notes go into the kind's folder, not the date folders today's note would have", () => {
+    const v = vault({ [`${DAYS}/2026-09-17.md`]: "" }, { daily: { format: "YYYY/MM/YYYY-MM-DD", folder: DAYS }, patterns: { calendarCustomFilePattern: "[days]/YYYY/MM/YYYY-MM-DD" } });
+    const p = v.plan({ from: "YYYY-MM-DD", to: "DD-MM-YYYY" });
+    assert.equal(p.dest, DAYS);
+    assert.equal(v.R.defaults("day").folder, DAYS);
 });
 
 test("a new format is refused before anything changes: with a folder, without a whole date", () => {

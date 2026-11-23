@@ -33,13 +33,15 @@ export default class RenamePeriodicNotes {
     }
 
     // The folder a kind's notes are kept in and the format that names them now, as Plainday makes them
-    // (PeriodicNotes.where, Schedule.dailyOpts, DatePrompt.weekRules)
+    // (Schedule.dailyOpts, TimeReport.periodFolders, DatePrompt.weekRules)
     defaults(unit) {
         const rules = plainday.DatePrompt.weekRules();
-        return {
-            folder: plainday.PeriodicNotes.where(unit, moment().format("YYYY-MM-DD"), rules).folder,
-            to: unit === "day" ? plainday.Schedule.dailyOpts().format : rules.format[unit],
-        };
+        return { folder: this.folderOf(unit), to: unit === "day" ? plainday.Schedule.dailyOpts().format : rules.format[unit] };
+    }
+
+    // The kind's own folder, without the date folders a format of the Daily notes plugin's may add
+    folderOf(unit) {
+        return unit === "day" ? plainday.Schedule.dailyOpts().folder : plainday.TimeReport.periodFolders()[unit];
     }
 
     // The dialog: the form, then the preview, then the run
@@ -89,7 +91,12 @@ export default class RenamePeriodicNotes {
                 window.requestAnimationFrame(() => go.buttonEl.focus());
             }
         };
-        modal.scope.register([], "Enter", () => { void onEnter?.(); return false; });
+        // Enter in a box previews, and on the preview renames; on a button, it presses that button
+        modal.scope.register([], "Enter", () => {
+            if (document.activeElement?.tagName === "BUTTON") return true;
+            void onEnter?.();
+            return false;
+        });
         modal.onOpen = () => showForm();
         modal.open();
     }
@@ -97,8 +104,8 @@ export default class RenamePeriodicNotes {
     // What the preview says: [{ text, caution }]
     describe(p) {
         const lines = [], kind = RenamePeriodicNotes.KINDS[p.unit];
-        const where = p.dest ? `\`${p.dest}\`` : "the top of the vault";
-        if (!p.notes.length && !p.taken.length) lines.push({ text: `No notes in ${p.folder ? `\`${p.folder}\`` : "the vault's top folder"} are named \`${p.from}\`.` });
+        const where = p.dest || "the top of the vault";
+        if (!p.notes.length && !p.taken.length) lines.push({ text: `No notes in ${p.folder || "the vault's top folder"} are named ${p.from}.` });
         if (p.notes.length) {
             const e = p.notes.at(-1);
             lines.push({ text: `Renames ${this.count(p.notes.length, `${kind} note`)}, such as ${e.rel} → ${e.name} (${this.spell(p.unit, e.period, p.locale)}), into ${where}.` });
@@ -137,8 +144,8 @@ export default class RenamePeriodicNotes {
         if (!from) return { refused: "Give the format the notes are named in now." };
         if (!to) return { refused: "Give the format they should be named in." };
         if (to.includes("/")) return { refused: "Plainday doesn't find notes in date folders yet, so the new format can't hold a folder." };
-        if (!plainday.Settings.namesWholeDate(unit, to, locale)) return { refused: `Names in \`${to}\` don't give a note's whole date on their own, which Plainday needs.` };
-        const dest = plainday.PeriodicNotes.where(unit, moment().format("YYYY-MM-DD"), rules).folder;
+        if (!plainday.Settings.namesWholeDate(unit, to, locale)) return { refused: `Names in ${to} don't give a note's whole date on their own, which Plainday needs.` };
+        const dest = this.folderOf(unit);
         const prefix = folder ? `${folder}/` : "";
         const ctx = { unit, folder, prefix, from, to, locale, dest };
 
@@ -154,7 +161,7 @@ export default class RenamePeriodicNotes {
             if (!period) continue;
             const name = this.name(unit, period, to, locale);
             if (!this.readsBack(unit, period, name, to, locale)) {
-                return { refused: `${rel} would be named ${name}, which doesn't read back as the same ${unit} in \`${to}\`.` };
+                return { refused: `${rel} would be named ${name}, which doesn't read back as the same ${unit} in ${to}.` };
             }
             const path = `${dest ? `${dest}/` : ""}${name}.md`;
             if (path !== f.path) found.push({ file: f, from: f.path, rel, period, name, path });
@@ -212,10 +219,13 @@ export default class RenamePeriodicNotes {
         return (unit === "day" || unit === "week" ? m : m.clone().startOf(unit)).format("YYYY-MM-DD");
     }
 
-    // The name `format` gives the period starting on `period`; a week's is its fourth day's week
+    // The name `format` gives the period starting on `period`. A week's is the week in `format`'s way of
+    // counting that holds the old week's fourth day, named from its first day, so a format with a day in it
+    // names the week as Plainday does.
     name(unit, period, format, locale) {
         const m = moment(period, "YYYY-MM-DD", true).locale(locale);
-        return (unit === "week" ? m.add(3, "days") : m).format(format);
+        if (unit !== "week") return m.format(format);
+        return m.add(3, "days").startOf(plainday.Settings.constructor.isoName(format) ? "isoWeek" : "week").format(format);
     }
 
     // Whether `name` reads back in `format` as the same day, month or year, or as a week holding the old
