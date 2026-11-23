@@ -1,6 +1,8 @@
 import { Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { WorkspaceLeaf } from "obsidian" */
+/** @import { SomeView } from "../host.js" */
 export default class AddProjectLink {
 
     // On a task or event line in a daily, weekly, monthly or yearly note: pick a project or area from the
@@ -10,7 +12,7 @@ export default class AddProjectLink {
     // Anywhere else nothing changes, before the menu, and the notice says what to do instead.
     async invoke() {
         const helper = plainday.AddTaskNote, tasks = plainday.TaskIds, change = plainday.TaskChange;
-        const editor = app.workspace.activeLeaf?.view?.editor;
+        const editor = /** @type {(WorkspaceLeaf & { view: SomeView }) | null} */ (app.workspace.activeLeaf)?.view?.editor;
         const source = app.workspace.getActiveFile();
         if (!helper || !editor || !source) return;
         if (!tasks.works(source)) return;
@@ -51,11 +53,11 @@ export default class AddProjectLink {
 
     // The line with `link` as its one ⭕ or 🗃️, before the note link that ends it, or at the end with no
     // trailing space. Any in the run of links that ends it come off; one in its text is part of the title.
-/**
- * @param {string} lineText
- * @param {string} link
- * @returns {string}
- */
+    /**
+     * @param {string} lineText
+     * @param {string} link
+     * @returns {string}
+     */
     placed(lineText, link) {
         const helper = plainday.AddTaskNote;
         return helper.withHome(lineText, link, helper.trailingProjectLinks(lineText).map((l) => l.raw), { inRun: true });
@@ -63,13 +65,17 @@ export default class AddProjectLink {
 
     // What to call the line in the menu: its text after the checkbox and an event's time, with
     // symbol links left out and any other link read as its alias
+    /**
+     * @param {string} lineText
+     * @returns {string}
+     */
     label(lineText) {
         const helper = plainday.AddTaskNote;
         const { EVENT_TIME } = helper.constructor;
         return lineText.slice(helper.afterCheckbox(lineText))
             .replace(helper.constructor.BLOCK_ID, "")
             .replace(EVENT_TIME, "")
-            .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/gu, (m, target, alias) => {
+            .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/gu, (m, /** @type {string} */ target, /** @type {string | undefined} */ alias) => {
                 const shown = (alias ?? target).trim();
                 return /^(?:⋯|↗|⭕|🗃|🚩)/u.test(shown) ? "" : shown;
             })

@@ -4,6 +4,43 @@ import { EditorSelection, EditorState, Prec, StateEffect, Transaction } from "@c
 import { foldedRanges } from "@codemirror/language";
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, Events, TFile, View, WorkspaceLeaf } from "obsidian" */
+/** @import { DecorationSet, ViewUpdate } from "@codemirror/view" */
+/** @import { Extension, Range, Text } from "@codemirror/state" */
+/** @import { CmEditor, MomentFn } from "../host.js" */
+/** @import { NameReader } from "../shared/taskIds.js" */
+/**
+ * A stretch of a line, as offsets into it: a task's ID from the space before it (blockId), or a line
+ * an edit touched, as offsets into the note.
+ * @typedef {{ from: number, to: number }} Span
+ *
+ * A system link's kind, by its alias's symbol (KINDS).
+ * @typedef {"due" | "forward" | "note" | "from" | "project" | "area"} LinkKind
+ *
+ * One system link in the run that ends a line (trail): where it is, its kind, the note it names, and its alias.
+ * @typedef {{ from: number, to: number, kind: LinkKind, target: string, alias: string }} TrailLink
+ *
+ * The run of system links that ends a task or event line (trail).
+ * @typedef {{ bodyFrom: number, textEnd: number, runFrom: number, runTo: number, links: TrailLink[] }} Trail
+ *
+ * One change on a line, as offsets into it, with where it leaves the cursor in the text it puts in, and
+ * where keepIdAtEnd puts that text instead.
+ * @typedef {{ from: number, to: number, insert: string, cursor: number }} LineEdit
+ * @typedef {{ changes: { from: number, insert: string }[], cursor: number }} Moved
+ *
+ * What the extension draws on the lines it's asked for (build): its two layers, and whether a run's
+ * width is still a guess.
+ * @typedef {{ outer: DecorationSet, inner: DecorationSet, unmeasured: boolean }} Drawn
+ *
+ * An event's handle knows what it was registered on, which Obsidian's types leave out.
+ * @typedef {EventRef & { e: Events }} OwnRef
+ *
+ * What a run keeps on the window, so the next run reuses its slot and undoes the rest: the editor
+ * extension's slot, the listeners, the measured widths by what the links show, the character size
+ * they were measured at, and the two timers.
+ * @typedef {{ slot: Extension[], refs: EventRef[], widths: Map<string, number>, size: string | null, timer: number | null, midnight: number | null }} Handles
+ * @typedef {Window & { pmTrailingLinks?: Handles }} HandleWindow
+ */
 export default class TrailingLinks {
     // Startup script (OBS-84): draws the links that end a task or event line small, at the right
     // of the line's last row, the way Things shows a deadline. Display only, except that it keeps a
@@ -66,6 +103,7 @@ export default class TrailingLinks {
     // `2026-09-17#^p7d2qe`; periodicLine reads the name
     static PERIODIC_LINE = /^([^#]+)#\^[A-Za-z0-9-]+$/;
     // A link's kind by its alias's symbol; one with none is a forward date (LINK's last alternative)
+    /** @type {Record<string, LinkKind>} */
     static KINDS = { "🚩": "due", "➡": "forward", "⋯": "note", "↗": "from", "⭕": "project", "🗃": "area" };
     // A task's ID ending its line (OBS-181), with the space before it
     static BLOCK_ID = /\s\^[A-Za-z0-9-]+\s*$/;
@@ -78,6 +116,11 @@ export default class TrailingLinks {
 
     // Where a line's ID is: { from (the space before it), to }, or null. `strict`: only the ID that's
     // hidden (HIDDEN_ID)
+    /**
+     * @param {string} text
+     * @param {{ strict?: boolean }} [options]
+     * @returns {Span | null}
+     */
     static blockId(text, { strict = false } = {}) {
         const m = text.match(strict ? TrailingLinks.HIDDEN_ID : TrailingLinks.BLOCK_ID);
         return m ? { from: m.index, to: m.index + m[0].trimEnd().length } : null;
@@ -86,6 +129,11 @@ export default class TrailingLinks {
     // Where a task or event line's text ends, ahead of the links and the hidden ID that end it, or null
     // when nothing does. A task with no text yet ends right after its checkbox, where the cursor rests.
     // `read` reads a forward date's name, here and in each rule below that takes it (periodicLine).
+    /**
+     * @param {string} text
+     * @param {NameReader} [read]
+     * @returns {number | null}
+     */
     static textEnd(text, read) {
         const head = text.match(TrailingLinks.TASK_LINE);
         if (!head) return null;
@@ -96,6 +144,13 @@ export default class TrailingLinks {
     // Where End and Cmd-→ go from `ch` on a line with a textEnd: the end of the text, then, from there or
     // past it, the end of the line. Null on any other line, and on an upper row of one that wraps, which
     // ends at `rowEnd`, ahead of the text's end.
+    /**
+     * @param {string} text
+     * @param {number} ch
+     * @param {number} [rowEnd]
+     * @param {NameReader} [read]
+     * @returns {number | null}
+     */
     static endStop(text, ch, rowEnd = text.length, read) {
         const end = TrailingLinks.textEnd(text, read);
         if (end === null || Math.max(ch, rowEnd) < end) return null;
@@ -107,6 +162,11 @@ export default class TrailingLinks {
     // lookbehind, OBS-199), and a pattern can't read a name by the vault's formats (OBS-297), so it's made
     // here. When it fails, no link ends the text: one starting later would need a `|` after this one's,
     // and a date label has none. TimeReport.trailLink is the same.
+    /**
+     * @param {string} text
+     * @param {NameReader} [read]
+     * @returns {RegExpMatchArray | null}
+     */
     static lastLink(text, read) {
         const m = text.match(TrailingLinks.LINK);
         return m && (m[3] === undefined || TrailingLinks.periodicLine(m[1], read)) ? m : null;
@@ -116,6 +176,11 @@ export default class TrailingLinks {
     // link's own, one inside its text, or one made of the link's second `[` and a `[` after it, as the
     // lookbehind read it, OBS-199), a name or path that reads as a day's, week's, month's or year's note
     // (`read`, PeriodicNotes.reader; Plainday's when it's not given), then `#^` and an ID
+    /**
+     * @param {string} target
+     * @param {NameReader} [read]
+     * @returns {boolean}
+     */
     static periodicLine(target, read) {
         const text = `[[${target}`;
         const m = text.slice(text.lastIndexOf("[[") + 2).match(TrailingLinks.PERIODIC_LINE);
@@ -124,6 +189,10 @@ export default class TrailingLinks {
 
     // `read`, or Plainday's reader of periodic note names (PeriodicNotes.reader). Code that runs without
     // Plainday hands its own in; with neither, it throws rather than read a name wrong.
+    /**
+     * @param {NameReader} [read]
+     * @returns {NameReader}
+     */
     static reader(read) {
         if (read) return read;
         const own = plainday?.PeriodicNotes?.reader?.();
@@ -135,9 +204,15 @@ export default class TrailingLinks {
     // (where the text starts, after the checkbox), textEnd (where it ends, before the space ahead
     // of the run), runFrom, runTo, links: [{ from, to, kind, target, alias }] in line order }. Null
     // when the line doesn't end in one. Trailing spaces and the ID aren't part of the run.
+    /**
+     * @param {string} text
+     * @param {NameReader} [read]
+     * @returns {Trail | null}
+     */
     static trail(text, read) {
         const head = text.match(TrailingLinks.TASK_LINE);
         if (!head) return null;
+        /** @type {TrailLink[]} */
         const links = [];
         let end = TrailingLinks.blockId(text)?.from ?? text.length;
         end = text.slice(0, end).trimEnd().length;
@@ -169,6 +244,12 @@ export default class TrailingLinks {
         return found;
     }
 
+    /**
+     * @param {string} text
+     * @param {number} bodyFrom
+     * @param {number} end
+     * @returns {number}
+     */
     static lastWordStart(text, bodyFrom, end) {
         if (end <= bodyFrom) return -1;
         const before = text.slice(0, end);
@@ -181,8 +262,13 @@ export default class TrailingLinks {
 
     // The name a project or area link is shown with: the shortest of the note's name and its
     // aliases, leaving out the ⭕.Area.Project style ones. The name wins a tie.
+    /**
+     * @param {string} basename
+     * @param {unknown} aliases
+     * @returns {string}
+     */
     static shortestName(basename, aliases) {
-        const plain = [].concat(aliases ?? [])
+        const plain = /** @type {unknown[]} */ ([]).concat(aliases ?? [])
             .filter((a) => a !== null && a !== undefined)
             .map(String)
             .filter((a) => a && !/^(?:⭕|🗃)/u.test(a));
@@ -191,12 +277,22 @@ export default class TrailingLinks {
 
     // Whether a due link's target, read as a day's note (`read`, as periodicLine), is before `today`
     // (YYYY-MM-DD). A 🚩 on a link to any other note never is.
+    /**
+     * @param {string} target
+     * @param {string} today
+     * @param {NameReader} [read]
+     * @returns {boolean}
+     */
     static overdue(target, today, read) {
         const period = TrailingLinks.reader(read)(target);
         return period?.unit === "day" && period.date < today;
     }
 
     // A line's indent, a tab counting as four spaces (as TimeReport counts it)
+    /**
+     * @param {string} text
+     * @returns {number}
+     */
     static indent(text) {
         let w = 0;
         for (const ch of text.match(/^\s*/)[0]) w += ch === "\t" ? 4 : 1;
@@ -204,6 +300,12 @@ export default class TrailingLinks {
     }
 
     // The last of the `count` lines that's nested under line `n` (n itself when none is)
+    /**
+     * @param {(n: number) => string} lineAt
+     * @param {number} count
+     * @param {number} n
+     * @returns {number}
+     */
     static subtreeEnd(lineAt, count, n) {
         const base = TrailingLinks.indent(lineAt(n));
         let last = n;
@@ -230,6 +332,12 @@ export default class TrailingLinks {
     // Obsidian's own (fix round 1). The start the old and new text share is left out (an edit may
     // replace the character before the cursor with itself), and an edit that takes text off is left
     // alone.
+    /**
+     * @param {string} text
+     * @param {LineEdit} edit
+     * @param {NameReader} [read]
+     * @returns {Moved | null}
+     */
     static keepIdAtEnd(text, edit, read) {
         if (!TrailingLinks.TASK_LINE.test(text)) return null;
         const id = TrailingLinks.blockId(text, { strict: true });
@@ -244,8 +352,9 @@ export default class TrailingLinks {
         // Whether `before`, put in at `n`, would follow the checkbox straight away: a task with no text yet
         // shares the checkbox's space with what's after it, so the text gets a space of its own there and
         // the box stays a box
-        const boxOnly = (n) => /^\s*[-*+]\s+\[.\]$/.test(text.slice(0, n)) && /^\S/.test(before);
+        const boxOnly = (/** @type {number} */ n) => /^\s*[-*+]\s+\[.\]$/.test(text.slice(0, n)) && /^\S/.test(before);
         // Where `before` goes; `after` goes at the end of the line
+        /** @type {number} */
         let at;
         if (before && !taken && from >= id.to) at = TrailingLinks.trail(text, read)?.textEnd ?? id.from;
         else if (boxOnly(id.from) && !taken && !after && (from === id.from || from === id.from + 1)) at = id.from;
@@ -268,33 +377,35 @@ export default class TrailingLinks {
         const ws = app.workspace;
 
         // One registered slot per load of Plainday; a rerun swaps what's in it
-        const kept = window.pmTrailingLinks;
+        const kept = /** @type {HandleWindow} */ (window).pmTrailingLinks;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
+        /** @type {Handles} */
         const handles = { slot: slot ?? [], refs: [], widths: new Map(), size: null, timer: null, midnight: null };
-        window.pmTrailingLinks = handles;
+        /** @type {HandleWindow} */ (window).pmTrailingLinks = handles;
         if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
         // Redraw every line on screen: a note moved or retagged, or the day changed
         const refresh = StateEffect.define();
-        const redrawAll = () => ws.iterateAllLeaves((leaf) => leaf.view?.editor?.cm?.dispatch?.({ effects: refresh.of(null) }));
+        const redrawAll = () => ws.iterateAllLeaves((/** @type {WorkspaceLeaf & { view: View & { editor?: CmEditor } }} */ leaf) => leaf.view?.editor?.cm?.dispatch?.({ effects: refresh.of(null) }));
 
-        const sourceOf = (v) => v.state.field(editorInfoField, false)?.file?.path ?? "";
-        const noteFor = (linktext, sourcePath) => app.metadataCache.getFirstLinkpathDest(linktext.split(/[#^]/)[0], sourcePath);
-        const nameOf = (file, fallback) => file
+        const sourceOf = (/** @type {EditorView} */ v) => v.state.field(editorInfoField, false)?.file?.path ?? "";
+        const noteFor = (/** @type {string} */ linktext, /** @type {string} */ sourcePath) => app.metadataCache.getFirstLinkpathDest(linktext.split(/[#^]/)[0], sourcePath);
+        const nameOf = (/** @type {TFile | null} */ file, /** @type {string} */ fallback) => file
             ? T.shortestName(file.basename, app.metadataCache.getFileCache(file)?.frontmatter?.aliases)
             : fallback.split("/").pop();
 
         // The decorations for the lines in `ranges` (by default, the lines on screen)
+        /** @type {(v: EditorView, ranges?: readonly Span[]) => Drawn} */
         const build = (v, ranges = v.visibleRanges) => {
             const none = { outer: Decoration.none, inner: Decoration.none, unmeasured: false };
             if (!v.state.field(editorLivePreviewField, false)) return none;
             const doc = v.state.doc;
             const sourcePath = sourceOf(v);
-            const today = moment().format("YYYY-MM-DD");
+            const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
             // The names of periodic notes read as the settings are now, once for the lines drawn
             const read = T.reader();
             const folds = foldedRanges(v.state);
-            const outer = [], inner = [];
+            const outer = /** @type {Range<Decoration>[]} */ ([]), inner = /** @type {Range<Decoration>[]} */ ([]);
             let unmeasured = false;
             for (const { from, to } of ranges) {
                 for (let pos = from; pos <= to;) {
@@ -316,7 +427,7 @@ export default class TrailingLinks {
                     // A shown ID (OBS-185) is drawn in the run, last, at the right edge after the links: where
                     // it is in the text, after the room the last word keeps, it lands on top of them
                     const idText = idShown ? line.text.slice(idShown.from + 1, idShown.to) : null;
-                    const at = (i) => line.from + i;
+                    const at = (/** @type {number} */ i) => line.from + i;
                     const shown = t.links.map((l) => {
                         if (l.kind !== "project" && l.kind !== "area") return { l, text: l.alias };
                         return { l, text: nameOf(noteFor(l.target, sourcePath), l.target), name: true };
@@ -353,20 +464,20 @@ export default class TrailingLinks {
         };
 
         // Measures links it hasn't seen yet (the same links are the same width anywhere), then redraws
-        const measure = (v) => v.requestMeasure({
+        const measure = (/** @type {EditorView} */ v) => v.requestMeasure({
             key: handles,
-            read: (rv) => [...rv.contentDOM.querySelectorAll(".pm-trail-run[data-pm-sig]")]
+            read: (rv) => /** @type {HTMLElement[]} */ ([...rv.contentDOM.querySelectorAll(".pm-trail-run[data-pm-sig]")])
                 .filter((run) => !handles.widths.has(run.dataset.pmSig))
                 // Not while a link on the line is open: its markdown is wider than the pills
                 .filter((run) => !run.closest(".pm-trail-line")?.querySelector(".pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)"))
                 .map((run) => {
                     // Only the pills: the space between two links is an element too, and it lays out
                     // at the far left
-                    const pills = [...run.children].filter((k) => k.classList.contains("pm-trail"))
+                    const pills = /** @type {Element[]} */ ([...run.children]).filter((k) => k.classList.contains("pm-trail"))
                         .map((k) => k.getBoundingClientRect()).filter((r) => r.width > 0);
                     if (!pills.length) return null;
                     const width = Math.max(...pills.map((r) => r.right)) - Math.min(...pills.map((r) => r.left)) + T.PILL_MARGIN_PX;
-                    return [run.dataset.pmSig, Math.ceil(width)];
+                    return /** @type {[string, number]} */ ([run.dataset.pmSig, Math.ceil(width)]);
                 })
                 .filter(Boolean),
             write: (found, wv) => {
@@ -376,15 +487,17 @@ export default class TrailingLinks {
             },
         });
 
-        const span = (v) => v.visibleRanges.map((r) => `${v.state.doc.lineAt(r.from).number}-${v.state.doc.lineAt(r.to).number}`).join(",");
+        const span = (/** @type {EditorView} */ v) => v.visibleRanges.map((r) => `${v.state.doc.lineAt(r.from).number}-${v.state.doc.lineAt(r.to).number}`).join(",");
 
         const plugin = ViewPlugin.fromClass(class {
+            /** @param {EditorView} v */
             constructor(v) {
                 Object.assign(this, build(v));
                 this.span = span(v);
                 if (this.unmeasured) measure(v);
             }
 
+            /** @param {ViewUpdate} u */
             update(u) {
                 // CodeMirror calls every edit a viewport change (the positions after it move), so what
                 // counts is which lines are on screen
@@ -416,16 +529,28 @@ export default class TrailingLinks {
 
             // Swaps the decorations of the lines in `touched` for `part`, what build drew for them;
             // the rest are mapped through the update's changes
+            /**
+             * @param {ViewUpdate} u
+             * @param {Drawn} part
+             * @param {Span[]} touched
+             */
             merge(u, part, touched) {
-                const inside = (pos) => touched.some((r) => pos >= r.from && pos <= r.to);
-                const add = (set, more) => set.map(u.changes).update({ filter: (from) => !inside(from), add: [...T.ranges(more)], sort: true });
+                const inside = (/** @type {number} */ pos) => touched.some((r) => pos >= r.from && pos <= r.to);
+                const add = (/** @type {DecorationSet} */ set, /** @type {DecorationSet} */ more) => set.map(u.changes).update({ filter: (from) => !inside(from), add: [...T.ranges(more)], sort: true });
+                /** @type {DecorationSet} */
                 this.outer = add(this.outer, part.outer);
+                /** @type {DecorationSet} */
                 this.inner = add(this.inner, part.inner);
+                /** @type {boolean} */
                 this.unmeasured = part.unmeasured;
             }
 
             // The lines with a hidden ID (OBS-181) that the cursor left and reached, each once: the ID
             // shows only while the cursor is at it. Only the main cursor counts, as in build.
+            /**
+             * @param {ViewUpdate} u
+             * @returns {Span[]}
+             */
             idLines(u) {
                 const doc = u.state.doc;
                 const lines = [u.startState.selection.main.head, u.state.selection.main.head].map((p) => doc.lineAt(Math.min(p, doc.length)));
@@ -437,8 +562,12 @@ export default class TrailingLinks {
 
             // The lines an edit touched, each with the lines nested under it, or null when the edit spans
             // lines or changes an indent: then everything on screen is redrawn
+            /**
+             * @param {ViewUpdate} u
+             * @returns {Span[] | null}
+             */
             touched(u) {
-                const doc = u.state.doc, old = u.startState.doc, out = [];
+                const doc = u.state.doc, old = u.startState.doc, out = /** @type {Span[]} */ ([]);
                 let lines = 0, whole = false;
                 u.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
                     const before = old.lineAt(fromA), first = doc.lineAt(fromB);
@@ -461,7 +590,7 @@ export default class TrailingLinks {
         // End and Cmd-→: where the default would stop in the moved links (or past the text, on the
         // line's last row), go where endStop says, or straight to the end of the line in Source mode.
         // A hidden ID (OBS-181) counts as a link: the default can stop just before it.
-        const toEnd = (extend) => (v) => {
+        const toEnd = (/** @type {boolean} */ extend) => (/** @type {EditorView} */ v) => {
             const { state: s } = v;
             const live = s.field(editorLivePreviewField, false);
             let hit = false;
@@ -483,7 +612,7 @@ export default class TrailingLinks {
         // Enter at the end of the text, where End now stops, acts as at the end of the line, so End, then
         // Enter, still leaves the links and the ID on their line. It only moves the cursor, and returns
         // false: the Enter itself stays Obsidian's own.
-        const enter = (v) => {
+        const enter = (/** @type {EditorView} */ v) => {
             const { state: s } = v;
             const { ranges, main } = s.selection;
             if (ranges.length > 1 || !main.empty || !s.field(editorLivePreviewField, false)) return false;
@@ -501,8 +630,8 @@ export default class TrailingLinks {
 
         // A click on a moved link opens that link. Caught on the way down, before CodeMirror and
         // Obsidian, which would pick the link from where the click lands in the text.
-        const linkAt = (e, v) => {
-            const pill = e.target.closest?.(".pm-trail");
+        const linkAt = (/** @type {MouseEvent} */ e, /** @type {EditorView} */ v) => {
+            const pill = /** @type {Element} */ (e.target).closest?.(".pm-trail");
             const lineEl = pill?.closest(".pm-trail-line");
             if (!lineEl || lineEl.querySelector(".pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)")) return null;
             const pos = v.posAtDOM(pill);
@@ -511,9 +640,10 @@ export default class TrailingLinks {
         };
         const EVENTS = ["pointerdown", "mousedown", "mouseup", "click", "auxclick"];
         const clicks = ViewPlugin.fromClass(class {
+            /** @param {EditorView} v */
             constructor(v) {
                 this.v = v;
-                this.handler = (e) => {
+                this.handler = (/** @type {MouseEvent} */ e) => {
                     if (e.button !== 0 && e.button !== 1) return;
                     const link = linkAt(e, v);
                     if (!link) return;
@@ -539,7 +669,7 @@ export default class TrailingLinks {
             // Composed input (an IME, an accent key) is left alone: moving it would break the composition
             if (!tr.docChanged || !tr.isUserEvent("input") || tr.isUserEvent("input.type.compose")) return tr;
             if (tr.startState.selection.ranges.length !== 1) return tr;
-            let one = null, count = 0;
+            let one = /** @type {{ fromA: number, toA: number, fromB: number, inserted: Text } | null} */ (null), count = 0;
             tr.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
                 count++;
                 one = { fromA, toA, fromB, inserted };
@@ -584,19 +714,19 @@ export default class TrailingLinks {
         );
         // A due date turns red at midnight
         const atMidnight = () => {
-            const next = moment().add(1, "day").startOf("day").add(1, "second");
+            const next = /** @type {MomentFn} */ (moment)().add(1, "day").startOf("day").add(1, "second");
             handles.midnight = window.setTimeout(() => {
                 redrawAll();
                 atMidnight();
-            }, next.diff(moment()));
+            }, next.diff(/** @type {MomentFn} */ (moment)()));
         };
         atMidnight();
     }
 
     deconstructor() {
-        const handles = window.pmTrailingLinks;
+        const handles = /** @type {HandleWindow} */ (window).pmTrailingLinks;
         if (!handles) return;
-        for (const ref of handles.refs) ref.e.offref(ref);
+        for (const ref of /** @type {OwnRef[]} */ (handles.refs)) ref.e.offref(ref);
         handles.refs = [];
         window.clearTimeout(handles.timer);
         window.clearTimeout(handles.midnight);
@@ -606,6 +736,10 @@ export default class TrailingLinks {
     }
 
     // A decoration set's ranges, to add to another set
+    /**
+     * @param {DecorationSet} set
+     * @returns {Generator<Range<Decoration>>}
+     */
     static *ranges(set) {
         for (const c = set.iter(); c.value; c.next()) yield c.value.range(c.from, c.to);
     }
