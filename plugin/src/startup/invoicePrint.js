@@ -25,7 +25,8 @@ export default class InvoicePrint {
     /** @param {HTMLElement} el */
     static mark(el) {
         if (!el.classList.contains("pm-invoice")) return;
-        const heading = [...el.querySelectorAll("h2")].find((h) => (h.dataset.heading ?? h.textContent ?? "").trim().toLowerCase() === InvoicePrint.HEADING.toLowerCase());
+        // jsconfig.json's lib has no DOM.Iterable, so a NodeList spreads to any[]
+        const heading = /** @type {HTMLHeadingElement[]} */ ([...el.querySelectorAll("h2")]).find((h) =>(h.dataset.heading ?? h.textContent ?? "").trim().toLowerCase() === InvoicePrint.HEADING.toLowerCase());
         let block = heading?.parentElement ?? null;
         if (!block || block.parentElement !== el) return;
         for (; block; block = block.nextElementSibling) block.classList.add(InvoicePrint.CLASS);

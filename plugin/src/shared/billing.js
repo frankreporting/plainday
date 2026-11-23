@@ -1,5 +1,5 @@
 /** @import TimeReport from "../commands/timeReport.js" */
-/** @import { ReportIndex } from "../commands/timeReport.js" */
+/** @import { Entry, Model, Money, NameReader, Problem, ProjectProblem, ReportIndex } from "../commands/timeReport.js" */
 /**
  * A Billed entries row as an invoice keeps it: its daily note's date, its start and end in minutes
  * after that day's midnight (an end past midnight is over 1440), its minutes, the minutes billed and
@@ -32,6 +32,40 @@
  *
  * Where an entry stands (standing): billed, changed since it was billed, or open.
  * @typedef {{ kind: "billed" | "changed", invoice: Invoice, row: BilledRow } | { kind: "open", invoice?: undefined, row?: undefined }} Standing
+ *
+ * A Billed entries row as read (readBilled): a row that doesn't read, by line (from 1), and a date row
+ * whose label shows another day than the one it links (dayOf's `shows`).
+ * @typedef {{ line: number, text: string }} RowAt
+ * @typedef {{ line: number, text: string, date: string, shows: string }} LabeledRow
+ * @typedef {{ date: string, shows: string | null }} LinkedDay
+ *
+ * An invoice's Billed entries as read: its rows, the rows that don't read, the date rows labeled with
+ * another day, whether there's a table and whether it has its column names.
+ * @typedef {{ rows: BilledRow[], bad: RowAt[], labeled: LabeledRow[], found: boolean, head: boolean }} BilledTable
+ *
+ * A billed row's times (times): its date, start and end in minutes, and its minutes.
+ * @typedef {{ date: string, start: number, end: number, minutes: number }} RowTimes
+ *
+ * A day of the Billed entries section as it's read (readSection): its date, the hours its date row
+ * states in minutes, its entries, its date row, and whether a row of it didn't read.
+ * @typedef {{ date: string, minutes: number | null, rows: BilledRow[], at: RowAt, unread: boolean }} SectionDay
+ *
+ * The entries by date (byDate): live, archived, and both.
+ * @typedef {{ live: Map<string, Entry[]>, archived: Map<string, Entry[]>, all: Map<string, Entry[]> }} EntriesByDate
+ *
+ * A billed row that changed, with its invoice (invoiceChanges).
+ * @typedef {{ invoice: Invoice, change: BilledChange }} InvoiceChange
+ *
+ * What a new invoice would bill (select), and an entry it holds back.
+ * @typedef {{ entry: Entry, invoice: Invoice | null, row: BilledRow | null, why: "changed" | "duplicate" }} HeldBack
+ * @typedef {{
+ *   scope: Set<string>, entries: Entry[], heldBack: HeldBack[], changed: InvoiceChange[], notHourly: string[],
+ *   problems: Problem[], projectProblems: ProjectProblem[], bad: { invoice: Invoice, problem: string }[],
+ *   cap: { used: number, cap: number } | null,
+ * }} Selection
+ *
+ * A line of an invoice (rows): a date and rate, the billed minutes, the amount in cents, and its tasks.
+ * @typedef {{ date: string, cents: number, minutes: number, tasks: string[], amount: number }} InvoiceLine
  */
 export default class Billing {
     // What's been billed, and where each time entry stands (OBS-5). An invoice note keeps its own copy
@@ -58,31 +92,55 @@ export default class Billing {
     // An invoice's status property, its own so it never mixes with the projects' `status` (OBS-117)
     static STATUS = "invoice_status";
 
+    /**
+     * @param {BillingEntry} e
+     * @returns {string}
+     */
     key(e) {
         return `${e.date} ${e.start} ${e.end}`;
     }
 
+    /**
+     * @param {string} date
+     * @returns {number}
+     */
     day(date) {
         return Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10)) / 864e5;
     }
 
+    /**
+     * @param {number} n
+     * @returns {string}
+     */
     date(n) {
         return new Date(n * 864e5).toISOString().slice(0, 10);
     }
 
     // A frontmatter date as YYYY-MM-DD, or null: "2026-09-02", "2026-09-02T09:00", a real day only
+    /**
+     * @param {unknown} value
+     * @returns {string | null}
+     */
     isoDate(value) {
         const m = String(value ?? "").trim().match(/^(\d{4}-\d{2}-\d{2})(?:$|T)/);
         return m && !Number.isNaN(this.day(m[1])) && this.date(this.day(m[1])) === m[1] ? m[1] : null;
     }
 
     // A checkbox property: true, or "true" / "yes" typed by hand
+    /**
+     * @param {unknown} value
+     * @returns {boolean}
+     */
     truthy(value) {
         return value === true || /^(true|yes)$/i.test(String(value ?? "").trim());
     }
 
     // Text for a table cell: one line, every | escaped, and a #tag or an HTML tag quoted from a task
     // or note shown as text, so it can't tag the invoice or draw anything (as TimeReport.tableText)
+    /**
+     * @param {unknown} text
+     * @returns {string}
+     */
     tableText(text) {
         return String(text ?? "").replace(/\s+/g, " ").trim().replace(/\\+\|?|\|/g, (m) => (m.endsWith("|") && m.length % 2 ? `${m.slice(0, -1)}\\|` : m))
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
@@ -90,6 +148,11 @@ export default class Billing {
 
     // Text as a Billed entries cell reads back: defused, on one line, pipes unescaped. Task and note
     // text is compared this way, so a table round trip is never a change.
+    /**
+     * @param {TimeReport} tr
+     * @param {unknown} text
+     * @returns {string}
+     */
     stored(tr, text) {
         return this.tableText(tr.defuse(text)).replace(/\\\|/g, "|");
     }
@@ -97,19 +160,29 @@ export default class Billing {
     // Whether `text` from a daily note reads as `cell`, a Billed entries cell: compared as stored, without
     // the zero-width spaces defuse puts in, since what it escapes can change (OBS-238 left the report's
     // freeze comments whole, which an invoice made before escaped)
+    /**
+     * @param {TimeReport} tr
+     * @param {unknown} text
+     * @param {string} cell
+     * @returns {boolean}
+     */
     readsAs(tr, text, cell) {
-        const bare = (t) => String(t ?? "").replace(/\u200B/g, "");
+        const bare = (/** @type {unknown} */ t) => String(t ?? "").replace(/\u200B/g, "");
         return bare(this.stored(tr, text)) === bare(cell);
     }
 
     // A table row's cells, `\|` read back as `|`. A `|` inside a [[link]] belongs to the link even when
     // its `\` is gone: moving a note with the Advanced Rename and Delete Handler plugin strips it from
     // every link in a table, and the row must still read (OBS-117).
+    /**
+     * @param {string} line
+     * @returns {string[]}
+     */
     cells(line) {
         let s = line.trim();
         if (s.startsWith("|")) s = s.slice(1);
         if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-        const out = [];
+        const /** @type {string[]} */ out = [];
         let cell = "", inLink = false;
         for (let i = 0; i < s.length; i++) {
             if (!inLink && s.startsWith("[[", i) && s.indexOf("]]", i + 2) !== -1) { inLink = true; cell += "[["; i++; continue; }
@@ -122,6 +195,10 @@ export default class Billing {
     }
 
     // A cell's text as it shows: without the %% comments that close in it
+    /**
+     * @param {unknown} cell
+     * @returns {string}
+     */
     shown(cell) {
         return String(cell ?? "").replace(/%%.*?%%/g, " ").replace(/\s+/g, " ").trim();
     }
@@ -133,12 +210,18 @@ export default class Billing {
     // entries under it without the date, oldest first. `linkText(path)` is the link text for a project;
     // a date row links its day's note by its name (TimeReport.dayLinks, OBS-298).
     // Task and note are defused, so text quoted from a daily note can't open a comment in the invoice.
+    /**
+     * @param {BilledRow[]} rows
+     * @param {TimeReport} tr
+     * @param {(path: string) => string} linkText
+     * @returns {string[]}
+     */
     billedLines(rows, tr, linkText) {
-        const t = (s) => this.tableText(tr.defuse(s));
-        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const t = (/** @type {unknown} */ s) => this.tableText(tr.defuse(s));
+        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const link = tr.dayLinks();
         const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end);
-        const out = [];
+        const /** @type {string[][]} */ out = [];
         for (const date of new Set(sorted.map((r) => r.date))) {
             const day = sorted.filter((r) => r.date === date);
             out.push([`**[[${link(date)}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
@@ -156,6 +239,11 @@ export default class Billing {
     // shows }] (dayOf). `head` says whether the column names were there, and `both` that the note has two tables
     // (two sections, or the section and an old callout), whose rows all count. `project` comes back as link
     // text, to resolve with index.linkDest from the invoice's path.
+    /**
+     * @param {string} text
+     * @param {TimeReport} tr
+     * @returns {BilledTable & { both: boolean }}
+     */
     readBilled(text, tr) {
         const lines = String(text ?? "").split(/\r?\n/);
         const read = tr.reader();
@@ -169,6 +257,10 @@ export default class Billing {
     }
 
     // The line that heads the Billed entries section, whatever its case
+    /**
+     * @param {string} line
+     * @returns {boolean}
+     */
     isHeading(line) {
         return /^##\s+billed entries\s*$/i.test(String(line).trim());
     }
@@ -177,11 +269,17 @@ export default class Billing {
     // day's note by the vault's formats (`read`, TimeReport.reader), whatever its label says. { date, shows }:
     // `shows` the month and day its label shows when that's another day ("8/27", TimeReport.labelDay), else
     // null; a label without a month and day isn't compared. Null when the first link isn't a day's note's.
+    /**
+     * @param {string} cell
+     * @param {TimeReport} tr
+     * @param {NameReader} read
+     * @returns {LinkedDay | null}
+     */
     dayOf(cell, tr, read) {
         const m = String(cell ?? "").match(/\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/);
         const day = m ? read(m[1]) : null;
         if (day?.unit !== "day") return null;
-        const shows = tr.constructor.labelDay(m[2]);
+        const shows = (/** @type {typeof TimeReport} */ (tr.constructor)).labelDay(m[2]);
         return { date: day.date, shows: shows && shows !== `${+day.date.slice(5, 7)}/${+day.date.slice(8, 10)}` ? shows : null };
     }
 
@@ -195,11 +293,17 @@ export default class Billing {
     // A date row is the one whose first cell links a day's note (dayOf, OBS-298): its entries are on the day it
     // links, and one whose label shows another day is listed in `labeled`, which makes the invoice a Problem too.
     // `again` is a second Billed entries heading.
+    /**
+     * @param {string[]} lines
+     * @param {TimeReport} tr
+     * @param {NameReader} [read]
+     * @returns {BilledTable & { again: boolean }}
+     */
     readSection(lines, tr, read = tr.reader()) {
-        const rows = [], bad = [], labeled = [];
+        const /** @type {BilledRow[]} */ rows = [], /** @type {RowAt[]} */ bad = [], /** @type {LabeledRow[]} */ labeled = [];
         const at = lines.findIndex((l) => this.isHeading(l));
         if (at === -1) return { rows, bad, labeled, found: false, head: false, again: false };
-        let head = false, first = true, inTable = false, ended = false, again = false, day = null;
+        let head = false, first = true, inTable = false, ended = false, again = false, /** @type {SectionDay | null} */ day = null;
         const close = () => {
             if (!day) return;
             rows.push(...day.rows);
@@ -253,6 +357,12 @@ export default class Billing {
 
     // An entry row of the section, on `date`, or null: exactly the table's cells, and a project, since
     // a row that doesn't say whose time it was can't show that it moved to another project since
+    /**
+     * @param {string[]} cells
+     * @param {string} date
+     * @param {TimeReport} tr
+     * @returns {BilledRow | null}
+     */
     readEntry(cells, date, tr) {
         if (cells.length !== Billing.HEAD.length || !date || !this.isoDate(date)) return null;
         const time = cells[1].match(/^(\S+)\s*[-–]\s*(\S+)$/);
@@ -267,6 +377,13 @@ export default class Billing {
 
     // { date, start, end, minutes } from a start and an end as written, an end past midnight over 1440
     // (pm to am), or null
+    /**
+     * @param {string} date
+     * @param {string} startText
+     * @param {string} endText
+     * @param {TimeReport} tr
+     * @returns {RowTimes | null}
+     */
     times(date, startText, endText, tr) {
         const start = tr.minutes(startText);
         let end = tr.minutes(endText);
@@ -279,10 +396,16 @@ export default class Billing {
     }
 
     // The old folded callout, read as it always was, its date read by its link's name as the section's (dayOf)
+    /**
+     * @param {string[]} lines
+     * @param {TimeReport} tr
+     * @param {NameReader} [read]
+     * @returns {BilledTable}
+     */
     readCallout(lines, tr, read = tr.reader()) {
         const opener = new RegExp(`^>\\s*\\[!${Billing.CALLOUT}\\]`, "i");
         const at = lines.findIndex((l) => opener.test(l.trim()));
-        const rows = [], bad = [], labeled = [];
+        const /** @type {BilledRow[]} */ rows = [], /** @type {RowAt[]} */ bad = [], /** @type {LabeledRow[]} */ labeled = [];
         if (at === -1) return { rows, bad, labeled, found: false, head: false };
         let head = false, first = true;
         for (let i = at + 1; i < lines.length && /^\s*>/.test(lines[i]); i++) {
@@ -303,6 +426,12 @@ export default class Billing {
     }
 
     // A row of the old callout, on the day its first cell links (`linked`, dayOf), or null
+    /**
+     * @param {string[]} cells
+     * @param {TimeReport} tr
+     * @param {LinkedDay | null} linked
+     * @returns {BilledRow | null}
+     */
     readRow(cells, tr, linked) {
         if (cells.length < Billing.CALLOUT_HEAD.length || !linked) return null;
         const date = linked.date;
@@ -316,6 +445,11 @@ export default class Billing {
 
     // What an invoice's Problem says about its date rows labeled with another day (readBilled's `labeled`): the
     // first one's label and the day it links, the one its entries count on
+    /**
+     * @param {LabeledRow[]} labeled
+     * @param {TimeReport} tr
+     * @returns {string}
+     */
     labeledText(labeled, tr) {
         const [l] = labeled, n = labeled.length;
         const one = `labeled ${l.shows} that links the daily note for ${tr.shortDate(l.date)}, the date Plainday reads`;
@@ -342,12 +476,12 @@ export default class Billing {
      * @returns {Invoice}
      */
     readInvoice({ path, props = {}, text = "", tagged = true, error = null }, tr, index) {
-        const p = (name) => tr.prop(props ?? {}, name);
-        const filled = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+        const p = (/** @type {string} */ name) => tr.prop(props ?? {}, name);
+        const filled = (/** @type {unknown} */ v) => v !== undefined && v !== null && String(v).trim() !== "";
         const raw = String([p(Billing.STATUS), p("status")].find(filled) ?? "").trim().toLowerCase();
         const status = raw === "cancelled" ? "canceled" : raw || "draft";
-        const linkedTo = (value) => {
-            const link = String([].concat(value ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
+        const linkedTo = (/** @type {unknown} */ value) => {
+            const link = String(/** @type {unknown[]} */ ([]).concat(value ?? [])[0] ?? "").match(/\[\[([^\]|#]+)/)?.[1]?.trim();
             const dest = link ? index.linkDest(link, path) : null;
             return dest && tr.counts(dest, index) ? dest : null;
         };
@@ -357,7 +491,7 @@ export default class Billing {
         for (const r of rows) r.projectPath = r.project ? index.linkDest(r.project, path) : null;
         const minutes = rows.reduce((s, r) => s + r.billed, 0);
         const cents = this.rows(rows).reduce((s, r) => s + r.amount, 0);
-        const given = (name) => { const v = p(name); return v === undefined || v === null || String(v).trim() === "" ? null : Number(v); };
+        const given = (/** @type {string} */ name) => { const v = p(name); return v === undefined || v === null || String(v).trim() === "" ? null : Number(v); };
         const hours = given("hours"), total = given("total");
         const n = bad.length;
         const problem = error ? "has frontmatter that doesn't read"
@@ -368,8 +502,8 @@ export default class Billing {
             : labeled.length ? this.labeledText(labeled, tr)
             : !head ? "has a Billed entries table without its column names"
             : !rows.length ? "has no rows in its Billed entries"
-            : hours !== null && (!Number.isFinite(hours) || Math.round(hours * 60) !== minutes) ? `has Billed entries that add up to ${tr.hours(minutes)} hours, not its \`hours\` (${p("hours")})`
-            : total !== null && (!Number.isFinite(total) || Math.round(total * 100) !== cents) ? `has Billed entries that add up to ${tr.money(cents)}, not its \`total\` (${p("total")})`
+            : hours !== null && (!Number.isFinite(hours) || Math.round(hours * 60) !== minutes) ? `has Billed entries that add up to ${tr.hours(minutes)} hours, not its \`hours\` (${/** @type {(name: string) => string | number} */ (p)("hours")})`
+            : total !== null && (!Number.isFinite(total) || Math.round(total * 100) !== cents) ? `has Billed entries that add up to ${tr.money(cents)}, not its \`total\` (${/** @type {(name: string) => string | number} */ (p)("total")})`
             : null;
         return {
             // `unread`: its status can't be read, so it isn't taken for a draft. One that lost its tag but still
@@ -392,7 +526,7 @@ export default class Billing {
      * @returns {Ledger}
      */
     ledger(invoices, { except = null } = {}) {
-        const byKey = new Map(), byDate = new Map(), twice = [], live = [];
+        const /** @type {Map<string, BilledHit>} */ byKey = new Map(), /** @type {Map<string, BilledHit[]>} */ byDate = new Map(), /** @type {Ledger["twice"]} */ twice = [], /** @type {Invoice[]} */ live = [];
         for (const invoice of invoices) {
             if (invoice.path === except || invoice.status === "canceled") continue;
             live.push(invoice);
@@ -413,6 +547,11 @@ export default class Billing {
     // dash), canceled ones included, or past `last` (the last number in Settings → Plainday →
     // Invoices) when that's higher, so a deleted invoice's number is never used again. Null for the
     // very first, with no `last`.
+    /**
+     * @param {Invoice[]} invoices
+     * @param {number | null} [last]
+     * @returns {number | null}
+     */
     nextNumber(invoices, last = null) {
         const n = invoices.map((i) => String(i.number).match(/^(\d+)-(?!\d{2}-\d{2}$)/)?.[1]).filter(Boolean).map(Number);
         if (Number.isInteger(last) && last >= 0) n.push(last);
@@ -523,16 +662,32 @@ export default class Billing {
     // The projects a project's invoices and timesheet cover: itself, and every project below it when
     // its `include_subprojects` checkbox is on
     // A live project's leave out its archived sub-projects, which are never invoiced (OBS-213).
+    /**
+     * @param {string} project
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @returns {Set<string>}
+     */
     scope(project, model, tr, index) {
         const on = this.truthy(tr.prop(index.props?.(project) ?? {}, "include_subprojects"));
         return on ? new Set([...tr.subtree(project, model.parent)].filter((p) => tr.isArchived(p) === tr.isArchived(project))) : new Set([project]);
     }
 
     // The entries Billing can bill: every one but an archived project's (OBS-213)
+    /**
+     * @param {Model} model
+     * @returns {Entry[]}
+     */
     entries(model) {
         return model.entries.filter((e) => !e.archived);
     }
 
+    /**
+     * @param {string} project
+     * @param {Model} model
+     * @returns {boolean}
+     */
     hourly(project, model) {
         const m = model.money.get(project);
         return !!m && m.type === "hourly" && !!m.rate;
@@ -543,9 +698,13 @@ export default class Billing {
     // billingEntries); `archived`, the report's archived entries (OBS-213); `all`, for an archived
     // project's rows: the archived entries, then the live ones, so its billed time now on a live
     // project's line at its day and times says so (OBS-215).
+    /**
+     * @param {Model} model
+     * @returns {EntriesByDate}
+     */
     byDate(model) {
-        const group = (list) => {
-            const out = new Map();
+        const group = (/** @type {Entry[]} */ list) => {
+            const /** @type {Map<string, Entry[]>} */ out = new Map();
             for (const e of list) {
                 if (!out.has(e.date)) out.set(e.date, []);
                 out.get(e.date).push(e);
@@ -561,8 +720,15 @@ export default class Billing {
 
     // The projects `invoice`'s rows bill: each row's project link, or where that names no project, the
     // project of the entry at its day and times, counted or not, archived or live
+    /**
+     * @param {Invoice} invoice
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @returns {string[]}
+     */
     rowProjects(invoice, model, tr, index) {
-        const out = new Set();
+        const /** @type {Set<string>} */ out = new Set();
         const entries = [...model.entries, ...(model.disputed ?? [])];
         for (const r of invoice.rows) {
             if (r.projectPath && tr.counts(r.projectPath, index)) out.add(r.projectPath);
@@ -572,6 +738,11 @@ export default class Billing {
     }
 
     // Whether an invoice touches `scope`: its project, or a row's project, is in it (or can't be told)
+    /**
+     * @param {Invoice} invoice
+     * @param {Set<string>} scope
+     * @returns {boolean}
+     */
     touches(invoice, scope) {
         return !invoice.project || scope.has(invoice.project) || invoice.rows.some((r) => !r.projectPath || scope.has(r.projectPath));
     }
@@ -580,8 +751,16 @@ export default class Billing {
     // two never disagree: changed: [{ invoice, change }], every change that isn't wording; byInvoice:
     // Map(invoice → its changes). Nothing is held back on a guess (OBS-215): a billed entry that isn't
     // at its day and times, or overlapping them, is gone.
+    /**
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @param {Ledger} ledger
+     * @param {{ byDate?: EntriesByDate }} [options]
+     * @returns {{ changed: InvoiceChange[], byInvoice: Map<Invoice, BilledChange[]> }}
+     */
     invoiceChanges(model, tr, index, ledger, { byDate = this.byDate(model) } = {}) {
-        const changed = [], byInvoice = new Map();
+        const /** @type {InvoiceChange[]} */ changed = [], /** @type {Map<Invoice, BilledChange[]>} */ byInvoice = new Map();
         for (const invoice of ledger.invoices ?? []) {
             const list = this.changes(invoice, model, tr, index, ledger, { byDate, late: false }).changes;
             byInvoice.set(invoice, list);
@@ -607,16 +786,23 @@ export default class Billing {
     //   bad        [{ invoice, problem }] an invoice in scope whose Billed entries can't be trusted:
     //              invoicing is refused
     //   cap        { used, cap } in minutes when billable time through `through` passes the cap
+    /**
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @param {{ project: string, through: string, ledger: Ledger }} options
+     * @returns {Selection}
+     */
     select(model, tr, index, { project, through, ledger }) {
         if (!this.isoDate(through)) throw new Error(`Billing.select: "${through}" isn't a date`);
         // An archived project's time is never invoiced (OBS-213)
         const scope = new Set([...this.scope(project, model, tr, index)].filter((p) => !tr.isArchived(p)));
-        const entries = [], heldBack = [], notHourly = new Set(), bad = [];
-        let first = null;
+        const /** @type {Entry[]} */ entries = [], /** @type {HeldBack[]} */ heldBack = [], /** @type {Set<string>} */ notHourly = new Set(), /** @type {Selection["bad"]} */ bad = [];
+        let /** @type {string | null} */ first = null;
         for (const invoice of ledger.invoices ?? []) {
             if (invoice.problem && this.touches(invoice, scope)) bad.push({ invoice, problem: invoice.problem });
         }
-        const keys = new Set();
+        const /** @type {Set<string>} */ keys = new Set();
         for (const e of this.entries(model)) {
             if (!scope.has(e.project) || e.date > through || !e.billable) continue;
             if (!this.hourly(e.project, model)) { notHourly.add(e.project); continue; }
@@ -630,18 +816,18 @@ export default class Billing {
         }
         const { changed: all } = this.invoiceChanges(model, tr, index, ledger);
         const changed = all.filter(({ invoice, change }) => this.touches(invoice, scope) || change.kind === "gone");
-        const order = (a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end;
+        const order = (/** @type {BillingEntry} */ a, /** @type {BillingEntry} */ b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end;
         entries.sort(order);
         heldBack.sort((a, b) => order(a.entry, b.entry));
-        const running = (p) => (p.kind === "open" ? 0 : 1);
+        const running = (/** @type {Problem} */ p) => (p.kind === "open" ? 0 : 1);
         const floor = first ?? through;
         const problems = model.problems
             .filter((p) => p.date <= through && (p.date >= floor || p.kind === "open" || p.kind === "subtime") && (p.projects ?? []).some((x) => scope.has(x)))
             .sort((a, b) => running(a) - running(b) || a.date.localeCompare(b.date) || a.line - b.line);
         const projectProblems = model.projectProblems.filter((p) => scope.has(p.project) && !p.invoice);
         // The cap covers the project and every project below it, as on its note
-        const m = model.money.get(project) ?? {};
-        let cap = null;
+        const m = model.money.get(project) ?? /** @type {Partial<Money>} */ ({});
+        let /** @type {Selection["cap"]} */ cap = null;
         if (m.capMinutes) {
             const all = tr.subtree(project, model.parent);
             const used = model.entries.filter((e) => all.has(e.project) && e.billable && e.date <= through)
@@ -652,6 +838,12 @@ export default class Billing {
     }
 
     // Billed entries rows for `entries`, at each entry's project's hourly rate
+    /**
+     * @param {Entry[]} entries
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @returns {BilledRow[]}
+     */
     snapshot(entries, model, tr) {
         return entries.map((e) => ({
             date: e.date, start: e.start, end: e.end, minutes: e.minutes, billed: tr.rounded(e.minutes),
@@ -662,8 +854,12 @@ export default class Billing {
     // The invoice's lines: a row per date and rate, oldest first (higher rate first on a date), each
     // its rounded minutes added up, the amount in cents, and its tasks in order. TimeReport's totals
     // price time the same way, a day and a rate at a time.
+    /**
+     * @param {BilledRow[]} billed
+     * @returns {InvoiceLine[]}
+     */
     rows(billed) {
-        const groups = new Map();
+        const /** @type {Map<string, Omit<InvoiceLine, "amount">>} */ groups = new Map();
         for (const r of billed) {
             const k = `${r.date} ${r.cents}`;
             if (!groups.has(k)) groups.set(k, { date: r.date, cents: r.cents, minutes: 0, tasks: [] });
@@ -690,9 +886,18 @@ export default class Billing {
     // other against the entries as Billing reads them, as before OBS-213.
     // late: entries in the invoice's scope and period, billable and hourly, on no invoice; never for an
     // archived project, whose time is never invoiced.
+    /**
+     * @param {Invoice} invoice
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @param {Ledger} ledger
+     * @param {{ byDate?: EntriesByDate, late?: boolean }} [options]
+     * @returns {{ changes: BilledChange[], late: Entry[] }}
+     */
     changes(invoice, model, tr, index, ledger, { byDate = this.byDate(model), late: wantLate = true } = {}) {
-        const abs = (x) => [this.day(x.date) * 1440 + x.start, this.day(x.date) * 1440 + x.end];
-        const out = [];
+        const abs = (/** @type {BillingEntry} */ x) => [this.day(x.date) * 1440 + x.start, this.day(x.date) * 1440 + x.end];
+        const /** @type {BilledChange[]} */ out = [];
         for (const row of invoice.rows) {
             const pool = row.projectPath && tr.isArchived(row.projectPath) ? byDate.all : byDate.live;
             const exact = (pool.get(row.date) ?? []).filter((e) => e.start === row.start && e.end === row.end);
