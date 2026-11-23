@@ -2,7 +2,7 @@ import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { TFile, WorkspaceLeaf } from "obsidian" */
-/** @import { Fold, FoldView } from "../host.js" */
+/** @import { Fold, FoldView, MomentFn } from "../host.js" */
 /**
  * What a device remembers of a daily note (a snapshot): when it was taken, the note's line count,
  * whether its frontmatter was collapsed, and each item with sub-bullets, by line, text (checkbox
@@ -238,9 +238,9 @@ export default class RefoldDailyNotes {
         };
         // Drop snapshots of notes that are gone or too old for an outside change to matter
         const { format } = plainday.Schedule.dailyOpts();
-        const cutoff = moment().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
+        const cutoff = /** @type {MomentFn} */ (moment)().startOf("day").subtract(RefoldDailyNotes.KEEP_DAYS, "days");
         for (const path of Object.keys(store)) {
-            const date = moment(path.split("/").pop().replace(/\.md$/, ""), format, true);
+            const date = /** @type {MomentFn} */ (moment)(path.split("/").pop().replace(/\.md$/, ""), format, true);
             if (!app.vault.getFileByPath(path) || (date.isValid() && date.isBefore(cutoff))) delete store[path];
         }
         app.saveLocalStorage(RefoldDailyNotes.STORE, store);

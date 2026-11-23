@@ -794,6 +794,10 @@ export default class TimeReport {
     // `area`, which is read when a note has no `parent`, so a vault works before its notes are renamed.
     // A note's `parent` link from its frontmatter (`area` on older notes), or null. One pass over
     // the keys, since the report asks for every note's
+    /**
+     * @param {Record<string, unknown> | null | undefined} fm
+     * @returns {string | null}
+     */
     parentValue(fm) {
         if (!fm) return null;
         let parent, area;
@@ -1485,6 +1489,11 @@ export default class TimeReport {
         return Number.isFinite(n) && n > 0 ? n : null;
     }
 
+    /**
+     * @param {Record<string, unknown>} props
+     * @param {string} name
+     * @returns {unknown}
+     */
     prop(props, name) {
         const key = Object.keys(props ?? {}).find((k) => k.toLowerCase() === name);
         return key ? props[key] : undefined;
@@ -2112,6 +2121,7 @@ export default class TimeReport {
         return Math.ceil(minutes / step) * step;
     }
 
+    /** @param {number} minutes */
     hours(minutes) {
         return (minutes / 60).toFixed(2);
     }
@@ -2193,6 +2203,7 @@ export default class TimeReport {
         return t;
     }
 
+    /** @param {number} cents */
     money(cents) {
         const [whole, frac] = (cents / 100).toFixed(2).split(".");
         return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${frac}`;

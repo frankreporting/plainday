@@ -56,8 +56,15 @@ export * as chronoEn from "chrono-node/en";
 /** @import { EditorView } from "@codemirror/view" */
 /** @import { Extension } from "@codemirror/state" */
 /** @import { Moment } from "moment" */
+/** @import MomentLib from "moment" */
 /** @import { ParsedResult } from "chrono-node" */
 /**
+ * Moment.js's function, which Obsidian hands over as `moment`. Obsidian's types import Moment.js as a
+ * namespace, which the directory's scan reads as a function returning anything (it reads the code
+ * with `esModuleInterop`, as jsconfig.json does), so each call casts `moment` to this type in a
+ * comment first: `(moment)(date, "YYYY-MM-DD", true)` with the cast before the parentheses.
+ * @typedef {typeof MomentLib} MomentFn
+ *
  * A folded range in a note, by line, and a note's folds as Obsidian saves them on each device, which
  * it ignores once `lines` no longer matches the note:
  * @typedef {{ from: number, to: number }} Fold

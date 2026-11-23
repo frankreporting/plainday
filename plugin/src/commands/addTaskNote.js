@@ -1111,6 +1111,7 @@ export default class AddTaskNote {
 
     // The day of the daily note open now, read by its name as every link to a day is (OBS-297, OBS-300), else
     // today: YYYY-MM-DD
+    /** @returns {string} */
     dailyNoteDate() {
         const file = app.workspace.getActiveFile();
         const period = file ? plainday.PeriodicNotes.periodOfName(file.basename) : null;

@@ -3,7 +3,7 @@ import { app, plainday } from "../host.js";
 
 /** @import { TFile, WorkspaceLeaf } from "obsidian" */
 /** @import { Moment } from "moment" */
-/** @import { SomeView } from "../host.js" */
+/** @import { MomentFn, SomeView } from "../host.js" */
 /**
  * A pane, whose scroll position and cursor Plan carries across by hand: what Obsidian hands back
  * (as any) only goes back to setEphemeralState
@@ -55,8 +55,8 @@ export default class Plan {
         const activeFile = view?.file;
         const anchorIsDaily = activeFile ? this.isDailyNote(activeFile) : false;
         const start = anchorIsDaily
-            ? moment(activeFile.basename, format, true)
-            : moment().startOf("day");
+            ? /** @type {MomentFn} */ (moment)(activeFile.basename, format, true)
+            : /** @type {MomentFn} */ (moment)().startOf("day");
 
         const dates = [];
         for (let i = 0; i < days; i++) dates.push(start.clone().add(i, "days"));

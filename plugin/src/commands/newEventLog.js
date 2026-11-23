@@ -2,7 +2,7 @@ import { ButtonComponent, Modal, moment, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { WorkspaceLeaf } from "obsidian" */
-/** @import { SomeView } from "../host.js" */
+/** @import { MomentFn, SomeView } from "../host.js" */
 
 export default class NewEventLog {
     // The command New event log (OBS-122): asks for an event's title, makes its log on the day of the daily note
@@ -31,9 +31,9 @@ export default class NewEventLog {
      * @param {string} date
      * @param {string} [today]
      */
-    when(date, today = moment().format("YYYY-MM-DD")) {
-        const day = moment(date, "YYYY-MM-DD", true);
-        const words = /** @type {Record<number, string | undefined>} */ ({ 0: "Today", 1: "Tomorrow", "-1": "Yesterday" })[day.diff(moment(today, "YYYY-MM-DD", true), "days")];
+    when(date, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD")) {
+        const day = /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true);
+        const words = /** @type {Record<number, string | undefined>} */ ({ 0: "Today", 1: "Tomorrow", "-1": "Yesterday" })[day.diff(/** @type {MomentFn} */ (moment)(today, "YYYY-MM-DD", true), "days")];
         return words ?? day.locale(plainday.DatePrompt.weekRules().locale).format("ddd M/D/YY");
     }
 
