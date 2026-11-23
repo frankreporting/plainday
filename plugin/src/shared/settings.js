@@ -1,6 +1,18 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { MomentFn } from "../host.js" */
+/**
+ * A data file as Obsidian loads it, or a pasted copy as it parses: an object whose values are checked
+ * as they're read; null when there's no data file, and undefined when it doesn't read
+ * @typedef {Record<string, unknown> | null | undefined} Raw
+ *
+ * What reads a folder's path from a setting (Billing): `pathOf` any folder, `folderOf` the invoice
+ * folder, which can't be inside the archive
+ * @typedef {(raw: unknown) => { folder: string, error: string | null }} PathOf
+ * @typedef {{ pathOf: PathOf, folderOf: (raw: unknown, archive?: string | null) => { folder: string, error: string | null } }} FolderReader
+ */
+
 export default class Settings {
     // Plainday's settings (OBS-80, OBS-281): what Settings → Plainday shows, kept in Plainday's own data
     // file (.obsidian/plugins/plainday/data.json, through the plugin's loadData and saveData), never in a
@@ -170,6 +182,10 @@ export default class Settings {
     }
 
     // One line of text, trimmed; "" for anything else
+    /**
+     * @param {unknown} v
+     * @returns {string}
+     */
     text(v) {
         return typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
     }
@@ -235,11 +251,15 @@ export default class Settings {
      * Settings from whatever was stored or pasted: each value that reads, else its default. The invoice
      * folder follows Billing.folderOf's rules, so it's always a folder in the vault, or "".
      * @param {unknown} raw
-     * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
+     * @param {FolderReader} [billing]
      * @returns {ReturnType<Settings["defaults"]>}
      */
     normalize(raw, billing = plainday.Billing) {
         const out = this.defaults();
+        /**
+         * @param {unknown} v
+         * @returns {Record<string, unknown>}
+         */
         const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
         const r = obj(raw), inv = obj(r.invoices), tables = obj(r.tables), editor = obj(r.editor);
         // The folders first (OBS-283): the invoice folder can't be inside the archive. The three
@@ -395,16 +415,20 @@ export default class Settings {
     namesWholeDate(unit, format, locale) {
         const name = format.slice(format.lastIndexOf("/") + 1);
         const same = unit === "week" && Settings.isoName(name) ? "isoWeek" : unit;
-        const at = (y, m, d) => moment([y, m, d]).locale(locale);
+        const at = (/** @type {number} */ y, /** @type {number} */ m, /** @type {number} */ d) => /** @type {MomentFn} */ (moment)([y, m, d]).locale(locale);
         const dates = [at(1970, 8, 30), at(2067, 8, 30),
             ...[2026, 1970, 2067].flatMap((y) => Array.from({ length: 8 }, (_, i) => at(y, 11, 28).add(i, "days")))];
         return dates.every((date) => {
-            const back = moment(date.format(name), name, locale, true);
+            const back = /** @type {MomentFn} */ (moment)(date.format(name), name, locale, true);
             return back.isValid() && back.isSame(date, same);
         });
     }
 
     // Whether a week's name counts ISO weeks: GGGG or WW outside [brackets], as JumpToDate.isoWeeks reads it
+    /**
+     * @param {string} name
+     * @returns {boolean}
+     */
     static isoName(name) {
         return /[GW]/.test(name.replace(/\[[^\]]*\]/g, ""));
     }
@@ -612,7 +636,7 @@ export default class Settings {
         for (const item of v) {
             const r = typeof item === "object" && item !== null ? /** @type {Record<string, unknown>} */ (item) : {};
             const title = typeof r.title === "string" ? r.title.replace(/\s+/g, " ").trim() : "";
-            const links = (Array.isArray(r.links) ? r.links : []).filter((l) => typeof l === "string" && Settings.SERIES_LINK.test(l.trim()) && !Settings.LINKISH.test(l)).map((l) => l.trim());
+            const links = (Array.isArray(r.links) ? r.links : []).filter((l) => typeof l === "string" && Settings.SERIES_LINK.test(l.trim()) && !Settings.LINKISH.test(l)).map((/** @type {string} */ l) => l.trim());
             if (!title || !links.length) continue;
             byTitle.set(title, [...new Set([...(byTitle.get(title) ?? []), ...links])]);
         }
@@ -857,19 +881,21 @@ export default class Settings {
      * leaves this device's as they are. A copy made before there were folders (OBS-283) carries this
      * device's folders and templates, so a paste leaves them as they are too.
      * @param {string} text
-     * @param {{ folderOf: (raw: unknown) => { folder: string, error: string | null } }} [billing]
+     * @param {FolderReader} [billing]
      * @returns {{ settings: ReturnType<Settings["defaults"]>, links: Record<string, string>, withCalendars: boolean, error?: undefined } | { error: string, settings?: undefined, links?: undefined, withCalendars?: undefined }}
      */
     readCopy(text, billing = plainday.Billing) {
         const not = { error: "That isn't a copy of Plainday's settings. Use Copy at the top of Settings → Plainday, then paste here what it copied." };
         const t = String(text ?? "").trim();
         if (!t) return { error: "Paste a copy of Plainday's settings here." };
+        /** @type {Raw} */
         let raw;
-        try { raw = JSON.parse(t); } catch { return not; }
+        try { raw = /** @type {(text: string) => Raw} */ (JSON.parse)(t); } catch { return not; }
         if (typeof raw !== "object" || raw === null || !(Settings.COPY_MARK in raw)) return not;
         const settings = this.normalize(raw, billing);
         /** @type {Record<string, string>} */
         const links = {};
+        /** @type {Record<string, unknown>} */
         const given = typeof raw.links === "object" && raw.links !== null ? raw.links : {};
         for (const { id } of settings.calendars.list) {
             const link = given[id];
@@ -890,7 +916,7 @@ export default class Settings {
      * @returns {ReturnType<Settings["defaults"]>}
      */
     pasted(copy, now = this.data) {
-        const out = JSON.parse(JSON.stringify(copy));
+        const out = /** @type {(text: string) => typeof copy} */ (JSON.parse)(JSON.stringify(copy));
         out.invoices.lastNumber = Math.max(copy.invoices.lastNumber, now.invoices.lastNumber);
         return out;
     }
@@ -903,7 +929,7 @@ export default class Settings {
     async load() {
         const plugin = plainday.plugin;
         if (!plugin) return;
-        const raw = await plugin.loadData();
+        const raw = await /** @type {Promise<Raw>} */ (plugin.loadData());
         this.unreadable = raw === undefined;
         this.saved = raw !== null;
         this.calendarsSaved = this.hasCalendars(raw);
@@ -916,6 +942,10 @@ export default class Settings {
     }
 
     // Whether a data file as loaded has calendars, or doesn't read
+    /**
+     * @param {Raw} raw
+     * @returns {boolean}
+     */
     hasCalendars(raw) {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.calendars === "object" && raw.calendars !== null);
     }
@@ -928,6 +958,12 @@ export default class Settings {
 
     // Whether Projects, the Inbox or the archive a data file names didn't survive normalize(): one that
     // doesn't read, or three that don't hold together, which went back to the defaults
+    /**
+     * @param {Raw} raw
+     * @param {ReturnType<Settings["defaults"]>} settings
+     * @param {{ pathOf: PathOf }} [billing]
+     * @returns {boolean}
+     */
     foldersDropped(raw, settings, billing = plainday.Billing) {
         const f = typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null ? raw.folders : null;
         if (!f) return false;
@@ -935,13 +971,23 @@ export default class Settings {
     }
 
     // A data file or a copy with `three` (Projects, the Inbox and the archive) in place of its own
+    /**
+     * @param {Raw} raw
+     * @param {{ projects: string, inbox: string, archive: string }} three
+     * @returns {Record<string, unknown>}
+     */
     withFolders(raw, three) {
+        /** @type {Record<string, unknown>} */
         const r = typeof raw === "object" && raw !== null ? raw : {};
         const f = typeof r.folders === "object" && r.folders !== null ? r.folders : {};
         return { ...r, folders: { ...f, ...three } };
     }
 
     // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read
+    /**
+     * @param {Raw} raw
+     * @returns {boolean}
+     */
     hasFolders(raw) {
         return raw === undefined || (typeof raw === "object" && raw !== null && typeof raw.folders === "object" && raw.folders !== null);
     }
@@ -991,7 +1037,7 @@ export default class Settings {
     async replaceWith(copy, links = {}, withCalendars = true) {
         const before = this.data;
         const next = this.pasted(copy);
-        if (!withCalendars) next.calendars = JSON.parse(JSON.stringify(before.calendars));
+        if (!withCalendars) next.calendars = /** @type {(text: string) => typeof before.calendars} */ (JSON.parse)(JSON.stringify(before.calendars));
         // A copy from before recurring events were in the settings keeps this device's (OBS-275)
         else if (next.calendars.recurring === null) next.calendars.recurring = before.calendars.recurring;
         this.data = next;
@@ -1018,7 +1064,7 @@ export default class Settings {
     async reload() {
         const plugin = plainday.plugin;
         if (!plugin) return;
-        const raw = await plugin.loadData();
+        const raw = await /** @type {Promise<Raw>} */ (plugin.loadData());
         if (raw === undefined) return;
         this.unreadable = false;
         this.saved = raw !== null;

@@ -1,8 +1,8 @@
 import { getFrontMatterInfo, moment, Notice, parseYaml, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { Editor, TFile } from "obsidian" */
-/** @import { Templater } from "../host.js" */
+/** @import { Editor, MarkdownView, TFile } from "obsidian" */
+/** @import { MomentFn, Templater } from "../host.js" */
 /** @import { Period, Unit, WeekRules } from "./datePrompt.js" */
 /**
  * Where a periodic note goes and what it's called (where): its unit, the date asked for, its period's
@@ -37,12 +37,19 @@ export default class PeriodicNotes {
         // sync and Schedule making the same day at once). FinishPeriodicNotes leaves these alone.
         /** @type {Map<string, Promise<TFile>>} */
         this.making = new Map();
-        // Plainday's own holds on Templater's trigger, by path
+        // Plainday's own holds on Templater's trigger, by path: the timer that lets each go
+        /** @type {Map<string, number>} */
         this.holds = new Map();
     }
 
     // The first day of the period `date` is in: the day itself, its week's first day (Monday for ISO weeks,
     // else the week settings' first day), the first of its month or of its year
+    /**
+     * @param {Unit} unit
+     * @param {string} date
+     * @param {WeekRules} rules
+     * @returns {string}
+     */
     start(unit, date, rules) {
         if (unit === "day") return date;
         if (unit === "month") return `${date.slice(0, 7)}-01`;
@@ -62,11 +69,12 @@ export default class PeriodicNotes {
      */
     where(unit, date, rules = plainday.DatePrompt.weekRules()) {
         const start = this.start(unit, date, rules);
+        /** @type {string} */
         let path;
-        if (unit === "day") path = plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true));
+        if (unit === "day") path = plainday.Schedule.dailyNotePath(/** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true));
         else {
             const place = plainday.TimeReport.periodPlaces()[unit];
-            const folder = [place.folder, place.dateFolders ? moment(start, "YYYY-MM-DD", true).locale(rules.locale).format(place.dateFolders) : ""].filter(Boolean).join("/");
+            const folder = [place.folder, place.dateFolders ? /** @type {MomentFn} */ (moment)(start, "YYYY-MM-DD", true).locale(rules.locale).format(place.dateFolders) : ""].filter(Boolean).join("/");
             path = `${folder ? `${folder}/` : ""}${plainday.JumpToDate.periodName({ date, unit }, rules)}.md`;
         }
         const at = path.lastIndexOf("/");
@@ -85,7 +93,7 @@ export default class PeriodicNotes {
      * @returns {string | null}
      */
     alias(unit, date, rules = plainday.DatePrompt.weekRules()) {
-        const day = (d) => moment(d, "YYYY-MM-DD", true).locale(rules.locale);
+        const day = (/** @type {string} */ d) => /** @type {MomentFn} */ (moment)(d, "YYYY-MM-DD", true).locale(rules.locale);
         if (unit === "day") return day(date).format("M/D/YY dddd");
         if (unit === "week") return `Week of ${day(this.start(unit, date, rules)).format("M/D/YY")}`;
         if (unit === "month") return day(this.start(unit, date, rules)).format("MMMM YYYY");
@@ -104,8 +112,8 @@ export default class PeriodicNotes {
      */
     periodOfName(name, rules = plainday.DatePrompt.weekRules(), day = plainday.Schedule.dailyOpts().format) {
         const formats = { day, ...rules.format };
-        for (const unit of ["day", "week", "month", "year"]) {
-            const m = moment(name, formats[unit], unit === "day" ? moment.locale() : rules.locale, true);
+        for (const unit of /** @type {Unit[]} */ (["day", "week", "month", "year"])) {
+            const m = /** @type {MomentFn} */ (moment)(name, formats[unit], unit === "day" ? moment.locale() : rules.locale, true);
             if (!m.isValid() || m.format(formats[unit]) !== name) continue;
             // A week's name reads as its first day already
             const first = unit === "day" || unit === "week" ? m : m.clone().startOf(unit);
@@ -127,8 +135,9 @@ export default class PeriodicNotes {
         const day = plainday.Schedule.dailyOpts().format;
         const key = [day, moment.locale(), rules.locale, rules.format.week, rules.format.month, rules.format.year].join("\n");
         if (this.names?.key !== key) {
+            /** @type {Map<string, Period | null>} */
             const seen = new Map();
-            const read = (linktext) => {
+            const read = (/** @type {string | null | undefined} */ linktext) => {
                 const name = String(linktext ?? "").split("/").pop().trim();
                 let out = seen.get(name);
                 if (out === undefined) {
@@ -139,6 +148,7 @@ export default class PeriodicNotes {
                 }
                 return out;
             };
+            /** @type {{ key: string, read: (linktext: string | null | undefined) => Period | null } | undefined} */
             this.names = { key, read };
         }
         return this.names.read;
@@ -146,6 +156,10 @@ export default class PeriodicNotes {
 
     // That kind of note's template: the Daily notes plugin's or Notebook Navigator's for a day (as
     // Schedule.dailyOpts says), JumpToDate.templateFor for the rest; null when there's none
+    /**
+     * @param {Unit} unit
+     * @returns {TFile | null}
+     */
     templateOf(unit) {
         if (unit !== "day") return plainday.JumpToDate.templateFor(unit);
         const t = plainday.Schedule.dailyOpts().template;
@@ -177,6 +191,11 @@ export default class PeriodicNotes {
         return this.making.get(target.path);
     }
 
+    /**
+     * @param {PeriodicPlace} target
+     * @param {WeekRules} rules
+     * @returns {Promise<TFile>}
+     */
     async make(target, rules) {
         const { path, folder, unit, kind } = target;
         const alias = this.alias(unit, target.date, rules);
@@ -192,6 +211,7 @@ export default class PeriodicNotes {
         await this.makeFolders(folder);
         // Templater's trigger is kept off the note from before it's there, so it's never templated twice
         this.hold(path);
+        /** @type {TFile} */
         let file;
         try {
             file = await app.vault.create(path, text);
@@ -256,6 +276,7 @@ export default class PeriodicNotes {
 
     // Makes the folders `path` needs, one at a time: a note in folders by date can need several (OBS-310).
     // One made a moment ago by something else is fine.
+    /** @param {string} path */
     async makeFolders(path) {
         let at = "";
         for (const part of String(path ?? "").split("/").filter(Boolean)) {
@@ -270,6 +291,10 @@ export default class PeriodicNotes {
     }
 
     // That kind of note's template, run on a note there already (finish)
+    /**
+     * @param {TFile} file
+     * @param {PeriodicPlace} target
+     */
     async applyTemplate(file, target) {
         const tpl = this.templateOf(target.unit);
         const tplText = tpl ? await app.vault.read(tpl) : "";
@@ -303,6 +328,10 @@ export default class PeriodicNotes {
     // where it is. A cursor at the very start of a note that had no properties stays above properties put
     // there (CodeMirror keeps a cursor before what's inserted at it), so it goes below them, where you'd
     // type: in a note just opened empty, that's where the next keystroke lands.
+    /**
+     * @param {TFile} file
+     * @param {(text: string) => string} fn
+     */
     async rewrite(file, fn) {
         const top = this.cursorAtTopOf(file);
         await plainday.Schedule.rewrite(file, fn);
@@ -316,7 +345,7 @@ export default class PeriodicNotes {
      * @returns {Editor | null}
      */
     cursorAtTopOf(file) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {MarkdownView} */ (l.view)).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         const editor = view?.editor, cursor = editor?.getCursor();
         return editor && cursor.line === 0 && cursor.ch === 0 && !getFrontMatterInfo(editor.getValue()).exists ? editor : null;
     }
@@ -334,6 +363,11 @@ export default class PeriodicNotes {
     // `text` with `alias` among its aliases: properties of its own at the top when it has none, a line of
     // its own when its properties have no aliases, else added to the list. Unchanged when it's there, and
     // when its properties don't read.
+    /**
+     * @param {string} text
+     * @param {string | null} alias
+     * @returns {string}
+     */
     withAlias(text, alias) {
         if (!alias) return text;
         const nl = text.includes("\r\n") ? "\r\n" : "\n";
@@ -341,7 +375,7 @@ export default class PeriodicNotes {
         if (!info.exists) return `---${nl}aliases: ${this.scalar(alias)}${nl}---${nl}${text}`;
         const props = this.read(info.frontmatter);
         if (!props) return text;
-        const have = [].concat(props.aliases ?? []).filter((a) => a !== null && a !== "").map(String);
+        const have = /** @type {unknown[]} */ ([]).concat(props.aliases ?? []).filter((a) => a !== null && a !== "").map(String);
         if (have.includes(alias)) return text;
         if (!("aliases" in props)) return `${text.slice(0, info.from)}aliases: ${this.scalar(alias)}${nl}${text.slice(info.from)}`;
         props.aliases = [...have, alias];
@@ -363,7 +397,7 @@ export default class PeriodicNotes {
         for (const [key, value] of Object.entries(b.props)) {
             if (!(key in props)) props[key] = value;
             else if (PeriodicNotes.LISTS.includes(key) || Array.isArray(props[key]) || Array.isArray(value)) {
-                props[key] = [...new Set([...[].concat(props[key] ?? []), ...[].concat(value ?? [])].filter((v) => v !== null && v !== ""))];
+                props[key] = [...new Set([.../** @type {unknown[]} */ ([]).concat(props[key] ?? []), .../** @type {unknown[]} */ ([]).concat(value ?? [])].filter((v) => v !== null && v !== ""))];
             } else if (value !== null && value !== "") props[key] = value;
         }
         return `---\n${stringifyYaml(props)}---\n${a.body}${b.body}`;
@@ -381,10 +415,14 @@ export default class PeriodicNotes {
         return props ? { props, body: text.slice(info.contentStart) } : { props: null, body: text };
     }
 
+    /**
+     * @param {string} yaml
+     * @returns {Record<string, unknown> | null}
+     */
     read(yaml) {
         try {
-            const props = parseYaml(yaml) ?? {};
-            return typeof props === "object" && !Array.isArray(props) ? props : null;
+            const props = /** @type {(yaml: string) => unknown} */ (parseYaml)(yaml) ?? {};
+            return typeof props === "object" && !Array.isArray(props) ? /** @type {Record<string, unknown>} */ (props) : null;
         } catch {
             return null;
         }
@@ -408,12 +446,12 @@ export default class PeriodicNotes {
      */
     fill(text, { name, start }) {
         const opts = app.internalPlugins?.plugins?.templates?.instance?.options ?? {};
-        const day = moment(start, "YYYY-MM-DD", true);
-        return text.replace(/\{\{\s*(title|date|time)\s*(?::([^}]*))?\}\}/gi, (all, what, format) => {
+        const day = /** @type {MomentFn} */ (moment)(start, "YYYY-MM-DD", true);
+        return text.replace(/\{\{\s*(title|date|time)\s*(?::([^}]*))?\}\}/gi, (/** @type {string} */ all, /** @type {string} */ what, /** @type {string | undefined} */ format) => {
             const w = what.toLowerCase();
             if (w === "title") return name;
             if (w === "date") return day.format(format?.trim() || opts.dateFormat || "YYYY-MM-DD");
-            return moment().format(format?.trim() || opts.timeFormat || "HH:mm");
+            return /** @type {MomentFn} */ (moment)().format(format?.trim() || opts.timeFormat || "HH:mm");
         });
     }
 

@@ -1,10 +1,27 @@
 import { MarkdownView, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { TFile } from "obsidian" */
+/** @import { Editor, TFile } from "obsidian" */
+/** @import { MomentFn, Registry, Templater } from "../host.js" */
 /**
  * A log make() found or made: its note, and whether it was made just now.
  * @typedef {{ file: TFile, made: boolean }} LogMade
+ *
+ * The properties Plainday writes into a log (OWN), and their values with its alias (own):
+ * @typedef {"parent" | "date" | "time" | "endTime" | "who"} OwnKey
+ * @typedef {Record<OwnKey, string> & { alias: string }} OwnLog
+ *
+ * A log's start and end time, from its event line ("1:30pm", and "" when the line has no end):
+ * @typedef {{ time: string, endTime: string }} Times
+ *
+ * The event line CalNav means (eventLineFor): its index, its text, and the log link ending it:
+ * @typedef {{ i: number, line: string, link: RegExpMatchArray | null }} EventLine
+ *
+ * What recordEvent did to a daily note's text, and the event line as it was:
+ * @typedef {{ text: string, outcome: "present" | "linked" | "inserted" | "skipped", line: string | null }} Recorded
+ *
+ * What openLog tells CalNav:
+ * @typedef {{ status: "opened" | "created", name: string, path: string, linked?: boolean, dailyNote?: boolean } | { error: string }} Opened
  */
 
 export default class EventLog {
@@ -19,6 +36,7 @@ export default class EventLog {
     // - recordEvent() and eventTimes(): the event line and its times, moved here from the Log template's two
     //   Templater scripts as they were
     // The properties Plainday writes, whose values win over a template's (Settings.WRITES.log warns about a clash)
+    /** @type {OwnKey[]} */
     static OWN = ["parent", "date", "time", "endTime", "who"];
 
     constructor() {
@@ -90,7 +108,7 @@ export default class EventLog {
     async finish(file) {
         const named = file ? this.dayOf(file.basename) : null;
         if (!named || this.making.has(file.basename)) return null;
-        const daily = app.vault.getFileByPath(plainday.Schedule.dailyNotePath(moment(named.date, "YYYY-MM-DD", true)));
+        const daily = app.vault.getFileByPath(plainday.Schedule.dailyNotePath(/** @type {MomentFn} */ (moment)(named.date, "YYYY-MM-DD", true)));
         if (!daily) return null;
         const { outcome } = this.recordEvent(await this.textOf(daily), { log: file.basename, title: named.title });
         if (outcome !== "present" || (await app.vault.read(file)).trim() !== "") return null;
@@ -106,12 +124,16 @@ export default class EventLog {
     // (its title as the sync writes it, the same time first); a log it links is opened, or made under the name it
     // links; with no link, a log named for the day and title is opened, or made, and the line is linked. Returns
     // { status: "opened" | "created", name, path, linked, dailyNote } or { error }.
+    /**
+     * @param {{ date?: string, title?: string, start?: string | null, allDay?: boolean }} [event]
+     * @returns {Promise<Opened>}
+     */
     async openLog({ date, title: rawTitle, start = null, allDay = false } = {}) {
         const sync = plainday.CalendarSync, tasks = plainday.AddTaskNote;
-        const day = moment(date, "YYYY-MM-DD", true);
+        const day = /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true);
         if (!day.isValid()) return { error: `${date} isn't a date` };
         const title = sync.title({ title: rawTitle });
-        const time = allDay ? "" : moment(start).format("h:mma");
+        const time = allDay ? "" : /** @type {MomentFn} */ (moment)(start).format("h:mma");
         const dailyPath = plainday.Schedule.dailyNotePath(day);
         const daily = app.vault.getFileByPath(dailyPath);
         const hit = daily ? this.eventLineFor(await app.vault.read(daily), title, time, allDay) : null;
@@ -141,10 +163,18 @@ export default class EventLog {
     // The event line CalNav means, in a daily note's text: { i, line, link } (link, the log link ending the line, as a
     // match of CalendarSync.LOG_LINK, or null), or null. Its title as the sync writes it, exactly or but for case, the
     // one at `time` (or all day) first.
+    /**
+     * @param {string} text
+     * @param {string} title
+     * @param {string} time
+     * @param {boolean} allDay
+     * @returns {EventLine | null}
+     */
     eventLineFor(text, title, time, allDay) {
         const sync = plainday.CalendarSync;
         const LINE = /^(\s*[-*+]\s+\[<\]\s+)(?:\[\[\d{4}-\d{2}-\d{2}\|[^\]]*\]\]\s+)?(?:(all day|\d{1,2}:\d{2}\s?[ap]m)\t)?(.*)$/i;
-        const norm = (t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
+        const norm = (/** @type {string | undefined} */ t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
+        /** @type {(EventLine & { shown: string, sameTime: boolean })[]} */
         const rows = [];
         text.split("\n").forEach((line, i) => {
             const m = line.match(LINE);
@@ -161,6 +191,12 @@ export default class EventLog {
     }
 
     // Opens `file` and puts the cursor at the end of its body, so you can start typing, then says what happened
+    /**
+     * @param {TFile} file
+     * @param {"opened" | "created"} status
+     * @param {{ linked?: boolean, dailyNote?: boolean }} [more]
+     * @returns {Promise<Opened>}
+     */
     async opened(file, status, more = {}) {
         await this.open(file);
         return { status, name: file.basename, path: file.path, ...more };
@@ -184,6 +220,10 @@ export default class EventLog {
 
     // The daily note's text: its editor's when it's open in the active pane (Add note just linked the line there),
     // else what's on disk
+    /**
+     * @param {TFile} daily
+     * @returns {Promise<string>}
+     */
     async textOf(daily) {
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         return view?.file === daily && view.editor ? view.editor.getValue() : app.vault.cachedRead(daily);
@@ -191,9 +231,13 @@ export default class EventLog {
 
     // The log `name`: where its line says, its line recorded, its properties, then the Log template. `into` is a blank
     // note to fill and file rather than a new one. Resolves to { file, made: true }, or null.
+    /**
+     * @param {{ date: string, title: string, name: string, time?: string, into?: TFile | null }} log
+     * @returns {Promise<LogMade | null>}
+     */
     async build({ date, title, name, time = "", into = null }) {
         const tasks = plainday.AddTaskNote, schedule = plainday.Schedule;
-        const day = moment(date, "YYYY-MM-DD", true);
+        const day = /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true);
         const dailyPath = day.isValid() ? schedule.dailyNotePath(day) : null;
         let daily = dailyPath ? app.vault.getFileByPath(dailyPath) : null;
         const dailyText = daily ? await this.textOf(daily) : "";
@@ -205,12 +249,13 @@ export default class EventLog {
         const folder = home ? tasks.logsFolderIn(home.parent.path) : tasks.stagingFolder();
         let parent = "";
         if (home) {
-            const alias = [].concat(app.metadataCache.getFileCache(home)?.frontmatter?.aliases ?? [])[0] || home.basename;
+            const alias = /** @type {string[]} */ ([]).concat(/** @type {{ aliases?: string | string[] } | undefined} */ (app.metadataCache.getFileCache(home)?.frontmatter)?.aliases ?? [])[0] || home.basename;
             parent = `[[${home.basename}|${alias}]]`;
         }
         if (folder && folder !== "/") await tasks.makeFolder(folder);
 
         // Its line in the daily note, then its times from that line
+        /** @type {Times | null} */
         let times = null;
         if (!day.isValid()) {
             new Notice(`${date} isn't a date, so this log wasn't recorded in a daily note`);
@@ -234,6 +279,10 @@ export default class EventLog {
 
     // The log's line: recorded in its daily note (made first when it isn't there) as the Log template recorded it.
     // Resolves to the log's times from the line, or null.
+    /**
+     * @param {{ daily: TFile | null, dailyPath: string, name: string, title: string, time: string, home: TFile | null }} log
+     * @returns {Promise<Times | null>}
+     */
     async recordLine({ daily, dailyPath, name, title, time, home }) {
         const tasks = plainday.AddTaskNote, sync = plainday.CalendarSync;
         const fresh = !daily;
@@ -242,7 +291,7 @@ export default class EventLog {
         // project note that isn't its folder's own note can't hold the log, and the line still names it, as
         // AddProjectLink does). A log left in the Inbox leaves the line's links as they are.
         const homeLink = home ? tasks.homeLink(home, tasks.linktextFor(home, app.vault.getMarkdownFiles().map((f) => f.path))) : null;
-        const record = (text) => this.recordEvent(text, { log: name, title, time, home: homeLink }, sync, fresh);
+        const record = (/** @type {string} */ text) => this.recordEvent(text, { log: name, title, time, home: homeLink }, sync, fresh);
         // A line that's there already, naming the log's project, means nothing to write. Open in the editor (Add note
         // made the log from its line), only the lines that change are written there, so nothing you type is
         // overwritten; otherwise the note is written in one step, and its fold snapshot taken again, as MoveToProject
@@ -267,6 +316,10 @@ export default class EventLog {
     // The log's note: made at `folder/name` with Plainday's properties and the Log template's text in one write, or
     // `into` filled and moved there; then the Log template through Templater, when it's on. Templater's trigger is
     // kept off it from before it's there, so Get Template never runs on it.
+    /**
+     * @param {{ name: string, folder: string, own: OwnLog, into: TFile | null }} log
+     * @returns {Promise<LogMade | null>}
+     */
     async write({ name, folder, own, into }) {
         const notes = plainday.PeriodicNotes, tasks = plainday.AddTaskNote;
         const path = normalizePath(folder && folder !== "/" ? `${folder}/${name}.md` : `${name}.md`);
@@ -278,7 +331,7 @@ export default class EventLog {
             if (tplText.includes("<%")) unused = true;
             else text = this.withTemplate(text, notes.fill(tplText, { name, start: own.date }), own);
         }
-        let file = into, top = null;
+        let file = into, top = /** @type {Editor | null} */ (null);
         if (into) {
             // Written on disk, not through its editor: the move below sets SyncArea going, which writes the note's
             // `parent` on disk, and an editor's unsaved text would then be lost. It's blank, so nothing typed is.
@@ -312,21 +365,27 @@ export default class EventLog {
     // The Log template run on the log through Templater, which adds the template's properties to Plainday's and its
     // text after them; then Plainday's values again where the template set its own, its alias first and `log` among
     // the tags; then the template's `id` first
+    /**
+     * @param {Templater} templater
+     * @param {TFile} tpl
+     * @param {TFile} file
+     * @param {OwnLog} own
+     */
     async withTemplater(templater, tpl, file, own) {
         const notes = plainday.PeriodicNotes;
         await templater.write_template_to_file(tpl, file);
         // Templater lets go of the note when it's done; the trigger mustn't take it then
         notes.hold(file.path);
         const front = notes.parts(await app.vault.read(file)).props ?? {};
-        const same = (key) => String(front[key] ?? "") === own[key];
-        const aliases = [].concat(front.aliases ?? []), tags = [].concat(front.tags ?? []);
+        const same = (/** @type {OwnKey} */ key) => String(front[key] ?? "") === own[key];
+        const aliases = /** @type {unknown[]} */ ([]).concat(front.aliases ?? []), tags = /** @type {unknown[]} */ ([]).concat(front.tags ?? []);
         const tagged = tags.some((t) => String(t).toLowerCase() === "log");
         if (!EventLog.OWN.every(same) || aliases[0] !== own.alias || !tagged) {
-            await app.fileManager.processFrontMatter(file, (f) => {
+            await app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ f) => {
                 for (const key of EventLog.OWN) if (String(f[key] ?? "") !== own[key]) f[key] = own[key] || null;
-                const others = [].concat(f.aliases ?? []).filter((a) => a !== null && a !== "" && a !== own.alias);
+                const others = /** @type {unknown[]} */ ([]).concat(f.aliases ?? []).filter((a) => a !== null && a !== "" && a !== own.alias);
                 f.aliases = [own.alias, ...others];
-                const more = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
+                const more = /** @type {unknown[]} */ ([]).concat(f.tags ?? []).filter((t) => t !== null && t !== "");
                 if (!more.some((t) => String(t).toLowerCase() === "log")) f.tags = ["log", ...more];
             });
         }
@@ -337,10 +396,15 @@ export default class EventLog {
     // A new log's text, `own` its alias, `parent` (a link, or ""), `date`, `time`, `endTime` and `who`: a template's
     // `id` first, as in every note (OBS-317), then Plainday's properties in the order the Log template wrote them,
     // then `extra` (a template's other properties), then `body`
+    /**
+     * @param {OwnLog} own
+     * @param {{ aliases?: string[], tags?: string[], extra?: Record<string, unknown>, body?: string }} [more]
+     * @returns {string}
+     */
     noteText(own, { aliases = [own.alias], tags = ["log"], extra = {}, body = "" } = {}) {
-        const scalar = (v) => plainday.PeriodicNotes.scalar(String(v));
+        const scalar = (/** @type {unknown} */ v) => plainday.PeriodicNotes.scalar(String(v));
         // A time as the Log template and the calendar sync write it, bare: `9:00am` reads back as that text
-        const bare = (key) => (own[key] ? `${key}: ${/^\d{1,2}:\d{2}[ap]m$/i.test(own[key]) ? own[key] : scalar(own[key])}` : `${key}:`);
+        const bare = (/** @type {OwnKey} */ key) => (own[key] ? `${key}: ${/^\d{1,2}:\d{2}[ap]m$/i.test(own[key]) ? own[key] : scalar(own[key])}` : `${key}:`);
         const { id, ...others } = extra;
         const lines = [
             "aliases:", ...aliases.map((a) => `  - ${scalar(a)}`), "tags:", ...tags.map((t) => `  - ${scalar(t)}`),
@@ -353,11 +417,17 @@ export default class EventLog {
 
     // `text` with a template's text, `filled`, added, without Templater: the properties combined as
     // PeriodicNotes.merge combines them, Plainday's own kept, its alias first and `log` among the tags
+    /**
+     * @param {string} text
+     * @param {string} filled
+     * @param {OwnLog} own
+     * @returns {string}
+     */
     withTemplate(text, filled, own) {
         const notes = plainday.PeriodicNotes;
         const { props, body } = notes.parts(notes.merge(text, filled));
         const extra = { ...props };
-        const list = (key, first) => [...new Set([first, ...[].concat(extra[key] ?? []).filter((v) => v !== null && v !== "").map(String)])];
+        const list = (/** @type {string} */ key, /** @type {string} */ first) => [...new Set([first, .../** @type {unknown[]} */ ([]).concat(extra[key] ?? []).filter((v) => v !== null && v !== "").map(String)])];
         const aliases = list("aliases", own.alias), tags = list("tags", "log");
         for (const key of ["aliases", "tags", ...EventLog.OWN]) delete extra[key];
         return this.noteText(own, { aliases, tags, extra, body });
@@ -403,6 +473,10 @@ export default class EventLog {
 
     // The item of the run that ends `text`, with the spaces before it, or null: an ℹ️ or 🆓 only after a space or a
     // tab, found here since older iPhones can't run a lookbehind (AddTaskNote.trailItem)
+    /**
+     * @param {string} text
+     * @returns {RegExpMatchArray | null}
+     */
     static trailItem(text) {
         const item = text.match(EventLog.TRAIL_ITEM);
         if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
@@ -411,15 +485,23 @@ export default class EventLog {
         return item;
     }
 
+    /**
+     * @param {string} text
+     * @param {{ log: string, title: string, time?: string, home?: string | null }} event
+     * @param {Registry["CalendarSync"]} [sync]
+     * @param {boolean} [fresh]
+     * @returns {Recorded}
+     */
     recordEvent(text, { log, title, time = "", home = null }, sync = plainday.CalendarSync, fresh = false) {
         text = String(text ?? "");
         if (!title) return { text, outcome: "skipped", line: null };
         const lines = text.split("\n");
         const { LOG_LINK, NOTE_MARK } = sync.constructor;
-        const logOf = (link) => link.match(/^\[\[([^[\]|]+)/)?.[1].split("#")[0].trim().split("/").pop().replace(/\.md$/, "");
-        const normal = (t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
+        const logOf = (/** @type {string} */ link) => link.match(/^\[\[([^[\]|]+)/)?.[1].split("#")[0].trim().split("/").pop().replace(/\.md$/, "");
+        const normal = (/** @type {string | undefined} */ t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
 
         const wanted = normal(time);
+        /** @type {{ i: number, rest: string, at: number }[]} */
         const candidates = [];
         for (const [i, line] of lines.entries()) {
             const match = line.match(EventLog.LINE);
@@ -466,6 +548,11 @@ export default class EventLog {
 
     // `line` with `home` as its one ⭕ or 🗃️, before the first note link in the run that ends it (as AddTaskNote.withHome
     // puts it); unchanged with no `home`, or when it already reads that way
+    /**
+     * @param {string} line
+     * @param {string | null} home
+     * @returns {string}
+     */
     homeIn(line, home) {
         if (!home) return line;
         let bare = line.replace(/\s+$/, "");
@@ -482,8 +569,8 @@ export default class EventLog {
             bare = bare.slice(0, from) + gap + bare.slice(to);
         }
         bare = bare.replace(/\s+$/, "");
-        let at = bare.length, before = null;
-        for (let item; (item = EventLog.trailItem(bare.slice(0, at)));) {
+        let at = bare.length, before = /** @type {number | null} */ (null);
+        for (/** @type {RegExpMatchArray | null} */ let item; (item = EventLog.trailItem(bare.slice(0, at)));) {
             at = item.index;
             if (EventLog.NOTE_LINK.test(item[0])) before = at;
         }
@@ -501,9 +588,14 @@ export default class EventLog {
     // ("1:30pm - 2:15pm") once you've edited it, whose last time is the end. The start is followed by the sync's tab, or
     // by spaces on a line typed by hand, as Add note reads it. Older daily notes have no end line, so endTime can be "".
     // Null when no line with a time links to the log: all-day events have no time, so they don't count.
+    /**
+     * @param {string} text
+     * @param {string} logName
+     * @returns {Times | null}
+     */
     eventTimes(text, logName) {
         const TIME = /\d{1,2}:\d{2}\s?[ap]m/i;
-        const normal = (t) => t.replace(/\s/g, "").toLowerCase();
+        const normal = (/** @type {string} */ t) => t.replace(/\s/g, "").toLowerCase();
         const lines = String(text ?? "").split("\n");
         const escaped = logName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const link = new RegExp(`\\[\\[${escaped}(?:\\.md)?(?:[|#\\]])`);

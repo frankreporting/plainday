@@ -2,6 +2,13 @@ import { ButtonComponent, getFrontMatterInfo, Modal, moment, Notice, stringifyYa
 import { app, plainday } from "../host.js";
 
 /** @import { TFile } from "obsidian" */
+/** @import { MomentFn, NavigatorPlugin, Templater } from "../host.js" */
+/**
+ * A project or an area
+ * @typedef {"project" | "area"} Kind
+ * Plainday's own properties for a new one (own()), with its alias and its tag first
+ * @typedef {{ aliases: string[], tags: string[] } & Record<string, unknown>} OwnProps
+ */
 
 export default class ProjectNotes {
     // Projects and areas, made in one place (OBS-123): New project, New area and Convert to project call make(),
@@ -38,12 +45,17 @@ export default class ProjectNotes {
 
     constructor() {
         // Where the cursor goes in the note made last: { path, offset }, from a template's cursor marker
+        /** @type {{ path: string, offset: number } | null} */
         this.cursorAt = null;
     }
 
     // ---------------------------------------------------------------- names
 
     // The name a typed name gives: trimmed, its runs of spaces made one
+    /**
+     * @param {unknown} typed
+     * @returns {string}
+     */
     nameOf(typed) {
         return String(typed ?? "").trim().replace(/\s+/g, " ");
     }
@@ -99,12 +111,13 @@ export default class ProjectNotes {
         let text = this.noteText(own), unused = false;
         if (tplText.trim() && !templater) {
             if (tplText.includes("<%")) unused = true;
-            else text = this.withTemplate(text, notes.fill(tplText, { name, start: moment().format("YYYY-MM-DD") }), own);
+            else text = this.withTemplate(text, notes.fill(tplText, { name, start: /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD") }), own);
         }
         // Templater's trigger is kept off the note from before its folder appears: another plugin can make the
         // folder's note as the folder appears (Folder Notes), and the trigger would template that one
         notes.hold(path);
         await this.makeFolders(folder);
+        /** @type {TFile} */
         let file;
         try {
             file = await app.vault.create(path, text);
@@ -130,11 +143,20 @@ export default class ProjectNotes {
 
     // The template a project or an area is made with, as Settings → Plainday → Note templates has it; blank means
     // Project.md or Area.md in the vault's template folder (Templater's), else at the top of the vault
+    /**
+     * @param {Kind} kind
+     * @returns {string}
+     */
     templatePath(kind) {
         return plainday.Settings.get().templates[kind] || plainday.Settings.defaultTemplatePath(kind);
     }
 
     // Plainday's properties for a new project or area, in the Project template's order: { key: value }
+    /**
+     * @param {Kind} kind
+     * @param {string} name
+     * @returns {OwnProps}
+     */
     own(kind, name) {
         const k = ProjectNotes.KINDS[kind];
         const props = { aliases: [`${k.mark}${name}`], tags: [k.tag] };
@@ -147,8 +169,13 @@ export default class ProjectNotes {
 
     // A note's text from its properties, in their order, and `body`. An empty value is a bare key, as the old
     // templates wrote one, and a date stays bare, as Obsidian writes it.
+    /**
+     * @param {Record<string, unknown>} props
+     * @param {string} [body]
+     * @returns {string}
+     */
     noteText(props, body = "") {
-        const empty = (v) => v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length);
+        const empty = (/** @type {unknown} */ v) => v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length);
         const lines = ["---"];
         for (const [key, value] of Object.entries(props)) {
             if (empty(value)) lines.push(`${key}:`);
@@ -159,6 +186,10 @@ export default class ProjectNotes {
         return `${lines.join("\n")}\n---\n${body}`;
     }
 
+    /**
+     * @param {unknown} value
+     * @returns {string}
+     */
     scalar(value) {
         if (typeof value !== "string") return String(value);
         return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : plainday.PeriodicNotes.scalar(value);
@@ -167,11 +198,18 @@ export default class ProjectNotes {
     // `text` with a template's text, `filled`, added, without Templater: the properties combined as
     // PeriodicNotes.merge combines them (a template's value fills or replaces Plainday's, lists keep both), then
     // Plainday's own values put back (ownValues), in Plainday's order with the template's other properties after
+    /**
+     * @param {string} text
+     * @param {string} filled
+     * @param {OwnProps} own
+     * @returns {string}
+     */
     withTemplate(text, filled, own) {
         const notes = plainday.PeriodicNotes;
         const { props, body } = notes.parts(notes.merge(text, filled));
         const fixed = this.ownValues(props ?? {}, own);
         // A template's `id` first, as every note's (Brian, 11/22), then Plainday's, then the template's others
+        /** @type {Record<string, unknown>} */
         const ordered = "id" in fixed ? { id: fixed.id } : {};
         for (const key of Object.keys(own)) ordered[key] = fixed[key];
         for (const [key, value] of Object.entries(fixed)) if (!(key in ordered)) ordered[key] = value;
@@ -180,9 +218,14 @@ export default class ProjectNotes {
 
     // `props` with Plainday's own values kept: its alias first, its tag, and any value of Plainday's a template left
     // empty
+    /**
+     * @param {Record<string, unknown>} props
+     * @param {OwnProps} own
+     * @returns {Record<string, unknown>}
+     */
     ownValues(props, own) {
         const out = { ...props };
-        const list = (v) => [].concat(v ?? []).filter((x) => x !== null && x !== "").map(String);
+        const list = (/** @type {unknown} */ v) => /** @type {unknown[]} */ ([]).concat(v ?? []).filter((x) => x !== null && x !== "").map(String);
         const alias = own.aliases[0], tag = own.tags[0];
         out.aliases = [alias, ...list(out.aliases).filter((a) => a !== alias)];
         const tags = list(out.tags);
@@ -198,6 +241,10 @@ export default class ProjectNotes {
     // What's in `file` gets what `wanted` (the text Plainday wrote) has and it lacks: the properties it doesn't
     // have, or has empty, and the body when its own is empty. Nothing there is replaced. A note another plugin made
     // first (Folder Notes, as the folder appeared) gets Plainday's properties this way.
+    /**
+     * @param {TFile} file
+     * @param {string} wanted
+     */
     async fillIn(file, wanted) {
         const notes = plainday.PeriodicNotes;
         const now = await app.vault.read(file);
@@ -206,7 +253,7 @@ export default class ProjectNotes {
         const props = { ...(want.props ?? {}) };
         for (const [key, value] of Object.entries(have.props ?? {})) {
             const blank = value === null || value === undefined || value === "";
-            if (Array.isArray(props[key]) || Array.isArray(value)) props[key] = [...new Set([...[].concat(props[key] ?? []), ...[].concat(value ?? [])].filter((v) => v !== null && v !== ""))];
+            if (Array.isArray(props[key]) || Array.isArray(value)) props[key] = [...new Set([.../** @type {unknown[]} */ ([]).concat(props[key] ?? []), .../** @type {unknown[]} */ ([]).concat(value ?? [])].filter((v) => v !== null && v !== ""))];
             else if (!blank || !(key in props)) props[key] = value;
         }
         const body = have.body.trim() ? have.body : want.body;
@@ -216,6 +263,12 @@ export default class ProjectNotes {
 
     // The template run on the new note through Templater, which adds the template's properties to Plainday's and its
     // text after them; then Plainday's own values again where the template changed them (ownValues)
+    /**
+     * @param {Templater} templater
+     * @param {TFile} tpl
+     * @param {TFile} file
+     * @param {OwnProps} own
+     */
     async withTemplater(templater, tpl, file, own) {
         const notes = plainday.PeriodicNotes;
         await templater.write_template_to_file(tpl, file);
@@ -223,10 +276,10 @@ export default class ProjectNotes {
         notes.hold(file.path);
         const front = notes.parts(await app.vault.read(file)).props ?? {};
         const fixed = this.ownValues(front, own);
-        const same = (key) => JSON.stringify(front[key] ?? null) === JSON.stringify(fixed[key] ?? null);
+        const same = (/** @type {string} */ key) => JSON.stringify(front[key] ?? null) === JSON.stringify(fixed[key] ?? null);
         const changed = Object.keys(fixed).filter((key) => !same(key));
         if (changed.length) {
-            await app.fileManager.processFrontMatter(file, (f) => {
+            await app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ f) => {
                 for (const key of changed) f[key] = fixed[key] === "" ? null : fixed[key];
             });
         }
@@ -237,7 +290,7 @@ export default class ProjectNotes {
     // template's new properties after the note's
     /** @param {TFile} file */
     async idFirst(file) {
-        const move = (text) => {
+        const move = (/** @type {string} */ text) => {
             const info = getFrontMatterInfo(text);
             if (!info.exists) return text;
             const lines = text.slice(info.from, info.to).split("\n");
@@ -252,6 +305,7 @@ export default class ProjectNotes {
 
     // Takes a template's cursor markers out of the note and remembers where the first one was (the lowest
     // number, then the first in the text), for open()
+    /** @param {TFile} file */
     async takeCursor(file) {
         const text = await app.vault.read(file);
         const marks = [...text.matchAll(ProjectNotes.CURSOR)];
@@ -263,6 +317,7 @@ export default class ProjectNotes {
     }
 
     // Makes the folders `path` needs, one at a time
+    /** @param {string} path */
     async makeFolders(path) {
         let at = "";
         for (const part of path.split("/")) {
@@ -283,6 +338,11 @@ export default class ProjectNotes {
     // settings, or with "Use frontmatter metadata" on, in the folder note's icon and color. The note is pinned in its
     // folder when Navigator's "Pin created folder notes" is on, as Navigator does for a folder note it makes itself.
     // Without Navigator nothing happens. `navigator` is the Notebook Navigator plugin, if installed.
+    /**
+     * @param {TFile} file
+     * @param {Kind} kind
+     * @param {NavigatorPlugin | null} [navigator]
+     */
     async look(file, kind, navigator = app.plugins?.getPlugin?.("notebook-navigator")) {
         const metadata = navigator?.api?.metadata;
         const folder = file?.parent;
@@ -292,9 +352,10 @@ export default class ProjectNotes {
         if (metadata.setFolderMeta && !metadata.getFolderMeta?.(folder)) {
             // The tag's own look wins; a tag with none gets the system's
             const look = metadata.getTagMeta?.(tag) ?? {};
+            /** @type {Record<string, string>} */
             let meta = {};
             for (const key of ["icon", "color", "backgroundColor"]) if (look[key]) meta[key] = look[key];
-            if (!Object.keys(meta).length) meta = { ...ProjectNotes.LOOKS[tag] };
+            if (!Object.keys(meta).length) meta = { ...ProjectNotes.LOOKS[/** @type {Kind} */ (tag)] };
             if (Object.keys(meta).length) await metadata.setFolderMeta(folder, meta);
         }
         const settings = navigator.settings;
@@ -330,6 +391,7 @@ export default class ProjectNotes {
     ask(kind, value = "", reason = "") {
         const k = ProjectNotes.KINDS[kind];
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let answer = null;
             const modal = new (class extends Modal {
                 onClose() { window.setTimeout(() => resolve(answer), 0); }
@@ -364,6 +426,7 @@ export default class ProjectNotes {
 
     // Opens the new note once the metadata cache has read it, so its properties show (OBS-177), with the cursor
     // where its template's marker was, else at the end of its body, below the properties
+    /** @param {TFile} file */
     async open(file) {
         await this.read(file);
         const leaf = app.workspace.getLeaf(false);
@@ -386,6 +449,10 @@ export default class ProjectNotes {
     }
 
     // Resolves once the metadata cache has the note's properties, or after READ_MS
+    /**
+     * @param {TFile} file
+     * @returns {Promise<void>}
+     */
     read(file) {
         if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
         return new Promise((resolve) => {
