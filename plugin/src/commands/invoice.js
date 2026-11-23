@@ -4,7 +4,7 @@ import { app, plainday } from "../host.js";
 /** @import { TFile } from "obsidian" */
 /** @import { Fold, FoldInfo, FoldView, MomentFn } from "../host.js" */
 /** @import TimeReport from "./timeReport.js" */
-/** @import { Entry, Model, Money, ReportIndex } from "./timeReport.js" */
+/** @import { Entry, HeaderFreeze, Model, Money, ReportIndex, TableFreeze } from "./timeReport.js" */
 /** @import Billing from "../shared/billing.js" */
 /** @import { BilledChange, BilledRow, BillingEntry, HeldBack, InvoiceChange, InvoiceLine, Selection } from "../shared/billing.js" */
 /** @import Settings from "../shared/settings.js" */
@@ -35,7 +35,7 @@ import { app, plainday } from "../host.js";
  *   invoiceDate: string, periodStart?: string, periodEnd?: string, minutes: number, cents: number, paid?: string | null,
  *   from: Party, billTo: Party, projectId: string, requestedBy: string, terms: string, paymentNote: string,
  *   billed: BilledRow[], linkText: (path: string) => string, descriptions?: Map<string, string>,
- *   check: string[] | null, tables?: unknown, freezes?: Map<string, unknown[]>,
+ *   check: string[] | null, tables?: TableFreeze, freezes?: Map<string, HeaderFreeze[]>,
  * }} Draft
  */
 export default class Invoice {
@@ -271,7 +271,7 @@ export default class Invoice {
         // The two tables, each under its heading, frozen for Selectable Tables (OBS-238): `d.tables` is the
         // default, and `d.freezes` what a rebuilt draft's tables held (TimeReport.freezesIn), so a freeze
         // you set stays. A table of yours in the payment note is left alone.
-        const frozen = (/** @type {string[]} */ lines) => /** @type {(lines: string[], old: Map<string, unknown[]>, settings: unknown) => string[]} */ (tr.withFreezes)(lines, d.freezes ?? /** @type {Map<string, unknown[]>} */ (new Map()), d.tables ?? null);
+        const frozen = (/** @type {string[]} */ lines) => tr.withFreezes(lines, d.freezes ?? /** @type {Map<string, HeaderFreeze[]>} */ (new Map()), d.tables ?? null);
         const facts = [
             ...(d.requestedBy ? [fact("Requested by", d.requestedBy)] : []),
             ...(d.projectId ? [fact("Project ID", d.projectId)] : []),
@@ -889,7 +889,7 @@ export default class Invoice {
      * @returns {Promise<Record<string, unknown>>}
      */
     async propsOf(file, tr) {
-        const info = getFrontMatterInfo(await /** @type {string | Promise<string>} */ (tr.textOf(file)));
+        const info = getFrontMatterInfo(await tr.textOf(file));
         try { return info.exists ? /** @type {(text: string) => Record<string, unknown> | null} */ (parseYaml)(info.frontmatter) ?? {} : {}; } catch { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
     }
 
@@ -1153,7 +1153,7 @@ export default class Invoice {
      * @param {Billing} billing
      */
     async actions(file, tr, billing) {
-        const text = await /** @type {string | Promise<string>} */ (tr.textOf(file));
+        const text = await tr.textOf(file);
         if (!billing.hasBilled(text)) {
             new Notice("This note has no Billed entries, so Invoice leaves it alone");
             return;
@@ -1270,7 +1270,7 @@ export default class Invoice {
             start--; end--;
             text = `\n${text.slice(0, -1)}`;
         }
-        await app.foldManager.save(file, { folds: /** @type {(folds: Fold[], content: string, start: number, end: number, text: string) => Fold[]} */ (tr.shiftFolds)(saved.folds ?? [], before, start, end, text), lines: after.split("\n").length });
+        await app.foldManager.save(file, { folds: tr.shiftFolds(saved.folds ?? [], before, start, end, text), lines: after.split("\n").length });
         return true;
     }
 
@@ -1393,7 +1393,7 @@ export default class Invoice {
                 `${stale} ${stale === 1 ? "entry has" : "entries have"} changed or been logged in its period since the draft was made.`,
                 "Rebuild it first, so it bills what the daily notes say now?",
             ], [["cancel", "Cancel"], ["send", "Mark sent anyway"], ["rebuild", "Rebuild", true]]);
-            if (pick === "rebuild") { await this.rebuild(file, invoice, await /** @type {string | Promise<string>} */ (tr.textOf(file)), tr, billing, index); return; }
+            if (pick === "rebuild") { await this.rebuild(file, invoice, await tr.textOf(file), tr, billing, index); return; }
             if (pick !== "send") return;
         }
         // The invoice date is the day it's sent: set with the status, on the property and where it prints
@@ -1412,7 +1412,7 @@ export default class Invoice {
     async mark(file, invoice, tr, { status, key, title, dropCheck = false, printed = false }, billing) {
         const date = await this.askDate(title);
         if (!date) return;
-        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
+        const before = await tr.textOf(file);
         let after = this.setStatus(before, status, { [key]: date });
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (printed) after = this.setPrintedDate(after, date);
@@ -1432,7 +1432,7 @@ export default class Invoice {
         const pick = await this.choose(`Cancel ${invoice.name}?`, "Its entries become unbilled again, for the next invoice. The note stays, marked canceled.",
             [["keep", "Keep it"], ["cancel", "Cancel invoice", true]]);
         if (pick !== "cancel") return;
-        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
+        const before = await tr.textOf(file);
         const after = this.setStatus(before, "canceled");
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (!(await this.writeKeepingFold(file, before, after, tr, billing))) return;
@@ -1457,7 +1457,7 @@ export default class Invoice {
         const billingChanges = result.changes.filter((c) => c.kind !== "wording").length;
         const stamp = tr.shortDate(/** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"));
         const title = billingChanges || result.late.length ? `Changed since invoiced · checked ${stamp}` : `No changes since invoiced · checked ${stamp}`;
-        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
+        const before = await tr.textOf(file);
         if (!(await this.writeKeepingFold(file, before, this.placeCheck(before, this.checkLines(title, items)), tr, billing))) return;
         new Notice(billingChanges || result.late.length ? `${invoice.name}: ${billingChanges} changed, ${result.late.length} logged since` : `${invoice.name}: no changes since invoiced`);
     }

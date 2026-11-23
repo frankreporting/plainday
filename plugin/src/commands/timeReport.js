@@ -1,13 +1,14 @@
 import { getFrontMatterInfo, moment, Notice, parseYaml, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { CachedMetadata } from "obsidian" */
+/** @import { CachedMetadata, Editor, TFile } from "obsidian" */
 /** @import { Period, Unit, WeekRules } from "../shared/datePrompt.js" */
 /** @import { BilledChange, BilledRow, Invoice, Ledger, Standing } from "../shared/billing.js" */
 /** @import Billing from "../shared/billing.js" */
 /** @import Schedule from "./schedule.js" */
 /** @import TaskIds from "../shared/taskIds.js" */
-/** @import { MomentFn } from "../host.js" */
+/** @import { CheckedLine, TaskProblem } from "../shared/taskIds.js" */
+/** @import { Fold, MomentFn, SomeView } from "../host.js" */
 /**
  * A link's name, or its path's last part, read as a periodic note's: { unit, date } (the period's
  * first day), or null (reader).
@@ -121,7 +122,7 @@ import { app, plainday } from "../host.js";
  *   entries: Entry[], billingEntries: Entry[], disputed: Entry[], problems: Problem[], parent: Map<string, string | null>,
  *   projectProblems: ProjectProblem[], money: Map<string, Money>, events: ReportEvent[], areas: Set<string>,
  *   billing?: { billing: Billing, invoices: Invoice[], ledger: Ledger, index: ReportIndex, byInvoice: Map<Invoice, BilledChange[]> },
- *   tables?: unknown,
+ *   tables?: TableFreeze,
  * }} Model
  *
  * What a report covers (inScope): everything, a month (YYYY-MM), a project and those below it, or a
@@ -151,11 +152,47 @@ import { app, plainday } from "../host.js";
  * The cursor's place in a note, and what the timer hotkey does (toggleEntry): a start's edit is
  * `from`, `to`, `text` and `cursor`, a stop's `line` and `text`.
  * @typedef {{ line: number, ch: number }} Cursor
- * @typedef {{ text: string, from?: Cursor, to?: Cursor, cursor?: Cursor, line?: number }} EntryEdit
+ * @typedef {{ text: string, from?: Cursor, to?: Cursor, cursor?: Cursor, line?: number, error?: undefined }} EntryEdit
  * @typedef {{
  *   action?: "start" | "stop", edit?: EntryEdit, status?: { line: number, text: string }, summary?: string,
  *   jump?: Cursor, choose?: { line: number, label: string }[], pick?: boolean, elsewhere?: boolean, error?: string,
  * }} Toggle
+ *
+ * A timesheet's report (render), for its project's path; and every report render writes.
+ * @typedef {{ kind: "timesheet", path: string }} TimesheetScope
+ * @typedef {ProjectScope | PeriodScope | TimesheetScope} ReportScope
+ *
+ * A column of hoursGrid: its header, and which entries it counts.
+ * @typedef {{ head: string, match: (e: Entry) => boolean }} GridColumn
+ *
+ * A timesheet entry's status (sheet): its mark, its invoice's link, and whether an hourly invoice can bill it.
+ * @typedef {{ mark: string, invoice: string, hourly: boolean }} SheetStatus
+ *
+ * A table's freeze, in rows and columns; what a header row's freeze comments hold (freezeOf); the
+ * default (tableDefault): a freeze, null when off, or KEEP_FREEZES while it isn't known; and where
+ * a table is in some lines, under its heading (tablesIn).
+ * @typedef {{ rows: number, columns: number }} Freeze
+ * @typedef {{ kind: "default", rows: number, columns: number } | { kind: "custom", rows?: undefined, columns?: undefined }} FreezeLabel
+ * @typedef {{ mark: Freeze | null, label: FreezeLabel | null }} HeaderFreeze
+ * @typedef {{ rows?: number, columns?: number, keep?: boolean } | null} TableFreeze
+ * @typedef {{ at: number, end: number, heading: string }} TableAt
+ *
+ * An edit to a note's text, by character offsets (renameHeading, placeBlock, blockEdits), or why
+ * the block can't be placed.
+ * @typedef {{ start: number, end: number, text: string, inserted?: boolean, error?: undefined }} TextEdit
+ * @typedef {{ error: string }} EditError
+ *
+ * What writeBlock did: whether it wrote, and whether the block is new; or why it didn't, and whether
+ * the open note refused the change. A note writePeriodNotes or writeProjectNotes couldn't update, by
+ * name, `heldBack` when the open note refused it.
+ * @typedef {{ wrote?: boolean, inserted?: boolean, error?: string, heldBack?: boolean }} WriteResult
+ * @typedef {string | { heldBack: string }} BrokenNote
+ *
+ * Where a weekly, monthly or yearly note goes (periodPlaces): its fixed folder, and its folders by date.
+ * @typedef {{ folder: string, dateFolders: string }} PeriodPlace
+ *
+ * What kind of event a line is, by its form (eventKind), or null for a task.
+ * @typedef {"event" | "forwarded" | "canceled" | "meeting" | null} EventKind
  */
 export default class TimeReport {
     // Time reports built from the time entries in daily notes. Runs at startup on the desktop
@@ -3049,12 +3086,20 @@ export default class TimeReport {
     // "earned" (dollars) or "hours" (billable + 🆓). Earned has only the projects whose billable hours
     // earned something by the hour (a row with no rate would be blank), and the flat fees earned that
     // year, each in the month it was earned; no Unassigned, and [] without them.
+    /**
+     * @param {Model} model
+     * @param {Entry[]} entries
+     * @param {PeriodScope} scope
+     * @param {NoteLink} link
+     * @param {"earned" | "hours"} measure
+     * @returns {string[]}
+     */
     yearTable(model, entries, scope, link, measure) {
         // The year by its first day, and each month by its date (YYYY-MM) and its note's name, as the week
         // settings name them (OBS-91)
         const year = (this.periodStartOf("year", scope.key) ?? `${scope.key}`).slice(0, 4);
         const fees = measure === "earned" ? this.earnedFees(model).filter((f) => f.date.slice(0, 4) === year) : [];
-        const earning = (p) => this.earnedFor(this.totals(entries.filter((e) => e.project === p), model.money), p, model) > 0;
+        const earning = (/** @type {string} */ p) => this.earnedFor(this.totals(entries.filter((e) => e.project === p), model.money), p, model) > 0;
         const projects = measure === "hours" ? this.ownProjects(entries)
             : [...new Set([...this.ownProjects(entries).filter(earning), ...fees.map((f) => f.project)])].sort((x, y) => this.basename(x).localeCompare(this.basename(y)));
         if (measure === "earned" && !projects.length) return [];
@@ -3064,10 +3109,11 @@ export default class TimeReport {
             return { name, key, note: this.periodOf(`${key}-01`, "month") };
         });
         const head = ["Project", ...months.map(({ name, note }) => `[[${scope.linkTarget ? scope.linkTarget("month", note) : note}\\|${name}]]`), scope.key];
+        /** @type {string[][]} */
         const out = [];
         // A month's (or with `month` null, the year's) Earned: what the entries earned by the hour, and
         // the flat fees earned then (the project's, or every one on the All row)
-        const value = (list, project, month = null) => {
+        const value = (/** @type {Entry[]} */ list, /** @type {string | null} */ project, /** @type {string | null} */ month = null) => {
             const flat = measure === "earned" ? fees.filter((f) => (project ? f.project === project : true) && (!month || f.date.startsWith(month + "-"))).reduce((s, f) => s + f.cents, 0) : 0;
             if (!list.length && !flat) return "";
             const t = this.totals(list, model.money);
@@ -3075,7 +3121,7 @@ export default class TimeReport {
             const c = (list.length ? this.earnedFor(t, project, model) ?? 0 : 0) + flat;
             return c ? this.money(c).replace(/\.00$/, "") : "";
         };
-        const row = (name, list, project, bold = false) => {
+        const row = (/** @type {string} */ name, /** @type {Entry[]} */ list, /** @type {string | null} */ project, bold = false) => {
             const cells = [name, ...months.map(({ key }) => value(list.filter((e) => e.date.startsWith(key + "-")), project, key)), value(list, project)];
             return bold ? this.boldRow(cells) : cells;
         };
@@ -3089,14 +3135,22 @@ export default class TimeReport {
     // Hours by column: a row per project (its own entries), Unassigned and All; `columns` are
     // [{ head, match(entry) }], followed by a total column headed `totalHead`. Cells are hours
     // (billable + 🆓, rounded per entry), blank when none.
+    /**
+     * @param {Model} model
+     * @param {Entry[]} entries
+     * @param {GridColumn[]} columns
+     * @param {string} totalHead
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     hoursGrid(model, entries, columns, totalHead, link) {
         const head = ["Project", ...columns.map((c) => c.head), totalHead];
-        const hours = (list) => {
+        const hours = (/** @type {Entry[]} */ list) => {
             if (!list.length) return "";
             const t = this.totals(list, model.money);
             return this.hoursCell(t.billable + t.free);
         };
-        const row = (name, list, bold = false) => {
+        const row = (/** @type {string} */ name, /** @type {Entry[]} */ list, bold = false) => {
             const cells = [name, ...columns.map((c) => hours(list.filter(c.match))), hours(list)];
             return bold ? this.boldRow(cells) : cells;
         };
@@ -3109,50 +3163,76 @@ export default class TimeReport {
 
     // A weekly note's breakdown by day: a column per day of the week, from its first day, headed "Sun 9/6"
     // with a link to that daily note, by its name (dayLinks), then the week
+    /**
+     * @param {Model} model
+     * @param {Entry[]} entries
+     * @param {PeriodScope} scope
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     weekDaysTable(model, entries, scope, link) {
         const [from] = this.weekRange(scope.key);
         const start = Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10)) / 864e5;
         const days = Array.from({ length: 7 }, (_, i) => new Date((start + i) * 864e5).toISOString().slice(0, 10));
         const day = this.dayLinks();
-        const columns = days.map((d) => ({ head: `[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${+d.slice(5, 7)}/${+d.slice(8, 10)}]]`, match: (e) => e.date === d }));
+        const columns = days.map((d) => ({ head: `[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${+d.slice(5, 7)}/${+d.slice(8, 10)}]]`, match: (/** @type {Entry} */ e) => e.date === d }));
         return this.hoursGrid(model, entries, columns, "Week", link);
     }
 
     // A monthly note's breakdown by week: a column per week that overlaps the month, by the week
     // settings, headed "8/30-9/5" with a link to that weekly note, then the month. A week that straddles
     // two months counts only this month's days here, so the Month column matches the summary.
+    /**
+     * @param {Model} model
+     * @param {Entry[]} entries
+     * @param {PeriodScope} scope
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     monthWeeksTable(model, entries, scope, link) {
         const [y, m] = this.periodStartOf("month", scope.key).split("-").map(Number);
         const first = Date.UTC(y, m - 1, 1) / 864e5, last = Date.UTC(y, m, 0) / 864e5;
+        /** @type {string[]} */
         const weeks = [];
         for (let n = first; n <= last; n++) {
             const key = this.weekKey(new Date(n * 864e5).toISOString().slice(0, 10));
             if (!weeks.includes(key)) weeks.push(key);
         }
-        const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
+        const md = (/** @type {string} */ date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
         const columns = weeks.map((key) => {
             const [from, to] = this.weekRange(key);
             const target = scope.linkTarget ? scope.linkTarget("week", key) : key;
-            return { head: `[[${target}\\|${md(from)}-${md(to)}]]`, match: (e) => this.weekKey(e.date) === key };
+            return { head: `[[${target}\\|${md(from)}-${md(to)}]]`, match: (/** @type {Entry} */ e) => this.weekKey(e.date) === key };
         });
         return this.hoursGrid(model, entries, columns, "Month", link);
     }
 
     // `here`: the project or area note the report is written in ({ path, area }), so a Problem on one of its own
     // lines says "This project note" rather than naming the note twice (Brian, OBS-233's test round)
+    /**
+     * @param {Model} model
+     * @param {Problem[]} problems
+     * @param {ProjectProblem[]} projectProblems
+     * @param {Entry[]} entries
+     * @param {NoteLink} link
+     * @param {ProjectScope | null} [here]
+     * @returns {string[]}
+     */
     problemLines(model, problems, projectProblems, entries, link, here = null) {
+        /** @type {string[]} */
         const out = [];
         // A daily note's link, by its name (OBS-298)
         const day = this.dayLinks();
-        const quote = (text) => {
+        const quote = (/** @type {string} */ text) => {
             const chars = Array.from(text);
             const t = chars.length > TimeReport.QUOTE_MAX ? chars.slice(0, TimeReport.QUOTE_MAX - 1).join("").trimEnd() + "…" : text;
             return t.replace(/`/g, "'");
         };
         // A Problem about a whole task (two deadlines, OBS-233) is on each of its days, and said once in a report:
         // at the first of them there
+        /** @type {Set<string>} */
         const told = new Set();
-        const first = (p) => !p.group || (!told.has(p.group) && told.add(p.group));
+        const first = (/** @type {{ group?: string }} */ p) => !p.group || (!told.has(p.group) && told.add(p.group));
         problems = problems.filter(first);
         projectProblems = projectProblems.filter(first);
         for (const p of problems) {
@@ -3161,7 +3241,7 @@ export default class TimeReport {
             out.push(`- ${p.lead ? `${p.lead} ` : ""}${at} line ${p.line}: \`${quote(p.title ?? p.text)}\` ${p.message}`);
         }
         // Both of a line's projects, or an invoice's, can be in one report: said once
-        const once = (line) => { if (!out.includes(line)) out.push(line); };
+        const once = (/** @type {string} */ line) => { if (!out.includes(line)) out.push(line); };
         for (const p of projectProblems) {
             if (p.noProject) {
                 once(this.invoiceProblem(p, link, day));
@@ -3194,12 +3274,23 @@ export default class TimeReport {
     }
 
     // A link to a note, by its path, showing its name
+    /**
+     * @param {string} path
+     * @returns {string}
+     */
     noteLink(path) {
         return `[[${path.replace(/\.md$/, "")}|${this.basename(path)}]]`;
     }
 
     // What's wrong with a line in a periodic note (ownNoteProblems), and what to do about it. `day` names a daily
     // note's link (dayLinks).
+    /**
+     * @param {LineConflict} c
+     * @param {NoteLink} link
+     * @param {(text: string) => string} quote
+     * @param {DayLink} [day]
+     * @returns {string}
+     */
     conflictLine(c, link, quote, day = this.dayLinks()) {
         const at = `${c.kind === "day" ? `[[${day(c.date)}|${this.shortDate(c.date)}]]` : this.noteLink(c.path)} line ${c.line}: \`${quote(c.text)}\``;
         if (c.links) return `- ${at} names ${c.links.map(link).join(" and ")}, so its time isn't counted on either; take the wrong link off`;
@@ -3212,6 +3303,10 @@ export default class TimeReport {
     // whose note waits in the Inbox (the time counts and bills), and a task whose lines disagree, unless
     // the disagreement is over the project (a stale forward date doesn't change a billable entry): two
     // projects on one task, or a subtask's day in another project than its note (OBS-233)
+    /**
+     * @param {{ kind?: string, rule?: string, conflict?: LineConflict | null }} p
+     * @returns {boolean}
+     */
     changesBilling(p) {
         return (!["task", "subtask", "parent"].includes(p.kind) && !p.conflict?.inbox) || p.rule === "project" || p.rule === "subtaskProject";
     }
@@ -3220,9 +3315,15 @@ export default class TimeReport {
     // draft's change ends "rebuild it", since Rebuild fixes it. A timesheet adds an `overlap` (an entry
     // that overlaps billed time) of its own (OBS-143), which Rebuild doesn't fix. `day` names a daily note's link
     // (dayLinks).
+    /**
+     * @param {Pick<ProjectProblem, "invoice" | "noProject" | "problem" | "change" | "twice">} p
+     * @param {NoteLink} link
+     * @param {DayLink} [day]
+     * @returns {string}
+     */
     invoiceProblem(p, link, day = this.dayLinks()) {
-        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
-        const when = (r) => `[[${day(r.date)}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
+        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const when = (/** @type {BilledRow} */ r) => `[[${day(r.date)}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
         if (p.twice) {
             const [a, b] = p.twice.invoices;
             return a === b ? `- ${when(p.twice.row)} is on [[${a.name}]] twice`
@@ -3252,6 +3353,10 @@ export default class TimeReport {
 
     // A missing billed row as its invoice recorded it, so you can tell what to put back (Brian,
     // 2026-10-29): its day and times, then its task and note, quoted
+    /**
+     * @param {BilledRow} row
+     * @returns {string}
+     */
     missingRow(row) {
         const what = [row.task, row.note].filter(Boolean).join(": ").replace(/`/g, "'");
         return `${this.shortDate(row.date)} ${this.formatTime(row.start)} - ${this.formatTime(row.end)}${what ? ` \`${what}\`` : ""}`;
@@ -3262,6 +3367,10 @@ export default class TimeReport {
     // project) or draw anything. Billing.tableText does the same for invoices. A `|` already escaped,
     // after an odd number of backslashes, stays as it is: a run of backslashes is read whole, with the
     // pipe after it.
+    /**
+     * @param {unknown} text
+     * @returns {string}
+     */
     tableText(text) {
         return String(text ?? "").replace(/\s+/g, " ").trim().replace(/\\+\|?|\|/g, (m) => (m.endsWith("|") && m.length % 2 ? `${m.slice(0, -1)}\\|` : m))
             .replace(/(^|\s)#(?=[^\s#])/g, "$1\\#").replace(/</g, "&lt;");
@@ -3273,13 +3382,19 @@ export default class TimeReport {
     // the timesheet has no time of; the table has a bold row per day, newest first, then the day's
     // entries in time order (see sheet). Problems come first, when there's anything to say: its entries'
     // (see sheetEntryProblems), then its invoices' (see sheetProblems). Each part ends with a blank line.
+    /**
+     * @param {Model} model
+     * @param {TimesheetScope} scope
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     timesheetLines(model, scope, link) {
         const b = model.billing;
         const on = b ? b.billing.scope(scope.path, model, this, b.index) : new Set([scope.path]);
         const entries = model.entries.filter((e) => on.has(e.project));
         const project = new Set(entries.map((e) => e.project)).size > 1;
         const billable = entries.filter((e) => e.billable), free = entries.filter((e) => !e.billable);
-        const total = (list) => `${this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0))} hrs`;
+        const total = (/** @type {Entry[]} */ list) => `${this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0))} hrs`;
         const own = this.sheetEntryProblems(model, on, scope.path, entries, link);
         // Problems first, as in every report (OBS-167)
         const out = this.problemsCallout([...own.lines, ...this.sheetProblems(model, on, entries, link)]);
@@ -3299,13 +3414,21 @@ export default class TimeReport {
     // overlap, and the entries under a task or event line a Problem is on (a stray 🆓 there, or a note
     // waiting in the Inbox). Running clocks, malformed lines, time under a sub-task and a line where
     // nothing decides aren't counted, so they have no row; only their line says so.
+    /**
+     * @param {Model} model
+     * @param {Set<string>} on
+     * @param {string} root
+     * @param {Entry[]} entries
+     * @param {NoteLink} link
+     * @returns {{ lines: string[], flagged: Set<Entry> }}
+     */
     sheetEntryProblems(model, on, root, entries, link) {
         const problems = model.problems.filter((p) => p.projects.some((x) => on.has(x)) && this.changesBilling(p));
         const projectProblems = model.projectProblems.filter((p) => !p.invoice && !p.twice && (this.changesBilling(p) || p.conflict?.inbox) && (on.has(p.project) || (p.parent && p.parent === root)));
-        const at = (path, line) => `${path}\n${line}`;
+        const at = (/** @type {string} */ path, /** @type {number} */ line) => `${path}\n${line}`;
         const named = new Set([...problems.flatMap((p) => [at(p.path, p.line), ...(p.other ? [at(p.other.path, p.other.line)] : [])]),
             ...projectProblems.filter((p) => p.conflict).map((p) => at(p.conflict.path, p.conflict.line))]);
-        const about = (e) => named.has(at(e.path, e.line)) || (e.context ?? []).some((c) => named.has(at(e.path, c.line)));
+        const about = (/** @type {Entry} */ e) => named.has(at(e.path, e.line)) || (e.context ?? []).some((c) => named.has(at(e.path, c.line)));
         return {
             lines: problems.length || projectProblems.length ? this.problemLines(model, problems, projectProblems, entries, link) : [],
             flagged: new Set(entries.filter(about)),
@@ -3316,11 +3439,18 @@ export default class TimeReport {
     // time in it, and an entry on two invoices. The lines are the project note's, from the same changes
     // (Billing.invoiceChanges). An entry that's ⚠️ for no change of its own, such as one that overlaps a billed
     // row whose entry is still there, gets a line of its own. Empty when there's nothing to say.
+    /**
+     * @param {Model} model
+     * @param {Set<string>} on
+     * @param {Entry[]} entries
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     sheetProblems(model, on, entries, link) {
         const b = model.billing;
         if (!b) return [];
-        const mine = (p) => !!p && on.has(p);
-        const out = [], explained = new Set();
+        const mine = (/** @type {string | null | undefined} */ p) => !!p && on.has(p);
+        const /** @type {string[]} */ out = [], /** @type {Set<BillingEntry>} */ explained = new Set();
         for (const invoice of b.invoices) {
             if (invoice.status === "canceled") continue;
             if (!invoice.project && b.billing.rowProjects(invoice, model, this, b.index).some(mine)) out.push(this.invoiceProblem({ invoice, noProject: true }, link));
@@ -3338,7 +3468,7 @@ export default class TimeReport {
             if (mine(twice.row.projectPath) || twice.invoices.some((i) => mine(i.project))) out.push(this.invoiceProblem({ twice }, link));
         }
         const standing = this.sheetStanding(model);
-        const order = (x, y) => x.date.localeCompare(y.date) || x.start - y.start || x.end - y.end;
+        const order = (/** @type {Entry} */ x, /** @type {Entry} */ y) => x.date.localeCompare(y.date) || x.start - y.start || x.end - y.end;
         for (const e of [...entries].sort(order)) {
             const s = standing(e);
             if (explained.has(e) || !this.warned(e, s)) continue;
@@ -3372,6 +3502,11 @@ export default class TimeReport {
     }
 
     // Whether an entry is ⚠️: changed since it was billed, or billed and now 🆓
+    /**
+     * @param {Entry} e
+     * @param {Standing} s
+     * @returns {boolean}
+     */
     warned(e, s) {
         return s.kind === "changed" || (s.kind === "billed" && !e.billable);
     }
@@ -3389,31 +3524,39 @@ export default class TimeReport {
     // billed, in its own; a day's total of each kind, blank when it has none), Task and Notes (with no
     // 🆓: the status column says it), and Invoice, the invoice that billed the entry, where anything bills
     // by the hour. It's about time, so it has no amounts.
+    /**
+     * @param {Model} model
+     * @param {Entry[]} entries
+     * @param {{ project: boolean, link: NoteLink, flagged?: Set<Entry> }} options
+     * @returns {string[]}
+     */
     sheet(model, entries, { project, link, flagged = new Set() }) {
         const billing = entries.some((e) => this.hourlyCents(model, e) !== null);
         const billable = entries.some((e) => e.billable), free = entries.some((e) => !e.billable);
         const marks = billing || free || entries.some((e) => flagged.has(e));
-        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const day = this.dayLinks();
         const standing = this.sheetStanding(model);
         // An entry's { mark, invoice, hourly }: hourly when an hourly invoice can bill it
+        /** @type {(e: Entry) => SheetStatus} */
         const status = (e) => {
-            const s = billing ? standing(e) : { kind: "open" };
+            const s = billing ? standing(e) : /** @type {Standing} */ ({ kind: "open" });
             const mark = flagged.has(e) || this.warned(e, s) ? "⚠️" : !e.billable ? "🆓" : s.kind === "open" ? "" : this.invoiceMark(s.invoice);
             return { mark, invoice: s.kind === "open" ? "" : `[[${s.invoice.name}]]`, hourly: e.billable && this.hourlyCents(model, e) !== null };
         };
         const head = [...(marks ? [""] : []), "Date / Time", ...(project ? ["Project"] : []), ...(billable ? ["Bill"] : []), ...(free ? ["🆓"] : []),
             "Task", "Notes", ...(billing ? ["Invoice"] : [])];
-        const hours = (list) => this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0));
+        const hours = (/** @type {Entry[]} */ list) => this.hours(list.reduce((m, e) => m + this.rounded(e.minutes), 0));
         // A row's hours: in Billable, then in 🆓, each column only when the timesheet has it
-        const split = (b, f) => [...(billable ? [b] : []), ...(free ? [f] : [])];
+        const split = (/** @type {string} */ b, /** @type {string} */ f) => [...(billable ? [b] : []), ...(free ? [f] : [])];
         const days = [...new Set(entries.map((e) => e.date))].sort().reverse()
             .map((d) => ({ d, list: entries.filter((e) => e.date === d).sort((x, y) => x.start - y.start || x.end - y.end) }));
+        /** @type {string[][]} */
         const rows = [];
         for (const { d, list } of days) {
             const each = list.map(status);
-            const kind = (want) => list.filter((e) => e.billable === want);
-            const sum = (want) => (kind(want).length ? `**${hours(kind(want))}**` : "");
+            const kind = (/** @type {boolean} */ want) => list.filter((e) => e.billable === want);
+            const sum = (/** @type {boolean} */ want) => (kind(want).length ? `**${hours(kind(want))}**` : "");
             rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]**`, ...(project ? [""] : []),
                 ...split(sum(true), sum(false)), "", "", ...(billing ? [""] : [])]);
             for (const [k, e] of list.entries()) {
@@ -3434,6 +3577,10 @@ export default class TimeReport {
     //     canceled invoice); else the earliest status among them: ✏️ draft, 🕒 sent, 📄 a status of your
     //     own (most likely sent), then ✅ paid, so a day is ✅ only when every one is paid;
     //   - a day with no hourly entries is 🆓 when every entry is 🆓, and blank otherwise.
+    /**
+     * @param {SheetStatus[]} rows
+     * @returns {string}
+     */
     dayMark(rows) {
         if (rows.some((r) => r.mark === "⚠️")) return "⚠️";
         const hourly = rows.filter((r) => r.hourly).map((r) => r.mark);
@@ -3443,13 +3590,23 @@ export default class TimeReport {
     }
 
     // An invoice's status as its mark (📄 for a status of your own)
+    /**
+     * @param {Invoice} invoice
+     * @returns {string}
+     */
     invoiceMark(invoice) {
-        return TimeReport.INVOICE_MARK[invoice.status] ?? "📄";
+        return /** @type {Record<string, string>} */ (TimeReport.INVOICE_MARK)[invoice.status] ?? "📄";
     }
 
     // A project note's invoices (OBS-117): the project's and its sub-projects', newest first, each with
     // its status mark in an unnamed first column, then a Total of all but the canceled ones. Hours and
     // Total are the invoice's own `hours` and `total`.
+    /**
+     * @param {Model} model
+     * @param {ProjectScope} scope
+     * @param {NoteLink} link
+     * @returns {string[]}
+     */
     invoiceLines(model, scope, link) {
         const b = model.billing;
         if (!b) return [];
@@ -3458,9 +3615,9 @@ export default class TimeReport {
             .sort((x, y) => (y.invoiceDate ?? "").localeCompare(x.invoiceDate ?? "") || y.number.localeCompare(x.number, undefined, { numeric: true }));
         if (!list.length) return [];
         const project = new Set(list.map((i) => i.project)).size > 1;
-        const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
-        const minutes = (i) => (i.hours === null ? null : Math.round(i.hours * 60));
-        const cents = (i) => (i.total === null ? null : Math.round(i.total * 100));
+        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+        const minutes = (/** @type {Invoice} */ i) => (i.hours === null ? null : Math.round(i.hours * 60));
+        const cents = (/** @type {Invoice} */ i) => (i.total === null ? null : Math.round(i.total * 100));
         const live = list.filter((i) => i.status !== "canceled");
         const head = ["", "Invoice", ...(project ? ["Project"] : []), "Date", "Period", "Hours", "Total"];
         return this.table(head, head.map((h, k) => (h === "Hours" || h === "Total" ? "right" : k === 0 ? "center" : null)), [
@@ -3480,13 +3637,20 @@ export default class TimeReport {
     // or its full path when another note has the same name).
     // `link(path)` makes a project or area link (see reportLink; defaults to [[basename]]); inside
     // a table its `|` is escaped (see cell).
+    /**
+     * @param {Model} model
+     * @param {ReportScope} scope
+     * @param {string} stamp
+     * @param {NoteLink} [link]
+     * @returns {string}
+     */
     render(model, scope, stamp, link = (p) => `[[${this.basename(p)}]]`) {
         // A project's timesheet link opens the block, beside when it was updated
         const top = scope.kind === "project" && scope.sheet ? `[[${scope.sheet}|Timesheet]] | *Updated ${stamp}*` : `*Updated ${stamp}*`;
         const out = [TimeReport.START, top, ""];
         // Problems only when there's something to say (OBS-133), and then first, right under the
         // Updated line, where they can't be missed below a long table (OBS-167)
-        const problems = (mine) => out.push(...this.problemsCallout(this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link, scope.kind === "project" ? scope : null)));
+        const problems = (/** @type {Scoped} */ mine) => out.push(...this.problemsCallout(this.problemLines(model, mine.problems, mine.projectProblems, mine.entries, link, scope.kind === "project" ? scope : null)));
 
         // A period's Problems, then its Earnings, when anything bills, then its Hours (OBS-133)
         if (scope.kind === "period") {
@@ -3522,6 +3686,10 @@ export default class TimeReport {
 
     // A report's Problems as a callout, then a blank line, so what follows isn't drawn inside it;
     // [] with nothing to say
+    /**
+     * @param {string[]} lines
+     * @returns {string[]}
+     */
     problemsCallout(lines) {
         return lines.length ? [TimeReport.PROBLEMS, ...lines.map((l) => `> ${l}`), ""] : [];
     }
@@ -3536,15 +3704,24 @@ export default class TimeReport {
     // or null when both are 0. Selectable Tables freezes at most 9 columns, a status column that comes
     // along included. While Plainday's settings file doesn't read (`unreadable`), the default isn't
     // known: KEEP_FREEZES, so every table keeps the freeze it has rather than lose a default it had.
+    /**
+     * @param {{ freezeRows: number, freezeColumns: number }} [tables]
+     * @param {boolean} [unreadable]
+     * @returns {TableFreeze}
+     */
     tableDefault(tables = plainday?.Settings?.get().tables, unreadable = plainday?.Settings?.unreadable) {
         if (unreadable) return TimeReport.KEEP_FREEZES;
-        const whole = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+        const whole = (/** @type {number} */ v) => (Number.isInteger(v) && v > 0 ? v : 0);
         const rows = whole(tables?.freezeRows), columns = Math.min(whole(tables?.freezeColumns), TimeReport.MAX_FROZEN_COLUMNS);
         return rows || columns ? { rows, columns } : null;
     }
 
     // What a header row holds: { mark: { rows, columns } or null, label: { kind: "default", rows, columns },
     // { kind: "custom" } or null }. The first mark counts, as in Selectable Tables, and code shows its text.
+    /**
+     * @param {unknown} header
+     * @returns {HeaderFreeze}
+     */
     freezeOf(header) {
         const text = String(header ?? "").replace(/(`+)[^`]+\1/g, (code) => " ".repeat(code.length));
         const mark = text.match(TimeReport.FREEZE_MARK), label = text.match(TimeReport.FREEZE_LABEL);
@@ -3556,6 +3733,11 @@ export default class TimeReport {
 
     // The default for a table headed `head` (its header cells): `columns` counts from the first named
     // column, so an unnamed status column at the left comes along without counting (Brian, 11/03). Null when off.
+    /**
+     * @param {TableFreeze} settings
+     * @param {string[]} [head]
+     * @returns {Freeze | null}
+     */
     freezeDefault(settings, head = []) {
         if (!settings) return null;
         const named = head.findIndex((h) => String(h ?? "").trim() !== "");
@@ -3571,10 +3753,17 @@ export default class TimeReport {
     //     or one labeled custom: that freeze, labeled custom;
     //   - a label with no freeze (Unfreeze table): `%%freeze 0 0%%`, labeled custom, so it stays unfrozen.
     // With KEEP_FREEZES, a default freeze stays as it is, and a new table gets none.
+    /**
+     * @param {HeaderFreeze | null} old
+     * @param {TableFreeze} settings
+     * @param {string[]} [head]
+     * @returns {string}
+     */
     freezeHeader(old, settings, head = []) {
+        /** @type {(freeze: Freeze) => string} */
         const mark = ({ rows, columns }) => `%%freeze ${rows} ${columns}%%`;
-        const custom = (freeze) => `${mark(freeze)} %%custom%%`;
-        const { mark: now = null, label = null } = old ?? {};
+        const custom = (/** @type {Freeze} */ freeze) => `${mark(freeze)} %%custom%%`;
+        const { mark: now = null, label = null } = old ?? /** @type {Partial<HeaderFreeze>} */ ({});
         const keep = !!settings?.keep;
         const def = keep ? (label?.kind === "default" ? { rows: label.rows, columns: label.columns } : null) : this.freezeDefault(settings, head);
         const byDefault = def ? `${mark(def)} %%default ${def.rows} ${def.columns}%%` : "";
@@ -3585,6 +3774,10 @@ export default class TimeReport {
     }
 
     // A header cell without its freeze comments, each with the spaces after it
+    /**
+     * @param {unknown} text
+     * @returns {string}
+     */
     withoutFreeze(text) {
         return this.splitFreeze(String(text ?? "")).filter((_, i) => i % 2 === 0)
             .map((part, i) => (i ? part.replace(/^[ \t]*/, "") : part)).join("").trim();
@@ -3593,6 +3786,10 @@ export default class TimeReport {
     // How a table's heading is known from run to run: its numbers don't count (a timesheet's carry its
     // totals), and a timesheet's summary line is one heading whatever kinds of time it names, so its table
     // keeps its freeze when its first 🆓 entry comes in (OBS-242)
+    /**
+     * @param {string} line
+     * @returns {string}
+     */
     tableHeading(line) {
         const h = line.trim().replace(/\d[\d.,]*/g, "#").replace(/\s+/g, " ");
         return TimeReport.SHEET_HEADINGS.test(h) ? TimeReport.SHEET_HEADING : h;
@@ -3600,9 +3797,14 @@ export default class TimeReport {
 
     // The tables in `lines`, each with the heading above it (tableHeading): [{ at (its first row), end (its
     // last), heading }].
+    /**
+     * @param {string[]} lines
+     * @returns {TableAt[]}
+     */
     tablesIn(lines) {
+        /** @type {TableAt[]} */
         const out = [];
-        const row = (j) => /^\s*\|/.test(lines[j] ?? "");
+        const row = (/** @type {number} */ j) => /^\s*\|/.test(lines[j] ?? "");
         let heading = "";
         for (let i = 0; i < lines.length; i++) {
             const t = lines[i].trim();
@@ -3619,7 +3821,12 @@ export default class TimeReport {
     // What the tables in `lines` hold in their header rows: Map(heading → [freezeOf, …]), in order. A
     // timesheet from before OBS-242 has two tables, Billable time and 🆓 time, for the one it has now: a
     // freeze you set on either carries over, the Billable table's when both have one.
+    /**
+     * @param {string[]} lines
+     * @returns {Map<string, HeaderFreeze[]>}
+     */
     freezesIn(lines) {
+        /** @type {Map<string, HeaderFreeze[]>} */
         const out = new Map();
         for (const { at, heading } of this.tablesIn(lines)) {
             if (!out.has(heading)) out.set(heading, []);
@@ -3632,6 +3839,11 @@ export default class TimeReport {
 
     // A header row's freeze (freezeOf). One you set on a timesheet from before OBS-242, whose Date and Time
     // were two columns, counts one column fewer once it reached Time, so it ends at the same column.
+    /**
+     * @param {string} header
+     * @param {string} heading
+     * @returns {HeaderFreeze}
+     */
     freezeOfRow(header, heading) {
         const f = this.freezeOf(header);
         if (heading !== TimeReport.SHEET_HEADING || !f.mark || !this.ownFreeze(f)) return f;
@@ -3641,14 +3853,22 @@ export default class TimeReport {
 
     // Whether a header's freeze (freezeOf) is one you set, which freezeHeader keeps and labels custom,
     // rather than the default's or none
+    /**
+     * @param {HeaderFreeze} freeze
+     * @returns {boolean}
+     */
     ownFreeze({ mark, label }) {
         if (!mark) return !!label;
         return !(label?.kind === "default" && mark.rows === label.rows && mark.columns === label.columns);
     }
 
     // A row's cells as written, padding included: a `\` escapes the character after it
+    /**
+     * @param {string} line
+     * @returns {string[]}
+     */
     tableCells(line) {
-        const text = line.trimEnd(), out = [];
+        const text = line.trimEnd(), /** @type {string[]} */ out = [];
         let from = text.length - text.trimStart().length;
         if (text[from] === "|") from++;
         for (let i = from; i < text.length; i++) {
@@ -3662,8 +3882,15 @@ export default class TimeReport {
     // `lines` with each table's header frozen as freezeHeader says, from `old` (freezesIn of what's there
     // now) and `settings` (tableDefault). A table matches the old one under the same heading, the first
     // with the first. A table whose header changes is written again through `table`, so it stays padded.
+    /**
+     * @param {string[]} lines
+     * @param {Map<string, HeaderFreeze[]>} old
+     * @param {TableFreeze} settings
+     * @returns {string[]}
+     */
     withFreezes(lines, old, settings) {
         const out = lines.slice();
+        /** @type {Map<string, number>} */
         const seen = new Map();
         for (const { at, end, heading } of this.tablesIn(lines)) {
             const n = seen.get(heading) ?? 0;
@@ -3683,6 +3910,12 @@ export default class TimeReport {
 
     // `block` with its tables frozen, from the block in `content` (the note as it is now) and `settings`.
     // With the default off and no freeze in the note, it's `block` as it is.
+    /**
+     * @param {string} block
+     * @param {string} content
+     * @param {TableFreeze} settings
+     * @returns {string}
+     */
     freezeBlock(block, content, settings) {
         const text = String(content ?? "");
         if (!settings && !/%%\s*(?:freeze|default|custom)\b/.test(text)) return block;
@@ -3698,14 +3931,20 @@ export default class TimeReport {
     // replace), or { error }. An existing block is replaced. Otherwise it goes right under `heading`
     // if the note has it, else at the end under a new `heading` (with `heading` null, at the end on
     // its own, as in a timesheet). Never anywhere else.
+    /**
+     * @param {string} content
+     * @param {string} block
+     * @param {{ heading?: string | null }} [options]
+     * @returns {TextEdit | EditError}
+     */
     placeBlock(content, block, { heading = TimeReport.HEADING } = {}) {
         const nl = content.includes("\r\n") ? "\r\n" : "\n";
         const lines = content.split("\n");            // keeps any \r, so offsets stay exact
-        const offset = (n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
-        const endOf = (n) => offset(n) + lines[n].replace(/\r$/, "").length;
-        const text = (s) => s.replace(/\r?\n/g, nl);
+        const offset = (/** @type {number} */ n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+        const endOf = (/** @type {number} */ n) => offset(n) + lines[n].replace(/\r$/, "").length;
+        const text = (/** @type {string} */ s) => s.replace(/\r?\n/g, nl);
         const { hidden, starts, ends, unclosed } = this.scan(lines.map((l) => l.replace(/\r$/, "")));
-        const blank = (j) => lines[j].trim() === "";
+        const blank = (/** @type {number} */ j) => lines[j].trim() === "";
 
         if (starts.length || ends.length) {
             if (starts.length !== 1 || ends.length !== 1 || ends[0] < starts[0]) {
@@ -3736,11 +3975,15 @@ export default class TimeReport {
     // which the block then goes under instead of a second heading. Never when another heading in the
     // note already reads "## Time Report", in any case. Only the heading's text changes, so no line
     // moves. Returns the edit { start, end, text }, or null.
+    /**
+     * @param {string} content
+     * @returns {TextEdit | null}
+     */
     renameHeading(content) {
         const lines = content.split("\n");
         const { hidden, starts, ends } = this.scan(lines.map((l) => l.replace(/\r$/, "")));
-        const is = (j, heading) => !hidden[j] && lines[j].trim().toLowerCase() === heading.toLowerCase();
-        const either = (j) => is(j, TimeReport.HEADING) || is(j, TimeReport.OLD_HEADING);
+        const is = (/** @type {number} */ j, /** @type {string} */ heading) => !hidden[j] && lines[j].trim().toLowerCase() === heading.toLowerCase();
+        const either = (/** @type {number} */ j) => is(j, TimeReport.HEADING) || is(j, TimeReport.OLD_HEADING);
         let h = -1;
         if (starts.length) {
             let j = starts[0] - 1;
@@ -3764,10 +4007,18 @@ export default class TimeReport {
     // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), a new
     // block gets none, and the note gets its class if it hasn't (sheetClass). `tables` is the default freeze (tableDefault): the block's tables are
     // frozen from it and from the block that's there now (freezeBlock), before they're compared.
+    /**
+     * @param {string} content
+     * @param {string} block
+     * @param {{ onlyIfChanged?: boolean, heading?: boolean, tables?: TableFreeze }} [options]
+     * @returns {TextEdit[] | EditError}
+     */
     blockEdits(content, block, { onlyIfChanged = true, heading = true, tables = null } = {}) {
-        const apply = (c, edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
+        const apply = (/** @type {string} */ c, /** @type {TextEdit} */ edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
+        /** @type {TextEdit[]} */
         const edits = [];
         let current = content;
+        /** @type {((c: string) => TextEdit | null)[]} */
         const steps = heading ? [(c) => this.renameHeading(c), (c) => this.blankLineAbove(c)] : [(c) => this.sheetClass(c), (c) => this.dropHeading(c)];
         for (const step of steps) {
             const edit = step(current);
@@ -3785,6 +4036,10 @@ export default class TimeReport {
     // A timesheet's report has no heading (OBS-167): the "## Time Report" (or older) heading right
     // above its block, with only blank lines between them, goes, along with those blank lines.
     // Returns the edit { start, end, text }, or null.
+    /**
+     * @param {string} content
+     * @returns {TextEdit | null}
+     */
     dropHeading(content) {
         const lines = content.split("\n");
         const { hidden, starts } = this.scan(lines.map((l) => l.replace(/\r$/, "")));
@@ -3793,13 +4048,18 @@ export default class TimeReport {
         while (j >= 0 && !hidden[j] && !lines[j].trim()) j--;
         const heading = j >= 0 && !hidden[j] && [TimeReport.HEADING, TimeReport.OLD_HEADING].some((h) => lines[j].trim().toLowerCase() === h.toLowerCase());
         if (!heading) return null;
-        const offset = (n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+        const offset = (/** @type {number} */ n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
         return { start: offset(j), end: offset(starts[0]), text: "" };
     }
 
     // Room to add things above the report (tasks at the top of a weekly or monthly note): the
     // "## Time report" heading always has a blank line above it. Returns the insertion
     // { start, end, text } that adds one, or null when it's already there (or there's no heading).
+    /**
+     * @param {string} content
+     * @param {string} [heading]
+     * @returns {TextEdit | null}
+     */
     blankLineAbove(content, heading = TimeReport.HEADING) {
         const nl = content.includes("\r\n") ? "\r\n" : "\n";
         const lines = content.split("\n");
@@ -3814,13 +4074,22 @@ export default class TimeReport {
 
     // Saved folds after replacing old[start, end) with `text`: folds after the change move with
     // it, folds around it stretch, folds that start inside a replaced block go
+    /**
+     * @param {Fold[]} folds
+     * @param {string} content
+     * @param {number} start
+     * @param {number} end
+     * @param {string} text
+     * @returns {Fold[]}
+     */
     shiftFolds(folds, content, start, end, text) {
-        const newlines = (s) => (s.match(/\n/g) ?? []).length;
+        const newlines = (/** @type {string} */ s) => (s.match(/\n/g) ?? []).length;
         const first = newlines(content.slice(0, start));
         const last = newlines(content.slice(0, end));
         // A change inside one line (a heading renamed) moves no line, so a fold on it stays
         if (first === last && !newlines(text)) return folds.slice();
         const delta = newlines(text) - newlines(content.slice(start, end));
+        /** @type {Fold[]} */
         const moved = [];
         for (const f of folds) {
             if (f.from === 0 && f.to === 0) moved.push(f);                                   // collapsed frontmatter
@@ -3834,15 +4103,24 @@ export default class TimeReport {
     }
 
     // Same block apart from the "Updated" line
+    /**
+     * @param {string} content
+     * @param {string} block
+     * @returns {boolean}
+     */
     sameBlock(content, block) {
         const lines = this.lines(content);
         const { blocks, starts, ends } = this.scan(lines);
         if (starts.length !== 1 || ends.length !== 1 || blocks.length !== 1) return false;
         // Line 1 says when it was updated (after the timesheet link, on a project): that alone isn't a change
-        const strip = (ls) => ls.map((l, i) => (i === 1 ? l.replace(/\*Updated [^*]*\*/, "*Updated*") : l)).join("\n");
+        const strip = (/** @type {string[]} */ ls) => ls.map((l, i) => (i === 1 ? l.replace(/\*Updated [^*]*\*/, "*Updated*") : l)).join("\n");
         return strip(lines.slice(blocks[0].start, blocks[0].end + 1)) === strip(this.lines(block));
     }
 
+    /**
+     * @param {string} content
+     * @returns {boolean}
+     */
     hasBlock(content) {
         return this.scan(this.lines(content)).starts.length > 0;
     }
@@ -3854,6 +4132,11 @@ export default class TimeReport {
     // The task or event line `cursorLine` is on or under: the top of its nest (nestTop; rule 5, OBS-193), when
     // that's a checklist line or a meeting line in the form used before August 2025, else -1. A sub-task's
     // clock is its task's.
+    /**
+     * @param {string[]} lines
+     * @param {number} cursorLine
+     * @returns {number}
+     */
     anchorLine(lines, cursorLine) {
         const line = lines[cursorLine];
         if (line === undefined || line.trim() === "") return -1;
@@ -3881,6 +4164,10 @@ export default class TimeReport {
     }
 
     // A line that shows nothing: only a %% %% or <!-- --> comment, or whitespace
+    /**
+     * @param {string} line
+     * @returns {boolean}
+     */
     commentOnly(line) {
         return /^\s*(?:%%[^%]*%%|<!--[\s\S]*?-->)\s*$/.test(line);
     }
@@ -3897,7 +4184,7 @@ export default class TimeReport {
      * @returns {number}
      */
     nestTop(lineAt, i) {
-        const isBox = (l) => /^\s*[-*+]\s+\[.\]/.test(l);
+        const isBox = (/** @type {string} */ l) => /^\s*[-*+]\s+\[.\]/.test(l);
         let top = i, width = this.indentWidth(lineAt(i));
         for (let j = i - 1; j >= 0 && width > 0; j--) {
             const l = lineAt(j);
@@ -3921,9 +4208,10 @@ export default class TimeReport {
     /**
      * @param {string[] | ((n: number) => string)} lines
      * @param {number} i
+     * @returns {{ at: number, line: string, box: string | null, event: EventKind }}
      */
     topOf(lines, i) {
-        const lineAt = typeof lines === "function" ? lines : (n) => lines[n];
+        const lineAt = typeof lines === "function" ? lines : (/** @type {number} */ n) => lines[n];
         const at = this.nestTop(lineAt, i);
         const line = lineAt(at);
         return { at, line, box: line.match(/^\s*[-*+]\s+\[(.)\]/)?.[1] ?? null, event: this.eventKind(line) };
@@ -3934,7 +4222,10 @@ export default class TimeReport {
     // its date in front and then the event's time and a tab; "canceled" for a [-] line it wrote, the
     // event's time and a tab first; "meeting" for a line in the form days used before August 2025, at
     // the left edge with no bullet and its time first (classify's "event").
-    /** @param {string} line */
+    /**
+     * @param {string} line
+     * @returns {EventKind}
+     */
     eventKind(line) {
         const m = line.match(/^\s*[-*+]\s+\[(.)\]\s*(.*)$/);
         if (!m) return this.classify(line).kind === "event" ? "meeting" : null;
@@ -3946,13 +4237,26 @@ export default class TimeReport {
     }
 
     // A task's running entries: every one under it, a sub-task's included (rule 5, OBS-193)
+    /**
+     * @param {string[]} lines
+     * @param {number} anchor
+     * @param {number[]} [all]
+     * @returns {number[]}
+     */
     ownOpenLines(lines, anchor, all = this.openLines(lines)) {
         const last = this.subtreeEnd(lines, anchor);
         return all.filter((i) => i > anchor && i <= last && this.anchorLine(lines, i) === anchor);
     }
 
+    /**
+     * @param {string[]} lines
+     * @param {number} [from]
+     * @param {number} [to]
+     * @returns {number[]}
+     */
     openLines(lines, from = 0, to = lines.length - 1) {
         const { visible, hidden, blocks } = this.scan(lines);
+        /** @type {number[]} */
         const out = [];
         for (let i = from; i <= to; i++) {
             if (hidden[i] || blocks.some((b) => i >= b.start && i <= b.end)) continue;
@@ -3963,6 +4267,12 @@ export default class TimeReport {
 
     // { from, to, text, cursor } to add "- 9:01am - " under the task, above its first sub-task or else
     // at the end of its sub-bullets (or on the empty bullet the cursor is on), or { error }
+    /**
+     * @param {string[]} lines
+     * @param {number} cursorLine
+     * @param {string} now
+     * @returns {EntryEdit | EditError}
+     */
     startEntry(lines, cursorLine, now) {
         const anchor = this.anchorLine(lines, cursorLine);
         if (anchor === -1) return { error: "Put the cursor on a task or event" };
@@ -3973,7 +4283,7 @@ export default class TimeReport {
         // An empty bullet you just typed directly under the task gets the entry; anywhere deeper
         // (under a plain bullet) the entry wouldn't count, so it goes at the task's own level
         const empty = lines[cursorLine].match(/^(\s*)[-*+]\s*$/);
-        const parentOf = (j) => {
+        const parentOf = (/** @type {number} */ j) => {
             const w = this.indentWidth(lines[j]);
             for (let k = j - 1; k >= 0; k--) if (lines[k].trim() && this.indentWidth(lines[k]) < w) return k;
             return -1;
@@ -3989,7 +4299,7 @@ export default class TimeReport {
         // first sub-task, after any end time, entries and notes; with no sub-tasks, at the end
         let after = last;
         if (child) {
-            const isBox = (l) => /^\s*[-*+]\s+\[.\]/.test(l);
+            const isBox = (/** @type {string} */ l) => /^\s*[-*+]\s+\[.\]/.test(l);
             const sub = lines.findIndex((l, j) => j > anchor && j <= last && isBox(l) && this.indentWidth(l) === this.indentWidth(child));
             if (sub !== -1) after = sub - 1;
         }
@@ -3999,6 +4309,12 @@ export default class TimeReport {
 
     // { line, text } replacing the running entry's line with its end time filled in, or { error }.
     // Picks the entry on the cursor line, else the one under the cursor's task, else the note's only one.
+    /**
+     * @param {string[]} lines
+     * @param {number} cursorLine
+     * @param {string} now
+     * @returns {EntryEdit | EditError}
+     */
     stopEntry(lines, cursorLine, now) {
         const all = this.openLines(lines);
         let target = all.includes(cursorLine) ? cursorLine : null;
@@ -4069,6 +4385,13 @@ export default class TimeReport {
         return { action: "start", edit, ...(status && { status }), summary: `Started ${now}: ${this.itemLabel(this.scan(lines).visible[anchor])}` };
     }
 
+    /**
+     * @param {string[]} lines
+     * @param {number} line
+     * @param {string} now
+     * @param {number} daysAgo
+     * @returns {Toggle}
+     */
     stopToggle(lines, line, now, daysAgo) {
         const { visible } = this.scan(lines);
         const start = this.classify(visible[line]).entry[1];
@@ -4100,6 +4423,12 @@ export default class TimeReport {
 
     // "10:30am: Charts" for a running entry: its start and the task or event it's under, which
     // (unlike an entry's note) is always there to say what the time is for
+    /**
+     * @param {string[]} lines
+     * @param {string[]} visible
+     * @param {number} line
+     * @returns {string}
+     */
     timerLabel(lines, visible, line) {
         const anchor = this.anchorLine(lines, line);
         return `${this.classify(visible[line]).entry[1]}${anchor === -1 ? "" : ": " + this.itemLabel(visible[anchor])}`;
@@ -4107,6 +4436,10 @@ export default class TimeReport {
 
     // A task or event line as dropdown text: no bullet or checkbox, links shown as their text, a sent
     // line's forward date and a task's ID left out
+    /**
+     * @param {string} line
+     * @returns {string}
+     */
     itemLabel(line) {
         return line.trimEnd().replace(TimeReport.BLOCK_ID, "").replace(TimeReport.FORWARD_LINK, "").replace(TimeReport.BULLET, "$3").replace(/^\[.\]\s*/, "")
             .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1").replace(/\[\[([^\]]*)\]\]/g, "$1")
@@ -4116,11 +4449,20 @@ export default class TimeReport {
 
     // The dropdown when the cursor isn't on a task, for today's daily note: [{ line, label }] with
     // running entries first (picking one stops it), then open tasks and events that have none.
+    /**
+     * @param {string[]} lines
+     * @returns {{ line: number, label: string }[]}
+     */
     toggleChoices(lines) {
         return [...this.runningChoices(lines), ...this.taskChoices(lines)];
     }
 
     // A note's running entries as dropdown items; `day` ("9/14") marks a note other than today's
+    /**
+     * @param {string[]} lines
+     * @param {string} [day]
+     * @returns {{ line: number, label: string }[]}
+     */
     runningChoices(lines, day = "") {
         const { visible } = this.scan(lines);
         return this.openLines(lines).map((i) => ({ line: i, label: `⏱ Stop ${this.timerLabel(lines, visible, i)}${day ? " · " + day : ""}` }));
@@ -4129,12 +4471,16 @@ export default class TimeReport {
     // Open tasks and events with no running entry, top lines only (rule 5, OBS-193): a sub-task's clock is
     // its task's, so a nested line isn't offered. Done [x], cancelled [-] and forwarded [>] items are left
     // out; [<] is an event, so it stays.
+    /**
+     * @param {string[]} lines
+     * @returns {{ line: number, label: string }[]}
+     */
     taskChoices(lines) {
         const { visible, hidden, blocks } = this.scan(lines);
         const all = this.openLines(lines);
-        const lineAt = (n) => lines[n];
+        const lineAt = (/** @type {number} */ n) => lines[n];
         // Under an entry, a checkbox is a note about that entry, and time logged under it wouldn't count
-        const underEntry = (i) => {
+        const underEntry = (/** @type {number} */ i) => {
             let w = this.indentWidth(lines[i]);
             for (let k = i - 1; k >= 0 && w > 0; k--) {
                 if (!visible[k].trim() || this.indentWidth(lines[k]) >= w) continue;
@@ -4143,6 +4489,7 @@ export default class TimeReport {
             }
             return false;
         };
+        /** @type {{ line: number, label: string }[]} */
         const items = [];
         for (let i = 0; i < lines.length; i++) {
             if (hidden[i] || blocks.some((b) => i >= b.start && i <= b.end)) continue;
@@ -4157,16 +4504,24 @@ export default class TimeReport {
 
     // toggleEntry on a note's text, for a note that isn't open in an editor: its result plus
     // `content`, the note with the edit made (in the note's line endings), when there's something to write
+    /**
+     * @param {string} text
+     * @param {number} line
+     * @param {string} now
+     * @param {number} [daysAgo]
+     * @param {boolean} [canStart]
+     * @returns {Toggle & { content?: string }}
+     */
     toggleText(text, line, now, daysAgo = 0, canStart = true) {
         const lines = this.lines(text);
         const r = this.toggleEntry(lines, line, now, daysAgo, canStart);
         if (!r.action) return r;
         const starts = [0, ...[...text.matchAll(/\n/g)].map((m) => m.index + 1)];
-        const offset = (pos) => starts[pos.line] + pos.ch;
+        const offset = (/** @type {Cursor} */ pos) => starts[pos.line] + pos.ch;
         const e = r.edit;
-        const [start, end, insert] = e.from
+        const [start, end, insert] = /** @type {[number, number, string]} */ (e.from
             ? [offset(e.from), offset(e.to), e.text.replace(/\n/g, text.includes("\r\n") ? "\r\n" : "\n")]
-            : [offset({ line: e.line, ch: 0 }), offset({ line: e.line, ch: lines[e.line].length }), e.text];
+            : [offset({ line: e.line, ch: 0 }), offset({ line: e.line, ch: lines[e.line].length }), e.text]);
         let content = text.slice(0, start) + insert + text.slice(end);
         // The status change keeps the task line's length, so it doesn't move the edit above
         if (r.status) {
@@ -4179,6 +4534,13 @@ export default class TimeReport {
     // Saved folds after `inserted` goes in as a new line after line `after`: folds below move down,
     // and a fold that runs to that line from a line less indented than the new one (its task, and
     // what that's nested under) takes it in, so a folded task stays folded with its new entry
+    /**
+     * @param {Fold[]} folds
+     * @param {string[]} lines
+     * @param {number} after
+     * @param {string} inserted
+     * @returns {Fold[]}
+     */
     foldsAfterInsert(folds, lines, after, inserted) {
         const w = this.indentWidth(inserted);
         return folds.map((f) => {
@@ -4233,13 +4595,13 @@ export default class TimeReport {
             // Nothing is written while a daily note is still in the marks before OBS-208: currentModel
             // says so (oldMarksNotice) and throws
             const { model } = await this.currentModel({ index, schedule: this.schedule, billing });
-            const stamp = moment().format("YYYY-MM-DD h:mma");
+            const stamp = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD h:mma");
             // Project and area links by name (tables escape the | themselves)
-            const link = (p) => {
+            const link = (/** @type {string} */ p) => {
                 const f = app.vault.getFileByPath(p);
                 return this.reportLink(f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p), p);
             };
-            const done = [], trouble = [];
+            const /** @type {string[]} */ done = [], /** @type {string[]} */ trouble = [];
             const linkTarget = this.periodLinkTarget(this.periodPlaces());
 
             const { updated, broken, created: sheetsMade } = await this.writeProjectNotes(model, index, stamp, link, linkTarget);
@@ -4259,7 +4621,7 @@ export default class TimeReport {
             if (periods.updated) done.push(`${periods.updated} periodic note${periods.updated === 1 ? "" : "s"}`);
             broken.push(...periods.broken);
             trouble.push(...periods.trouble);
-            const markers = broken.filter((b) => typeof b === "string"), heldBack = broken.filter((b) => b?.heldBack).map((b) => b.heldBack);
+            const markers = broken.filter((b) => typeof b === "string"), heldBack = broken.filter((b) => b?.heldBack).map((b) => /** @type {{ heldBack: string }} */ (b).heldBack);
             if (markers.length) trouble.push(`couldn't update ${markers.join(", ")} (check its time:start/end markers, or an unclosed code block or comment)`);
             // A plugin refused the change to the open note (OBS-238); the next run tries again
             if (heldBack.length) trouble.push(`couldn't update ${heldBack.join(", ")}: the open note didn't take the change; click outside its tables and run TimeReport again`);
@@ -4293,6 +4655,11 @@ export default class TimeReport {
     // Whether a task's line in `note` ({ path, kind }) is compared with its other lines for its project: one
     // in a periodic note, or a project's or area's own note. A line in a task note, log or plain note is
     // compared with nothing (rule 15), so a subtask's day line can go its own way.
+    /**
+     * @param {{ path: string, kind?: string }} note
+     * @param {ReportIndex} index
+     * @returns {boolean}
+     */
     comparedNote(note, index) {
         return note.kind !== "other" || (this.counts(note.path, index) && this.basename(this.dirname(note.path)) === this.basename(note.path));
     }
@@ -4303,13 +4670,18 @@ export default class TimeReport {
     // every note whose links in the cache include a ⭕, 🗃️, 🚩, ⋯ or ↗, and every note just written or open in
     // an editor (TaskIds.nowFiles). Each is read once, as it is now
     // (textOf: from its editor when it's open in one), as the daily notes are.
+    /**
+     * @param {DayNote[]} daily
+     * @returns {Promise<ReadNote[]>}
+     */
     async taskNotes(daily) {
+        /** @type {Map<string, ReadNote>} */
         const byPath = new Map(daily.map((n) => [n.path, { path: n.path, kind: "day", date: n.date, text: n.text }]));
         const tasks = plainday?.TaskIds;
         if (!tasks?.allIds) return [...byPath.values()];
         const T = tasks.constructor, read = this.reader();
         // The notes in the system, and Archive, whose Problems are listed too (Brian, 2026-10-28)
-        const add = async (file) => {
+        const add = async (/** @type {TFile} */ file) => {
             if (!byPath.has(file.path) && (!tasks.ignored(file) || this.isArchived(file.path))) byPath.set(file.path, { path: file.path, kind: tasks.kindOf(file), text: await this.textOf(file) });
         };
         for (const lines of tasks.allIds().values()) for (const { file } of lines) await add(file);
@@ -4349,8 +4721,16 @@ export default class TimeReport {
     // the task's project, or, when the task counts toward none, a Problem on its note that the weekly,
     // monthly and yearly notes list under a day (problemDate).
     // Pure, so the demo's reports (renderReports.mjs) run it too, passing TaskIds as `T`.
+    /**
+     * @param {Model} model
+     * @param {ReportIndex} index
+     * @param {ReadNote[]} notes
+     * @param {typeof TaskIds} [T]
+     * @returns {void}
+     */
     addTaskProblems(model, index, notes, T = plainday?.TaskIds?.constructor) {
         if (!T?.check) return;
+        /** @type {Map<string, ReadNote>} */
         const byPath = new Map(notes.map((n) => [n.path, n]));
         const violations = T.check(notes, {
             projectOf: (note, i, lines) => this.lineProject(note, i, lines, index, false),
@@ -4363,6 +4743,7 @@ export default class TimeReport {
         // report says once (problemLines). The report's own checks (`own`, OBS-233) keep to the periods of
         // the line: one in a week's, month's or year's note is that period's, linking the note, and one in
         // any other note is its project's alone, not every period's with time on the project
+        /** @type {(l: { path: string, line: number, text: string }, fields: { kind: string, rule?: string, message: string, group?: string, own?: boolean, lead?: string, title?: string }, projects: string[]) => void} */
         const place = (l, fields, projects) => {
             const note = byPath.get(l.path);
             const { kind, rule, message, group, own = false, lead, title } = fields;
@@ -4421,6 +4802,14 @@ export default class TimeReport {
     // The day a task Problem on line `l` of `note`, a note that isn't a daily note, is listed under: a
     // week's, month's or year's first day; for any other note, the day its forward date points at (a week's, month's
     // or year's first), else today
+    /**
+     * @param {ReadNote} note
+     * @param {{ path: string, text: string }} l
+     * @param {Map<string, ReadNote>} byPath
+     * @param {ReportIndex} index
+     * @param {typeof TaskIds} T
+     * @returns {string}
+     */
     problemDate(note, l, byPath, index, T) {
         if (note.kind !== "other") return this.noteDate(note, note.kind);
         const fwd = T.forwardOf(l.text, this.reader());
@@ -4446,15 +4835,21 @@ export default class TimeReport {
     // Today, YYYY-MM-DD, by moment where it's loaded
     /** @returns {string} */
     today() {
-        return moment ? moment().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10);
+        return moment ? /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10);
     }
 
     // What a Problem says about line `l` of a task check's result `v`
+    /**
+     * @param {TaskProblem} v
+     * @param {CheckedLine} l
+     * @param {ReportIndex} index
+     * @returns {string}
+     */
     taskProblemText(v, l, index) {
         // A daily note's line shows its day, read by the note's name (OBS-298)
         const read = this.reader();
-        const name = (p) => { const day = read(this.basename(p)); return day?.unit === "day" ? this.shortDate(day.date) : this.basename(p); };
-        const ref = (o) => `[[${this.basename(o.path)}|${name(o.path)}]] line ${o.line + 1}`;
+        const name = (/** @type {string} */ p) => { const day = read(this.basename(p)); return day?.unit === "day" ? this.shortDate(day.date) : this.basename(p); };
+        const ref = (/** @type {{ path: string, line: number }} */ o) => `[[${this.basename(o.path)}|${name(o.path)}]] line ${o.line + 1}`;
         const others = v.lines.filter((o) => o !== l).map(ref).join(", ");
         switch (v.rule) {
             // One fix (Brian, OBS-233's test round): AddProjectLink on a line, which gives the whole task the project
@@ -4462,7 +4857,7 @@ export default class TimeReport {
             // the task, which went on without it, takes its ID off it; when every project the lines name is
             // finished, none is in AddProjectLink's menu
             case "project": {
-                const archived = (o) => this.isArchived(o.path);
+                const archived = (/** @type {CheckedLine} */ o) => this.isArchived(o.path);
                 const kept = [...new Set(v.lines.filter(archived).map((o) => `[[${this.basename(o.path)}]]`))].join(" and ");
                 const projects = v.detail.projects ?? [];
                 const live = new Set(v.lines.flatMap((o, i) => (archived(o) ? [] : [projects[i]])));
@@ -4499,6 +4894,10 @@ export default class TimeReport {
     // out, and the invoice notes attached (OBS-5). The Invoice command builds on the same one, so an
     // invoice and the report never disagree about an entry. A caller that captured Schedule and Billing
     // when it started (refresh, OBS-41) passes them in.
+    /**
+     * @param {{ index?: ReportIndex, schedule?: Schedule, billing?: Billing }} [options]
+     * @returns {Promise<{ model: Model, index: ReportIndex }>}
+     */
     async currentModel({ index = this.appIndex(), schedule = plainday.Schedule, billing = plainday.Billing } = {}) {
         // A command's model (Invoice) is a run of its own: it reads names with one reader too, and names days
         // with one namer
@@ -4508,7 +4907,7 @@ export default class TimeReport {
             this.runName = this.dayLinks();
         }
         try {
-            const clock = moment();
+            const clock = /** @type {MomentFn} */ (moment)();
             const daily = await this.readDailyNotes(schedule);
             if (this.oldMarksNotice(daily)) throw Object.assign(new Error("TimeReport: daily notes still in the marks before OBS-208"), { oldMarks: true });
             const checked = await this.taskNotes(daily);
@@ -4539,6 +4938,7 @@ export default class TimeReport {
         // has its Billed entries counts too, flagged, so an invoice whose tag or frontmatter got lost
         // can't let its entries be billed again
         const folder = this.invoiceFolder(billing);
+        /** @type {InvoiceNote[]} */
         const out = [];
         for (const f of app.vault.getMarkdownFiles()) {
             const cache = app.metadataCache.getFileCache(f);
@@ -4549,14 +4949,18 @@ export default class TimeReport {
             const text = await this.textOf(f);
             if (!tagged && !billing.hasBilled(text)) continue;
             const info = getFrontMatterInfo(text);
-            let props = cache?.frontmatter ?? {}, error = null;
-            try { if (info.exists) props = parseYaml(info.frontmatter) ?? {}; } catch (e) { error = e.message; }
+            let /** @type {Record<string, unknown>} */ props = cache?.frontmatter ?? {}, error = null;
+            try { if (info.exists) props = /** @type {(yaml: string) => Record<string, unknown> | null} */ (parseYaml)(info.frontmatter) ?? {}; } catch (e) { error = /** @type {Error} */ (e).message; }
             out.push({ path: f.path, props, text, tagged: tagged && !error, error });
         }
         return out;
     }
 
     // The invoice folder in Settings → Plainday (OBS-112, OBS-281), or "" before one is chosen
+    /**
+     * @param {Billing} billing
+     * @returns {string}
+     */
     invoiceFolder(billing) {
         return billing.folderOf(plainday?.Settings?.get().invoices.folder ?? null, this.systemFolders().archive).folder;
     }
@@ -4567,7 +4971,7 @@ export default class TimeReport {
      * @returns {string[]}
      */
     tagsOf(cache) {
-        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
+        const raw = /** @type {unknown} */ (cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? []);
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .filter(Boolean)
             .map((t) => String(t).replace(/^#/, ""))
@@ -4582,6 +4986,10 @@ export default class TimeReport {
     // folders "gggg"); otherwise a folder set in Settings → Plainday → Folders (OBS-283), else weeks,
     // months and years beside the daily notes folder, which blank means (`asBefore`, which the panel
     // shows). JumpToDate calls it outside a report run too, before `this.schedule` is set.
+    /**
+     * @param {{ asBefore?: boolean }} [options]
+     * @returns {{ week: PeriodPlace, month: PeriodPlace, year: PeriodPlace }}
+     */
     periodPlaces({ asBefore = false } = {}) {
         const settings = asBefore ? null : plainday?.Settings;
         const navigator = settings?.periodicSource?.() === "notebook-navigator";
@@ -4590,7 +4998,7 @@ export default class TimeReport {
         // setting means, and what the panel shows as its placeholder
         const daily = (this.schedule ?? plainday.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
-        const beside = (fallback) => `${planner ? `${planner}/` : ""}${fallback}`;
+        const beside = (/** @type {string} */ fallback) => `${planner ? `${planner}/` : ""}${fallback}`;
         /** @param {"week" | "month" | "year"} unit @param {string} fallback @returns {{ folder: string, dateFolders: string }} */
         const placeOf = (unit, fallback) => {
             const nn = navigator ? settings.navigatorNote(unit) : null;
@@ -4601,6 +5009,10 @@ export default class TimeReport {
     }
 
     // The fixed folder of each: { week, month, year }, as periodPlaces says
+    /**
+     * @param {{ asBefore?: boolean }} [options]
+     * @returns {{ week: string, month: string, year: string }}
+     */
     periodFolders({ asBefore = false } = {}) {
         const p = this.periodPlaces({ asBefore });
         return { week: p.week.folder, month: p.month.folder, year: p.year.folder };
@@ -4608,18 +5020,29 @@ export default class TimeReport {
 
     // Where the note named `key` of `unit` goes, by `places` (periodPlaces): its folders by date read
     // from the period's first day, as PeriodicNotes.where files it; null when `key` isn't such a name
+    /**
+     * @param {Record<string, PeriodPlace>} places
+     * @param {string} unit
+     * @param {string} key
+     * @returns {string | null}
+     */
     periodPath(places, unit, key) {
         const start = this.periodStartOf(unit, key);
         if (!start) return null;
         const place = places[unit];
-        const folder = place.dateFolders ? [place.folder, moment(start, "YYYY-MM-DD", true).locale(this.calendar().rules?.locale ?? moment.locale()).format(place.dateFolders)].filter(Boolean).join("/") : place.folder;
+        const folder = place.dateFolders ? [place.folder, /** @type {MomentFn} */ (moment)(start, "YYYY-MM-DD", true).locale(this.calendar().rules?.locale ?? moment.locale()).format(place.dateFolders)].filter(Boolean).join("/") : place.folder;
         return `${folder ? `${folder}/` : ""}${key}.md`;
     }
 
     // Link text for a weekly or monthly note: just its name ("2026w37", "2026-05"), unless another note
     // in the vault has that name, then its full path so the link can't land on the wrong note. A link to
     // a note that doesn't exist yet creates it when clicked (its template moves it into its folder).
+    /**
+     * @param {Record<string, PeriodPlace>} places
+     * @returns {LinkTarget}
+     */
     periodLinkTarget(places) {
+        /** @type {Map<string, number>} */
         const count = new Map();
         for (const f of app.vault.getMarkdownFiles()) count.set(f.basename, (count.get(f.basename) ?? 0) + 1);
         return (unit, key) => {
@@ -4633,17 +5056,25 @@ export default class TimeReport {
     // periodic note that already has a block. With `create`, a missing note is created from its
     // template first, unless this device created it before (you deleted it: it stays deleted).
     // Returns { updated (existing notes rewritten), created: [names], broken: [names], trouble: [messages] }.
+    /**
+     * @param {Model} model
+     * @param {string} stamp
+     * @param {NoteLink} link
+     * @param {{ create: boolean }} options
+     * @returns {Promise<{ updated: number, created: string[], broken: BrokenNote[], trouble: string[] }>}
+     */
     async writePeriodNotes(model, stamp, link, { create }) {
         const places = this.periodPlaces();
         const linkTarget = this.periodLinkTarget(places);
+        /** @type {(unit: "week" | "month" | "year", key: string) => PeriodScope} */
         const scopeOf = (unit, key) => ({ kind: "period", unit, key, linkTarget });
         const wanted = this.periodsWithEntries(model);
-        const remembered = new Set(app.loadLocalStorage(TimeReport.CREATED_KEY) ?? []);
+        const remembered = new Set(/** @type {string[] | null} */ (app.loadLocalStorage(TimeReport.CREATED_KEY)) ?? []);
         let updated = 0;
-        const created = [], broken = [], trouble = [];
+        const /** @type {string[]} */ created = [], /** @type {BrokenNote[]} */ broken = [], /** @type {string[]} */ trouble = [];
         let canCreate = create;
 
-        for (const unit of ["week", "month", "year"]) {
+        for (const unit of /** @type {const} */ (["week", "month", "year"])) {
             const keys = new Set(wanted[unit]), place = places[unit];
             // A note counts where its own name puts it (OBS-310); a note outside the folder isn't read
             for (const f of app.vault.getMarkdownFiles()) {
@@ -4686,6 +5117,13 @@ export default class TimeReport {
 
     // Makes the note as every periodic note is made (PeriodicNotes.ensure: its alias, then its template),
     // then puts the report below whatever it holds, under its heading. Returns { file } or { error }.
+    /**
+     * @param {string} path
+     * @param {"week" | "month" | "year"} unit
+     * @param {string} key
+     * @param {string} block
+     * @returns {Promise<{ file: TFile, error?: undefined } | { error: string, file?: undefined }>}
+     */
     async createPeriodNote(path, unit, key, block) {
         const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "the top of the vault";
         const notes = plainday?.PeriodicNotes;
@@ -4699,11 +5137,11 @@ export default class TimeReport {
 
     /** @returns {ReportIndex} */
     appIndex() {
-        const cacheOf = (path) => {
+        const cacheOf = (/** @type {string} */ path) => {
             const f = app.vault.getFileByPath(path);
             return f ? app.metadataCache.getFileCache(f) : null;
         };
-        const tagged = (path, tag) => {
+        const tagged = (/** @type {string} */ path, /** @type {string} */ tag) => {
             const c = cacheOf(path);
             return !!c && this.tagsOf(c).includes(tag);
         };
@@ -4712,8 +5150,9 @@ export default class TimeReport {
         // note that couldn't be told would otherwise fail the run, and read as "other" its time is lost
         const schedule = this.schedule ?? plainday.Schedule, tasks = plainday.TaskIds;
         const rules = plainday.DatePrompt?.weekRules?.(), places = schedule ? this.periodPlaces() : undefined;
+        /** @type {Map<string, string>} */
         const kinds = new Map();
-        const kind = (path) => {
+        const kind = (/** @type {string} */ path) => {
             if (!kinds.has(path)) {
                 const f = app.vault.getFileByPath(path);
                 kinds.set(path, !f ? "other" : schedule.isDailyNote(f) ? "day" : schedule.periodOf(f, rules, places) ?? "other");
@@ -4741,8 +5180,12 @@ export default class TimeReport {
     }
 
     // An open note's editor can be ahead of the file on disk (Obsidian saves a moment after typing)
+    /**
+     * @param {TFile} file
+     * @returns {string | Promise<string>}
+     */
     textOf(file) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {SomeView} */ (l.view)).find((v) => v?.file === file && v.editor);
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
@@ -4762,7 +5205,7 @@ export default class TimeReport {
     oldMarkLines(daily) {
         const T = plainday?.TaskIds?.constructor;
         const read = this.reader();
-        const old = (l) => (T?.oldMarks ? T.oldMarks(l, read).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
+        const old = (/** @type {string} */ l) => (T?.oldMarks ? T.oldMarks(l, read).length > 0 : /\|\s*(?:🗒|🔗)\uFE0F?\s*\]\]\s*(?:\^[\w-]+\s*)?$/u.test(l));
         let n = 0;
         for (const d of daily) {
             if (!/🗒|🔗/u.test(d.text)) continue;
@@ -4790,6 +5233,10 @@ export default class TimeReport {
     // Until the one-time conversion has run, a line with a 🗒️ reads wrong: the dead link hides the ⭕
     // before it, so its time would count toward nothing. A run that would write a report or an invoice
     // stops instead, with a notice that stays: true when it did.
+    /**
+     * @param {{ text: string }[]} daily
+     * @returns {boolean}
+     */
     oldMarksNotice(daily) {
         const n = this.oldMarkLines(daily);
         if (!n) return false;
@@ -4798,14 +5245,19 @@ export default class TimeReport {
         return true;
     }
 
+    /**
+     * @param {Schedule} [schedule]
+     * @returns {Promise<DayNote[]>}
+     */
     async readDailyNotes(schedule = this.schedule) {
         const { format } = schedule.dailyOpts();
+        /** @type {DayNote[]} */
         const notes = [];
         for (const f of app.vault.getMarkdownFiles()) {
             if (!schedule.isDailyNote(f)) continue;
             const text = await this.textOf(f);
             if (!/\d[:.]\d\d|\d\s*[ap]\.?m/i.test(text)) continue;
-            notes.push({ date: moment(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });
+            notes.push({ date: /** @type {MomentFn} */ (moment)(f.basename, format, true).format("YYYY-MM-DD"), path: f.path, text });
         }
         return notes;
     }
@@ -4814,13 +5266,22 @@ export default class TimeReport {
     // Returns { updated: how many were rewritten, broken: names of notes with broken markers }.
     // A link for a table cell: the `|` before its alias escaped, so it doesn't end the cell (one
     // escaped already is written again as it was)
+    /**
+     * @param {string} text
+     * @returns {string}
+     */
     cell(text) {
         return String(text).replace(/\[\[[^\]]*\]\]/g, (l) => l.replace(/\\?\|/g, "\\|"));
     }
 
     // The project notes a report goes to: every project or area with time, counted or not, its parents, and
     // any project a project-level problem is about (a conflict can name a project with no time of its own)
+    /**
+     * @param {Model} model
+     * @returns {Set<string>}
+     */
     projectTargets(model) {
+        /** @type {Set<string>} */
         const targets = new Set();
         for (const p of [...[...model.entries, ...(model.disputed ?? [])].map((e) => e.project), ...model.projectProblems.map((x) => x.project)]) {
             const seen = new Set();
@@ -4829,15 +5290,25 @@ export default class TimeReport {
         return targets;
     }
 
+    /**
+     * @param {Model} model
+     * @param {ReportIndex} index
+     * @param {string} stamp
+     * @param {NoteLink} link
+     * @param {LinkTarget} linkTarget
+     * @returns {Promise<{ updated: number, broken: BrokenNote[], created: string[] }>}
+     */
     async writeProjectNotes(model, index, stamp, link, linkTarget) {
         const targets = this.projectTargets(model);
         for (const f of app.vault.getMarkdownFiles()) {
             if (!targets.has(f.path) && this.counts(f.path, index) && this.hasBlock(await this.textOf(f))) targets.add(f.path);
         }
         let updated = 0;
+        /** @type {BrokenNote[]} */
         const broken = [];
         const sheets = this.timesheetNotes(index);
-        const remembered = new Set(app.loadLocalStorage(TimeReport.CREATED_KEY) ?? []);
+        const remembered = new Set(/** @type {string[] | null} */ (app.loadLocalStorage(TimeReport.CREATED_KEY)) ?? []);
+        /** @type {string[]} */
         const created = [];
         for (const path of targets) {
             const file = app.vault.getFileByPath(path);
@@ -4859,7 +5330,12 @@ export default class TimeReport {
 
     // Every timesheet note (tagged `timesheet`), by the project its `parent` links: Map(project → path).
     // Found this way, a timesheet stays its project's when either is renamed.
+    /**
+     * @param {ReportIndex} index
+     * @returns {Map<string, string>}
+     */
     timesheetNotes(index) {
+        /** @type {Map<string, string>} */
         const out = new Map();
         for (const f of app.vault.getMarkdownFiles()) {
             const fm = app.metadataCache.getFileCache(f)?.frontmatter;
@@ -4876,6 +5352,17 @@ export default class TimeReport {
     // so it stays deleted). Returns the link text for the project note to link it, or null.
     // A note of yours that happens to have the timesheet's name, and isn't tagged `timesheet`, is left
     // alone. `created` collects the names of notes made, for the notice.
+    /**
+     * @param {Model} model
+     * @param {string} project
+     * @param {Map<string, string>} sheets
+     * @param {Set<string>} remembered
+     * @param {string} stamp
+     * @param {NoteLink} link
+     * @param {BrokenNote[]} broken
+     * @param {string[]} created
+     * @returns {Promise<string | null>}
+     */
     async writeTimesheet(model, project, sheets, remembered, stamp, link, broken, created) {
         const tagged = sheets.get(project);
         const path = tagged ?? this.sheetPath(project);
@@ -4889,8 +5376,8 @@ export default class TimeReport {
             if (!file) {
                 if (!Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
                 const projectFile = app.vault.getFileByPath(project);
-                const alias = [].concat(app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases ?? [])[0] || projectFile.basename;
-                file = await app.vault.create(path, this.sheetNote(moment().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
+                const alias = /** @type {string[]} */ ([]).concat(/** @type {string | string[]} */ (app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases) ?? [])[0] || projectFile.basename;
+                file = await app.vault.create(path, this.sheetNote(/** @type {MomentFn} */ (moment)().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
                 remembered.add(path);
                 app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                 created.push(file.basename);
@@ -4911,6 +5398,11 @@ export default class TimeReport {
     // count the note as written. A plugin can refuse a change: Selectable Tables drops any change to a table
     // while one of its cells is selected (OBS-238). The selection is left alone; clicking outside the table
     // and running the command again gets the change in.
+    /**
+     * @param {Editor} editor
+     * @param {TextEdit[]} edits
+     * @returns {boolean}
+     */
     applyInEditor(editor, edits) {
         for (const edit of edits) {
             const was = editor.getValue();
@@ -4924,23 +5416,30 @@ export default class TimeReport {
     // Writes through an open editor when there is one (the editor keeps its own folds), else
     // through the vault in one read-modify-write, moving the saved folds to match. `heading` and
     // `tables` as in blockEdits. { error, heldBack } when the open note didn't take the change.
+    /**
+     * @param {TFile} file
+     * @param {string} block
+     * @param {{ onlyIfChanged: boolean, heading?: boolean, tables?: TableFreeze }} options
+     * @returns {Promise<WriteResult>}
+     */
     async writeBlock(file, block, { onlyIfChanged, heading = true, tables = null }) {
-        const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
+        const apply = (/** @type {string} */ content, /** @type {TextEdit} */ edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
         // What to do to `content`: [edits in order], or { error }. Nothing when it's already right.
+        /** @type {(content: string) => { edits?: TextEdit[], error?: string }} */
         const plan = (content) => {
             const edits = this.blockEdits(content, block, { onlyIfChanged, heading, tables });
             return edits.error ? edits : { edits };
         };
 
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {SomeView} */ (l.view)).find((v) => v?.file === file && v.editor);
         if (view) {
             const p = plan(view.editor.getValue());
             if (p.error) return p;
             if (!this.applyInEditor(view.editor, p.edits)) return { error: "the open note didn't take the change", heldBack: true };
             return { wrote: p.edits.length > 0, inserted: p.edits.some((e) => e.inserted) };
         }
-        let result = { wrote: false };
-        let steps = null;      // [{ before, edit }] for moving the saved folds
+        let /** @type {WriteResult} */ result = { wrote: false };
+        let /** @type {{ before: string, edit: TextEdit }[] | null} */ steps = null;      // [{ before, edit }] for moving the saved folds
         await app.vault.process(file, (content) => {
             const p = plan(content);
             if (p.error) { result = p; return content; }
