@@ -25,6 +25,7 @@ import NewArea from "./newArea.js";
 import NewEventLog from "./newEventLog.js";
 import NewProject from "./newProject.js";
 import Plan from "./plan.js";
+import RenamePeriodicNotes from "./renamePeriodicNotes.js";
 import Schedule from "./schedule.js";
 import DueDate from "./setDueDate.js";
 import TimeReport from "./timeReport.js";
@@ -33,7 +34,7 @@ import ViewErrorLogs from "./viewErrorLogs.js";
 
 export const CLASSES = {
     AddProjectLink, AddTaskNote, CalendarSync, ConvertToProject, DueDate, Invoice, JumpToDate, MoveToProject, NewArea, NewEventLog,
-    NewProject, Plan, Schedule, TimeReport, ToggleTimeEntry, ViewErrorLogs,
+    NewProject, Plan, RenamePeriodicNotes, Schedule, TimeReport, ToggleTimeEntry, ViewErrorLogs,
 };
 
 export const COMMANDS = [
@@ -49,6 +50,7 @@ export const COMMANDS = [
     { id: "toggle-time-entry", name: "Toggle time entry", script: "ToggleTimeEntry", icon: "timer" },
     { id: "jump-to-date", name: "Jump to date", script: "JumpToDate", icon: "calendar-search" },
     { id: "plan", name: "Plan", script: "Plan", icon: "columns-3" },
+    { id: "rename-periodic-notes", name: "Rename periodic notes", script: "RenamePeriodicNotes", icon: "replace" },
     { id: "time-report", name: "Time report", script: "TimeReport", icon: "table-2" },
     { id: "invoice", name: "Invoice", script: "Invoice", icon: "receipt" },
     { id: "view-error-logs", name: "View error logs", script: "ViewErrorLogs", icon: "triangle-alert" },
