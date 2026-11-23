@@ -21,7 +21,7 @@
 }
 
 /* Settings → Plainday: a line under a setting with something to know, such as a folder Invoice will
-   create, in the alert color */
+   create, in the alert color; and New project's box: why a name can't be used */
 .plainday-caution {
     color: var(--text-warning);
 }

@@ -16,7 +16,7 @@ const settings = new Settings();
 const plain = (x) => JSON.parse(JSON.stringify(x));
 // The folders a new vault starts with (OBS-283): the system's three as they always were, the rest blank
 const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", periodic: "", week: "", month: "", year: "", errorLog: "" };
-const TEMPLATES = { week: "", month: "", year: "", task: "", log: "" };
+const TEMPLATES = { week: "", month: "", year: "", task: "", log: "", project: "", area: "" };
 const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
@@ -604,8 +604,8 @@ test("templateWarning: the properties a template sets that Plainday writes itsel
     assert.equal(settings.templateWarning(["a", "b", "c"], ["a", "b", "c"]), "Your template also sets `a`, `b` and `c`; Plainday writes its own.");
     assert.equal(settings.templateWarning(["tags", "aliases"], ["tags", "aliases"]), "");
     assert.equal(settings.templateWarning(["date"], []), "");
-    assert.deepEqual(plain(Settings.WRITES), { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"] },
-        "the alias PeriodicNotes writes (OBS-120), a list, so no row warns; a task note's tag, parent and due (OBS-121); a log's parent, day, times and who (OBS-122)");
+    assert.deepEqual(plain(Settings.WRITES), { week: ["aliases"], month: ["aliases"], year: [], task: ["tags", "parent", "due"], log: ["parent", "date", "time", "endTime", "who"], project: [], area: [] },
+        "the alias PeriodicNotes writes (OBS-120), a list, so no row warns; a task note's tag, parent and due (OBS-121); a log's parent, day, times and who (OBS-122); a project's or area's template may set any of the rest (OBS-123)");
     assert.equal(settings.templateWarning(["aliases", "tags"], Settings.WRITES.week), "");
     // A Task template that sets `parent` or `due` is warned about; its `id`, `status` and tags aren't (OBS-121)
     assert.equal(settings.templateWarning(["id", "tags", "parent", "due", "status"], Settings.WRITES.task), "Your template also sets `parent` and `due`; Plainday writes its own.");
@@ -783,8 +783,8 @@ test("navigatorNote: the folder, name and template Notebook Navigator's pattern 
 
 test("templates: blank means the template's own name in the vault's template folder, never a folder of this repository's (OBS-283)", () => {
     const d = settings.defaults().templates;
-    assert.deepEqual(plain([d.task, d.log]), ["", ""], "blank as it comes");
-    assert.deepEqual(plain(Settings.TEMPLATE_NAMES), { task: "Task", log: "Log", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" });
+    assert.deepEqual(plain([d.task, d.log, d.project, d.area]), ["", "", "", ""], "blank as it comes");
+    assert.deepEqual(plain(Settings.TEMPLATE_NAMES), { task: "Task", log: "Log", project: "Project", area: "Area", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" });
     // Templater keeps the folder; without it a template sits at the top of the vault
     const withTemplater = withPlugin({ templater: "Config/Templates" });
     assert.equal(withTemplater.s.defaultTemplatePath("task"), "Config/Templates/Task.md");
@@ -793,6 +793,9 @@ test("templates: blank means the template's own name in the vault's template fol
     assert.equal(bare.s.defaultTemplatePath("task"), "Task.md");
     assert.equal(bare.s.defaultTemplatePath("log"), "Log.md");
     assert.equal(bare.s.defaultTemplatePath("year"), "Yearly Note.md");
+    // The Project and Area templates the same way (OBS-123)
+    assert.equal(withTemplater.s.defaultTemplatePath("project"), "Config/Templates/Project.md");
+    assert.equal(bare.s.defaultTemplatePath("area"), "Area.md");
     const slashes = withPlugin({ templater: "/Templates/" });
     assert.equal(slashes.s.defaultTemplatePath("log"), "Templates/Log.md");
     // Nothing writes this repository's own folder in as a default
@@ -800,6 +803,8 @@ test("templates: blank means the template's own name in the vault's template fol
     const n = settings.normalize({ templates: { task: "Templates/My task", log: "a|b" } }, billing);
     assert.equal(n.templates.task, "Templates/My task.md");
     assert.equal(n.templates.log, "", "a path that doesn't read is blank, so the default holds");
+    const pa = settings.normalize({ templates: { project: "Templates/My project", area: 5 } }, billing);
+    assert.deepEqual([pa.templates.project, pa.templates.area], ["Templates/My project.md", ""], "the Project and Area rows read the same way (OBS-123)");
 });
 
 test("recurring events' projects (OBS-275): each title once with its ⭕ and 🗃️ links; null until read; anything else left out", () => {

@@ -39,6 +39,8 @@
     "month": "",
     "year": "",
     "task": "",
-    "log": ""
+    "log": "",
+    "project": "",
+    "area": ""
   }
 }

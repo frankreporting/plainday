@@ -253,7 +253,7 @@ test("each command in the list is added with its id, name and icon, and runs its
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
         assert.deepEqual(plugin.commands.map(shown), COMMANDS.map(shown));
-        assert.equal(plugin.commands.length, 14);
+        assert.equal(plugin.commands.length, 16);
         for (const c of plugin.commands) {
             assert.match(c.id, /^[a-z]+(-[a-z]+)*$/, "ids are lower case with hyphens, without the plugin's id");
             // An icon name from Obsidian's set (OBS-263): without one, the phone's toolbar draws a question mark
@@ -410,7 +410,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
             ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
-            ["group", "Note templates", ["Task note", "Log"]],
+            ["group", "Note templates", ["Tasks", "Logs", "Projects", "Areas"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox", "Draw task markers"]],
@@ -426,7 +426,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Task note", "Log", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Tasks", "Logs", "Projects", "Areas", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
             "a row whose name says what it is carries no description (Brian, 11/16 and 11/17)");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
@@ -866,7 +866,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
     }
 });
 
-test("Settings → Plainday → Note templates: the Task note and Log templates, blank meaning the template's name in the vault's template folder (OBS-283)", async () => {
+test("Settings → Plainday → Note templates: the Task note, Log, Project note and Area note templates, blank meaning the template's name in the vault's template folder (OBS-283)", async () => {
     const { plugin } = load(BUNDLE);
     const task = { path: "Templates/Task.md" }, mine = { path: "Templates/My task.md" };
     const files = new Map([[task.path, task], [mine.path, mine]]);
@@ -877,17 +877,21 @@ test("Settings → Plainday → Note templates: the Task note and Log templates,
     await plugin.onload();
     try {
         const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
-        assert.deepEqual(items.map((i) => i.name), ["Task note", "Log"]);
+        assert.deepEqual(items.map((i) => i.name), ["Tasks", "Logs", "Projects", "Areas"]);
         const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
-        const t = draw("Task note");
+        const t = draw("Tasks");
         assert.equal(t.control.inputEl.value, "", "blank as it comes");
         assert.equal(t.control.inputEl.placeholder, "Templates/Task.md", "Templater's folder, not this repository's");
         assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
         // The Log's default isn't in this vault, and a log is made without one too (OBS-122)
-        assert.equal(draw("Log").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
+        assert.equal(draw("Logs").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
+        // So are projects and areas (OBS-123), whose templates may set any property Plainday writes
+        assert.equal(draw("Projects").warning(), "“Templates/Project.md” isn't in the vault, so projects are made without a template.");
+        assert.equal(draw("Areas").warning(), "“Templates/Area.md” isn't in the vault, so areas are made without a template.");
+        assert.equal(draw("Projects").control.inputEl.placeholder, "Templates/Project.md");
         // A task note is made without one (OBS-121), so a missing Task template only says so
         files.delete(task.path);
-        assert.equal(draw("Task note").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
+        assert.equal(draw("Tasks").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
         files.set(task.path, task);
         t.type("Templates/My task");
         t.leave();
@@ -1416,7 +1420,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 37);
+    assert.equal(classFiles.length, 40);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

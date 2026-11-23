@@ -1,11 +1,12 @@
 import { MarkdownView, Notice } from "obsidian";
-import { app } from "../host.js";
+import { app, plainday } from "../host.js";
 
 export default class ConvertToProject {
-    // Turns the selected text into a project, replacing the old QuickAdd "Convert to project"
-    // choice: creates a note named after the selection in Inbox from the Project template, which
-    // moves it into a new project folder at the top of Projects (OBS-55: no menu; MoveToProject
-    // files it under an area afterwards), then swaps the selection for a link to the new note.
+    // Turns the selected text into a project (OBS-123): makes it as New project does, straight in its folder at the
+    // top of the Projects folder (ProjectNotes.make), without opening it, then swaps the selection for a link to
+    // the new note, so you stay where you were. Move to project files it under an area afterwards (OBS-55).
+    // A selection that can't name a project opens New project's name box with the text in it and the reason under
+    // it; a name changed there links under the words you selected: [[New name|selected words]].
     async invoke() {
         const editor = app.workspace.getActiveViewOfType(MarkdownView)?.editor;
         if (!editor) return;
@@ -16,38 +17,36 @@ export default class ConvertToProject {
             new Notice("Select the text to turn into a project");
             return;
         }
-        // Characters that can't appear in a file name or a wikilink
-        if (/[\\/:*?"<>|#^[\]\n]/.test(title)) {
-            new Notice("A project name can't contain \\ / : * ? \" < > | # ^ [ ] or line breaks");
-            return;
-        }
-        if (app.metadataCache.getFirstLinkpathDest(title, "")) {
-            new Notice(`A note named "${title}" already exists`);
-            return;
-        }
-
-        const templater = app.plugins.plugins["templater-obsidian"]?.templater;
-        const template = app.vault.getAbstractFileByPath("Config/Templates/Project.md");
-        if (!templater || !template) {
-            new Notice("Needs Templater and Config/Templates/Project.md");
-            return;
-        }
-
         const from = editor.getCursor("from");
         const to = editor.getCursor("to");
 
-        // Resolves once the template has finished; the note has been moved by then, so link to
-        // wherever it ended up.
-        // It starts in the Inbox, as Settings → Plainday → Folders has it (OBS-283), until OBS-123 makes it in place
-        const file = await templater.create_new_note_from_template(template, plainday.Settings.folders().inbox, title, false);
-        if (!file) return;
+        const notes = plainday.ProjectNotes;
+        let name = title;
+        const why = notes.problem(title, "project");
+        if (why) {
+            name = await notes.ask("project", title.replace(/\s+/g, " "), why);
+            if (name === null) return;
+        }
+        let file;
+        try {
+            file = await notes.make({ kind: "project", name });
+        } catch (e) {
+            console.error("ConvertToProject: couldn't make the project", e);
+            new Notice(`Couldn't make the project: ${e.message}`);
+            return;
+        }
 
-        const link = `[[${file.basename}]]`;
+        const link = name === title || !this.labelable(title) ? `[[${file.basename}]]` : `[[${file.basename}|${title}]]`;
         if (editor.getRange(from, to) === selection) {
             // Keep any spaces that were selected around the name
-            editor.replaceRange(selection.replace(title, link), from, to);
+            editor.replaceRange(selection.replace(title, () => link), from, to);
         } else {
-            new Notice(`Created ${link}, but the text changed, so the link wasn't inserted`);
+            new Notice(`Made [[${file.basename}]], but the text changed, so the link wasn't put in`);
         }
+    }
+
+    // Whether `text` can be a link's label: not when it holds a line break, a | or brackets that would end the link
+    labelable(text) {
+        return !/[\r\n|]|\]\]|\[\[/.test(text);
     }
 }

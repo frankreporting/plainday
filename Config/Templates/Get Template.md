@@ -17,7 +17,9 @@ if (tp.config.run_mode === 2 && !window.newNoteGuardMadeHere?.has(tp.config.targ
 // keeps this trigger off them (FinishPeriodicNotes, OBS-120). Nor are task notes: Add note makes them
 // from a task line (OBS-121), so a title starting "!task" is a note like any other. Nor are event logs:
 // Add note and New event log make them, and a note an event line links is finished as one (EventLog,
-// OBS-122), so a title starting with a date or "!today" is a note like any other too.
+// OBS-122), so a title starting with a date or "!today" is a note like any other too. Nor are projects and
+// areas: New project, New area and Convert to project make them (ProjectNotes, OBS-123), so a title starting
+// "!project" or "!area", or a "🗃️." link clicked, is a note like any other as well.
 if (/!person/.test(tp.file.title)) {
 	let person = await tp.file.include("[[Person]]");
 	tR += person;
@@ -26,18 +28,6 @@ else if (/!entity/.test(tp.file.title)) {
 	let entity = await tp.file.include("[[Entity]]");
 	tR += entity;
 } 
-else if (/!project/.test(tp.file.title)) {
-	let project = await tp.file.include("[[Project]]");
-	tR += project;
-}
-else if (/!area/.test(tp.file.title)) {
-	let area = await tp.file.include("[[Area]]");
-	tR += area;
-}
-else if (/🗃️/.test(tp.file.title)) {
-	let area = await tp.file.include("[[Area]]");
-	tR += area;
-}
 else {
 	let note = await tp.file.include("[[Empty Note]]");
 	tR += note;
