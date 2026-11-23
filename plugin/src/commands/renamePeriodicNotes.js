@@ -27,6 +27,8 @@ export default class RenamePeriodicNotes {
     static PROGRESS_MS = 1000;
     // How many names a notice lists before it says how many more
     static LISTED = 5;
+    // Formats to go through when the old and new ones name periods alike
+    static VIA = { day: ["YYYY-MM-DD", "YYYYMMDD"], week: ["GGGG-[W]WW", "gggg[w]ww"], month: ["YYYY-MM", "YYYYMM"], year: ["YYYY"] };
 
     async invoke() {
         this.ask({ unit: "day", ...this.defaults("day"), from: "" });
@@ -167,6 +169,16 @@ export default class RenamePeriodicNotes {
             if (path !== f.path) found.push({ file: f, from: f.path, rel, period, name, path });
         }
         found.sort((a, b) => a.period.localeCompare(b.period));
+        // Formats that name periods alike (DD-MM-YYYY and MM-DD-YYYY): a note would take the name another note
+        // this run renames has now. Renamed one by one, a plugin that rewrites links on each rename would move
+        // the links meant for one onto the other, so the run goes through a third format instead.
+        const leaving = new Map(found.map((n) => [n.file.basename.toLowerCase(), n]));
+        const swap = found.find((n) => (leaving.get(n.name.toLowerCase()) ?? n) !== n);
+        if (swap) {
+            const was = leaving.get(swap.name.toLowerCase());
+            const via = RenamePeriodicNotes.VIA[unit].find((f) => f !== from && f !== to);
+            return { refused: `${swap.rel} would take the name ${was.rel} has now, since ${from} and ${to} name some ${unit === "day" ? "days" : `${unit}s`} alike. Rename them to ${via} first, then from ${via} to ${to}.` };
+        }
         const notes = [], taken = [], giving = new Set();
         for (const n of found) {
             const key = n.name.toLowerCase();
@@ -216,7 +228,8 @@ export default class RenamePeriodicNotes {
     read(unit, text, format, locale) {
         const m = moment(text, format, locale, true);
         if (!m.isValid() || m.format(format) !== text) return null;
-        return (unit === "day" || unit === "week" ? m : m.clone().startOf(unit)).format("YYYY-MM-DD");
+        // In Western digits, whatever the language's own
+        return (unit === "day" || unit === "week" ? m : m.clone().startOf(unit)).locale("en").format("YYYY-MM-DD");
     }
 
     // The name `format` gives the period starting on `period`. A week's is the week in `format`'s way of

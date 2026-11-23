@@ -292,6 +292,23 @@ test("a name another note has already: that note is left beside it, its links to
     assert.equal(merged.notes()["Inbox/A.md"], "[[18-09-2026|9/18]] [[17-09-2026|9/17]]");
 });
 
+test("formats that name days alike are refused, with a third format to go through, which renames them right", async () => {
+    const notes = { [`${DAYS}/05-11-2026.md`]: "", [`${DAYS}/11-05-2026.md`]: "", [`${DAYS}/20-11-2026.md`]: "", "Inbox/A.md": "[[05-11-2026|🚩 11/5]] [[11-05-2026|🚩 5/11]]" };
+    const daily = { format: "DD-MM-YYYY", folder: DAYS };
+    let v = vault(notes, { daily, patterns: { calendarCustomFilePattern: "[days]/MM-DD-YYYY" } });
+    assert.match(v.plan({ from: "DD-MM-YYYY", to: "MM-DD-YYYY" }).refused,
+        /^11-05-2026 would take the name 05-11-2026 has now, since DD-MM-YYYY and MM-DD-YYYY name some days alike\. Rename them to YYYY-MM-DD first, then from YYYY-MM-DD to MM-DD-YYYY\.$/);
+    await v.run({ from: "DD-MM-YYYY", to: "YYYY-MM-DD" });
+    v = vault(v.notes(), { daily, patterns: { calendarCustomFilePattern: "[days]/MM-DD-YYYY" } });
+    await v.run({ from: "YYYY-MM-DD", to: "MM-DD-YYYY" });
+    const n = v.notes();
+    assert.deepEqual(Object.keys(n).filter((k) => k.startsWith(DAYS)), [`${DAYS}/05-11-2026.md`, `${DAYS}/11-05-2026.md`, `${DAYS}/11-20-2026.md`]);
+    assert.equal(n["Inbox/A.md"], "[[11-05-2026|🚩 11/5]] [[05-11-2026|🚩 5/11]]");
+    // Weeks counted two ways whose names look alike, across a year starting on a Friday
+    const w = vault({ [`${WEEKS}/2027w01.md`]: "", [`${WEEKS}/2027w02.md`]: "" }, { patterns: { calendarCustomWeekPattern: "[weeks]/GGGG[w]WW" } });
+    assert.match(w.plan({ unit: "week", folder: WEEKS, from: "gggg[w]ww", to: "GGGG[w]WW" }).refused, /Rename them to GGGG-\[W\]WW first/);
+});
+
 test("Markdown links and links in properties are counted and listed, not rewritten", async () => {
     const v = vault(Object.fromEntries([day("2026-09-17"), ["Inbox/A.md", "---\nday: \"[[2026-09-17]]\"\n---\nSee [the day](2026-09-17.md) and [[2026-09-17]]\n"]]));
     const p = v.plan({ from: "YYYY-MM-DD" });
