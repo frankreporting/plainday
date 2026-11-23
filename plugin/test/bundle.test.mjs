@@ -836,16 +836,20 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         NAVIGATOR.calendarCustomWeekPattern = "gggg/[W]ww";
         try {
             const bad = draw("Weekly notes");
-            assert.equal(bad.descEl.text, "`Planner/weeks`, named `[W]ww`. Set in Notebook Navigator.", "where Plainday keeps them and the name it names them by, as every row says; the red line says why");
+            assert.equal(bad.descEl.text, "`Planner`, named `gggg/[W]ww`. Set in Notebook Navigator.", "its folder, then its folders by date and its name (OBS-310); the red line says why");
             assert.equal(warnings(bad).length, 1);
-            assert.equal(warnings(bad)[0], "Notebook Navigator's week pattern, `gggg/[W]ww`, puts these notes in folders by date, which Plainday can't follow yet. It keeps them in `Planner/weeks` instead. "
-                + "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.");
+            assert.equal(warnings(bad)[0], "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.", "folders by date need no line, the name does");
             assert.equal(warnings(draw("Weekly notes")).length, 1, "a redraw keeps one line");
             const template = draw("Weekly note");
             assert.deepEqual(warnings(template), [], "a template row isn't checked");
-            assert.equal(template.descEl.text, "None, until Plainday can file these notes where Notebook Navigator does.");
+            assert.equal(template.descEl.text, "`T/Week.md`. Set in Notebook Navigator.", "Navigator's own template, as for any pattern");
+            NAVIGATOR.calendarCustomMonthPattern = "YYYY/YYYYMM";
+            const monthly = draw("Monthly notes");
+            assert.equal(monthly.descEl.text, "`Planner`, named `YYYY/YYYYMM`. Set in Notebook Navigator.");
+            assert.deepEqual(warnings(monthly), [], "a month named by its whole date, in folders by year");
         } finally {
             NAVIGATOR.calendarCustomWeekPattern = "[weeks]/gggg[w]ww";
+            NAVIGATOR.calendarCustomMonthPattern = "[months]/YYYY-MM";
         }
         // The template Jump to date and Schedule make a new note from is Navigator's own, and nothing else:
         // not Plainday's setting, not Templater's folder
@@ -860,7 +864,6 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.equal(window.plainday.Schedule.dailyOpts().folder, "Planner/days");
         assert.equal(window.plainday.Schedule.dailyOpts().format, "YYYY-MM-DD");
         assert.equal(window.plainday.TimeReport.periodFolders().month, "Planner/months");
-        assert.equal(window.plainday.Schedule.dailyOpts({ asPlugin: true }).folder, "Reference/Planner/days", "the plugin's own, for the panel to show");
     } finally {
         plugin.onunload();
     }

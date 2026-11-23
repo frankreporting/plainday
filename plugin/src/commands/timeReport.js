@@ -3453,7 +3453,7 @@ export default class TimeReport {
                 return this.reportLink(f ? app.metadataCache.fileToLinktext(f, "", true) : this.basename(p), p);
             };
             const done = [], trouble = [];
-            const linkTarget = this.periodLinkTarget(this.periodFolders());
+            const linkTarget = this.periodLinkTarget(this.periodPlaces());
 
             const { updated, broken, created: sheetsMade } = await this.writeProjectNotes(model, index, stamp, link, linkTarget);
             if (updated) done.push(`${updated} project note${updated === 1 ? "" : "s"}`);
@@ -3770,12 +3770,14 @@ export default class TimeReport {
             .map((t) => t.toLowerCase());
     }
 
-    // weeks/months/years folders: Notebook Navigator's periodic notes folder plus the folder part of
-    // its week/month/year pattern ("[weeks]/gggg[w]ww" → "Reference/Planner/weeks"); without
-    // that, weeks/months/years beside the daily notes folder. A folder set in Settings → Plainday →
-    // Folders comes first (OBS-283); blank is this rule (`asBefore`, which the panel shows). JumpToDate
-    // calls it outside a report run too, before `this.schedule` is set.
-    periodFolders({ asBefore = false } = {}) {
+    // Where the weekly, monthly and yearly notes go: { week, month, year }, each { folder, dateFolders },
+    // the fixed folder and the folders by date under it ("" for none, OBS-310), as Schedule.folderFor
+    // joins them. With Notebook Navigator's calendar as the source, its periodic notes folder and the
+    // folder part of its pattern ("[weeks]/gggg[w]ww" → "Reference/Planner/weeks"; "gggg/[W]ww" → the
+    // folders "gggg"); otherwise a folder set in Settings → Plainday → Folders (OBS-283), else weeks,
+    // months and years beside the daily notes folder, which blank means (`asBefore`, which the panel
+    // shows). JumpToDate calls it outside a report run too, before `this.schedule` is set.
+    periodPlaces({ asBefore = false } = {}) {
         const settings = asBefore ? null : plainday?.Settings;
         const navigator = settings?.periodicSource?.() === "notebook-navigator";
         const set = navigator ? null : settings?.get?.()?.folders;
@@ -3784,24 +3786,41 @@ export default class TimeReport {
         const daily = (this.schedule ?? plainday.Schedule).dailyOpts().folder;
         const planner = daily.includes("/") ? daily.slice(0, daily.lastIndexOf("/")) : "";
         const beside = (fallback) => `${planner ? `${planner}/` : ""}${fallback}`;
-        /** @param {"week" | "month" | "year"} unit @param {string} fallback */
-        const folderOf = (unit, fallback) => (navigator ? settings.navigatorNote(unit)?.folder : null) || beside(fallback);
-        return {
-            week: set?.week || folderOf("week", "weeks"),
-            month: set?.month || folderOf("month", "months"),
-            year: set?.year || folderOf("year", "years"),
+        /** @param {"week" | "month" | "year"} unit @param {string} fallback @returns {{ folder: string, dateFolders: string }} */
+        const placeOf = (unit, fallback) => {
+            const nn = navigator ? settings.navigatorNote(unit) : null;
+            if (nn) return { folder: nn.folder, dateFolders: nn.dateFolders };
+            return { folder: set?.[unit] || beside(fallback), dateFolders: "" };
         };
+        return { week: placeOf("week", "weeks"), month: placeOf("month", "months"), year: placeOf("year", "years") };
+    }
+
+    // The fixed folder of each: { week, month, year }, as periodPlaces says
+    periodFolders({ asBefore = false } = {}) {
+        const p = this.periodPlaces({ asBefore });
+        return { week: p.week.folder, month: p.month.folder, year: p.year.folder };
+    }
+
+    // Where the note named `key` of `unit` goes, by `places` (periodPlaces): its folders by date read
+    // from the period's first day, as PeriodicNotes.where files it; null when `key` isn't such a name
+    periodPath(places, unit, key) {
+        const start = this.periodStartOf(unit, key);
+        if (!start) return null;
+        const place = places[unit];
+        const folder = place.dateFolders ? [place.folder, moment(start, "YYYY-MM-DD", true).locale(this.calendar().rules?.locale ?? moment.locale()).format(place.dateFolders)].filter(Boolean).join("/") : place.folder;
+        return `${folder ? `${folder}/` : ""}${key}.md`;
     }
 
     // Link text for a weekly or monthly note: just its name ("2026w37", "2026-05"), unless another note
     // in the vault has that name, then its full path so the link can't land on the wrong note. A link to
     // a note that doesn't exist yet creates it when clicked (its template moves it into its folder).
-    periodLinkTarget(folders) {
+    periodLinkTarget(places) {
         const count = new Map();
         for (const f of app.vault.getMarkdownFiles()) count.set(f.basename, (count.get(f.basename) ?? 0) + 1);
         return (unit, key) => {
-            const own = app.vault.getFileByPath(`${folders[unit]}/${key}.md`) ? 1 : 0;
-            return (count.get(key) ?? 0) - own > 0 ? `${folders[unit]}/${key}` : key;
+            const path = this.periodPath(places, unit, key) ?? `${places[unit].folder ? `${places[unit].folder}/` : ""}${key}.md`;
+            const own = app.vault.getFileByPath(path) ? 1 : 0;
+            return (count.get(key) ?? 0) - own > 0 ? path.replace(/\.md$/, "") : key;
         };
     }
 
@@ -3810,8 +3829,8 @@ export default class TimeReport {
     // template first, unless this device created it before (you deleted it: it stays deleted).
     // Returns { updated (existing notes rewritten), created: [names], broken: [names], trouble: [messages] }.
     async writePeriodNotes(model, stamp, link, { create }) {
-        const folders = this.periodFolders();
-        const linkTarget = this.periodLinkTarget(folders);
+        const places = this.periodPlaces();
+        const linkTarget = this.periodLinkTarget(places);
         const scopeOf = (unit, key) => ({ kind: "period", unit, key, linkTarget });
         const wanted = this.periodsWithEntries(model);
         const remembered = new Set(app.loadLocalStorage(TimeReport.CREATED_KEY) ?? []);
@@ -3820,13 +3839,16 @@ export default class TimeReport {
         let canCreate = create;
 
         for (const unit of ["week", "month", "year"]) {
-            const folder = folders[unit];
-            const keys = new Set(wanted[unit]);
+            const keys = new Set(wanted[unit]), place = places[unit];
+            // A note counts where its own name puts it (OBS-310); a note outside the folder isn't read
             for (const f of app.vault.getMarkdownFiles()) {
-                if (f.parent?.path === folder && this.periodStartOf(unit, f.basename) && this.hasBlock(await this.textOf(f))) keys.add(f.basename);
+                const parent = !f.parent || f.parent.path === "/" ? "" : f.parent.path;
+                const near = place.dateFolders ? !place.folder || parent.startsWith(`${place.folder}/`) : parent === place.folder;
+                if (near && this.periodPath(places, unit, f.basename) === f.path && this.hasBlock(await this.textOf(f))) keys.add(f.basename);
             }
             for (const key of this.byStart(unit, keys)) {
-                const path = `${folder}/${key}.md`;
+                const path = this.periodPath(places, unit, key);
+                if (!path) continue;
                 let file = app.vault.getFileByPath(path);
                 let isNew = false;
                 try {
@@ -3860,7 +3882,7 @@ export default class TimeReport {
     // Makes the note as every periodic note is made (PeriodicNotes.ensure: its alias, then its template),
     // then puts the report below whatever it holds, under its heading. Returns { file } or { error }.
     async createPeriodNote(path, unit, key, block) {
-        const folder = path.slice(0, path.lastIndexOf("/"));
+        const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "the top of the vault";
         const notes = plainday?.PeriodicNotes;
         const start = this.periodStartOf(unit, key);
         if (!notes || !start) return { error: `no more periodic notes created: ${key} couldn't be made` };
@@ -3883,12 +3905,12 @@ export default class TimeReport {
         // own test, with what it reads off `plainday` taken now, as a run keeps its Schedule (OBS-41): a
         // note that couldn't be told would otherwise fail the run, and read as "other" its time is lost
         const schedule = this.schedule ?? plainday.Schedule, tasks = plainday.TaskIds;
-        const rules = plainday.DatePrompt?.weekRules?.(), folders = schedule ? this.periodFolders() : undefined;
+        const rules = plainday.DatePrompt?.weekRules?.(), places = schedule ? this.periodPlaces() : undefined;
         const kinds = new Map();
         const kind = (path) => {
             if (!kinds.has(path)) {
                 const f = app.vault.getFileByPath(path);
-                kinds.set(path, !f ? "other" : schedule.isDailyNote(f) ? "day" : schedule.periodOf(f, rules, folders) ?? "other");
+                kinds.set(path, !f ? "other" : schedule.isDailyNote(f) ? "day" : schedule.periodOf(f, rules, places) ?? "other");
             }
             return kinds.get(path);
         };

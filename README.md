@@ -100,7 +100,6 @@ All of them are in the command palette as "Plainday: …". [The manual's *Comman
 | Time report | Writes time totals into project, area, weekly, monthly and yearly notes, and each project's timesheet |
 | Invoice | Makes a draft invoice from a project's unbilled time, or marks an invoice sent, paid or canceled |
 | View error logs | Opens the list of Problems the time report and the calendar sync found |
-| Rename periodic notes | After you change how daily, weekly, monthly or yearly notes are named, renames them and the wikilinks to them, once you've seen what will change |
 
 The Obsidian command-line tool runs them from a terminal too: `obsidian command id=plainday:add-note`.
 
