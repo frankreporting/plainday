@@ -15,10 +15,10 @@
 //   fails a call to an API newer than the manifest's minAppVersion). The class files reach Obsidian
 //   through typed imports (OBS-271), so the rule sees their calls too. typescript-eslint's own type
 //   checks run on Plainday's own files (plugin/src/main.js, host.js, settingsTab.js and the three
-//   indexes) and on the class files that carry types (TYPED, below), at warn, where lint's second
-//   run fails on any. The other class files have no types yet, and the scan's `no-unsafe-*`
-//   warnings on them wait until they do (OBS-318). Obsidian's types come from the `obsidian`
-//   package, pinned at its newest version, since older types don't know the newer APIs.
+//   indexes) and on the class files, which carry types (TYPED, below), at warn, where lint's second
+//   run fails on any. Since OBS-329, the last of OBS-318's sub-issues, every class file is in TYPED,
+//   and a new one goes in it. Obsidian's types come from the `obsidian` package, pinned at its
+//   newest version, since older types don't know the newer APIs.
 // - Globals: `no-undef` at the recommended level (warn) in plugin/src/, whose files import what
 //   they use; off elsewhere, where the Templater scripts read Templater's globals.
 // - The baseline: errors the class files and the Templater scripts had when this lint started
@@ -39,8 +39,7 @@ const typeChecked = warn(Object.assign({}, ...tseslint.configs.recommendedTypeCh
 
 // The class files that carry types (OBS-318), and the calendar worker's (OBS-327), whose warnings fail
 // lint's second run as Plainday's own files' do, so a file cleared of the scan's warnings stays clear.
-// Each of OBS-318's sub-issues adds the files it types; the files that never had a warning are here
-// from the start.
+// Every class file is here since OBS-329, the last of OBS-318's sub-issues; a new one goes in too.
 export const TYPED = [
     "plugin/src/commands/addProjectLink.js",
     "plugin/src/commands/addTaskNote.js",
@@ -55,6 +54,7 @@ export const TYPED = [
     "plugin/src/commands/plan.js",
     "plugin/src/commands/schedule.js",
     "plugin/src/commands/setDueDate.js",
+    "plugin/src/commands/timeReport.js",
     "plugin/src/commands/toggleTimeEntry.js",
     "plugin/src/commands/viewErrorLogs.js",
     "plugin/src/shared/billing.js",

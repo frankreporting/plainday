@@ -2,7 +2,7 @@ import { FuzzySuggestModal, Keymap, MarkdownView, moment, Notice } from "obsidia
 import { app, plainday } from "../host.js";
 
 /** @import { EditorPosition, Editor, TFile } from "obsidian" */
-/** @import { Fold, FoldView, MomentFn, SomeView } from "../host.js" */
+/** @import { FoldView, MomentFn, SomeView } from "../host.js" */
 /** @import TimeReport from "./timeReport.js" */
 /** @import { Toggle } from "./timeReport.js" */
 /**
@@ -244,8 +244,7 @@ export default class ToggleTimeEntry {
         const before = report.lines(text), after = report.lines(result.content);
         const saved = app.foldManager.load(file);
         if (saved && saved.lines === before.length && after.length > before.length) {
-            // TimeReport's own types come with OBS-329
-            const folds = /** @type {(folds: Fold[], lines: string[], after: number, inserted: string) => Fold[]} */ (report.foldsAfterInsert)(saved.folds, before, result.edit.from.line, after[result.edit.from.line + 1]);
+            const folds = report.foldsAfterInsert(saved.folds, before, result.edit.from.line, after[result.edit.from.line + 1]);
             await app.foldManager.save(file, { folds, lines: after.length });
         }
         return true;
