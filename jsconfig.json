@@ -6,6 +6,7 @@
     "lib": ["ES2022", "DOM"],
     "checkJs": false,
     "useUnknownInCatchVariables": true,
+    "strictNullChecks": true,
     "esModuleInterop": true,
     "noEmit": true
   },

@@ -790,7 +790,7 @@ export default class AddTaskNote {
      * @returns {boolean}
      */
     isFinished(cache) {
-        return [].concat(cache?.frontmatter?.status ?? [])
+        return /** @type {unknown[]} */ ([]).concat(cache?.frontmatter?.status ?? [])
             .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
     }
 

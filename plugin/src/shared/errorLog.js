@@ -95,7 +95,7 @@ export default class ErrorLog {
     fromModel(model, link) {
         const /** @type {ErrorItem[]} */ out = [];
         const add = (/** @type {string} */ kind, /** @type {string | null | undefined} */ path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
-        const label = (/** @type {{ rule?: string, kind?: string }} */ p) => /** @type {Record<string, string>} */ (ErrorLog.RULE)[p.rule] ?? /** @type {Record<string, string>} */ (ErrorLog.ENTRY)[p.kind];
+        const label = (/** @type {{ rule?: string, kind?: string }} */ p) => /** @type {Record<string, string>} */ (ErrorLog.RULE)[/** @type {string} */ (p.rule)] ?? /** @type {Record<string, string>} */ (ErrorLog.ENTRY)[/** @type {string} */ (p.kind)];
         // A task Problem on a line in a note that isn't a day is copied onto each of its projects, and a
         // line that disagrees, or a `parent`, onto both of its: once, at the note it's in. A Problem about a
         // whole task (`group`, two deadlines) is on each of its days: once, at the first
