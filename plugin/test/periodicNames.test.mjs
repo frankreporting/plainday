@@ -1,6 +1,7 @@
 // Tests for the periodic notes' name check (OBS-299): Settings.namesWholeDate, periodicFormat and
-// nameWarning in plugin/src/shared/settings.js, which Settings → Plainday → Folders → Periodic notes
-// shows under a row whose notes' names don't give their whole date on their own. moment is the real
+// periodicWarning in plugin/src/shared/settings.js, which Settings → Plainday → Folders → Periodic notes
+// shows under a row whose notes' names don't give their whole date on their own; and how navigatorNote
+// reads Notebook Navigator's pattern as one path (OBS-310). moment is the real
 // one, from node_modules (the plain-Node stand-in knows only a few formats), in four languages; the
 // Daily notes plugin and Notebook Navigator are stand-ins with invented settings.
 //
@@ -90,11 +91,11 @@ test("which format is checked: the Daily notes plugin's for the days, and nothin
     assert.equal(settings.periodicWarning("week"), "");
 });
 
-test("which format is checked with Notebook Navigator: its patterns as typed, even one Plainday can't follow", () => {
+test("which format is checked with Notebook Navigator: its patterns as typed, folders by date included", () => {
     const settings = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD", calendarCustomMonthPattern: "" }) });
     assert.equal(settings.periodicSource(), "notebook-navigator", "the demo's source");
     assert.deepEqual(plain(settings.periodicFormat("day")), { format: "[days]/YYYY/MM-DD", navigator: true });
-    assert.equal(settings.navigatorNote("day"), null, "Plainday can't follow it, so it uses the Daily notes plugin's meanwhile");
+    assert.deepEqual(plain(settings.navigatorNote("day")), { folder: "Planner/days", dateFolders: "YYYY", format: "MM-DD", template: "" }, "read as one path (OBS-310)");
     assert.deepEqual(plain(settings.periodicFormat("week")), { format: "[weeks]/gggg[w]ww", navigator: true });
     assert.equal(settings.periodicFormat("month"), null, "no pattern: Plainday's own name, which works");
     // Navigator installed but not making the notes: the Daily notes plugin's, as Schedule reads them
@@ -112,41 +113,36 @@ test("the demo's settings warn on no row", () => {
 
 const NEEDS_DAY = "Plainday reads a note's date from its name alone, so it needs the year, month, and day, such as `YYYY-MM-DD`.";
 const NEEDS_WEEK = "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.";
-// What the red line says when Navigator files a unit's notes in folders by date
-const DATED = (unit, pattern, folder) => `Notebook Navigator's ${unit} pattern, \`${pattern}\`, puts these notes in folders by date, which Plainday can't follow yet. It keeps them in \`${folder}\` instead.`;
 
-test("why Plainday doesn't follow Navigator's pattern: none, no folder of its own, or folders by date", () => {
-    const followed = vault({ navigator: NAVIGATOR() });
-    for (const unit of ["day", "week", "month", "year"]) assert.equal(followed.navigatorUnfollowed(unit), null, unit);
-    assert.equal(vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD" }), periodic: "daily-notes" }).navigatorUnfollowed("day"), null, "Navigator doesn't own them");
-    const odd = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "" }) });
-    assert.deepEqual(plain(odd.navigatorUnfollowed("day")), { reason: "datedFolders", pattern: "YYYY/YYYYMMDD" });
-    assert.deepEqual(plain(odd.navigatorUnfollowed("week")), { reason: "empty", pattern: "" });
-    const homeless = vault({ navigator: { ...NAVIGATOR(), vaultProfiles: [{ periodicNotesFolder: "" }] } });
-    assert.deepEqual(plain(homeless.navigatorUnfollowed("month")), { reason: "noFolder", pattern: "[months]/YYYY-MM" });
+test("folders by date and no periodic notes folder are followed: Navigator's own defaults among them (OBS-310)", () => {
+    const defaults = vault({ navigator: { ...NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "gggg/[W]ww", calendarCustomMonthPattern: "YYYY/YYYYMM", calendarCustomYearPattern: "YYYY" }), vaultProfiles: [{}] } });
+    assert.deepEqual(plain(defaults.navigatorNote("day")), { folder: "", dateFolders: "YYYY", format: "YYYYMMDD", template: "" });
+    assert.deepEqual(plain(defaults.navigatorNote("week")), { folder: "", dateFolders: "gggg", format: "[W]ww", template: "" });
+    assert.deepEqual(plain(defaults.navigatorNote("month")), { folder: "", dateFolders: "YYYY", format: "YYYYMM", template: "" });
+    assert.deepEqual(plain(defaults.navigatorNote("year")), { folder: "", dateFolders: "", format: "YYYY", template: "" });
+    assert.equal(vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "" }) }).navigatorNote("week"), null, "no pattern: Plainday's own");
 });
 
-test("the red line: where Navigator puts the notes when Plainday can't follow it, then what Plainday needs (Brian, 11/20)", () => {
+test("the red line: what Plainday needs when the names don't give the whole date, and nothing for folders by date (OBS-310)", () => {
     // The row shows `MM-DD` and that the Daily notes plugin sets it, so the line says only what's needed
     const daily = vault({ daily: { format: "MM-DD", folder: "Reference/Planner/days/2026" }, periodic: "daily-notes" });
     assert.equal(daily.periodicWarning("day", "en"), NEEDS_DAY);
+    assert.equal(vault({ daily: { format: "YYYY/MM/YYYY-MM-DD", folder: "Journal" }, periodic: "daily-notes" }).periodicWarning("day", "en"), "", "the Daily notes plugin's folders by date");
     const followed = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/MM-DD" }) });
     assert.equal(followed.periodicWarning("day", "en"), NEEDS_DAY);
-    // Folders by date: where Plainday keeps the notes instead, the Daily notes plugin's folder for a day
+    // Folders by date with a name that leaves out the year: only what the name needs
     const dated = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "[days]/YYYY/MM-DD" }) });
-    assert.equal(dated.periodicWarning("day", "en"), `${DATED("day", "[days]/YYYY/MM-DD", "Reference/Planner/days")} ${NEEDS_DAY}`);
+    assert.equal(dated.periodicWarning("day", "en"), NEEDS_DAY);
 
-    // Navigator's defaults: the day and the month only by their folders, the week by both, the year not at all
-    const defaults = vault({ navigator: NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "gggg/[W]ww", calendarCustomMonthPattern: "YYYY/YYYYMM", calendarCustomYearPattern: "YYYY" }) });
-    assert.equal(defaults.periodicWarning("day", "en"), DATED("day", "YYYY/YYYYMMDD", "Reference/Planner/days"));
-    assert.equal(defaults.periodicWarning("week", "en"), `${DATED("week", "gggg/[W]ww", "Reference/Planner/weeks")} ${NEEDS_WEEK}`);
-    assert.equal(defaults.periodicWarning("month", "en"), DATED("month", "YYYY/YYYYMM", "Reference/Planner/months"));
-    assert.equal(defaults.periodicWarning("year", "en"), "", "`YYYY` alone: under Navigator's folder, as it names it");
+    // Navigator's defaults, with no periodic notes folder: only the week, whose names (`W40`) leave out the year
+    const defaults = vault({ navigator: { ...NAVIGATOR({ calendarCustomFilePattern: "YYYY/YYYYMMDD", calendarCustomWeekPattern: "gggg/[W]ww", calendarCustomMonthPattern: "YYYY/YYYYMM", calendarCustomYearPattern: "YYYY" }), vaultProfiles: [{}] } });
+    assert.equal(defaults.periodicWarning("day", "en"), "");
+    assert.equal(defaults.periodicWarning("week", "en"), NEEDS_WEEK);
+    assert.equal(defaults.periodicWarning("month", "en"), "");
+    assert.equal(defaults.periodicWarning("year", "en"), "");
 
-    // No pattern isn't a problem: the notes are Plainday's own. No folder of its own is.
+    // No pattern isn't a problem: the notes are Plainday's own
     assert.equal(vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "" }) }).periodicWarning("week", "en"), "");
-    const homeless = vault({ navigator: { ...NAVIGATOR(), vaultProfiles: [{ periodicNotesFolder: "" }] } });
-    assert.equal(homeless.periodicWarning("week", "en"), "Notebook Navigator has no folder set for its periodic notes, which Plainday needs. It keeps these notes in `Reference/Planner/weeks` instead.");
 
     // Names alone
     const slip = vault({ navigator: NAVIGATOR({ calendarCustomWeekPattern: "[weeks]/YYYY[w]ww" }) });

@@ -761,23 +761,24 @@ test("periodicSource: the setting, else the calendar the vault uses; Navigator i
 
 test("navigatorNote: the folder, name and template Notebook Navigator's pattern says, with its [literals] unwrapped", async () => {
     const f = withPlugin({ plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
-    assert.deepEqual(plain(f.s.navigatorNote("day")), { folder: "Planner/days", format: "YYYY-MM-DD", template: "T/Day.md" });
-    assert.deepEqual(plain(f.s.navigatorNote("week")), { folder: "Planner/weeks", format: "gggg[w]ww", template: "T/Week.md" });
-    assert.deepEqual(plain(f.s.navigatorNote("month")), { folder: "Planner/months", format: "YYYY-MM", template: "" });
+    assert.deepEqual(plain(f.s.navigatorNote("day")), { folder: "Planner/days", dateFolders: "", format: "YYYY-MM-DD", template: "T/Day.md" });
+    assert.deepEqual(plain(f.s.navigatorNote("week")), { folder: "Planner/weeks", dateFolders: "", format: "gggg[w]ww", template: "T/Week.md" });
+    assert.deepEqual(plain(f.s.navigatorNote("month")), { folder: "Planner/months", dateFolders: "", format: "YYYY-MM", template: "" });
     // A pattern with no folder of its own sits at its base; no pattern means nothing to read
     const flat = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomYearPattern: "YYYY" } } } });
-    assert.deepEqual(plain(flat.s.navigatorNote("year")), { folder: "Planner", format: "YYYY", template: "" });
+    assert.deepEqual(plain(flat.s.navigatorNote("year")), { folder: "Planner", dateFolders: "", format: "YYYY", template: "" });
     const none = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomWeekPattern: "" } } } });
     assert.equal(none.s.navigatorNote("week"), null);
-    // A pattern whose folder part holds date tokens names a folder per date, which Plainday can't
-    // follow: it reads as none, so the folder falls back instead of a literal "YYYY" folder being made
-    for (const pattern of ["YYYY/MM/YYYY-MM-DD", "[days]/YYYY/YYYY-MM-DD", "YYYY/[days]/YYYY-MM-DD"]) {
-        const tokens = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarCustomFilePattern: pattern } } } });
-        assert.equal(tokens.s.navigatorNote("day"), null, pattern);
-    }
-    // And with no periodic notes folder of its own, there's no base to put them under
-    const baseless = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, vaultProfiles: [{}] } } } });
-    assert.equal(baseless.s.navigatorNote("day"), null);
+    // A pattern whose folder part holds dates is read as one path (OBS-310): the leading [literal] folders
+    // join the fixed folder, the rest are folders by date, and the name is what's after the last `/`
+    const read = (pattern, profile = NAVIGATOR.vaultProfiles) => plain(withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, vaultProfiles: profile, calendarCustomFilePattern: pattern } } } }).s.navigatorNote("day"));
+    assert.deepEqual(read("YYYY/MM/YYYY-MM-DD"), { folder: "Planner", dateFolders: "YYYY/MM", format: "YYYY-MM-DD", template: "T/Day.md" });
+    assert.deepEqual(read("[days]/YYYY/YYYY-MM-DD"), { folder: "Planner/days", dateFolders: "YYYY", format: "YYYY-MM-DD", template: "T/Day.md" });
+    assert.deepEqual(read("YYYY/[days]/YYYY-MM-DD"), { folder: "Planner", dateFolders: "YYYY/[days]", format: "YYYY-MM-DD", template: "T/Day.md" }, "a [literal] after a date is a folder by date");
+    assert.deepEqual(read("[periodic/days]/YYYY-MM-DD"), { folder: "Planner/periodic/days", dateFolders: "", format: "YYYY-MM-DD", template: "T/Day.md" }, "a / in [brackets] is text");
+    // No periodic notes folder of its own is the top of the vault, so Navigator's defaults work as they come
+    assert.deepEqual(read("YYYY/YYYYMMDD", [{}]), { folder: "", dateFolders: "YYYY", format: "YYYYMMDD", template: "T/Day.md" });
+    assert.deepEqual(read("[days]/YYYY-MM-DD", [{ periodicNotesFolder: "/" }]), { folder: "days", dateFolders: "", format: "YYYY-MM-DD", template: "T/Day.md" });
     assert.equal(withPlugin({}).s.navigatorCalendar(), null, "no Navigator installed");
 });
 

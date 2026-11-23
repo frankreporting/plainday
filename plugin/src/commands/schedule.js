@@ -757,38 +757,65 @@ export default class Schedule {
 
     // Where the daily notes are, what names them and what they're made from. With Notebook Navigator's
     // calendar as the periodic notes' source (Settings → Plainday → Folders → Periodic notes, OBS-283),
-    // its own day pattern says; otherwise the Daily notes plugin does, as before. `asPlugin` reads the
-    // plugin whichever source is chosen, for the panel to show.
-    dailyOpts({ asPlugin = false } = {}) {
-        const nn = asPlugin ? null : plainday.Settings?.periodicSource?.() === "notebook-navigator" ? plainday.Settings.navigatorNote("day") : null;
-        if (nn) return { folder: nn.folder, format: nn.format || "YYYY-MM-DD", template: nn.template };
+    // its own day pattern says; otherwise the Daily notes plugin does, as before. A format with folders
+    // in it is read as one path (OBS-310): { folder, dateFolders, format, template }, where `folder` is
+    // the fixed folder (the setting's, then the format's leading [literal] folders), `dateFolders` the
+    // format's folders by date ("YYYY/MM", "" for none) and `format` the name alone, which gives the
+    // note's date.
+    dailyOpts() {
+        const nn = plainday.Settings?.periodicSource?.() === "notebook-navigator" ? plainday.Settings.navigatorNote("day") : null;
+        if (nn) return { folder: nn.folder, dateFolders: nn.dateFolders, format: nn.format || "YYYY-MM-DD", template: nn.template };
         const opts = app.internalPlugins?.plugins?.["daily-notes"]?.instance?.options ?? {};
+        // Split as Settings.splitPattern splits Navigator's; a format without folders needs no split
+        const whole = String(opts.format || "YYYY-MM-DD");
+        const { folder, dateFolders, format } = plainday.Settings?.constructor?.splitPattern?.(whole) ?? { folder: "", dateFolders: "", format: whole };
+        const base = (opts.folder ?? "").replace(/\/$/, "");
         return {
-            folder: (opts.folder ?? "").replace(/\/$/, ""),
-            format: opts.format || "YYYY-MM-DD",
+            folder: folder && base ? `${base}/${folder}` : folder || base,
+            dateFolders,
+            format: format || "YYYY-MM-DD",
             template: opts.template ?? ""
         };
     }
 
-    dailyNotePath(m) {
-        const { folder, format } = this.dailyOpts();
-        return `${folder ? folder + "/" : ""}${m.format(format)}.md`;
+    // The folder a periodic note for date `m` sits in: the fixed folder, then its folders by date, as
+    // `m` formats them ("Journal" and "YYYY/MM" put 11/21/2026's in "Journal/2026/11"); "" is the top
+    static folderFor({ folder, dateFolders }, m) {
+        return [folder, dateFolders ? m.format(dateFolders) : ""].filter(Boolean).join("/");
     }
 
+    dailyNotePath(m) {
+        const opts = this.dailyOpts();
+        const folder = Schedule.folderFor(opts, m);
+        return `${folder ? folder + "/" : ""}${m.format(opts.format)}.md`;
+    }
+
+    // A daily note is named by the format and sits in the folder its own date gives (OBS-310): a note
+    // of that name anywhere else isn't one
     isDailyNote(file) {
-        const { folder, format } = this.dailyOpts();
-        const inFolder = (file.parent?.path ?? "/") === (folder || "/");
-        return inFolder && moment(file.basename, format, true).isValid();
+        const opts = this.dailyOpts();
+        const parent = file.parent?.path ?? "/";
+        if (!opts.dateFolders) return parent === (opts.folder || "/") && moment(file.basename, opts.format, true).isValid();
+        if (opts.folder && !parent.startsWith(`${opts.folder}/`)) return false;
+        const m = moment(file.basename, opts.format, true);
+        return m.isValid() && parent === (Schedule.folderFor(opts, m) || "/");
     }
 
     // "week", "month" or "year" for a weekly, monthly or yearly note, else null. One is named strictly
-    // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in its folder
-    // (TimeReport.periodFolders), so a note elsewhere with such a name isn't one. A report passes the
-    // two in, read when it began, so the whole run uses the same ones.
-    periodOf(file, rules = plainday.DatePrompt.weekRules(), folders = plainday.TimeReport.periodFolders()) {
-        const folder = file.parent?.path ?? "";
+    // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in the folder its own
+    // date gives (TimeReport.periodPlaces, OBS-310), so a note elsewhere with such a name isn't one. A
+    // report passes the two in, read when it began, so the whole run uses the same ones.
+    periodOf(file, rules = plainday.DatePrompt.weekRules(), places = plainday.TimeReport.periodPlaces()) {
+        // The top of the vault is "/" to Obsidian and "" to the settings
+        const folder = !file.parent || file.parent.path === "/" ? "" : file.parent.path;
         for (const unit of ["week", "month", "year"]) {
-            if (folder === folders[unit] && moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
+            const place = places[unit];
+            if (!place.dateFolders) {
+                if (folder === place.folder && moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
+                continue;
+            }
+            const m = moment(file.basename, rules.format[unit], rules.locale, true);
+            if (m.isValid() && folder === Schedule.folderFor(place, m)) return unit;
         }
         return null;
     }

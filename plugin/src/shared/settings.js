@@ -305,41 +305,58 @@ export default class Settings {
     }
 
     /**
-     * Where Notebook Navigator's calendar puts a note of `unit` and what names it, from its pattern
-     * ("[days]/YYYY-MM-DD" under its periodic notes folder), and the template it uses: { folder, format,
-     * template }. Null when its calendar isn't what makes them, or it has no pattern for that unit.
+     * Where Notebook Navigator's calendar puts a note of `unit` and what names it, from its pattern under
+     * its periodic notes folder, read as one path (OBS-310): { folder, dateFolders, format, template },
+     * split as splitPattern splits it ("[days]/YYYY-MM-DD" under "Planner" is the folder
+     * "Planner/days" and the name "YYYY-MM-DD"; "YYYY/YYYYMMDD" is the folders "YYYY" and the name
+     * "YYYYMMDD"). No periodic notes folder is the top of the vault, as Navigator reads it. Null when
+     * its calendar isn't what makes them, or it has no pattern for that unit.
      * @param {"day" | "week" | "month" | "year"} unit
-     * @returns {{ folder: string, format: string, template: string } | null}
+     * @returns {{ folder: string, dateFolders: string, format: string, template: string } | null}
      */
     navigatorNote(unit) {
         const nn = this.navigatorCalendar();
         if (!nn) return null;
         const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
-        const pattern = typeof nn[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]) : "";
+        const pattern = typeof nn[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]).trim() : "";
         if (!pattern) return null;
-        const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/\/+$/, "");
-        if (!base) return null;
-        const at = pattern.lastIndexOf("/");
-        const folders = at < 0 ? "" : pattern.slice(0, at);
-        // Only a folder part that is all [literals] and slashes is a folder: one with date tokens in it
-        // (`YYYY/MM/YYYY-MM-DD`) names a folder per date, which Plainday can't follow, so it reads as
-        // none and the folder falls back as it did before (OBS-283)
-        if (folders.replace(/\[[^\]]*\]/g, "").replace(/\//g, "") !== "") return null;
-        // The folder is those [literals] unwrapped, under the base; the name is the rest, as moment
-        // reads it (its own [literals] stay)
-        const dir = folders.replace(/\[([^\]]*)\]/g, "$1");
-        const format = at < 0 ? pattern : pattern.slice(at + 1);
+        const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/^\/+|\/+$/g, "");
+        const { folder, dateFolders, format } = Settings.splitPattern(pattern);
         const template = typeof nn[`calendarCustom${key}Template`] === "string" ? String(nn[`calendarCustom${key}Template`]) : "";
-        return { folder: [base, dir].filter(Boolean).join("/"), format, template };
+        return { folder: [base, folder].filter(Boolean).join("/"), dateFolders, format, template };
+    }
+
+    // A periodic note's pattern as one path (OBS-310), split where Plainday needs it: the leading folders
+    // that are all [literals] make the fixed `folder` ("[Journal]/YYYY-MM-DD" → "Journal"); the folders
+    // after them, from the first with a date in it, are `dateFolders`, a format of their own ("YYYY/MM"),
+    // "" for none; the part after the last `/` is the name's `format`. A `/` inside [brackets] is text,
+    // as moment reads it: "[periodic/months]/YYYY-MM" is the folder "periodic/months".
+    static splitPattern(pattern) {
+        const text = String(pattern ?? "");
+        // Most formats have no folders, and this runs for every note in a pass over the vault
+        if (!text.includes("/")) return { folder: "", dateFolders: "", format: text };
+        const parts = [""];
+        let open = false;
+        for (const ch of text) {
+            if (ch === "/" && !open) { parts.push(""); continue; }
+            if (ch === "[") open = true;
+            else if (ch === "]") open = false;
+            parts[parts.length - 1] += ch;
+        }
+        const format = parts.pop() ?? "";
+        let at = 0;
+        const fixed = [];
+        while (at < parts.length && parts[at].replace(/\[[^\]]*\]/g, "") === "") fixed.push(parts[at++].replace(/\[([^\]]*)\]/g, "$1"));
+        return { folder: fixed.filter(Boolean).join("/"), dateFolders: parts.slice(at).join("/"), format };
     }
 
     // ---------------------------------------------------------------- periodic note names (OBS-299)
 
     /**
      * The format that names `unit`'s notes, as it's set, and whether Notebook Navigator's calendar sets
-     * it: its pattern as typed, folders included, when it owns them and has one, even one Plainday can't
-     * follow (navigatorNote reads that as none); otherwise, for the daily notes, the Daily notes
-     * plugin's format. Null for the weekly, monthly and yearly notes Plainday names itself, which work.
+     * it: its pattern as typed, folders included, when it owns them and has one; otherwise, for the
+     * daily notes, the Daily notes plugin's format. Null for the weekly, monthly and yearly notes
+     * Plainday names itself, which work.
      * @param {"day" | "week" | "month" | "year"} unit
      * @returns {{ format: string, navigator: boolean } | null}
      */
@@ -348,13 +365,13 @@ export default class Settings {
         const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
         const pattern = typeof nn?.[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]).trim() : "";
         if (pattern) return { format: pattern, navigator: true };
-        return unit === "day" ? { format: plainday.Schedule.dailyOpts({ asPlugin: true }).format, navigator: false } : null;
+        return unit === "day" ? { format: String(app.internalPlugins?.plugins?.["daily-notes"]?.instance?.options?.format || "YYYY-MM-DD"), navigator: false } : null;
     }
 
     /**
      * Whether a format's names give a note's whole date on their own, as Plainday needs while it reads a
      * note's date from its name alone. Only the name is read: the part after the format's last `/`;
-     * folders before it are OBS-310's. 9/30 of 1970 and of 2067, and each day from 12/28 to 1/4 at three
+     * the folders before it are where the note goes (OBS-310), not what tells its date. 9/30 of 1970 and of 2067, and each day from 12/28 to 1/4 at three
      * year-ends (2026, 1970 and 2067, inside moment's window for two-digit years), is named, then read
      * back strictly: the names work when each reads back as the same day, week (ISO when the name
      * counts by GGGG or WW, Settings.isoName), month or year.
@@ -381,56 +398,27 @@ export default class Settings {
     }
 
     /**
-     * Why Plainday doesn't file and name `unit`'s notes by Notebook Navigator's pattern while Navigator
-     * owns them (navigatorNote reads it as none): "empty", it has no pattern for them, so they're
-     * Plainday's own; "noFolder", it has no periodic notes folder; "datedFolders", the pattern's folder
-     * part holds date tokens, a folder per date, which Plainday can't follow yet (OBS-310). With the
-     * pattern as typed. Null when Plainday follows it, or Navigator doesn't own the notes.
-     * @param {"day" | "week" | "month" | "year"} unit
-     * @returns {{ reason: "empty" | "noFolder" | "datedFolders", pattern: string } | null}
-     */
-    navigatorUnfollowed(unit) {
-        const nn = this.periodicSource() === "notebook-navigator" ? this.navigatorCalendar() : null;
-        if (!nn || this.navigatorNote(unit)) return null;
-        const set = this.periodicFormat(unit);
-        if (!set?.navigator) return { reason: "empty", pattern: "" };
-        const base = String(/** @type {{ periodicNotesFolder?: string }[] | undefined} */ (nn.vaultProfiles)?.[0]?.periodicNotesFolder ?? "").replace(/\/+$/, "");
-        return { reason: base ? "datedFolders" : "noFolder", pattern: set.format };
-    }
-
-    /**
-     * The red line under a periodic notes folder row, or "" (OBS-299): Notebook Navigator puts the notes
-     * where Plainday can't follow them yet, and where Plainday keeps them instead; then, when their names
-     * don't give the whole date (namesWholeDate), what Plainday needs. The row above says what names the
-     * notes and where that's set, so the line doesn't repeat it (Brian, 11/20). Days are named in
-     * moment's language, as Schedule.dailyNotePath names them; weeks, months and years in the week
-     * settings' (DatePrompt.weekRules), as JumpToDate.periodName does.
+     * The red line under a periodic notes folder row, or "" (OBS-299): when the notes' names don't give
+     * the whole date (namesWholeDate), what Plainday needs. The row above says what names the notes and
+     * where that's set, so the line doesn't repeat it (Brian, 11/20). Days are named in moment's
+     * language, as Schedule.dailyNotePath names them; weeks, months and years in the week settings'
+     * (DatePrompt.weekRules), as JumpToDate.periodName does. Folders by date need no line: Plainday files
+     * and finds the notes in them (OBS-310).
      * @param {"day" | "week" | "month" | "year"} unit
      * @param {string} [locale]
      * @returns {string}
      */
     periodicWarning(unit, locale = unit === "day" ? moment.locale() : plainday.DatePrompt.weekRules().locale) {
-        const lines = [];
-        const off = this.navigatorUnfollowed(unit);
-        if (off && off.reason !== "empty") {
-            const folder = unit === "day" ? plainday.Schedule.dailyOpts().folder : plainday.TimeReport.periodFolders()[unit];
-            const at = folder ? `\`${folder}\`` : "the top of the vault";
-            lines.push(off.reason === "noFolder"
-                ? `Notebook Navigator has no folder set for its periodic notes, which Plainday needs. It keeps these notes in ${at} instead.`
-                : `Notebook Navigator's ${unit} pattern, \`${off.pattern}\`, puts these notes in folders by date, which Plainday can't follow yet. It keeps them in ${at} instead.`);
-        }
         const set = this.periodicFormat(unit);
-        if (set && !this.namesWholeDate(unit, set.format, locale)) {
-            const iso = Settings.isoName(set.format.slice(set.format.lastIndexOf("/") + 1));
-            const needs = {
-                day: "the year, month, and day, such as `YYYY-MM-DD`",
-                week: `the week's year and number, such as \`${iso ? "GGGG-[W]WW" : "gggg[w]ww"}\``,
-                month: "the year and month, such as `YYYY-MM`",
-                year: "the year, such as `YYYY`",
-            }[unit];
-            lines.push(`Plainday reads a note's date from its name alone, so it needs ${needs}.`);
-        }
-        return lines.join(" ");
+        if (!set || this.namesWholeDate(unit, set.format, locale)) return "";
+        const iso = Settings.isoName(set.format.slice(set.format.lastIndexOf("/") + 1));
+        const needs = {
+            day: "the year, month, and day, such as `YYYY-MM-DD`",
+            week: `the week's year and number, such as \`${iso ? "GGGG-[W]WW" : "gggg[w]ww"}\``,
+            month: "the year and month, such as `YYYY-MM`",
+            year: "the year, such as `YYYY`",
+        }[unit];
+        return `Plainday reads a note's date from its name alone, so it needs ${needs}.`;
     }
 
     /**

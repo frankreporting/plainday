@@ -7,8 +7,8 @@ export default class PeriodicNotes {
     // FinishPeriodicNotes finishes one made any other way (Notebook Navigator's calendar, the Daily notes
     // plugin, a click on a link to a missing day) with finish().
     // - Where a note goes and what it's called: the periodic notes' source in Settings → Plainday → Folders
-    //   (OBS-283), through Schedule.dailyOpts for a day, and JumpToDate's names with TimeReport.periodFolders
-    //   for a week, a month or a year.
+    //   (OBS-283), through Schedule.dailyOpts for a day, and JumpToDate's names with TimeReport.periodPlaces
+    //   for a week, a month or a year, folders by date included (OBS-310).
     // - What Plainday writes into one: its alias, from the date, in the language of the week settings
     //   (DatePrompt.weekRules). A yearly note has none. Nothing reads it; the quick switcher and link
     //   suggestions match it when you type a date.
@@ -41,14 +41,21 @@ export default class PeriodicNotes {
     }
 
     // Where the note of `unit` ("day", "week", "month" or "year") for `date` (YYYY-MM-DD, any day of the
-    // period) goes, and what it's called: { unit, date, start, path, folder, name, kind }
+    // period) goes, and what it's called: { unit, date, start, path, folder, name, kind }. Its folder is
+    // the one the settings give, then the folders by date they give, read from the period's first day
+    // (OBS-310), so it's where Schedule.isDailyNote and periodOf look for it.
     where(unit, date, rules = plainday.DatePrompt.weekRules()) {
-        const path = unit === "day"
-            ? plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true))
-            : `${plainday.TimeReport.periodFolders()[unit]}/${plainday.JumpToDate.periodName({ date, unit }, rules)}.md`;
+        const start = this.start(unit, date, rules);
+        let path;
+        if (unit === "day") path = plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true));
+        else {
+            const place = plainday.TimeReport.periodPlaces()[unit];
+            const folder = [place.folder, place.dateFolders ? moment(start, "YYYY-MM-DD", true).locale(rules.locale).format(place.dateFolders) : ""].filter(Boolean).join("/");
+            path = `${folder ? `${folder}/` : ""}${plainday.JumpToDate.periodName({ date, unit }, rules)}.md`;
+        }
         const at = path.lastIndexOf("/");
         return {
-            unit, date, start: this.start(unit, date, rules), path,
+            unit, date, start, path,
             folder: at < 0 ? "" : path.slice(0, at), name: path.slice(at + 1).replace(/\.md$/, ""), kind: PeriodicNotes.KINDS[unit],
         };
     }
@@ -146,13 +153,7 @@ export default class PeriodicNotes {
             if (tplText.includes("<%")) unused = true;
             else text = this.merge(text, this.fill(tplText, target));
         }
-        if (folder && !app.vault.getFolderByPath(folder)) {
-            try {
-                await app.vault.createFolder(folder);
-            } catch (e) {
-                if (!app.vault.getFolderByPath(folder)) throw e;
-            }
-        }
+        await this.makeFolders(folder);
         // Templater's trigger is kept off the note from before it's there, so it's never templated twice
         this.hold(path);
         let file;
@@ -199,7 +200,7 @@ export default class PeriodicNotes {
         const empty = text.trim() === "";
         if (file.path !== target.path) {
             if (!empty || app.vault.getFileByPath(target.path)) return "left";
-            if (target.folder && !app.vault.getFolderByPath(target.folder)) await app.vault.createFolder(target.folder);
+            await this.makeFolders(target.folder);
             // Templater's trigger looks at the note by the path it's at when it looks, so the new one is held too
             this.hold(target.path);
             await app.fileManager.renameFile(file, target.path);
@@ -211,6 +212,21 @@ export default class PeriodicNotes {
         await this.addAlias(file, this.alias(period.unit, period.date, rules));
         if (top) this.cursorBelowProperties(top);
         return "finished";
+    }
+
+    // Makes the folders `path` needs, one at a time: a note in folders by date can need several (OBS-310).
+    // One made a moment ago by something else is fine.
+    async makeFolders(path) {
+        let at = "";
+        for (const part of String(path ?? "").split("/").filter(Boolean)) {
+            at = at ? `${at}/${part}` : part;
+            if (app.vault.getFolderByPath(at)) continue;
+            try {
+                await app.vault.createFolder(at);
+            } catch (e) {
+                if (!app.vault.getFolderByPath(at)) throw e;
+            }
+        }
     }
 
     // That kind of note's template, run on a note there already (finish)

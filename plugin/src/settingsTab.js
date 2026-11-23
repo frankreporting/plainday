@@ -806,8 +806,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const Settings = /** @type {typeof import("./shared/settings.js").default} */ (settings.constructor);
         const now = () => settings.get();
         // The Daily notes plugin's folder, name format and template, as Schedule reads them
-        /** @param {{ asPlugin?: boolean }} [opts] */
-        const daily = (opts) => /** @type {{ folder: string, format: string, template: string }} */ (plainday.Schedule.dailyOpts(opts));
+        const daily = () => /** @type {{ folder: string, dateFolders: string, format: string, template: string }} */ (plainday.Schedule.dailyOpts());
 
         /** @param {string} v */
         const code = (v) => `\`${v}\``;
@@ -1038,36 +1037,32 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const source = () => settings.periodicSource();
         const navigator = () => source() === "notebook-navigator";
         // A row that only says where a note goes and who decides: used for the daily notes, and for every
-        // periodic note in the Notebook Navigator source. When Navigator has no pattern Plainday can
-        // follow for a unit, the row says what decides instead, rather than crediting Navigator (OBS-283).
-        // A folder row says what names its notes, and warns when Plainday can't follow them or their names
-        // don't give their whole date (Settings.periodicWarning, OBS-299).
+        // periodic note in the Notebook Navigator source. When Navigator has no pattern for a unit, the row
+        // says what decides instead, rather than crediting Navigator (OBS-283). A folder row says what
+        // names its notes, folders by date included (OBS-310), and warns when their names don't give their
+        // whole date (Settings.periodicWarning, OBS-299).
         /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
         const shown = (name, unit, part) => row(name, "", (s) => {
             const nn = navigator() ? settings.navigatorNote(unit) : null;
-            const plugin = daily({ asPlugin: true });
             const value = part === "folder"
                 ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
                 : (unit === "day" ? daily().template : nn?.template ?? "");
-            // When Plainday can't follow Navigator's pattern for these, the red line below says why and
-            // where they are instead (Settings.periodicWarning); a template waits until it can
-            const off = navigator() && unit !== "day" ? settings.navigatorUnfollowed(unit) : null;
             const where = nn ? ". Set in Notebook Navigator."
                 : unit === "day" || !navigator() ? ". Set in Settings → Daily notes."
-                    : off?.reason === "empty" ? ". Notebook Navigator has no pattern for these, so they're Plainday's own."
-                        : part === "folder" ? ". Set in Notebook Navigator." : ", until Plainday can file these notes where Notebook Navigator does.";
+                    : ". Notebook Navigator has no pattern for these, so they're Plainday's own.";
             // A folder row also says what names its notes, which is the other half of finding them: the
-            // name Plainday reads them by (Schedule.dailyOpts for a day, DatePrompt.weekRules for the
-            // rest), so all four rows read alike (Brian, 11/20, OBS-299)
-            const names = unit === "day" ? (nn ? nn.format : plugin.format)
-                : /** @type {{ format: Record<string, string> }} */ (plainday.DatePrompt.weekRules()).format[unit];
+            // folders by date and the name, under the folder the row shows (Schedule.dailyOpts for a day,
+            // Navigator's pattern or DatePrompt.weekRules for the rest), so all four rows read alike
+            // (Brian, 11/20, OBS-299)
+            const day = daily();
+            const names = unit === "day" ? [day.dateFolders, day.format].filter(Boolean).join("/")
+                : [nn?.dateFolders, /** @type {{ format: Record<string, string> }} */ (plainday.DatePrompt.weekRules()).format[unit]].filter(Boolean).join("/");
             const named = part === "folder" ? `, named ${code(names)}` : "";
             const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
             s.descEl.empty();
             s.descEl.appendText(`${shownValue}${named}${where}`);
-            // A folder row whose notes Plainday can't follow, or whose names don't give their whole date,
-            // says so in a line of its own (OBS-299). Made here, after empty(), so a redraw never keeps
-            // an old one.
+            // A folder row whose notes' names don't give their whole date says so in a line of its own
+            // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
             const warning = part === "folder" ? settings.periodicWarning(unit) : "";
             if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
         });

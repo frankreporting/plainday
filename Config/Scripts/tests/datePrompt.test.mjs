@@ -311,7 +311,7 @@ const loadJump = ({ nn, language = "en", current = "en" } = {}) => {
     const moment = jumpMoment(current, { en: 0, "en-gb": 1, "en-au": 1, de: 1, fr: 1 });
     const plainday = {
         Schedule: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
-        TimeReport: { periodFolders: () => ({ week: `${PLANNER}/weeks`, month: `${PLANNER}/months`, year: `${PLANNER}/years` }) },
+        TimeReport: { periodPlaces: () => ({ week: { folder: `${PLANNER}/weeks`, dateFolders: "" }, month: { folder: `${PLANNER}/months`, dateFolders: "" }, year: { folder: `${PLANNER}/years`, dateFolders: "" } }) },
     };
     const ctx = vm.createContext({ moment, getLanguage: () => language, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, plainday });
     plainday.DatePrompt = new (vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", ctx))();

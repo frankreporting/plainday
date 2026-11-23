@@ -99,15 +99,13 @@ export default class Plan {
         return plainday.Schedule.dailyOpts();
     }
 
+    // Where a day's note goes, and whether a note is one: Schedule's, folders by date included (OBS-310)
     dailyNotePath(m) {
-        const { folder, format } = this.dailyOpts();
-        return `${folder ? folder + "/" : ""}${m.format(format)}.md`;
+        return plainday.Schedule.dailyNotePath(m);
     }
 
     isDailyNote(file) {
-        const { folder, format } = this.dailyOpts();
-        const inFolder = (file.parent?.path ?? "/") === (folder || "/");
-        return inFolder && moment(file.basename, format, true).isValid();
+        return plainday.Schedule.isDailyNote(file);
     }
 
     // The day's note, made if it isn't there, as every periodic note is made (PeriodicNotes.ensure)
