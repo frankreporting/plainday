@@ -55,8 +55,10 @@ function cacheOf(text) {
 }
 
 // Plainday's classes on a stand-in vault of `notes` (path → text), with Navigator's patterns. `open` is a
-// note open in an editor. Returns the vault's notes as they are after each call, and the notices.
-function vault(notes, { patterns = {}, open = null, daily = { format: "YYYY-MM-DD", folder: DAYS } } = {}) {
+// note open in an editor. `ardh` stands in for Advanced Rename and Delete Handler, which on every rename
+// rewrites the wikilinks that link the renamed note. Returns the vault's notes as they are after each call,
+// and the notices.
+function vault(notes, { patterns = {}, open = null, daily = { format: "YYYY-MM-DD", folder: DAYS }, ardh = false } = {}) {
     const files = new Map(Object.entries(notes));
     const made = new Set();
     const handles = new Map();
@@ -122,6 +124,14 @@ function vault(notes, { patterns = {}, open = null, daily = { format: "YYYY-MM-D
             rename: async (f, to) => {
                 if (files.has(to)) throw new Error("Destination file already exists!");
                 const from = f.path;
+                if (ardh) {
+                    const name = to.replace(/\.md$/, "");
+                    for (const [p, text] of files) {
+                        const next = text.replace(/(!?)\[\[([^\]#|\\]*)((?:\\?\||#)[^\]]*)?\]\]/g, (all, bang, linkpath, rest = "") =>
+                            (byLink(linkpath)?.path === from ? `${bang}[[${linkpath.includes("/") ? name : name.split("/").pop()}${rest}]]` : all));
+                        if (next !== text) files.set(p, next);
+                    }
+                }
                 // The folder a note leaves stays, as Obsidian leaves it, until it's removed
                 for (let d = parentOf(from); d; d = parentOf(d)) made.add(d);
                 files.set(to, files.get(from));
@@ -209,14 +219,20 @@ test("the links follow: label, heading, block, \\| and ! kept; a path keeps a pa
     assert.equal(end.left, false);
 });
 
-test("links are rewritten before the notes are renamed", async () => {
+test("two steps, through temporary names, and in each the links are rewritten before the notes are renamed", async () => {
     const v = vault(Object.fromEntries([day("2026-09-17"), ["Inbox/A.md", "[[2026-09-17]]"]]));
-    const order = [];
     const process = v.plainday.Schedule.rewrite.bind(v.plainday.Schedule);
-    v.plainday.Schedule.rewrite = async (f, fn) => { order.push(`links in ${f.path}`); return process(f, fn); };
+    const seen = [];
+    v.plainday.Schedule.rewrite = async (f, fn) => {
+        v.renames.push(`links in ${f.path}`);
+        const text = await process(f, fn);
+        seen.push(v.notes()[f.path]);
+        return text;
+    };
     await v.run({ from: "YYYY-MM-DD" });
-    order.push(...v.renames);
-    assert.deepEqual(order, ["links in Inbox/A.md", `${DAYS}/2026-09-17.md → ${DAYS}/17-09-2026.md`]);
+    assert.deepEqual(v.renames, ["links in Inbox/A.md", `${DAYS}/2026-09-17.md → ${DAYS}/Plainday renaming 17-09-2026.md`,
+        "links in Inbox/A.md", `${DAYS}/Plainday renaming 17-09-2026.md → ${DAYS}/17-09-2026.md`]);
+    assert.deepEqual(seen, ["[[Plainday renaming 17-09-2026]]", "[[17-09-2026]]"]);
 });
 
 test("a note open in an editor is written through it, and saved before the renames", async () => {
@@ -292,21 +308,45 @@ test("a name another note has already: that note is left beside it, its links to
     assert.equal(merged.notes()["Inbox/A.md"], "[[18-09-2026|9/18]] [[17-09-2026|9/17]]");
 });
 
-test("formats that name days alike are refused, with a third format to go through, which renames them right", async () => {
-    const notes = { [`${DAYS}/05-11-2026.md`]: "", [`${DAYS}/11-05-2026.md`]: "", [`${DAYS}/20-11-2026.md`]: "", "Inbox/A.md": "[[05-11-2026|🚩 11/5]] [[11-05-2026|🚩 5/11]]" };
-    const daily = { format: "DD-MM-YYYY", folder: DAYS };
-    let v = vault(notes, { daily, patterns: { calendarCustomFilePattern: "[days]/MM-DD-YYYY" } });
-    assert.match(v.plan({ from: "DD-MM-YYYY", to: "MM-DD-YYYY" }).refused,
-        /^11-05-2026 would take the name 05-11-2026 has now, since DD-MM-YYYY and MM-DD-YYYY name some days alike\. Rename them to YYYY-MM-DD first, then from YYYY-MM-DD to MM-DD-YYYY\.$/);
-    await v.run({ from: "DD-MM-YYYY", to: "YYYY-MM-DD" });
-    v = vault(v.notes(), { daily, patterns: { calendarCustomFilePattern: "[days]/MM-DD-YYYY" } });
-    await v.run({ from: "YYYY-MM-DD", to: "MM-DD-YYYY" });
-    const n = v.notes();
+test("formats that name days alike rename in one run, even with a plugin that rewrites links on every rename", async () => {
+    // From DD-MM-YYYY to MM-DD-YYYY, 05-11-2026 is November 5 before and May 11 after
+    const opts = { ardh: true, patterns: { calendarCustomFilePattern: "[days]/MM-DD-YYYY" } };
+    const both = vault({ [`${DAYS}/05-11-2026.md`]: "November 5", [`${DAYS}/11-05-2026.md`]: "May 11", [`${DAYS}/20-11-2026.md`]: "",
+        "Inbox/A.md": "[[05-11-2026|11/5]] [[11-05-2026|5/11]]" }, opts);
+    await both.run({ from: "DD-MM-YYYY", to: "MM-DD-YYYY" });
+    let n = both.notes();
     assert.deepEqual(Object.keys(n).filter((k) => k.startsWith(DAYS)), [`${DAYS}/05-11-2026.md`, `${DAYS}/11-05-2026.md`, `${DAYS}/11-20-2026.md`]);
-    assert.equal(n["Inbox/A.md"], "[[11-05-2026|🚩 11/5]] [[05-11-2026|🚩 5/11]]");
+    assert.equal(n[`${DAYS}/11-05-2026.md`], "November 5", "the two swap names");
+    assert.equal(n["Inbox/A.md"], "[[11-05-2026|11/5]] [[05-11-2026|5/11]]");
+    // Only one of the two has a note: a 🚩 to the other day keeps its day
+    const one = vault({ [`${DAYS}/05-11-2026.md`]: "November 5", "Inbox/A.md": "[[05-11-2026|11/5]] [[11-05-2026|🚩 5/11]]" }, opts);
+    await one.run({ from: "DD-MM-YYYY", to: "MM-DD-YYYY" });
+    n = one.notes();
+    assert.equal(n[`${DAYS}/11-05-2026.md`], "November 5");
+    assert.equal(n["Inbox/A.md"], "[[11-05-2026|11/5]] [[05-11-2026|🚩 5/11]]");
     // Weeks counted two ways whose names look alike, across a year starting on a Friday
-    const w = vault({ [`${WEEKS}/2027w01.md`]: "", [`${WEEKS}/2027w02.md`]: "" }, { patterns: { calendarCustomWeekPattern: "[weeks]/GGGG[w]WW" } });
-    assert.match(w.plan({ unit: "week", folder: WEEKS, from: "gggg[w]ww", to: "GGGG[w]WW" }).refused, /Rename them to GGGG-\[W\]WW first/);
+    const w = vault({ [`${WEEKS}/2027w01.md`]: "Dec 27", [`${WEEKS}/2027w02.md`]: "Jan 3", "Inbox/A.md": "[[2027w01]] [[2027w02]]" },
+        { ardh: true, patterns: { calendarCustomWeekPattern: "[weeks]/GGGG[w]WW" } });
+    await w.run({ unit: "week", folder: WEEKS, from: "gggg[w]ww", to: "GGGG[w]WW" });
+    n = w.notes();
+    assert.deepEqual([n[`${WEEKS}/2026w53.md`], n[`${WEEKS}/2027w01.md`]], ["Dec 27", "Jan 3"]);
+    assert.equal(n["Inbox/A.md"], "[[2026w53]] [[2027w01]]");
+    // A note that stays, since another note keeps its new name, holds back the one that would take its name
+    const held = vault({ [`${DAYS}/05-11-2026.md`]: "", [`${DAYS}/11-05-2026.md`]: "", "Projects/11-05-2026.md": "" });
+    assert.deepEqual(plain(held.plan({ from: "DD-MM-YYYY", to: "MM-DD-YYYY" }).taken.map((t) => t.rel)), ["11-05-2026", "05-11-2026"]);
+});
+
+test("a run that stopped between its steps is finished by running the command again", async () => {
+    const v = vault({ [`${DAYS}/Plainday renaming 17-09-2026.md`]: "", [`${DAYS}/2026-09-18.md`]: "",
+        "Inbox/A.md": `[[Plainday renaming 17-09-2026|9/17]] [[Plainday renaming 30-09-2026|🚩 9/30]] [[2026-09-18]] [[${DAYS}/Plainday renaming 17-09-2026]]` });
+    assert.equal(v.R.unfinished().notes.length, 1);
+    const end = await v.R.runFinish();
+    const n = v.notes();
+    assert.equal(n["Inbox/A.md"], `[[17-09-2026|9/17]] [[30-09-2026|🚩 9/30]] [[2026-09-18]] [[${DAYS}/17-09-2026]]`);
+    assert.ok(`${DAYS}/17-09-2026.md` in n);
+    assert.equal(end.text, "Renamed 1 periodic note and rewrote 3 links in 1 note.");
+    const left = v.R.unfinished();
+    assert.equal(left.notes.length + left.edits.size, 0);
 });
 
 test("Markdown links and links in properties are counted and listed, not rewritten", async () => {
@@ -363,7 +403,7 @@ function demoNotes() {
 
 test("the demo renamed to DD-MM-YYYY reads as planned, and renamed back is as committed", async () => {
     const committed = demoNotes();
-    const v = vault(committed, { patterns: { calendarCustomFilePattern: "[days]/DD-MM-YYYY" } });
+    const v = vault(committed, { ardh: true, patterns: { calendarCustomFilePattern: "[days]/DD-MM-YYYY" } });
     const p = v.plan({ from: "YYYY-MM-DD" });
     assert.equal(p.notes.length, 10);
     assert.equal(p.taken.length, 0);
@@ -376,8 +416,9 @@ test("the demo renamed to DD-MM-YYYY reads as planned, and renamed back is as co
     assert.match(n[`${DAYS}/17-09-2026.md`], /\[\[30-09-2026\|🚩 9\/30\]\]/);
     assert.ok(Object.keys(n).some((k) => k.includes("2026-09-14 Homepage review")), "a log keeps its name");
     assert.equal(end.left, false, end.text);
+    assert.ok(!Object.entries(n).some(([k, text]) => `${k}${text}`.includes("Plainday renaming")), "nothing left under a temporary name");
     // And back
-    const back = vault(n);
+    const back = vault(n, { ardh: true });
     await back.run({ from: "DD-MM-YYYY", to: "YYYY-MM-DD" });
     assert.deepEqual(back.notes(), Object.fromEntries(Object.entries(committed).sort(([a], [b]) => a.localeCompare(b))));
 });

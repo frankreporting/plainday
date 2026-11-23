@@ -16,9 +16,14 @@ export default class RenamePeriodicNotes {
     //   the old format (most 🚩s link a day with no note). Each keeps its label, heading or block, folder
     //   and \|. Markdown links and links in properties, which Plainday never writes, are counted and listed
     //   for you instead. A table whose links change length is padded again (TimeReport.table, OBS-184).
-    // - Links first, then names: a plugin that rewrites links on a rename (Advanced Rename and Delete
-    //   Handler) then finds none left, and app.vault.rename doesn't stop to ask "Update links?" for each
-    //   note as fileManager.renameFile does unless Obsidian's setting is on.
+    // - Two steps, through temporary names (TEMP and the new name): first every link and note to its
+    //   temporary name, then off it. Each step rewrites the links first, then the names, so a plugin that
+    //   rewrites links on a rename (Advanced Rename and Delete Handler) finds none left, and
+    //   app.vault.rename doesn't stop to ask "Update links?" as fileManager.renameFile does. The temporary
+    //   names are why formats that name days alike work: from DD-MM-YYYY to MM-DD-YYYY, 05-11-2026 is
+    //   November 5 before and May 11 after, and renamed directly, a link rewritten to May 11 would spell the
+    //   November note's name until that note is renamed, and such a plugin would move it along.
+    //   A run that stops between the steps is finished by running the command again.
     // - A note whose new name another note has already is left beside it, and listed, so a link by name
     //   never becomes ambiguous. A note it can't rewrite is left as it was, and listed; the run goes on.
     // It changes no setting. Running it again with the formats swapped undoes it.
@@ -27,10 +32,12 @@ export default class RenamePeriodicNotes {
     static PROGRESS_MS = 1000;
     // How many names a notice lists before it says how many more
     static LISTED = 5;
-    // Formats to go through when the old and new ones name periods alike
-    static VIA = { day: ["YYYY-MM-DD", "YYYYMMDD"], week: ["GGGG-[W]WW", "gggg[w]ww"], month: ["YYYY-MM", "YYYYMM"], year: ["YYYY"] };
+    // What a note's or link's name starts with between the two steps of a run
+    static TEMP = "Plainday renaming ";
 
     async invoke() {
+        const left = this.unfinished();
+        if (left.notes.length || left.edits.size) return this.askFinish(left);
         this.ask({ unit: "day", ...this.defaults("day"), from: "" });
     }
 
@@ -103,6 +110,22 @@ export default class RenamePeriodicNotes {
         modal.open();
     }
 
+    // The dialog when a run stopped between its two steps: it offers to finish
+    askFinish(left) {
+        const modal = new Modal(app);
+        modal.titleEl.setText("Rename periodic notes");
+        const el = modal.contentEl;
+        const n = left.notes.length, links = [...left.edits.values()].reduce((a, l) => a + l.length, 0);
+        const what = n ? `${this.count(n, "note")} still ${n === 1 ? "has a temporary name" : "have temporary names"}, such as ${left.notes[0].rel}`
+            : `${this.count(links, "link")} still ${links === 1 ? "links a temporary name" : "link temporary names"}`;
+        el.createEl("p", { text: `A rename stopped before it was done, so ${what}. Finishing gives them their new names, and the links to them.` });
+        const row = el.createDiv({ cls: "modal-button-container" });
+        new ButtonComponent(row).setButtonText("Cancel").onClick(() => modal.close());
+        const go = new ButtonComponent(row).setButtonText("Finish").setCta().onClick(() => { modal.close(); void this.runFinish(); });
+        modal.onOpen = () => window.requestAnimationFrame(() => go.buttonEl.focus());
+        modal.open();
+    }
+
     // What the preview says: [{ text, caution }]
     describe(p) {
         const lines = [], kind = RenamePeriodicNotes.KINDS[p.unit];
@@ -134,7 +157,8 @@ export default class RenamePeriodicNotes {
 
     // Everything a run would do, worked out without changing anything: { unit, kind, folder, from, to, locale,
     // dest, notes: [{ file, from (its path), rel, period, name, path }], taken: [the same, left], edits:
-    // Map(path → [{ start, end, original, text }]), links and dangling (how many, and how many link no note),
+    // Map(path → [{ start, end, original, text, temp (its text between the steps) }]), links and dangling
+    // (how many, and how many link no note),
     // other: Map(path → its Markdown and property links), mislabeled: { count, label, name } }, or { refused }
     plan({ unit, folder, from, to }) {
         const rules = plainday.DatePrompt.weekRules();
@@ -169,23 +193,29 @@ export default class RenamePeriodicNotes {
             if (path !== f.path) found.push({ file: f, from: f.path, rel, period, name, path });
         }
         found.sort((a, b) => a.period.localeCompare(b.period));
-        // Formats that name periods alike (DD-MM-YYYY and MM-DD-YYYY): a note would take the name another note
-        // this run renames has now. Renamed one by one, a plugin that rewrites links on each rename would move
-        // the links meant for one onto the other, so the run goes through a third format instead.
-        const leaving = new Map(found.map((n) => [n.file.basename.toLowerCase(), n]));
-        const swap = found.find((n) => (leaving.get(n.name.toLowerCase()) ?? n) !== n);
-        if (swap) {
-            const was = leaving.get(swap.name.toLowerCase());
-            const via = RenamePeriodicNotes.VIA[unit].find((f) => f !== from && f !== to);
-            return { refused: `${swap.rel} would take the name ${was.rel} has now, since ${from} and ${to} name some ${unit === "day" ? "days" : `${unit}s`} alike. Rename them to ${via} first, then from ${via} to ${to}.` };
+        // A note stays when its new name is one a note keeps (a link by name would then be ambiguous), or an
+        // earlier note gets it. The notes this run renames give their names up, so two may swap names (the
+        // temporary names make that safe), until one of them is found to stay, which can hold another back.
+        const stays = new Set();
+        let notes = [];
+        for (let changed = true; changed;) {
+            changed = false;
+            const kept = new Map(names), leaving = new Set();
+            for (const n of found) {
+                if (stays.has(n)) continue;
+                const key = n.file.basename.toLowerCase();
+                kept.set(key, kept.get(key) - 1);
+                leaving.add(n.from);
+            }
+            notes = [];
+            const giving = new Set();
+            for (const n of found) {
+                if (stays.has(n)) continue;
+                const key = n.name.toLowerCase(), at = app.vault.getAbstractFileByPath(n.path);
+                if ((kept.get(key) ?? 0) > 0 || giving.has(key) || (at && !leaving.has(at.path))) { stays.add(n); changed = true; } else { giving.add(key); notes.push(n); }
+            }
         }
-        const notes = [], taken = [], giving = new Set();
-        for (const n of found) {
-            const key = n.name.toLowerCase();
-            const others = (names.get(key) ?? 0) - (n.file.basename.toLowerCase() === key ? 1 : 0);
-            if (others > 0 || giving.has(key) || app.vault.getAbstractFileByPath(n.path)) taken.push(n);
-            else { giving.add(key); notes.push(n); }
-        }
+        const taken = found.filter((n) => stays.has(n));
         ctx.renamed = new Map(notes.map((n) => [n.from, n]));
         // The old format's last part, which reads a link by its name alone when it gives the whole date
         const last = from.slice(from.lastIndexOf("/") + 1);
@@ -207,7 +237,10 @@ export default class RenamePeriodicNotes {
                 }
                 const next = this.retarget(w.linkpath, f.path, ctx);
                 if (!next || typeof at !== "number" || typeof end !== "number") continue;
-                list.push({ start: at, end, original: l.original, text: `${w.bang}[[${next.linkpath}${w.rest}]]` });
+                // Its temporary name, for the first step
+                const cut = next.linkpath.lastIndexOf("/") + 1;
+                const temp = `${next.linkpath.slice(0, cut)}${RenamePeriodicNotes.TEMP}${next.linkpath.slice(cut)}`;
+                list.push({ start: at, end, original: l.original, text: `${w.bang}[[${next.linkpath}${w.rest}]]`, temp: `${w.bang}[[${temp}${w.rest}]]` });
                 if (!next.note) dangling++;
                 const shows = unit === "day" ? plainday.TimeReport.constructor.labelDay(w.label) : null;
                 if (shows && shows !== `${+next.period.slice(5, 7)}/${+next.period.slice(8, 10)}`) {
@@ -297,73 +330,152 @@ export default class RenamePeriodicNotes {
     // ---------------------------------------------------------------- the run
 
     async run(p) {
-        const started = Date.now();
-        let progress = null;
-        const tell = (text) => {
-            if (!progress && Date.now() - started < RenamePeriodicNotes.PROGRESS_MS) return;
-            progress ??= new Notice(text, 0);
-            progress.setMessage(text);
-        };
-        const done = { links: 0, notes: 0, files: 0 }, failed = [], missed = [], late = [];
+        const show = this.progress(), out = { failed: new Set(), missed: new Set(), late: [] };
+        const done = { links: 0, notes: 0, files: 0 }, T = RenamePeriodicNotes.TEMP;
+        const emptied = new Set();
         try {
-            // Links first
-            const written = [];
+            // Step 1: every link and note to its temporary name, which no note or link has
+            const temp = new Map([...p.edits].map(([path, list]) => [path, list.map((e) => ({ ...e, text: e.temp }))]));
+            Object.assign(done, await this.rewriteLinks(temp, (i, n) => show(`Step 1 of 2: rewriting links in ${i} of ${n}…`), out));
+            const ours = new Set(p.notes.map((n) => n.from));
             let i = 0;
-            for (const [path, list] of p.edits) {
-                tell(`Rewriting links: ${++i} of ${this.count(p.edits.size, "note")}…`);
-                const file = app.vault.getFileByPath(path);
-                if (!file) { missed.push(path); continue; }
-                try {
-                    let n = 0;
-                    await plainday.Schedule.rewrite(file, (text) => {
-                        const out = this.apply(text, list);
-                        n = out.count;
-                        return out.text;
-                    });
-                    done.links += n;
-                    if (n) { done.files++; written.push(file); }
-                    if (n < list.length) missed.push(path);
-                } catch (e) {
-                    console.error(`RenamePeriodicNotes: couldn't rewrite the links in ${path}`, e);
-                    failed.push(path);
-                }
-            }
-            // An open note is read into the cache only once it's saved
-            for (const file of written) await this.viewOf(file)?.save?.();
-            await this.settled();
-            // Then the names
-            const emptied = new Set();
-            i = 0;
             for (const n of p.notes) {
-                tell(`Renaming ${p.kind} notes: ${++i} of ${p.notes.length}…`);
+                show(`Step 1 of 2: renaming ${++i} of ${this.count(p.notes.length, `${p.kind} note`)}…`);
                 if (!app.vault.getFileByPath(n.from)) continue;
-                if (app.vault.getAbstractFileByPath(n.path)) { late.push(n); continue; }
+                // A note made under the new name since the preview
+                const held = app.vault.getAbstractFileByPath(n.path);
+                const to = `${p.dest ? `${p.dest}/` : ""}${T}${n.name}.md`;
+                if ((held && !ours.has(held.path)) || app.vault.getAbstractFileByPath(to)) { out.late.push(n); continue; }
                 try {
                     if (p.dest && !app.vault.getFolderByPath(p.dest)) await app.vault.createFolder(p.dest);
-                    await app.vault.rename(n.file, n.path);
-                    done.notes++;
+                    await app.vault.rename(n.file, to);
                     for (let dir = this.parentOf(n.from); dir && dir !== p.folder && dir.startsWith(p.folder ? `${p.folder}/` : ""); dir = this.parentOf(dir)) emptied.add(dir);
                 } catch (e) {
                     console.error(`RenamePeriodicNotes: couldn't rename ${n.from}`, e);
-                    failed.push(n.from);
+                    out.failed.add(n.from);
                 }
             }
+            await this.settled();
+            // Step 2: off the temporary names
+            done.notes = (await this.finish((text) => show(`Step 2 of 2: ${text}`), out)).notes;
             // The date folders the notes came out of, deepest first, when nothing is left in them
             for (const dir of [...emptied].sort((a, b) => b.split("/").length - a.split("/").length)) {
                 const f = app.vault.getFolderByPath(dir);
                 if (f && !f.children.length) await app.fileManager.trashFile(f).catch((e) => console.error(`RenamePeriodicNotes: couldn't remove ${dir}`, e));
             }
         } finally {
-            progress?.hide();
+            show.hide();
         }
-        const end = this.summary(p, done, { failed, missed, late });
+        const end = this.summary(p, done, out);
         new Notice(end.text, end.left ? 0 : undefined);
         return end;
     }
 
+    // A run that stopped between its steps, finished
+    async runFinish() {
+        const show = this.progress(), out = { failed: new Set(), missed: new Set(), late: [] };
+        let done;
+        try {
+            done = await this.finish(show, out);
+        } finally {
+            show.hide();
+        }
+        const end = this.summary({ kind: "periodic", taken: [], other: new Map() }, done, out);
+        new Notice(end.text, end.left ? 0 : undefined);
+        return end;
+    }
+
+    // Step 2: every link to a temporary name, and every note with one, off it: { notes, links, files }
+    async finish(show, out) {
+        const left = this.unfinished();
+        const done = await this.rewriteLinks(left.edits, (i, n) => show(`rewriting links in ${i} of ${n}…`), out);
+        done.notes = 0;
+        let i = 0;
+        for (const n of left.notes) {
+            show(`renaming ${++i} of ${this.count(left.notes.length, "note")}…`);
+            // It keeps its temporary name while another note has its name
+            if (app.vault.getAbstractFileByPath(n.path)) { out.late.push(n); continue; }
+            try {
+                await app.vault.rename(n.file, n.path);
+                done.notes++;
+            } catch (e) {
+                console.error(`RenamePeriodicNotes: couldn't rename ${n.from}`, e);
+                out.failed.add(n.from);
+            }
+        }
+        return done;
+    }
+
+    // What's still under a temporary name, as the second step would change it: { notes: [{ file, from, rel,
+    // name, path }], edits: Map(path → [{ start, end, original, text }]) }
+    unfinished() {
+        const T = RenamePeriodicNotes.TEMP, files = app.vault.getMarkdownFiles();
+        const notes = files.filter((f) => f.basename.startsWith(T)).map((f) => {
+            const name = f.basename.slice(T.length), dir = this.parentOf(f.path);
+            return { file: f, from: f.path, rel: f.basename, name, path: `${dir ? `${dir}/` : ""}${name}.md` };
+        });
+        const edits = new Map();
+        for (const f of files) {
+            const cache = app.metadataCache.getFileCache(f), list = [];
+            for (const l of [...(cache?.links ?? []), ...(cache?.embeds ?? [])]) {
+                const w = RenamePeriodicNotes.parse(l.original);
+                const at = l.position?.start?.offset, end = l.position?.end?.offset;
+                if (!w || typeof at !== "number" || typeof end !== "number") continue;
+                const cut = w.linkpath.lastIndexOf("/") + 1;
+                if (!w.linkpath.startsWith(T, cut)) continue;
+                list.push({ start: at, end, original: l.original, text: `${w.bang}[[${w.linkpath.slice(0, cut)}${w.linkpath.slice(cut + T.length)}${w.rest}]]` });
+            }
+            if (list.length) edits.set(f.path, list);
+        }
+        return { notes, edits };
+    }
+
+    // The links of `edits` rewritten, then the views written through saved and the cache caught up: { links,
+    // files }. A note that can't be written goes into out.failed, one whose links moved into out.missed.
+    async rewriteLinks(edits, show, out) {
+        const written = [];
+        let i = 0, links = 0;
+        for (const [path, list] of edits) {
+            show(++i, this.count(edits.size, "note"));
+            const file = app.vault.getFileByPath(path);
+            if (!file) { out.missed.add(path); continue; }
+            try {
+                let n = 0;
+                await plainday.Schedule.rewrite(file, (text) => {
+                    const r = this.apply(text, list);
+                    n = r.count;
+                    return r.text;
+                });
+                links += n;
+                if (n) written.push(file);
+                if (n < list.length) out.missed.add(path);
+            } catch (e) {
+                console.error(`RenamePeriodicNotes: couldn't rewrite the links in ${path}`, e);
+                out.failed.add(path);
+            }
+        }
+        // An open note is read into the cache only once it's saved
+        for (const file of written) await this.viewOf(file)?.save?.();
+        await this.settled();
+        return { links, files: written.length };
+    }
+
+    // A notice of a run's progress, shown once it takes longer than PROGRESS_MS: show(text), show.hide()
+    progress() {
+        const started = Date.now();
+        let notice = null;
+        const show = (text) => {
+            if (!notice && Date.now() - started < RenamePeriodicNotes.PROGRESS_MS) return;
+            notice ??= new Notice(text, 0);
+            notice.setMessage(text);
+        };
+        show.hide = () => notice?.hide();
+        return show;
+    }
+
     // What the notice at the end says, and whether it left anything: { text, left }
-    summary(p, done, { failed, missed, late }) {
-        const kind = p.kind, lines = [];
+    summary(p, done, out) {
+        const kind = p.kind, lines = [], failed = [...out.failed], missed = [...out.missed], late = out.late;
         lines.push(`Renamed ${this.count(done.notes, `${kind} note`)} and rewrote ${this.count(done.links, "link")} in ${this.count(done.files, "note")}.`);
         const name = (path) => path.split("/").pop().replace(/\.md$/, "");
         const left = [...p.taken, ...late];
@@ -375,8 +487,8 @@ export default class RenamePeriodicNotes {
     }
 
     // `text` with each link of `list` changed where it still is (a note being edited may have moved it), and
-    // each table whose links changed length padded again: { text, count }. Throws when a table can't be
-    // padded, so the note is left as it was.
+    // each padded table whose links changed length padded again, so a table typed by hand stays as typed:
+    // { text, count }. Throws when a table can't be padded, so the note is left as it was.
     apply(text, list) {
         let out = text, count = 0;
         const lines = new Set();
@@ -387,7 +499,7 @@ export default class RenamePeriodicNotes {
             if (e.text.length !== e.original.length) lines.add(text.slice(0, e.start).split("\n").length - 1);
         }
         if (!lines.size) return { text: out, count };
-        const all = out.split("\n");
+        const all = out.split("\n"), before = text.split("\n");
         // Each table once, from its last changed line up, so the lines above keep their numbers
         const done = new Set();
         for (const i of [...lines].sort((a, b) => b - a)) {
@@ -398,7 +510,8 @@ export default class RenamePeriodicNotes {
             done.add(a);
             let b = i;
             while (b + 1 < all.length && all[b + 1].startsWith("|")) b++;
-            const padded = this.pad(all.slice(a, b + 1));
+            const was = before.slice(a, b + 1);
+            const padded = this.pad(was)?.join("\n") === was.join("\n") ? this.pad(all.slice(a, b + 1)) : null;
             if (padded) all.splice(a, b - a + 1, ...padded);
         }
         return { text: all.join("\n"), count };
