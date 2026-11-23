@@ -62,6 +62,8 @@ export const TYPED = [
     "plugin/src/shared/settings.js",
     "plugin/src/shared/snapshotDailyNotes.js",
     "plugin/src/shared/taskChange.js",
+    "plugin/src/shared/taskIds.js",
+    "plugin/src/startup/checkOff.js",
     "plugin/src/startup/finishLinkedLogs.js",
     "plugin/src/startup/finishPeriodicNotes.js",
     "plugin/src/startup/newNoteGuard.js",
