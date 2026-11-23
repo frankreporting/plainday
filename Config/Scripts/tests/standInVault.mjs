@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 
 export const src = (name) => classScript(`${name}.js`);
 
@@ -331,8 +331,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     let dialogUp = false;
     const page = { body: {}, querySelector: (sel) => (dialogUp && (sel === ".modal-container" || (sel === ".modal-container .prompt" && dialogUp === "prompt")) ? {} : null) };
     const MutationObserver = class { constructor(fn) { this.fn = fn; this.on = false; observers.push(this); } observe() { this.on = true; } disconnect() { this.on = false; } };
-    // `window`: where the editor features keep their handles
-    const context = vm.createContext({ ...obsidian, app, plainday, window: {}, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, MutationObserver, console: { ...console, error: () => {}, info: () => {} } });
+    // `window`: where the editor features keep their handles, with the context's timers
+    const context = withWindow(vm.createContext({ ...obsidian, app, plainday, window: {}, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, MutationObserver, console: { ...console, error: () => {}, info: () => {} } }));
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {

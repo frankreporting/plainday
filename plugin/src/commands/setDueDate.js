@@ -122,7 +122,7 @@ export default class DueDate {
             modal.close();
 
             // Safety net: if the fold got dropped anyway, restore the pre-edit fold map
-            setTimeout(() => {
+            window.setTimeout(() => {
                 const wasFolded = foldBefore?.folds?.some(f => f.from === lineNum);
                 const after = view.currentMode.getFoldInfo?.();
                 const stillFolded = after?.folds?.some(f => f.from === lineNum);
@@ -205,7 +205,7 @@ export default class DueDate {
             try {
                 const info = getFrontMatterInfo(text);
                 return info.exists ? parseYaml(info.frontmatter) ?? {} : {};
-            } catch (e) {
+            } catch {
                 return undefined;
             }
         };

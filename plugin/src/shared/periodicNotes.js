@@ -355,9 +355,9 @@ export default class PeriodicNotes {
     hold(path) {
         const pending = this.pending();
         if (!pending || !path) return;
-        clearTimeout(this.holds.get(path));
+        window.clearTimeout(this.holds.get(path));
         pending.add(path);
-        this.holds.set(path, setTimeout(() => {
+        this.holds.set(path, window.setTimeout(() => {
             this.holds.delete(path);
             pending.delete(path);
         }, PeriodicNotes.HOLD_MS));

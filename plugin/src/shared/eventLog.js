@@ -154,7 +154,7 @@ export default class EventLog {
         };
         toBody();
         // Obsidian can put the cursor in the title as the note opens
-        setTimeout(toBody, 300);
+        window.setTimeout(toBody, 300);
     }
 
     // The daily note's text: its editor's when it's open in the active pane (Add note just linked the line there),
@@ -280,7 +280,7 @@ export default class EventLog {
             await app.fileManager.renameFile(file, path);
         }
         // The editor shows what's on disk a moment later; a cursor still at its top goes below the properties
-        if (top) setTimeout(() => notes.cursorBelowProperties(top), 100);
+        if (top) window.setTimeout(() => notes.cursorBelowProperties(top), 100);
         return { file, made: true };
     }
 

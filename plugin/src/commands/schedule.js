@@ -224,7 +224,7 @@ export default class Schedule {
             // Its editor saves these edits only in a moment, so the next lookup reads the note itself
             tasks.touched(srcFile);
 
-            if (lineSurvives) setTimeout(() => {
+            if (lineSurvives) window.setTimeout(() => {
                 const wasFolded = foldBefore?.folds?.some(f => f.from === lineNum);
                 const stillFolded = view.currentMode.getFoldInfo?.()?.folds?.some(f => f.from === lineNum);
                 if (wasFolded && !stillFolded && view.currentMode.applyFoldInfo) {
@@ -980,7 +980,7 @@ export default class Schedule {
 
         const info = { folds, lines: content.split("\n").length };
         const view = app.workspace.getLeavesOfType("markdown").map(l => l.view).find(v => v?.file === file);
-        if (view) setTimeout(() => view.currentMode.applyFoldInfo(info), 50);
+        if (view) window.setTimeout(() => view.currentMode.applyFoldInfo(info), 50);
         await app.foldManager.save(file, info);
     }
 }

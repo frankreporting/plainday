@@ -8,12 +8,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
-import { classScript, readIndex } from "../../../plugin/classShape.mjs";
+import { classScript, readIndex, withWindow } from "../../../plugin/classShape.mjs";
 const { STARTUP } = readIndex("startup").exports;
 
 const here = new URL(".", import.meta.url);
 const SOURCE = classScript("newNoteGuard.js");
-const NewNoteGuard = vm.runInContext(SOURCE + "\n;NewNoteGuard", vm.createContext({}));
+const NewNoteGuard = vm.runInContext(SOURCE + "\n;NewNoteGuard", withWindow(vm.createContext({})));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const arrivedNote = createRequire(import.meta.url)("../Templater/arrivedNote.js");
 
@@ -48,7 +48,7 @@ test("arrivedNote, Get Template's copy of the rule, agrees with the guard", () =
 // is loaded (`plainday.plugin`), or has unloaded and left this listener behind.
 function setup({ loaded = true, templater = true } = {}) {
     const pending = new Set(), texts = new Map(), listeners = [];
-    const ctx = vm.createContext({
+    const ctx = withWindow(vm.createContext({
         plainday: { plugin: loaded ? {} : null },
         app: {
             plugins: {
@@ -69,7 +69,7 @@ function setup({ loaded = true, templater = true } = {}) {
         setTimeout,
         queueMicrotask,
         clearTimeout,
-    });
+    }));
     const Guard = vm.runInContext(SOURCE + "\n;NewNoteGuard", ctx);
     const guard = new Guard();
     const file = (path, text) => {

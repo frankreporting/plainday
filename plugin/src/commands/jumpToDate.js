@@ -184,7 +184,7 @@ export default class JumpToDate {
                 resolve(create);
             };
             // Focus once the modal is open, a frame later (OBS-50)
-            modal.onOpen = () => requestAnimationFrame(() => yes.focus());
+            modal.onOpen = () => window.requestAnimationFrame(() => yes.focus());
             modal.open();
         });
     }

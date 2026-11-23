@@ -264,13 +264,13 @@ export default class CheckOff {
         for (let k = 0; k < 10; k++) {
             const vs = views();
             if (vs.length < 2 || vs.every((v) => v.editor.getValue() === vs[0].editor.getValue())) return;
-            await new Promise((ok) => setTimeout(ok, 35));
+            await new Promise((ok) => window.setTimeout(ok, 35));
         }
     }
 
     // Runs `job` after the jobs before it, one at a time, never inside an edit
     enqueue(job) {
-        const run = () => new Promise((ok) => setTimeout(ok, 0)).then(() => Promise.race([job(), new Promise((ok) => setTimeout(ok, CheckOff.JOB_MS))]));
+        const run = () => new Promise((ok) => window.setTimeout(ok, 0)).then(() => Promise.race([job(), new Promise((ok) => window.setTimeout(ok, CheckOff.JOB_MS))]));
         this.queue = (this.queue ?? Promise.resolve()).then(run).catch((e) => console.error("CheckOff:", e));
         return this.queue;
     }
@@ -480,13 +480,13 @@ export default class CheckOff {
             // Obsidian focuses a modal's first button; the highlighted one takes it, unless a key was pressed first
             const focusIt = () => { if (!typed) focus?.buttonEl.focus(); };
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(choice), 0); }
+                onClose() { window.setTimeout(() => resolve(choice), 0); }
                 // Focused once the modal is open, not straight after open() (OBS-50); the timer for a window that
                 // draws no frames
                 onOpen() {
                     this.containerEl.addEventListener("keydown", () => { typed = true; }, true);
-                    requestAnimationFrame(focusIt);
-                    setTimeout(focusIt, 50);
+                    window.requestAnimationFrame(focusIt);
+                    window.setTimeout(focusIt, 50);
                 }
             })(app);
             const pick = (c) => { choice = c; modal.close(); };
@@ -582,7 +582,7 @@ export default class CheckOff {
         ev.preventDefault();
         ev.stopImmediatePropagation();
         // As Obsidian's own click there does, on a phone that can
-        try { navigator.vibrate?.(100); } catch (e) { /* none on this device: nothing to do */ }
+        try { navigator.vibrate?.(100); } catch { /* none on this device: nothing to do */ }
         if (job.ask) this.askLater(job.ask);
         else this.enqueue(() => this.tickRead(job.tick));
         return true;
@@ -609,11 +609,11 @@ export default class CheckOff {
             if (up()) { w.seen = true; return; }
             if (!w.seen || w.closed !== null) return;
             w.closed = Date.now();
-            clearTimeout(w.timer);
-            w.timer = setTimeout(() => this.unwatch(w), CheckOff.MENU_MS);
+            window.clearTimeout(w.timer);
+            w.timer = window.setTimeout(() => this.unwatch(w), CheckOff.MENU_MS);
         });
         w.observer.observe(doc.body, { childList: true });
-        w.timer = setTimeout(() => { if (!w.seen) this.unwatch(w); }, CheckOff.PRESS_MS);
+        w.timer = window.setTimeout(() => { if (!w.seen) this.unwatch(w); }, CheckOff.PRESS_MS);
         this.menu = w;
         // Kept where the next run of the script finds it, to end it
         if (window.pmCheckOff) window.pmCheckOff.menu = w;
@@ -628,7 +628,7 @@ export default class CheckOff {
     unwatch(w = this.menu) {
         if (!w || this.menu !== w) return;
         w.observer?.disconnect();
-        clearTimeout(w.timer);
+        window.clearTimeout(w.timer);
         this.menu = null;
         if (window.pmCheckOff?.menu === w) window.pmCheckOff.menu = null;
     }
@@ -681,7 +681,7 @@ export default class CheckOff {
         const tasks = plainday.TaskIds;
         let now = await tasks.readNow(file);
         for (let k = 0; k < 10 && now !== (await app.vault.cachedRead(file)); k++) {
-            await new Promise((ok) => setTimeout(ok, 35));
+            await new Promise((ok) => window.setTimeout(ok, 35));
             now = await tasks.readNow(file);
         }
         return now;
@@ -761,7 +761,7 @@ export default class CheckOff {
             const info = cm.state.field(editorInfoField, false);
             const file = info?.file;
             let at;
-            try { at = cm.state.doc.lineAt(cm.posAtDOM(box)).number - 1; } catch (e) { return; }
+            try { at = cm.state.doc.lineAt(cm.posAtDOM(box)).number - 1; } catch { return; }
             const lineAt = C.lineFn(cm.state.doc);
             const text = lineAt(at);
             if (C.markOf(text) !== ">" || !this.actsOn(file, lineAt, at)) return;
@@ -810,7 +810,7 @@ export default class CheckOff {
         for (const doc of handles.docs) for (const [name, fn] of events) doc.removeEventListener(name, fn, true);
         handles.docs.clear();
         // A press the last run noted for Task Status's menu
-        if (handles.menu) { handles.menu.observer?.disconnect(); clearTimeout(handles.menu.timer); handles.menu = null; }
+        if (handles.menu) { handles.menu.observer?.disconnect(); window.clearTimeout(handles.menu.timer); handles.menu = null; }
         this.unwatch();
         // The slot stays registered for the next run to fill
         handles.slot.length = 0;

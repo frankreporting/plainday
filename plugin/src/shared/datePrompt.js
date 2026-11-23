@@ -63,14 +63,14 @@ export default class DatePrompt {
         }
 
         let parsed;
-        try { parsed = nld.parseDate(t); } catch (e) { return null; }
+        try { parsed = nld.parseDate(t); } catch { return null; }
         const m = parsed?.moment;
         if (!m?.isValid?.()) return null;
         const date = m.format("YYYY-MM-DD");
 
         // The reader says when the words name a whole period ("next week", "this month")
         let period;
-        try { period = nld.parser?.getParsedPeriod?.(t, nld.settings?.weekStart) ?? null; } catch (e) { period = null; }
+        try { period = nld.parser?.getParsedPeriod?.(t, nld.settings?.weekStart) ?? null; } catch { period = null; }
         if (period && period.granularity !== "day" && typeof period.date?.getTime === "function" && !isNaN(period.date.getTime())) {
             const start = DatePrompt.localDate(period.date);
             if (period.granularity === "week") {
@@ -117,13 +117,13 @@ export default class DatePrompt {
         try {
             const d = parser.getParsedDateResult(text, now, { forwardDate: true });
             date = d ? DatePrompt.localDate(d) : null;
-        } catch (e) { date = null; }
+        } catch { date = null; }
         try {
             const best = [...(parser.getParsedResult?.(text) ?? [])].sort((a, b) => String(b.text ?? "").length - String(a.text ?? "").length)[0];
             words = String(best?.text ?? "");
             const said = (part) => !!best?.start?.isCertain?.(part);
             yearless = !!best && said("month") && said("day") && !said("year") && DatePrompt.squash(words) === DatePrompt.squash(text);
-        } catch (e) { words = ""; yearless = false; }
+        } catch { words = ""; yearless = false; }
         return { date, words, yearless };
     }
 
@@ -212,7 +212,7 @@ export default class DatePrompt {
         if (DatePrompt.warmed) return;
         DatePrompt.warmed = true;
         for (const text of ["warm up", "f", "friday", "next week", "in 2 days", "oct 2"]) {
-            try { this.describe(this.read(text)); } catch (e) { /* only a warm-up */ }
+            try { this.describe(this.read(text)); } catch { /* only a warm-up */ }
         }
     }
 
@@ -222,7 +222,7 @@ export default class DatePrompt {
     // puts the cursor back in the box. Returns the modal.
     open(title, onPick, { periods = false, name = null, nearest = false, label = null, extra } = {}) {
         let weekStart = 0;
-        try { weekStart = this.weekRules().weekStart; } catch (e) { weekStart = 0; }
+        try { weekStart = this.weekRules().weekStart; } catch { weekStart = 0; }
 
         const modal = new Modal(app);
         modal.titleEl.setText(title);
@@ -262,7 +262,7 @@ export default class DatePrompt {
         // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
         // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
         // Then warm the parser up, in the next task, once the box is drawn and focused.
-        modal.onOpen = () => requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); setTimeout(() => this.warmUp(), 0); });
+        modal.onOpen = () => window.requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); window.setTimeout(() => this.warmUp(), 0); });
         modal.open();
         return modal;
     }

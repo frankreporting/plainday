@@ -35,10 +35,10 @@ export default class NewEventLog {
         return new Promise((resolve) => {
             let title = null;
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(title), 0); }
+                onClose() { window.setTimeout(() => resolve(title), 0); }
                 // Focused once the modal is open, not straight after open(), so the hotkey's key doesn't land in the
                 // note (OBS-50)
-                onOpen() { requestAnimationFrame(() => input.inputEl.focus()); }
+                onOpen() { window.requestAnimationFrame(() => input.inputEl.focus()); }
             })(app);
             modal.titleEl.setText("New event log");
             modal.contentEl.createEl("p", { text: this.when(date) });

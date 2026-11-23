@@ -356,7 +356,7 @@ export default class TrailingLinks {
             write: (found, wv) => {
                 if (!found.length) return;
                 for (const [sig, w] of found) handles.widths.set(sig, w);
-                setTimeout(() => wv.dispatch({ effects: refresh.of(null) }));
+                window.setTimeout(() => wv.dispatch({ effects: refresh.of(null) }));
             },
         });
 
@@ -551,8 +551,8 @@ export default class TrailingLinks {
         // A note moved, renamed, retagged or given an alias changes a name; a theme or snippet
         // change changes the widths
         const later = () => {
-            clearTimeout(handles.timer);
-            handles.timer = setTimeout(redrawAll, T.REDRAW_MS);
+            window.clearTimeout(handles.timer);
+            handles.timer = window.setTimeout(redrawAll, T.REDRAW_MS);
         };
         handles.refs.push(
             app.vault.on("rename", later),
@@ -566,7 +566,7 @@ export default class TrailingLinks {
         // A due date turns red at midnight
         const atMidnight = () => {
             const next = moment().add(1, "day").startOf("day").add(1, "second");
-            handles.midnight = setTimeout(() => {
+            handles.midnight = window.setTimeout(() => {
                 redrawAll();
                 atMidnight();
             }, next.diff(moment()));
@@ -579,8 +579,8 @@ export default class TrailingLinks {
         if (!handles) return;
         for (const ref of handles.refs) ref.e.offref(ref);
         handles.refs = [];
-        clearTimeout(handles.timer);
-        clearTimeout(handles.midnight);
+        window.clearTimeout(handles.timer);
+        window.clearTimeout(handles.midnight);
         // The slot stays registered for the next run to fill
         handles.slot.length = 0;
         app.workspace.updateOptions();

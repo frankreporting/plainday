@@ -36,7 +36,7 @@ export default class SyncArea {
     deconstructor() {
         if (window.syncAreaRef) app.vault.offref(window.syncAreaRef);
         window.syncAreaRef = null;
-        clearTimeout(this.timer);
+        window.clearTimeout(this.timer);
     }
 
     onRename(file, oldPath) {
@@ -57,8 +57,8 @@ export default class SyncArea {
         // Keyed by the TFile so a note moved twice in quick succession is handled once;
         // keeps the first old path, which is the one Templater knows it by.
         if (!this.queue.has(file)) this.queue.set(file, oldPath);
-        clearTimeout(this.timer);
-        this.timer = setTimeout(() => {
+        window.clearTimeout(this.timer);
+        this.timer = window.setTimeout(() => {
             // One batch at a time, so a note is never written by two batches at once
             this.chain = (this.chain ?? Promise.resolve()).then(() => this.flush());
         }, SyncArea.DEBOUNCE_MS);
@@ -94,7 +94,7 @@ export default class SyncArea {
         if (!isPending()) return false;
         const deadline = Date.now() + SyncArea.TEMPLATER_WAIT_MS;
         while (isPending() && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 250));
+            await new Promise((r) => window.setTimeout(r, 250));
         }
         return true;
     }
@@ -148,9 +148,9 @@ export default class SyncArea {
     // Resolves once the metadata cache has re-read the note, or after 2 seconds
     waitForCache(file) {
         return new Promise((resolve) => {
-            const done = () => { app.metadataCache.offref(ref); clearTimeout(timer); resolve(); };
+            const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
             const ref = app.metadataCache.on("changed", (f) => { if (f === file) done(); });
-            const timer = setTimeout(done, 2000);
+            const timer = window.setTimeout(done, 2000);
         });
     }
 

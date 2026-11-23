@@ -153,7 +153,20 @@ export function loadClass(file, context, src = SRC) {
     const source = classSource(file, src);
     const { name } = parse(file, source);
     if (!name) throw new Error(`${file}: no \`export default class <Name>\``);
-    return vm.runInContext(`${scriptOf(source, file)}\n;${name}`, context, { filename: file });
+    return vm.runInContext(`${scriptOf(source, file)}\n;${name}`, withWindow(context), { filename: file });
+}
+
+// The class files call the timers through `window` (`window.setTimeout()`, as the directory's scan
+// asks, OBS-203), and in Obsidian `window` is the global object. So a context's `window` (a stand-in
+// a test gave, or a new one) reads the timers from the context's globals, where a test puts its own:
+// a test that swaps `setTimeout` on the context swaps `window.setTimeout` too. Returns the context.
+export const TIMERS = ["setTimeout", "clearTimeout", "requestAnimationFrame"];
+export function withWindow(context) {
+    const win = context.window ?? (context.window = {});
+    for (const timer of TIMERS) {
+        if (!Object.hasOwn(win, timer)) Object.defineProperty(win, timer, { configurable: true, get: () => context[timer] });
+    }
+    return context;
 }
 
 // One folder's index.js: the class files it imports, by class name, and what it exports. Read

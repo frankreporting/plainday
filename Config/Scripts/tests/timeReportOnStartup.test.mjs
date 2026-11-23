@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 
 const here = new URL(".", import.meta.url);
 const code = classScript("timeReportOnStartup.js");
@@ -31,7 +31,7 @@ function load(plainday, { hold = null } = {}) {
         // alive; the short polls must, or the process exits with a run still waiting
         setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (ms >= 1000) t.unref(); return t; },
     };
-    const TimeReportOnStartup = vm.runInContext(code + "\n;TimeReportOnStartup", vm.createContext(context));
+    const TimeReportOnStartup = vm.runInContext(code + "\n;TimeReportOnStartup", withWindow(vm.createContext(context)));
     TimeReportOnStartup.READY_WAIT_MS = 500;
     return { context, TimeReportOnStartup, warnings };
 }

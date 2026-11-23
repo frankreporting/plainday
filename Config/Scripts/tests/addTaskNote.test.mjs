@@ -7,14 +7,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { standIn, PLANNER, withFolders, momentOn, YAML as STAND_IN_YAML } from "./standInVault.mjs";
-import { classFiles, classScript, classSource } from "../../../plugin/classShape.mjs";
+import { classFiles, classScript, classSource, withWindow } from "../../../plugin/classShape.mjs";
 import { periodicNames, plainName } from "./dayNames.mjs";
 
 const here = new URL(".", import.meta.url);
 // `plainday` defined and empty, as in the Raycast timer's sandbox: the class reads it bare
 const AddTaskNote = vm.runInContext(
     classScript("addTaskNote.js") + "\n;AddTaskNote",
-    vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }),
+    withWindow(vm.createContext({ plainday: { PeriodicNotes: periodicNames() } })),
 );
 const add = new AddTaskNote();
 
@@ -193,7 +193,7 @@ test("isEvent: only `[<]` lines, and the checkbox pattern matches every status",
 });
 
 test("new notes are staged in the Inbox as it's set, outside Projects, so a note left there is unfiled (OBS-283)", () => {
-    const staged = (folders) => new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: withFolders({}, folders) })))().stagingFolder();
+    const staged = (folders) => new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday: withFolders({}, folders) }))))().stagingFolder();
     assert.equal(staged({}), "Inbox");
     assert.equal(staged({ projects: "Work", inbox: "Waiting" }), "Waiting");
     // The Task and Log templates are settings now (OBS-283), with the paths the command used to hold
@@ -201,7 +201,7 @@ test("new notes are staged in the Inbox as it's set, outside Projects, so a note
     const withTemplates = (templates) => {
         const plainday = withFolders({});
         Object.assign(plainday.Settings.get().templates, templates);
-        return new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday })))();
+        return new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday }))))();
     };
     assert.equal(withTemplates({}).templatePath("task"), "Config/Templates/Task.md");
     assert.equal(withTemplates({}).templatePath("log"), "Config/Templates/Log.md");
@@ -307,7 +307,7 @@ test("confirmMove: the note to decide about, highlighted with what it is, then w
     let opened;
     const Cls = vm.runInContext(
         classScript("addTaskNote.js") + "\n;AddTaskNote",
-        vm.createContext({ app: { metadataCache: { getFileCache: (f) => f.cache ?? null } }, Modal, ButtonComponent, requestAnimationFrame: () => {}, setTimeout }),
+        withWindow(vm.createContext({ app: { metadataCache: { getFileCache: (f) => f.cache ?? null } }, Modal, ButtonComponent, requestAnimationFrame: () => {}, setTimeout })),
     );
     const helper = new Cls();
     helper.isArea = (f) => f.basename === "Household";
@@ -398,7 +398,7 @@ test("isLog: a note in a ›logs folder (any case), or one tagged #log wherever 
     ]);
     const folders = { "projects/a/›logs": "Projects/A/›logs", "projects/b/›logs": "Projects/B/›Logs", "projects/c/logs": "Projects/C/logs" };
     app.vault.getAbstractFileByPathInsensitive = (p) => (folders[p.toLowerCase()] ? { path: folders[p.toLowerCase()] } : null);
-    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ app }));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ app })));
     const helper = new Cls();
     assert.deepEqual([0, 1, 2, 3, 6].map((i) => helper.isLog(files[i])), [true, true, true, false, false], "a folder still named logs isn't read");
     assert.equal(helper.logsFolder(files[4]), "Projects/A/›logs");
@@ -418,7 +418,7 @@ test("makeFolder: a logs folder it makes gets Navigator's history icon; another 
         },
         plugins: { plugins: { "notebook-navigator": { api: { metadata: { setFolderMeta: async (f, meta) => icons.push([f.path, meta]) } } } } },
     };
-    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ app, console }));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ app, console })));
     const helper = new Cls();
     await helper.makeFolder("Projects/B/›logs");
     await helper.makeFolder("Projects/C");
@@ -431,7 +431,7 @@ test("makeFolder: a logs folder it makes gets Navigator's history icon; another 
     app.plugins.plugins["notebook-navigator"] = { api: { metadata: { setFolderMeta: async () => { throw new Error("no"); } } } };
     const errors = [];
     const quiet = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote",
-        vm.createContext({ app, console: { error: (...a) => errors.push(a.join(" ")) } })))();
+        withWindow(vm.createContext({ app, console: { error: (...a) => errors.push(a.join(" ")) } }))))();
     await quiet.makeFolder("Projects/E/›logs");
     assert.equal(made.at(-1), "Projects/E/›logs", "an icon that can't be set doesn't stop the folder");
     assert.equal(errors.length, 1);
@@ -458,7 +458,7 @@ test("pickHome: MoveToProject can leave homes out of the menu and ask its own qu
         open() { shown = { placeholder: this.placeholder, items: this.getItems().map((f) => this.getItemText(f)) }; this.onClose(); }
     }
     const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote",
-        vm.createContext({ app, FuzzySuggestModal, setTimeout, plainday: withFolders({}) }));
+        withWindow(vm.createContext({ app, FuzzySuggestModal, setTimeout, plainday: withFolders({}) })));
     const helper = new Cls();
     await helper.pickHome("Order toner");
     assert.deepEqual(Array.from(shown.items), ["A", "B", "C"], "in order of their names");
@@ -499,13 +499,13 @@ const invokeOn = async (line, { ch = line.length, paths = [], sel = null } = {})
         f.parent = files.find((g) => g.path.startsWith(to.slice(0, to.lastIndexOf("/")).replace(/\/›?logs$/, "")))?.parent ?? f.parent;
     } };
     app.metadataCache.getFirstLinkpathDest = (name) => files.find((f) => f.basename.toLowerCase() === name.toLowerCase() || f.path === `${name}.md`) ?? null;
-    const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", vm.createContext({}));
-    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({
+    const DueDate = vm.runInContext(classScript("setDueDate.js") + "\n;DueDate", withWindow(vm.createContext({})));
+    const Cls = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({
         app, plainday: withFolders({
             DueDate: new DueDate(), PeriodicNotes: { periodOfName: plainName },
             EventLog: { make: async ({ date, title }) => { calls.push(`log ${date}: ${title}`); }, nameFor: (date, title) => `${date} ${add.fileName(title)}` },
         }), Notice: class { constructor(message) { calls.push(`notice: ${message}`); } },
-    }));
+    })));
     await new Cls().invoke();
     return { text, cursor: cursor && { ...cursor }, calls, notices: calls.filter((c) => c.startsWith("notice: ")).map((c) => c.slice(8)) };
 };
@@ -636,11 +636,11 @@ const taskNoteApp = ({ notes = {}, templates = {}, templater = false, aliases = 
             },
         } } : null) },
     };
-    const ctx = vm.createContext({ app, normalizePath: (p) => p, moment: momentOn("2026-09-16"), stringifyYaml: YAML.stringifyYaml, console: { error: () => {} }, Notice: class { constructor(m) { notices.push(m); } }, plainday: withFolders({}) });
-    const PeriodicNotes = vm.runInContext(classScript("periodicNotes.js") + "\n;PeriodicNotes", vm.createContext({ app, plainday: {}, moment: momentOn("2026-09-16"), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, ...YAML }));
+    const ctx = withWindow(vm.createContext({ app, normalizePath: (p) => p, moment: momentOn("2026-09-16"), stringifyYaml: YAML.stringifyYaml, console: { error: () => {} }, Notice: class { constructor(m) { notices.push(m); } }, plainday: withFolders({}) }));
+    const PeriodicNotes = vm.runInContext(classScript("periodicNotes.js") + "\n;PeriodicNotes", withWindow(vm.createContext({ app, plainday: {}, moment: momentOn("2026-09-16"), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, clearTimeout: () => {}, ...YAML })));
     ctx.plainday.PeriodicNotes = new PeriodicNotes();
     // ProjectNotes for its idFirst, the real one (OBS-317)
-    ctx.plainday.ProjectNotes = new (vm.runInContext(classScript("projectNotes.js") + "\n;ProjectNotes", vm.createContext({ app, plainday: ctx.plainday, ...YAML })))();
+    ctx.plainday.ProjectNotes = new (vm.runInContext(classScript("projectNotes.js") + "\n;ProjectNotes", withWindow(vm.createContext({ app, plainday: ctx.plainday, ...YAML }))))();
     const Fresh = vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", ctx);
     return { add: new Fresh(), text: (p) => text.get(p), calls, notices, home: fileOf("Projects/Home/Home.md") };
 };
@@ -738,8 +738,8 @@ test("the Task template, when there is one: through Templater it adds its proper
 });
 
 test("flagDay: the day a line's first 🚩 links, by its note's name, or null (OBS-66)", () => {
-    const tr = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }));
-    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: { PeriodicNotes: periodicNames(), TimeReport: new tr() } })))();
+    const tr = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", withWindow(vm.createContext({ plainday: { PeriodicNotes: periodicNames() } })));
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday: { PeriodicNotes: periodicNames(), TimeReport: new tr() } }))))();
     assert.equal(helper.flagDay("- [ ] Update the invoice [[2026-09-30|🚩 9/30]]"), "2026-09-30");
     assert.equal(helper.flagDay("- [ ] Update it [[Days/2026-09-30|🚩 9/30]] [[Home|⭕]] [[Update it|⋯]] ^k3x9m2"), "2026-09-30", "among the other links, by its path's name");
     assert.equal(helper.flagDay("- [ ] A [[2026-09-30|🚩 9/30]] [[2026-10-02|🚩 10/2]]"), "2026-09-30", "the first");
@@ -749,7 +749,7 @@ test("flagDay: the day a line's first 🚩 links, by its note's name, or null (O
 });
 
 test("trailingProjectLinks: a forward date after the ⭕ is part of the run, so the ⭕ is still found (OBS-185)", () => {
-    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", vm.createContext({ plainday: { PeriodicNotes: periodicNames() } })))();
+    const helper = new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday: { PeriodicNotes: periodicNames() } }))))();
     const plain = (v) => JSON.parse(JSON.stringify(v));
     assert.deepEqual(plain(helper.trailingProjectLinks("- [>] Book it [[Kestrel|⭕]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2")), [{ raw: "[[Kestrel|⭕]]", linkpath: "Kestrel" }]);
     assert.equal(helper.trailingNote("- [>] Book it [[Book it|⋯]] [[2026-10-08#^k3x9m2|10/8]] ^k3x9m2"), "Book it");

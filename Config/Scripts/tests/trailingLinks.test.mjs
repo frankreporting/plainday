@@ -118,7 +118,7 @@ test("trail: past a hand-made ID too, and an ID with no links before it isn't a 
 test("CSS: the forward date sits after the due date, faint (OBS-185)", () => {
     assert.match(CSS, /\.pm-trail-due \{ order: 2; \}/);
     assert.match(CSS, /\.pm-trail-forward \{ order: 3; \}/);
-    assert.match(CSS, /\.pm-trail-forward :is\(\.cm-hmd-internal-link, \.cm-underline\) \{ color: var\(--text-faint\) !important; \}/);
+    assert.match(CSS, /\.pm-trail-forward :is\(\.cm-hmd-internal-link, \.cm-underline\) \{ color: var\(--text-faint\); \}/);
 });
 
 test("CSS: the ⋯ and then the ↗ are drawn last, at the edge after the due and forward dates (OBS-208, Brian 2026-10-28)", () => {

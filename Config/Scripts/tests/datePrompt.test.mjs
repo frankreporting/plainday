@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { classScript } from "../../../plugin/classShape.mjs";
+import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 import { RECORD as FIX, recordedReader } from "./recordedReader.mjs";
 
 const SUN = "2026-09-27", MON = "2026-09-21", SAT = "2026-09-26";
@@ -16,12 +16,12 @@ const SUN = "2026-09-27", MON = "2026-09-21", SAT = "2026-09-26";
 const momentOn = (today) => (date = today) => ({ date, isValid: () => true, format: (f) => { assert.equal(f, "YYYY-MM-DD"); return date; } });
 
 const load = (ctx = {}, today = SUN) => {
-    const context = vm.createContext({ moment: momentOn(today), Notice: class { constructor(m) { (ctx.notices ??= []).push(m); } }, console: { error() {} }, ...ctx });
+    const context = withWindow(vm.createContext({ moment: momentOn(today), Notice: class { constructor(m) { (ctx.notices ??= []).push(m); } }, console: { error() {} }, ...ctx }));
     const DatePrompt = vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", context);
     return { DatePrompt, dp: new DatePrompt(), context };
 };
 const { dp } = load();
-const TimeReport = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", vm.createContext({}));
+const TimeReport = vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", withWindow(vm.createContext({})));
 const tr = new TimeReport();
 
 // A reader with Revived's recorded answers on `day`; a phrase the record doesn't have fails the test
@@ -313,7 +313,7 @@ const loadJump = ({ nn, language = "en", current = "en" } = {}) => {
         Schedule: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
         TimeReport: { periodPlaces: () => ({ week: { folder: `${PLANNER}/weeks`, dateFolders: "" }, month: { folder: `${PLANNER}/months`, dateFolders: "" }, year: { folder: `${PLANNER}/years`, dateFolders: "" } }) },
     };
-    const ctx = vm.createContext({ moment, getLanguage: () => language, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, plainday });
+    const ctx = withWindow(vm.createContext({ moment, getLanguage: () => language, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, plainday }));
     plainday.DatePrompt = new (vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", ctx))();
     const JumpToDate = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", ctx);
     plainday.JumpToDate = new JumpToDate();
@@ -358,7 +358,7 @@ test("the warm-up reads a few words once per session, and a failure in it is har
 });
 
 test("JumpToDate: a week or a month in words, this year unless a year comes before or after", () => {
-    const J = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
+    const J = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", withWindow(vm.createContext({})));
     const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const w = (t) => { const r = J.periodWords(t, { months: MONTHS, short: SHORT, year: 2026 }); return r && `${r.unit} ${r.year} ${r.n}`; };
@@ -379,7 +379,7 @@ test("JumpToDate: a week or a month in words, this year unless a year comes befo
     // Other languages: the locale's names (moment gives some locales separate forms)
     const j = new J();
     const ctx = { moment: { localeData: () => ({ months: () => ({ format: ["a"], standalone: ["январь"] }), monthsShort: () => ["янв."] }) } };
-    const names = vm.runInContext("(" + J.prototype.monthNames.toString().replace(/^monthNames/, "function") + ")", vm.createContext(ctx))({ locale: "ru" });
+    const names = vm.runInContext("(" + J.prototype.monthNames.toString().replace(/^monthNames/, "function") + ")", withWindow(vm.createContext(ctx)))({ locale: "ru" });
     assert.deepEqual([...names.months, ...names.short], ["январь", "янв."]);
     assert.equal(J.periodWords("январь 2027", { ...names, year: 2026 })?.n, 1);
     assert.equal(J.periodWords("янв", { ...names, year: 2026 })?.n, 1);
@@ -387,7 +387,7 @@ test("JumpToDate: a week or a month in words, this year unless a year comes befo
 });
 
 test("a week or a month in words says whether a year was given, and Schedule moves one that's over to next year (OBS-96)", () => {
-    const J = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", vm.createContext({}));
+    const J = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", withWindow(vm.createContext({})));
     const opts = { months: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], short: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], year: 2026 };
     for (const t of ["w38", "sep", "september"]) assert.equal(J.periodWords(t, opts).withYear, false, t);
     for (const t of ["w38 2026", "2027 w1", "Sep 2026", "2027 sep", "9/2026"]) assert.equal(J.periodWords(t, opts).withYear, true, t);

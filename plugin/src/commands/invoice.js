@@ -484,7 +484,7 @@ export default class Invoice {
                 getItemText(p) { return aliasOf(p); }
                 onChooseItem(p) { picked = p; }
                 // Obsidian closes the modal before it reports the choice
-                onClose() { setTimeout(() => resolve(picked), 0); }
+                onClose() { window.setTimeout(() => resolve(picked), 0); }
             })(app);
             modal.setPlaceholder("Invoice which project? (Esc: cancel)");
             modal.open();
@@ -600,9 +600,9 @@ export default class Invoice {
     // Resolves when the metadata cache next reads `file`, or after two seconds
     nextChange(file) {
         return new Promise((resolve) => {
-            const done = () => { app.metadataCache.offref(ref); clearTimeout(timer); resolve(); };
+            const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
             const ref = app.metadataCache.on("changed", (f) => { if (f === file) done(); });
-            const timer = setTimeout(done, 2000);
+            const timer = window.setTimeout(done, 2000);
         });
     }
 
@@ -615,7 +615,7 @@ export default class Invoice {
                 getItemText(item) { return item; }
                 onChooseItem(item) { picked = items.indexOf(item); }
                 // Obsidian closes the modal before it reports the choice
-                onClose() { setTimeout(() => resolve(picked), 0); }
+                onClose() { window.setTimeout(() => resolve(picked), 0); }
             })(app);
             modal.setPlaceholder(placeholder);
             modal.open();
@@ -670,16 +670,16 @@ export default class Invoice {
     // A note's properties, read from its text (the metadata cache can lag an edit)
     async propsOf(file, tr) {
         const info = getFrontMatterInfo(await tr.textOf(file));
-        try { return info.exists ? parseYaml(info.frontmatter) ?? {} : {}; } catch (e) { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
+        try { return info.exists ? parseYaml(info.frontmatter) ?? {} : {}; } catch { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
     }
 
     // Resolves once the metadata cache has read `file` (or after two seconds)
     indexed(file) {
         if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
         return new Promise((resolve) => {
-            const done = () => { app.metadataCache.offref(ref); clearTimeout(timer); resolve(); };
+            const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
             const ref = app.metadataCache.on("changed", (f) => { if (f === file) done(); });
-            const timer = setTimeout(done, 2000);
+            const timer = window.setTimeout(done, 2000);
         });
     }
 
@@ -699,7 +699,7 @@ export default class Invoice {
             const modal = plainday.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); }, { nearest: true });
             if (!modal) { resolve(null); return; }
             const closed = modal.onClose?.bind(modal);
-            modal.onClose = () => { closed?.(); setTimeout(() => resolve(picked), 0); };
+            modal.onClose = () => { closed?.(); window.setTimeout(() => resolve(picked), 0); };
             const input = modal.contentEl.querySelector("input");
             if (input) { input.value = "today"; input.dispatchEvent(new Event("input")); }
         });
@@ -710,9 +710,9 @@ export default class Invoice {
         return new Promise((resolve) => {
             let answer = null;
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(answer), 0); }
+                onClose() { window.setTimeout(() => resolve(answer), 0); }
                 // Focused once the modal is open, a frame later (OBS-50)
-                onOpen() { requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
+                onOpen() { window.requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
             })(app);
             modal.titleEl.setText(title);
             modal.contentEl.createEl("p", { text: description });
@@ -802,7 +802,7 @@ export default class Invoice {
             let go = false, opening = null;
             const modal = new (class extends Modal {
                 onClose() {
-                    setTimeout(() => {
+                    window.setTimeout(() => {
                         resolve(go);
                         if (!opening) return;
                         // Only a note that's there: opening a missing one would make it, outside its
@@ -814,7 +814,7 @@ export default class Invoice {
                     }, 0);
                 }
                 // Focused once the modal is open, a frame later (OBS-50): Cancel when something needs fixing
-                onOpen() { requestAnimationFrame(() => (fix.length ? cancel : create).buttonEl.focus()); }
+                onOpen() { window.requestAnimationFrame(() => (fix.length ? cancel : create).buttonEl.focus()); }
             })(app);
             modal.titleEl.setText(`Invoice ${tr.basename(project)} through ${this.md(through)}?`);
             // Selectable, so a missing entry's task and note can be copied back into its daily note
@@ -860,9 +860,9 @@ export default class Invoice {
             let picked = null;
             const made = [];
             const modal = new (class extends Modal {
-                onClose() { setTimeout(() => resolve(picked), 0); }
+                onClose() { window.setTimeout(() => resolve(picked), 0); }
                 // Focused once the modal is open, a frame later (OBS-50): the last button
-                onOpen() { requestAnimationFrame(() => made.at(-1)?.buttonEl.focus()); }
+                onOpen() { window.requestAnimationFrame(() => made.at(-1)?.buttonEl.focus()); }
             })(app);
             modal.titleEl.setText(title);
             for (const line of [].concat(text)) modal.contentEl.createEl("p", { text: line });
@@ -909,7 +909,7 @@ export default class Invoice {
                 getItems() { return choices; }
                 getItemText(c) { return c[1]; }
                 onChooseItem(c) { picked = c[0]; }
-                onClose() { setTimeout(() => resolve(picked), 0); }
+                onClose() { window.setTimeout(() => resolve(picked), 0); }
             })(app);
             modal.setPlaceholder(`${invoice.name} is ${invoice.status}: what next? (Esc: cancel)`);
             modal.open();
@@ -1001,7 +1001,7 @@ export default class Invoice {
         const now = this.foldInfo(file);
         const kept = (now?.folds ?? []).filter((f) => f.from !== fold.from && ((view && now.lines === lines) || (f.from === 0 && f.to === 0)));
         const info = { folds: [...kept, fold].sort((a, b) => a.from - b.from), lines };
-        if (view) setTimeout(() => view.currentMode.applyFoldInfo?.(info), 50);
+        if (view) window.setTimeout(() => view.currentMode.applyFoldInfo?.(info), 50);
         await app.foldManager.save(file, info);
     }
 

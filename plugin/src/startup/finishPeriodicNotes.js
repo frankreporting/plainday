@@ -51,13 +51,13 @@ export default class FinishPeriodicNotes {
         if (!notes || notes.making.has(file.path)) return null;
         try {
             if (!notes.periodOfName(file.basename)) return null;
-        } catch (e) {
+        } catch {
             return null;
         }
         if (Math.abs(now - (file.stat?.ctime ?? 0)) <= FinishPeriodicNotes.MADE_WITHIN_MS) return this.later(file);
         // One that arrived isn't finished, but an empty one is kept from Templater's trigger all the same
         if (file.stat?.size === 0) {
-            setTimeout(() => {
+            window.setTimeout(() => {
                 if (!notes.pending()?.has(file.path)) notes.hold(file.path);
             }, FinishPeriodicNotes.HOLD_AFTER_MS);
         }
@@ -114,6 +114,6 @@ export default class FinishPeriodicNotes {
     }
 
     static sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
     }
 }

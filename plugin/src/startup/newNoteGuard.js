@@ -72,14 +72,14 @@ export default class NewNoteGuard {
         if (!pending || !path) return;
         this.holds ??= new Map();
         if (!this.holds.has(path) && pending.has(path)) return;
-        clearTimeout(this.holds.get(path));
+        window.clearTimeout(this.holds.get(path));
         pending.add(path);
-        this.holds.set(path, setTimeout(() => this.release(path), NewNoteGuard.HOLD_MS));
+        this.holds.set(path, window.setTimeout(() => this.release(path), NewNoteGuard.HOLD_MS));
     }
 
     release(path) {
         if (!this.holds?.has(path)) return;
-        clearTimeout(this.holds.get(path));
+        window.clearTimeout(this.holds.get(path));
         this.holds.delete(path);
         this.pending()?.delete(path);
     }
@@ -115,7 +115,7 @@ export default class NewNoteGuard {
             const pending = this.pending();
             if (!pending) return;
             if (pending.has(file.path) && !this.holds?.has(file.path)) {
-                if (Date.now() - started < NewNoteGuard.RELEASE_WAIT_MS) setTimeout(wait, NewNoteGuard.POLL_MS);
+                if (Date.now() - started < NewNoteGuard.RELEASE_WAIT_MS) window.setTimeout(wait, NewNoteGuard.POLL_MS);
                 return;
             }
             this.hold(file.path);

@@ -12,12 +12,17 @@
 }
 
 /* Settings → Plainday → Invoice folder: the list of folders, each apart from the next when a long one
-   wraps, its later lines indented inside the theme's own padding */
+   wraps, its later lines indented inside the theme's own padding: the first line starts 1em to the left,
+   pulled back by an empty ::before, which lays it out as text-indent would */
 .plainday-folder-path {
     display: block;
     line-height: var(--line-height-tight);
     padding-inline-start: 1em;
-    text-indent: -1em;
+}
+
+.plainday-folder-path::before {
+    content: "";
+    margin-inline-start: -1em;
 }
 
 /* Settings → Plainday: a line under a setting with something to know, such as a folder Invoice will
@@ -101,6 +106,7 @@
 
     /* A folded line: Obsidian draws its "…" at the very end, after the room the last word kept.
        Keep room for the "…" too, and pull it back to sit right after the text. */
+    /* stylelint-disable-next-line -- :has is how CSS sees the fold's "…", which Obsidian draws inside the line */
     & .pm-trail-line:has(> .cm-foldPlaceholder) {
         --pm-fold-w: 1.75em;
         & .pm-trail-glue { padding-inline-end: calc(var(--pm-run-w) + var(--pm-fold-w)); }
@@ -116,6 +122,7 @@
         justify-content: flex-end;
         align-items: center;
         min-height: 1lh;
+        /* stylelint-disable-next-line -- cancels the hanging indent CodeMirror sets on every list line, which would push the links out of place; Obsidian supports it fully */
         text-indent: 0;
         white-space: nowrap;
     }
@@ -137,13 +144,15 @@
        links: the caret sits after it there, and ← moves into the links */
     & .pm-trail-run > .pm-trail-id { order: 5; color: var(--text-faint); }
 
-    /* A project or area link reads as its name: faint, no pill, still a link */
+    /* A project or area link reads as its name: faint, no pill, still a link. Its color is on the link's
+       text too, the inner .cm-underline, which a snippet's color for links (on .cm-hmd-internal-link, even
+       with !important) doesn't reach. */
     & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) .cm-hmd-internal-link {
-        background: none !important;
-        padding: 0 !important;
+        background: none;
+        padding: 0;
     }
     & .pm-trail-run > :is(.pm-trail-project, .pm-trail-area) :is(.cm-hmd-internal-link, .cm-underline) {
-        color: var(--text-faint) !important;
+        color: var(--text-faint);
     }
     & .pm-trail-run .pm-project-name { font-size: 0; }
     & .pm-trail-run .pm-project-name::before {
@@ -153,11 +162,12 @@
 
     /* The due date: faint, red once it's passed. The inner span too: a link to a day with no note
        yet is unresolved, and the theme colours that span. */
-    & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
-    & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint) !important; }
-    & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error) !important; }
+    & .pm-trail-run > .pm-trail-due :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint); }
+    & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint); }
+    & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error); }
 
     /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown */
+    /* stylelint-disable-next-line -- :has is how CSS sees that Obsidian shows a link's brackets inside the line */
     & .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {
         & .pm-trail-glue { padding-inline-end: 0; white-space: inherit; }
         & > .cm-foldPlaceholder { margin-inline-start: 0; }
@@ -183,9 +193,10 @@ body .pm-invoice .pm-invoice-parties {
 
 /* A line between your details and who it's billed to. On screen, none above your details, since many themes
    underline the title already (Brian, 11/22); printed, a line there too, as before. Live Preview draws each
-   block in a widget of its own, so there it's the widget that follows another's. */
+   block in a widget of its own, so there it's the widget that follows another's: the parties blocks are
+   the only HTML an invoice has. */
 body .pm-invoice .pm-invoice-parties + .pm-invoice-parties,
-body .pm-invoice .cm-html-embed:has(> .pm-invoice-parties) + .cm-html-embed > .pm-invoice-parties {
+body .pm-invoice .cm-html-embed + .cm-html-embed > .pm-invoice-parties {
     border-top: 1px solid var(--background-modifier-border);
 }
 
@@ -239,18 +250,17 @@ body .pm-invoice td {
 
 /* Billable hours (the one table of four columns): Qty, Rate and Amount never wrap, and take only the
    width their widest value needs, so the line item gets the rest (OBS-146). Billed entries, with its
-   long tasks and notes, wraps as any table does. */
-body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td):not(:first-child) {
+   long tasks and notes, wraps as any table does. A row of four cells is one of Billable hours, since every
+   row of a table Plainday writes has the same number of cells. */
+body .pm-invoice table tr > :first-child:nth-last-child(4) ~ :is(th, td) {
     white-space: nowrap;
     width: 1%;
 }
 
 @media print {
-    body .pm-invoice .metadata-container,
-    body .pm-invoice .inline-title,
-    body .pm-invoice .callout[data-callout="pm-billed"],
-    body .pm-invoice .callout[data-callout="pm-invoice-check"] {
-        display: none !important;
+    /* Each :is() list weighs as its heaviest part, above the themes' rules and Obsidian's own */
+    body .pm-invoice :is(.metadata-container, .inline-title, .callout[data-callout="pm-billed"], .callout[data-callout="pm-invoice-check"]) {
+        display: none;
     }
 
     body .pm-invoice .pm-invoice-parties {
@@ -261,11 +271,13 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
        prints in a div of its own, so that's the blocks after the heading's div; and the heading's own
        siblings, should they print unwrapped. Never the heading's div itself: unwrapped, that would be
        the whole note. */
+    /* stylelint-disable -- :has is how CSS finds the div a heading prints in, to hide the blocks after it */
     body .pm-invoice h2[data-heading="Billed entries" i],
     body .pm-invoice h2[data-heading="Billed entries" i] ~ *,
     body .pm-invoice div:has(> h2[data-heading="Billed entries" i]) ~ * {
-        display: none !important;
+        display: none;
     }
+    /* stylelint-enable */
 
     /* A long invoice: the column names again at the top of each page, and no row split between two */
     body .pm-invoice thead {
@@ -273,13 +285,12 @@ body .pm-invoice table:has(> thead > tr > th:nth-child(4):last-child) :is(th, td
     }
 
     body .pm-invoice tr {
-        break-inside: avoid;
+        page-break-inside: avoid;
     }
 
-    body .pm-invoice a,
-    body .pm-invoice .internal-link {
-        color: inherit !important;
-        text-decoration: none !important;
+    body .pm-invoice :is(a, .internal-link, .internal-link.is-unresolved, .external-link) {
+        color: inherit;
+        text-decoration: none;
     }
 }
 
@@ -310,6 +321,7 @@ body .pm-invoice {
 /* No alternating shade in a timesheet's table: every entry takes the band's shade, or the color you set.
    Each row rule holds under the mouse too, or Obsidian's own hover rule for odd rows would repaint every
    other row, and never a frozen cell, which Selectable Tables paints from the rows at rest. */
+/* stylelint-disable -- :has is how CSS tells Billable hours, the one table of four columns, from the tables that take day bands */
 .pm-timesheet table tbody tr:nth-child(n),
 .pm-timesheet table tbody tr:nth-child(n):hover,
 body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:nth-child(n),
@@ -317,30 +329,37 @@ body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbod
     background-color: var(--pm-timesheet-entry-background,
         color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-timesheet-entry-mix)));
 }
+/* stylelint-enable */
 
 /* Day rows are plain: the note's own background, painted rather than clear, since a theme can shade the
    table under its rows (Baseline gives the table's body --background-primary-alt) */
+/* stylelint-disable -- :has is how CSS finds a day row, by the bold date in its first cells; only Billable hours, the one table of four columns, is left out */
 .pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong),
 .pm-timesheet table tbody tr:has(> td:nth-child(-n + 2) strong):hover,
 body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:has(> td:nth-child(-n + 2) strong),
 body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr:has(> td:nth-child(-n + 2) strong):hover {
     background-color: var(--background-primary);
 }
+/* stylelint-enable */
 
 /* With the Selectable Tables plugin, frozen cells are painted solid, row by row, as the table's first odd
    and even rows look. In a timesheet those are always a day row and an entry under it, so each row's frozen
    cells take the look of its own kind: the day's plain background, or the entries' shade. */
+/* stylelint-disable -- :has is how CSS tells Billable hours, the one table of four columns, from the tables that take day bands */
 .markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:nth-child(n),
 .markdown-source-view.mod-cm6.pm-invoice .cm-table-widget.selectable-tables-frozen table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody > tr:nth-child(n) {
     --selectable-tables-odd-cell: var(--selectable-tables-even-row-odd-cell);
     --selectable-tables-even-cell: var(--selectable-tables-even-row-even-cell);
 }
+/* stylelint-enable */
 
+/* stylelint-disable -- :has is how CSS finds a day row, by the bold date in its first cells; only Billable hours, the one table of four columns, is left out */
 .markdown-source-view.mod-cm6.pm-timesheet .cm-table-widget.selectable-tables-frozen tbody > tr:has(> td:nth-child(-n + 2) strong),
 .markdown-source-view.mod-cm6.pm-invoice .cm-table-widget.selectable-tables-frozen table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody > tr:has(> td:nth-child(-n + 2) strong) {
     --selectable-tables-odd-cell: var(--selectable-tables-odd-row-odd-cell);
     --selectable-tables-even-cell: var(--selectable-tables-odd-row-even-cell);
 }
+/* stylelint-enable */
 
 
 /* Task markers (OBS-140): an event `[<]`, a forwarded task `[>]`, a started `[/]`, a canceled `[-]` and a
