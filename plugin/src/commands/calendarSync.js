@@ -208,8 +208,7 @@ export default class CalendarSync {
     static END_LINE = /^(\s*[-*+]\s+\d{1,2}:\d{2}\s?[ap]m)(\s*:.*)?$/i;
 
     async invoke() {
-        /** @type {Notice | null} */
-        let working = null;
+        let working = /** @type {Notice | null} */ (null);
         /** @type {string} */
         let said;
         try {
@@ -760,7 +759,7 @@ export default class CalendarSync {
             const lid = lids.get(key);
             const others = (where.get(lid) ?? []).filter((d) => d !== event.date);
             const title = this.title(event);
-            const carry = others.length ? await this.carryFrom(others, lid, this.recalled(cache.lines[lid], key, title)) : null;
+            const carry = others.length ? await this.carryFrom(others, lid, this.recalled(cache.lines[/** @type {string} */ (lid)], key, title)) : null;
             const day = (onDay.get(event.date) ?? []).filter((e) => e.key !== key);
             add(event.date, { kind: "event", key, lid, event, title, lines: this.lines(event), carry, day, series: event.recurring ? series.get(event.id) ?? null : null });
             // What it found there: a line that's changed since stays, forwarded, rather than lose what's new
@@ -1834,7 +1833,7 @@ export default class CalendarSync {
     lines(event) {
         // Worked out once a run for each event: moment's formatting is the slow part
         const memo = (this.linesMemo ??= new WeakMap());
-        if (typeof event === "object" && event && memo.has(event)) return [...memo.get(event)];
+        if (typeof event === "object" && event && memo.has(event)) return [.../** @type {string[]} */ (memo.get(event))];
         const out = this.renderLines(event);
         if (typeof event === "object" && event) memo.set(event, out);
         return [...out];

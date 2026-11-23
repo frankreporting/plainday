@@ -232,7 +232,7 @@ export default class ToggleTimeEntry {
             }
             return true;
         }
-        let /** @type {(Toggle & { content?: string }) | null} */ result = null;
+        let result = /** @type {(Toggle & { content?: string }) | null} */ (null);
         await app.vault.process(file, (raw) => {
             // vault.read drops a byte order mark that process still passes in
             const bom = raw.startsWith("\uFEFF") ? "\uFEFF" : "";

@@ -259,7 +259,7 @@ export default class TaskChange {
         const walk = async (seeds, task) => {
             const todo = [...seeds];
             while (todo.length) {
-                const { file, at } = todo.pop();
+                const { file, at } = /** @type {LineAt} */ (todo.pop());
                 if (held.has(`${file.path}:${at}`)) continue;
                 held.add(`${file.path}:${at}`);
                 const { raw, visible, hidden } = await this.shown(file, memo);

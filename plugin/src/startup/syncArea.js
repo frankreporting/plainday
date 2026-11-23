@@ -107,7 +107,7 @@ export default class SyncArea {
 
     /** @returns {Promise<void>} */
     async flush() {
-        const batch = [...this.queue];
+        const batch = [.../** @type {Map<TFile, string>} */ (this.queue)];
         this.queue.clear();
         let updated = 0;
         for (const [file, oldPath] of batch) {

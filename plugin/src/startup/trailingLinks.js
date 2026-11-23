@@ -482,7 +482,7 @@ export default class TrailingLinks {
                 .filter(Boolean),
             write: (found, wv) => {
                 if (!found.length) return;
-                for (const [sig, w] of found) handles.widths.set(sig, w);
+                for (const [sig, w] of /** @type {[string, number][]} */ (found)) handles.widths.set(sig, w);
                 window.setTimeout(() => wv.dispatch({ effects: refresh.of(null) }));
             },
         });

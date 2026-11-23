@@ -716,7 +716,7 @@ export default class TimeReport {
                 continue;
             }
 
-            const [, startText, endText, noteRaw] = node.entry;
+            const [, startText, endText, noteRaw] = /** @type {RegExpMatchArray} */ (node.entry);
             const start = this.minutes(startText);
             let end = this.minutes(endText);
             if (start === null || end === null) {
@@ -1716,7 +1716,7 @@ export default class TimeReport {
      * @returns {ReportIndex}
      */
     makeIndex(notes, {
-        kind = (path) => TimeReport.PLANNER_KIND[path.match(/(?:^|\/)Planner\/(days|weeks|months|years)\/[^/]+$/)?.[1]] ?? "other",
+        kind = (path) => TimeReport.PLANNER_KIND[/** @type {"days" | "weeks" | "months" | "years"} */ (path.match(/(?:^|\/)Planner\/(days|weeks|months|years)\/[^/]+$/)?.[1])] ?? "other",
         inSystem = () => true,
         inInbox = (path) => this.inFolder(path, this.systemFolders().inbox),
     } = {}) {
@@ -4521,7 +4521,7 @@ export default class TimeReport {
         const e = r.edit;
         const [start, end, insert] = /** @type {[number, number, string]} */ (e.from
             ? [offset(e.from), offset(e.to), e.text.replace(/\n/g, text.includes("\r\n") ? "\r\n" : "\n")]
-            : [offset({ line: e.line, ch: 0 }), offset({ line: e.line, ch: lines[e.line].length }), e.text]);
+            : [offset({ line: e.line, ch: 0 }), offset({ line: e.line, ch: lines[/** @type {number} */ (e.line)].length }), e.text]);
         let content = text.slice(0, start) + insert + text.slice(end);
         // The status change keeps the task line's length, so it doesn't move the edit above
         if (r.status) {
@@ -5439,7 +5439,7 @@ export default class TimeReport {
             return { wrote: p.edits.length > 0, inserted: p.edits.some((e) => e.inserted) };
         }
         let /** @type {WriteResult} */ result = { wrote: false };
-        let /** @type {{ before: string, edit: TextEdit }[] | null} */ steps = null;      // [{ before, edit }] for moving the saved folds
+        let steps = /** @type {{ before: string, edit: TextEdit }[] | null} */ (null);      // [{ before, edit }] for moving the saved folds
         await app.vault.process(file, (content) => {
             const p = plan(content);
             if (p.error) { result = p; return content; }
