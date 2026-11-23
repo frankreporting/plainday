@@ -2,11 +2,16 @@ import { Modal, moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { TFile } from "obsidian" */
+/** @import { MomentFn } from "../host.js" */
 /** @import { Period, WeekRules } from "../shared/datePrompt.js" */
 /**
  * The note a date opens (target): where PeriodicNotes puts it, its kind, the date in words, and the
  * date read.
  * @typedef {{ path: string, name: string, kind: string, when: string, result: Period }} JumpTarget
+ *
+ * A week or a month in words (periodWords): its unit, its year, its week or month number, and whether
+ * a year was typed.
+ * @typedef {{ unit: "week" | "month", year: number, n: number, withYear: boolean }} PeriodWords
  */
 
 export default class JumpToDate {
@@ -53,6 +58,11 @@ export default class JumpToDate {
     // "2026 sep", "9/2026". Without a year, this year. `months` and `short` are the locale's month
     // names. Returns { unit, year, n, withYear } (n the week or month number; withYear when a year was
     // typed), or null.
+    /**
+     * @param {string} text
+     * @param {{ months: string[], short: string[], year: number }} names
+     * @returns {PeriodWords | null}
+     */
     static periodWords(text, { months, short, year }) {
         const t = String(text ?? "").trim().toLowerCase().replace(/\s+/g, " ");
         const week = t.match(/^(?:(\d{4}) ?)?(?:w|wk|week) ?(\d{1,2})(?: (\d{4}))?$/);
@@ -62,7 +72,7 @@ export default class JumpToDate {
         const named = t.match(/^(?:(\d{4}) )?([\p{L}.]+)(?: (\d{4}))?$/u);
         if (!named || (named[1] && named[3])) return null;
         const word = named[2].replace(/\.$/, "");
-        const plain = (names) => [].concat(names ?? []).map((n) => String(n).toLowerCase().replace(/\.$/, ""));
+        const plain = (/** @type {string[]} */ names) => [].concat(names ?? []).map((n) => String(n).toLowerCase().replace(/\.$/, ""));
         let i = plain(months).indexOf(word);
         if (i < 0) i = plain(short).indexOf(word);
         if (i < 0 && word === "sept") i = 8;
@@ -70,6 +80,7 @@ export default class JumpToDate {
     }
 
     // Whether a week or a month ({ date, unit }, `date` its first day) is over by `today`
+    /** @param {Period} period @param {string} today @returns {boolean} */
     static over({ date, unit }, today) {
         if (unit === "month") return date.slice(0, 7) < today.slice(0, 7);
         const [y, m, d] = date.split("-").map(Number);
@@ -84,7 +95,7 @@ export default class JumpToDate {
      */
     monthNames(rules) {
         const data = moment.localeData(rules.locale);
-        const list = (names) => (Array.isArray(names) ? names : names?.standalone ?? names?.format ?? []);
+        const list = (/** @type {string[] | { standalone?: string[], format?: string[] }} */ names) => (Array.isArray(names) ? names : names?.standalone ?? names?.format ?? []);
         return { months: list(data.months()), short: list(data.monthsShort()) };
     }
 
@@ -98,16 +109,16 @@ export default class JumpToDate {
      * @returns {Period | null}
      */
     fromName(text, rules, { ahead = false } = {}) {
-        const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: moment().year() });
+        const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: /** @type {MomentFn} */ (moment)().year() });
         if (words) {
             const found = this.fromWords(words, rules);
-            if (ahead && found && !words.withYear && JumpToDate.over(found, moment().format("YYYY-MM-DD"))) {
+            if (ahead && found && !words.withYear && JumpToDate.over(found, /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"))) {
                 return this.fromWords({ ...words, year: words.year + 1 }, rules);
             }
             return found;
         }
-        for (const unit of ["week", "month", "year"]) {
-            const m = moment(text, rules.format[unit], rules.locale, true);
+        for (const unit of /** @type {("week" | "month" | "year")[]} */ (["week", "month", "year"])) {
+            const m = /** @type {MomentFn} */ (moment)(text, rules.format[unit], rules.locale, true);
             if (m.isValid() && m.format(rules.format[unit]) === text) {
                 // A week's name already reads as its first day; startOf("week") would move that to the
                 // locale's first day, which for ISO weeks in English is the Sunday of the week before
@@ -119,10 +130,15 @@ export default class JumpToDate {
 
     // A week number counted the way the weekly notes count them (ISO weeks when their pattern uses
     // GGGG or WW, else the locale's), or a month number: { date, unit }, or null if there's no such week
+    /**
+     * @param {Pick<PeriodWords, "unit" | "year" | "n">} words
+     * @param {WeekRules} rules
+     * @returns {Period | null}
+     */
     fromWords({ unit, year, n }, rules) {
         if (unit === "month") return n >= 1 && n <= 12 ? { date: `${year}-${String(n).padStart(2, "0")}-01`, unit } : null;
         const iso = this.isoWeeks(rules);
-        const m = moment().locale(rules.locale);
+        const m = /** @type {MomentFn} */ (moment)().locale(rules.locale);
         if (iso) m.isoWeekYear(year).isoWeek(n).startOf("isoWeek");
         else m.weekYear(year).week(n).startOf("week");
         const same = iso ? m.isoWeekYear() === year && m.isoWeek() === n : m.weekYear() === year && m.week() === n;
@@ -145,7 +161,7 @@ export default class JumpToDate {
      * @returns {string}
      */
     periodName({ date, unit }, rules) {
-        return moment(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
+        return /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
     }
 
     // The note a date opens: { path, name, kind, when, result }, where PeriodicNotes puts it. CalNav calls
@@ -164,6 +180,7 @@ export default class JumpToDate {
 
     // The note made, as every periodic note is (PeriodicNotes.ensure): in its folder, with its alias, then
     // its template
+    /** @param {JumpTarget} target @returns {Promise<TFile>} */
     async create(target) {
         const { unit, date } = target.result;
         return plainday.PeriodicNotes.ensure(unit, date);
@@ -194,11 +211,13 @@ export default class JumpToDate {
         return null;
     }
 
+    /** @returns {boolean} */
     skipping() {
         return app.loadLocalStorage(JumpToDate.SKIP_KEY) === true;
     }
 
     // Asks before creating a note. Enter creates, Escape and Cancel don't. Resolves true to create.
+    /** @param {JumpTarget} target @returns {Promise<boolean>} */
     confirm(target) {
         return new Promise((resolve) => {
             const modal = new Modal(app);
@@ -227,6 +246,7 @@ export default class JumpToDate {
     }
 
     // Under the preview, while notes are created without asking: say so, and offer to ask again
+    /** @param {HTMLElement} contentEl @param {(() => void) | null} [focus] @returns {void} */
     askAgainLine(contentEl, focus) {
         if (!this.skipping()) return;
         const line = contentEl.createDiv({ cls: "setting-item-description" });

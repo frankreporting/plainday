@@ -1,7 +1,21 @@
 import { moment } from "obsidian";
 import { chronoEn } from "../host.js";
 
-/** @import { DateReader } from "../host.js" */
+/** @import { DateReader, MomentFn, ParsedPeriod } from "../host.js" */
+/** @import { Chrono, Parser, ParsedResult, ParsingOption } from "chrono-node" */
+/**
+ * A unit a date moves by, as Revived names them:
+ * @typedef {"minute" | "hour" | "day" | "week" | "month" | "year" | "quarter"} DateUnit
+ *
+ * Revived's patterns (patterns()): its ordinal words with their numbers, the pattern an ordinal
+ * matches, and one regular expression per rule.
+ * @typedef {{
+ *   ordinals: Record<string, number>, ordinal: string, inUnits: RegExp, weekdayAt: RegExp, weekday: RegExp,
+ *   bareWeekday: RegExp, range: RegExp, ordinalOf: RegExp, lastDayOf: RegExp, weekdayOf: RegExp,
+ *   nextPeriod: RegExp, periodAfter: RegExp, periodBefore: RegExp, quarter: RegExp, yearQuarter: RegExp,
+ *   isoWeek: RegExp,
+ * }} Patterns
+ */
 
 // Plainday's own reader of dates typed in words, in English (OBS-139): the date box behind Schedule,
 // Due date, Jump to date and Invoice reads with it (DatePrompt).
@@ -24,6 +38,7 @@ import { chronoEn } from "../host.js";
 export default class DateWords {
     // The words for each unit, as Revived spells them in English. `m` is both a minute and a month:
     // Revived's last word for it wins, a month.
+    /** @type {Record<DateUnit, string[]>} */
     static UNITS = {
         minute: ["minute", "minutes", "min", "mins", "m"],
         hour: ["hour", "hours", "h", "hr", "hrs"],
@@ -33,7 +48,9 @@ export default class DateWords {
         year: ["year", "years", "y", "yr", "yrs"],
         quarter: ["quarter", "quarters", "q", "qtr"],
     };
+    /** @type {Record<string, number>} */
     static WEEKDAYS = { sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2, wednesday: 3, wed: 3, thursday: 4, thu: 4, thur: 4, thurs: 4, friday: 5, fri: 5, saturday: 6, sat: 6 };
+    /** @type {Record<string, number>} */
     static ORDINAL_WORDS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19, twentieth: 20, thirtieth: 30 };
     // A number's ending as Revived reads it: 16th, and its other languages' 16e, 16ème, 16.
     static ORDINAL_END = /(?:st|nd|rd|th|ème|er|e|\.)$/i;
@@ -41,7 +58,9 @@ export default class DateWords {
     // Made on first use: chrono-node's English with Revived's extra rule, { casual, gb } (gb is
     // British English, day before month, which Revived reads with when Obsidian's language is English
     // (UK)); and Revived's patterns, with its ordinal words and their numbers
+    /** @type {{ casual: Chrono, gb: Chrono } | null} */
     static parsers = null;
+    /** @type {Patterns | null} */
     static made = null;
 
     // ---------------------------------------------------------------- what DatePrompt asks
@@ -54,7 +73,7 @@ export default class DateWords {
     at(now = new Date()) {
         return {
             // Revived's plugin.parseDate: the period's first day for a week, month or year, else the day
-            parseDate: (text) => ({ moment: moment(this.parseDate(text, now)) }),
+            parseDate: (text) => ({ moment: /** @type {MomentFn} */ (moment)(this.parseDate(text, now)) }),
             parser: {
                 getParsedPeriod: (text) => this.period(text, now),
                 getParsedDateResult: (text, ref = now, opts = {}) => this.chronoDate(text, ref, opts),
@@ -64,6 +83,11 @@ export default class DateWords {
     }
 
     // The date the words name, as Revived's plugin.parseDate gives it
+    /**
+     * @param {string} text
+     * @param {Date} now
+     * @returns {Date | null}
+     */
     parseDate(text, now) {
         const p = this.period(text, now);
         return p.granularity === "quarter" ? this.date(text, now) : p.date;
@@ -71,6 +95,12 @@ export default class DateWords {
 
     // What chrono-node alone reads, Revived's extra rule included: the date of the longest stretch of
     // words it read, or null
+    /**
+     * @param {string} text
+     * @param {Date} ref
+     * @param {ParsingOption} [opts]
+     * @returns {Date | null}
+     */
     chronoDate(text, ref, opts = {}) {
         try {
             return DateWords.longest(this.chrono().parse(text, ref, opts))?.start.date() ?? null;
@@ -80,6 +110,11 @@ export default class DateWords {
     }
 
     // Every stretch of words chrono-node read, as its results
+    /**
+     * @param {string} text
+     * @param {Date} now
+     * @returns {ParsedResult[]}
+     */
     chronoResults(text, now) {
         try {
             return this.chrono().parse(text, now);
@@ -92,13 +127,19 @@ export default class DateWords {
 
     // A day, as Revived's getParsedDate reads it: its own rules in order, then chrono-node. Words it
     // can't read at all are `now`, as Revived's are; DatePrompt tells those apart.
+    /**
+     * @param {string} text
+     * @param {Date} now
+     * @returns {Date | null}
+     */
     date(text, now) {
         const R = this.patterns();
         const W = DateWords.WEEKDAYS;
         const cleaned = String(text).trim().replace(/[!?.]+$/, "");
         const t = cleaned.toLowerCase();
         const add = DateWords.add;
-        const day = (word) => W[word.toLowerCase()];
+        const day = (/** @type {string} */ word) => W[word.toLowerCase()];
+        /** @type {RegExpMatchArray | null} */
         let m;
 
         if (t === "now" || t === "today") return new Date(now.getTime());
@@ -192,6 +233,11 @@ export default class DateWords {
     // A period, as Revived's getParsedPeriod reads it: { date, granularity } with granularity "day",
     // "week", "month", "quarter" or "year" and date its first day (a week's ISO Monday; "this week"
     // stays today). Anything that isn't a period is a day.
+    /**
+     * @param {string} text
+     * @param {Date} now
+     * @returns {ParsedPeriod}
+     */
     period(text, now) {
         const R = this.patterns();
         const t = String(text).trim().replace(/[!?.]+$/, "");
@@ -233,23 +279,26 @@ export default class DateWords {
 
     // chrono-node's English with Revived's extra rule: a number from 1 to 31, with or without its
     // ending, or an ordinal word, is that day of the reference month ("the 16th")
+    /** @returns {Chrono} */
     chrono() {
         if (!DateWords.parsers) {
+            /** @type {Parser} */
             const day = {
                 pattern: () => new RegExp(this.patterns().ordinal),
                 extract: (context, match) => ({ day: this.ordinal(match[0]), month: context.refDate.getMonth() + 1 }),
             };
-            const make = (base) => { const c = base.clone(); c.parsers.push(day); return c; };
+            const make = (/** @type {Chrono} */ base) => { const c = base.clone(); c.parsers.push(day); return c; };
             DateWords.parsers = { casual: make(chronoEn.casual), gb: make(chronoEn.GB) };
         }
         return moment.locale() === "en-gb" ? DateWords.parsers.gb : DateWords.parsers.casual;
     }
 
+    /** @returns {Patterns} */
     patterns() {
         if (DateWords.made) return DateWords.made;
         const U = DateWords.UNITS;
         // Alternatives, longest first, so "mon" doesn't win over "monday"
-        const alt = (words) => [...new Set(words)].sort((a, b) => b.length - a.length).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+        const alt = (/** @type {string[]} */ words) => [...new Set(words)].sort((a, b) => b.length - a.length).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
         const ordinals = { ...DateWords.ORDINAL_WORDS };
         for (const [w, n] of Object.entries(DateWords.ORDINAL_WORDS).slice(0, 9)) { ordinals[`twenty ${w}`] = 20 + n; ordinals[`twenty-${w}`] = 20 + n; }
         ordinals["thirty first"] = 31;
@@ -259,7 +308,7 @@ export default class DateWords {
         const wd = alt(Object.keys(DateWords.WEEKDAYS));
         const unit = alt([...U.minute, ...U.hour, ...U.day, ...U.week, ...U.month, ...U.year]);
         const period = alt([...U.week, ...U.month, ...U.year, ...U.quarter]);
-        const re = (s) => new RegExp(s, "i");
+        const re = (/** @type {string} */ s) => new RegExp(s, "i");
         DateWords.made = {
             ordinals,
             ordinal: ord,
@@ -284,9 +333,13 @@ export default class DateWords {
     // The unit a word names. A word in two lists ("m") is the later one's, as in Revived, and one in
     // none is guessed from its first letters, as Revived guesses (some of them for its other
     // languages).
+    /**
+     * @param {string} word
+     * @returns {DateUnit}
+     */
     unitOf(word) {
         const w = word.toLowerCase();
-        const listed = ["minute", "hour", "day", "week", "month", "year"].filter((u) => DateWords.UNITS[u].includes(w)).pop();
+        const listed = /** @type {DateUnit[]} */ (["minute", "hour", "day", "week", "month", "year"]).filter((u) => DateWords.UNITS[u].includes(w)).pop();
         if (listed) return listed;
         if (w.startsWith("h")) return "hour";
         if (w.startsWith("d") || w.startsWith("j")) return "day";
@@ -298,6 +351,12 @@ export default class DateWords {
     }
 
     // "this", "next" or "last" friday, in weeks that start on Sunday
+    /**
+     * @param {Date} now
+     * @param {string} which
+     * @param {number} i
+     * @returns {Date}
+     */
     weekday(now, which, i) {
         const step = DateWords.step(which.toLowerCase());
         const x = DateWords.setWeekday(now, i);
@@ -305,30 +364,44 @@ export default class DateWords {
     }
 
     // The first day of this, next or last month
+    /**
+     * @param {Date} now
+     * @param {string} which
+     * @returns {Date}
+     */
     monthOf(now, which) {
         return DateWords.add(DateWords.startOfMonth(now), DateWords.step(which), "month");
     }
 
     // 1 for "next", -1 for "last", 0 otherwise
+    /** @param {string} which @returns {number} */
     static step(which) {
         return which === "next" ? 1 : which === "last" ? -1 : 0;
     }
 
     // The number an ordinal names: "16th", "16", "sixteenth"
+    /** @param {string} text @returns {number} */
     ordinal(text) {
         const t = text.toLowerCase();
         return this.patterns().ordinals[t] ?? parseInt(t.replace(DateWords.ORDINAL_END, ""));
     }
 
     // The longest of chrono-node's results, or null
+    /** @param {ParsedResult[]} results @returns {ParsedResult | null} */
     static longest(results) {
-        return results.reduce((best, r) => (!best || r.text.length > best.text.length ? r : best), null);
+        return results.reduce((best, r) => (!best || r.text.length > best.text.length ? r : best), /** @type {ParsedResult | null} */ (null));
     }
 
     // ---------------------------------------------------------------- dates, the way moment counts them
 
     // `n` units on from a date; months and years keep the day, or the month's last when it's shorter
     // (Jan 31 + 1 month is Feb 28)
+    /**
+     * @param {Date} date
+     * @param {number} n
+     * @param {DateUnit} unit
+     * @returns {Date}
+     */
     static add(date, n, unit) {
         const x = new Date(date.getTime());
         if (unit === "minute") x.setMinutes(x.getMinutes() + n);
@@ -346,6 +419,7 @@ export default class DateWords {
     }
 
     // The day of the same Sunday-to-Saturday week that's weekday `i` (0 is Sunday)
+    /** @param {Date} date @param {number} i @returns {Date} */
     static setWeekday(date, i) {
         const x = new Date(date.getTime());
         x.setDate(x.getDate() - x.getDay() + i);
@@ -353,20 +427,24 @@ export default class DateWords {
     }
 
     // Weekday `i`'s next day, today included
+    /** @param {Date} now @param {number} i @returns {Date} */
     static coming(now, i) {
         const x = DateWords.setWeekday(now, i);
-        const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const day = (/** @type {Date} */ d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
         return day(x) < day(now) ? DateWords.add(x, 1, "week") : x;
     }
 
+    /** @param {Date} date @returns {number} */
     static daysIn(date) {
         return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
     }
 
+    /** @param {Date} date @returns {Date} */
     static startOfMonth(date) {
         return new Date(date.getFullYear(), date.getMonth(), 1);
     }
 
+    /** @param {Date} date @returns {Date} */
     static endOfMonth(date) {
         return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
     }

@@ -3,7 +3,7 @@ import { app, plainday } from "../host.js";
 
 /** @import { Editor, TFile } from "obsidian" */
 /** @import { Moment } from "moment" */
-/** @import { Fold } from "../host.js" */
+/** @import { Fold, FoldView, MomentFn } from "../host.js" */
 /** @import { DateResult, Unit, WeekRules } from "../shared/datePrompt.js" */
 /** @import { TaskLine } from "../shared/taskIds.js" */
 /**
@@ -21,6 +21,26 @@ import { app, plainday } from "../host.js";
  * Where the weekly, monthly and yearly notes go (TimeReport.periodPlaces): each one's fixed folder, and
  * its folders by date ("" for none).
  * @typedef {Record<"week" | "month" | "year", { folder: string, dateFolders: string }>} PeriodPlaces
+ *
+ * A task's line in a periodic note as Schedule treats it (leaveBehind): the note's lines after, the lines
+ * that go (indent taken off), "forwarded" or "moved", the nest's last line, and what's left in its place.
+ * @typedef {{ lines: string[], outgoing: string[], moved: "moved" | "forwarded", end: number, kept: string[] }} LeftBehind
+ *
+ * Where placeInTopList put lines: the note's new content, the line the insert starts at, how many lines
+ * it adds, and the line of the first one moved there.
+ * @typedef {{ content: string, at: number, count: number, item: number }} Placed
+ *
+ * A note's folds before a write (captureFolds): whether its properties are folded, and its other folds,
+ * or null when the saved record no longer matches the note.
+ * @typedef {{ props: boolean, folds: Fold[] | null }} FoldsBefore
+ *
+ * What reopen did: false when the note had no such line any more, else that day's project when its time
+ * now counts toward another one (null when it doesn't).
+ * @typedef {false | { counts: string | null }} Reopened
+ *
+ * What Schedule says once it's done (said): whether a line was reopened, and where that day's time now
+ * counts; whether the line was forwarded; the task's name when run from under it; and where it went.
+ * @typedef {{ reopened?: boolean | { counts: string | null } | null, forwarded?: boolean, named?: string | null, label: string }} Said
  */
 
 export default class Schedule {
@@ -34,6 +54,7 @@ export default class Schedule {
     static ORIGIN = "obsidian-pm";
 
     async invoke() {
+        /** @type {FoldView | null} */
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         const srcFile = app.workspace.getActiveFile();
         if (!view || !srcFile) { new Notice("Need an active editor"); return; }
@@ -184,7 +205,7 @@ export default class Schedule {
                 end = Schedule.nest(now, lineNum).end;
                 const go = Schedule.openSteps(now, lineNum, end);
                 for (let k = lineNum + 1; k <= end; k++) if (!go.has(k) && now[k].replace(/\r$/, "").trim()) kept.push(now[k]);
-                const out = (l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
+                const out = (/** @type {string} */ l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
                 outgoing = [periodic ? copy : this.sentLine(copy, srcFile), ...[...go].filter((k) => now[k].replace(/\r$/, "").trim()).map((k) => out(now[k]))];
             } else {
                 // A periodic note (leaveBehind): from a day, the line stays [>] with what has to stay (its time,
@@ -274,9 +295,10 @@ export default class Schedule {
 
     // What Schedule says once it's done: "Moved to 9/18", "Forwarded to Wk of 9/20", "Reopened on 9/16", with
     // the task's name in quotes when it was run from a line under the task (OBS-193)
+    /** @param {Said} said @returns {string} */
     static said({ reopened, forwarded, named, label }) {
         const what = named ? ` "${named}"` : "";
-        const counts = reopened?.counts ? `; that day's time now counts toward ${reopened.counts}` : "";
+        const counts = /** @type {{ counts?: string | null } | null | undefined} */ (reopened)?.counts ? `; that day's time now counts toward ${/** @type {{ counts: string }} */ (reopened).counts}` : "";
         return reopened ? `Reopened${what} on ${label}${counts}` : `${forwarded ? "Forwarded" : "Moved"}${what} to ${label}`;
     }
 
@@ -336,10 +358,11 @@ export default class Schedule {
     // open in a periodic note, since the line being forwarded is its task's open line and a task has one.
     // A sent line with the ID says it's this task's: a second open line is then a copy (or a click turned
     // a [>] back), which keeps the ID so the checks list it.
+    /** @param {TaskLine[] | null} lines @param {TFile} srcFile @returns {boolean} */
     foreignId(lines, srcFile) {
         const tasks = plainday.TaskIds;
         const others = (lines ?? []).filter((l) => l.file.path !== srcFile.path);
-        const periodic = (l) => tasks.kindOf(l.file) !== "other";
+        const periodic = (/** @type {TaskLine} */ l) => tasks.kindOf(l.file) !== "other";
         const sent = others.some((l) => ">xX-".includes(l.task));
         return (!sent && others.some((l) => periodic(l) && " /".includes(l.task))) || (others.length > 0 && !others.some((l) => periodic(l) || ">xX-".includes(l.task)));
     }
@@ -365,7 +388,7 @@ export default class Schedule {
      * @returns {Promise<string>}
      */
     async rewrite(file, fn) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {MarkdownView} */ (l.view)).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         plainday.TaskIds?.touched?.(file);
         if (!view) return app.vault.process(file, fn);
         const before = view.editor.getValue(), after = fn(before);
@@ -414,6 +437,14 @@ export default class Schedule {
     // open line by it. Otherwise null, and the line is sent as a first send would
     // (OBS-181). The upgrade stays even if the date prompt is then dismissed: it only rewrites the line
     // as it is now.
+    /**
+     * @param {Editor} editor
+     * @param {TFile} srcFile
+     * @param {number} lineNum
+     * @param {string} lineText
+     * @param {string | null} [own]
+     * @returns {Promise<string | null>}
+     */
     async adopt(editor, srcFile, lineNum, lineText, own = null) {
         const tasks = plainday.TaskIds, T = tasks.constructor;
         const old = T.oldForward(lineText);
@@ -423,10 +454,10 @@ export default class Schedule {
         if (!title) return null;
         const lines = (await tasks.readNow(day)).split("\n");
         // A line nested under another is a sub-task (rule 5): never the task's line (isTop, below)
-        const ours = (l) => T.title(l) === title && [...l.matchAll(/\[\[([^\]|#]+)/g)].some((m) => m[1].split("/").pop().trim().toLowerCase() === name);
+        const ours = (/** @type {string} */ l) => T.title(l) === title && [...l.matchAll(/\[\[([^\]|#]+)/g)].some((m) => m[1].split("/").pop().trim().toLowerCase() === name);
         const matches = lines.map((l, i) => ({ l, i })).filter(({ l, i }) => /^\s*[-*+]\s+\[[ /]\]/.test(l) && !T.idOf(l) && ours(l) && T.isTop(lines, i));
         const sent = matches.length ? [] : lines.filter((l, i) => /^\s*[-*+]\s+\[>\]/.test(l) && T.idOf(l) && ours(l) && T.isTop(lines, i));
-        let id, link = null;
+        let /** @type {string} */ id, link = null;
         if (matches.length === 1) {
             id = own ?? tasks.freshId();
             const { l, i } = matches[0];
@@ -455,6 +486,10 @@ export default class Schedule {
     // the task. `lines` are the task's lines when the caller has them (gather); `restore` is where the status
     // of a source clicked back to [ ] (or ticked) is, set to [>] again once the move goes ahead, or when it's
     // refused (while the line is as it was). `named`: the task's name, for the notice, when run from under it.
+    /**
+     * @param {{ editor: Editor, srcFile: TFile, lineNum: number, lineText: string, id: string, lines?: TaskLine[] | null, restore?: number | null, named?: string | null }} from
+     * @returns {Promise<void>}
+     */
     async reschedule({ editor, srcFile, lineNum, lineText, id, lines: given = null, restore = null, named = null }) {
         const tasks = plainday.TaskIds, T = tasks.constructor;
         const fwd = T.forwardOf(lineText);
@@ -487,7 +522,7 @@ export default class Schedule {
      */
     whereIs(lines) {
         const tasks = plainday.TaskIds;
-        const periodic = (l) => tasks.kindOf(l.file) !== "other";
+        const periodic = (/** @type {TaskLine} */ l) => tasks.kindOf(l.file) !== "other";
         const open = lines.find((l) => " /".includes(l.task) && periodic(l)) ?? null;
         const done = open ? null : lines.find((l) => "xX-".includes(l.task) && periodic(l)) ?? null;
         return { open, done, current: open ?? done, sources: lines.filter((l) => !periodic(l) && ">xX-".includes(l.task)) };
@@ -518,7 +553,7 @@ export default class Schedule {
             tasks.touched(srcFile);
             return true;
         };
-        const refuse = (notice) => { putBack(); return { ok: false, notice, ...none }; };
+        const refuse = (/** @type {string} */ notice) => { putBack(); return { ok: false, notice, ...none }; };
         // A fresh copy needs the line it's made from
         if (!current && lineText === null) return refuse("This task's line is gone, so nothing was moved");
         const started = await this.started(lines);
@@ -547,12 +582,12 @@ export default class Schedule {
         const destFile = app.vault.getFileByPath(dest.path);
         const there = destFile ? await this.taskLineIn(destFile, id) : null;
         if (there && " /".includes(there.task)) return refuse(`This task is already open on ${dest.label}`);
-        const taken = (text) => {
+        const taken = (/** @type {string} */ text) => {
             const ls = text.split("\n");
             const at = Schedule.taskLine(ls, id, open ? " /" : "xX-");
             return at === -1 ? null : { at, before: ls, ...Schedule.leaveBehind(ls, at, { daily: this.isDailyNote(current.file), started }) };
         };
-        let outgoing, moved = "forwarded", plan = null;
+        let outgoing, moved = "forwarded", /** @type {{ at: number, before: string[] } & LeftBehind | null} */ plan = null;
         if (current) {
             plan = taken(await tasks.readNow(current.file));
             if (!plan) return refuse("The task's line changed before it could be moved, so it wasn't");
@@ -583,7 +618,7 @@ export default class Schedule {
             }
             if (current) {
                 // Only while the task's lines there are as they were read: a sub-task added meanwhile isn't lost
-                const nest = (p) => p.before.slice(p.at, p.end + 1).join("\n");
+                const nest = (/** @type {{ at: number, before: string[] } & LeftBehind} */ p) => p.before.slice(p.at, p.end + 1).join("\n");
                 let changed = false;
                 await this.rewrite(current.file, (t) => {
                     const p = taken(t);
@@ -609,20 +644,28 @@ export default class Schedule {
     /** @param {TFile} file @returns {Destination | null} */
     destinationOf(file) {
         const rules = plainday.DatePrompt.weekRules();
-        if (this.isDailyNote(file)) return this.destination(plainday.DatePrompt.result(moment(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
+        if (this.isDailyNote(file)) return this.destination(plainday.DatePrompt.result(/** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
         const unit = this.periodOf(file);
         if (!unit) return null;
-        return this.destination(plainday.DatePrompt.result(moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD"), unit), rules);
+        return this.destination(plainday.DatePrompt.result(/** @type {MomentFn} */ (moment)(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD"), unit), rules);
     }
 
     // Reopens the [>], done or canceled line ending in `id` in `file` with `outgoing`, the lines moving there
     // (reopenIn), and refreshes a daily note's fold snapshot. False when `file` has no such line any more, and
     // is left as it was, so the caller puts the lines in as usual rather than lose them
+    /**
+     * @param {TFile} file
+     * @param {string} id
+     * @param {string[]} outgoing
+     * @param {{ started?: boolean }} [options]
+     * @returns {Promise<Reopened>}
+     */
     async reopen(file, id, outgoing, { started = false } = {}) {
         // Where that day's time counts, as the report reads it, before and after: the notice says when it changed
         const tr = plainday.TimeReport, index = tr.appIndex();
         const note = { path: file.path, kind: plainday.TaskIds.kindOf(file) };
-        const name = (path) => (path ? path.split("/").pop().replace(/\.md$/, "") : "no project");
+        const name = (/** @type {string | null} */ path) => (path ? path.split("/").pop().replace(/\.md$/, "") : "no project");
+        /** @type {Reopened} */
         let reopened = false;
         await this.rewrite(file, (t) => {
             const before = t.split("\n"), at = Schedule.taskLine(before, id, ">xX-");
@@ -640,6 +683,12 @@ export default class Schedule {
 
     // Each done or canceled line of a task among `lines` (from gather) in a periodic note, other than in
     // `skip` (files), set to [>]: the task is open elsewhere now (rule 13)
+    /**
+     * @param {string} id
+     * @param {TaskLine[]} lines
+     * @param {(TFile | null | undefined)[]} [skip]
+     * @returns {Promise<void>}
+     */
     async reopenFinished(id, lines, skip = []) {
         const tasks = plainday.TaskIds, T = tasks.constructor;
         const files = new Map(lines.filter((l) => "xX-".includes(l.task) && tasks.kindOf(l.file) !== "other" && !skip.some((f) => f?.path === l.file.path)).map((l) => [l.file.path, l.file]));
@@ -666,6 +715,7 @@ export default class Schedule {
     // between are passed over) and whether time is logged anywhere in it, as the report reads a line: an entry,
     // a running clock, or a range it lists as a Problem; not a time in a line's text, or a commented-out one.
     // A line's \r is read past.
+    /** @param {string[]} lines @param {number} at @returns {{ end: number, time: boolean }} */
     static nest(lines, at) {
         const tr = plainday.TimeReport;
         const raw = lines.map((l) => l.replace(/\r$/, ""));
@@ -678,9 +728,11 @@ export default class Schedule {
     // The lines under line `at` (to `end`) that go when the task moves on with something left behind (OBS-210):
     // each open sub-task ([ ] or [/]) directly under it, with everything under that one, unless time is logged
     // under it. A Set of line indexes.
+    /** @param {string[]} lines @param {number} at @param {number} end @returns {Set<number>} */
     static openSteps(lines, at, end) {
         const tr = plainday.TimeReport;
         const raw = lines.map((l) => l.replace(/\r$/, ""));
+        /** @type {Set<number>} */
         const go = new Set();
         for (let j = at + 1; j <= end;) {
             if (!raw[j].trim()) { j++; continue; }
@@ -699,13 +751,19 @@ export default class Schedule {
     // moving whole reopens as [/] when the task has time logged (`started`), else [ ]; an open one keeps its box.
     // { lines, outgoing, moved, end, kept }: the note's lines after, the lines that go (indent taken off),
     // "forwarded" or "moved", the nest's last line, and what's left in its place.
+    /**
+     * @param {string[]} lines
+     * @param {number} at
+     * @param {{ daily: boolean, started?: boolean }} options
+     * @returns {LeftBehind}
+     */
     static leaveBehind(lines, at, { daily, started = false }) {
         const line = lines[at];
         const indent = line.match(/^\s*/)[0];
         const w = Schedule.nest(lines, at);
         const box = line.match(/\[(.)\]/)[1];
         const finished = "xX-".includes(box);
-        const out = (l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
+        const out = (/** @type {string} */ l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
         if (daily && w.time) {
             const raw = lines.map((l) => l.replace(/\r$/, ""));
             const go = Schedule.openSteps(lines, at, w.end);
@@ -714,7 +772,7 @@ export default class Schedule {
             const outgoing = [out(line).replace(/\[(.)\]/, "[/]"), ...[...go].filter((k) => raw[k].trim()).map((k) => out(lines[k]))];
             return { lines: [...lines.slice(0, at), ...kept, ...lines.slice(w.end + 1)], outgoing, moved: "forwarded", end: w.end, kept };
         }
-        const reopened = (l) => l.replace(/\[(.)\]/, `[${finished ? (started || w.time ? "/" : " ") : box === ">" ? " " : box}]`);
+        const reopened = (/** @type {string} */ l) => l.replace(/\[(.)\]/, `[${finished ? (started || w.time ? "/" : " ") : box === ">" ? " " : box}]`);
         const children = lines.slice(at + 1, w.end + 1).filter((l) => l.trim());
         return { lines: [...lines.slice(0, at), ...lines.slice(w.end + 1)], outgoing: [reopened(out(line)), ...children.map(out)], moved: "moved", end: w.end, kept: [] };
     }
@@ -724,6 +782,13 @@ export default class Schedule {
     // moved line's text, 🚩 and note link (OBS-181, OBS-193). Its box is [/] when the moved line was, or the task
     // has time logged (`started`, or time under the line), else [ ]. The old line's sub-bullets stay, and the
     // ones that came with it follow.
+    /**
+     * @param {string} text
+     * @param {string} id
+     * @param {string[]} moved
+     * @param {{ started?: boolean }} [options]
+     * @returns {string}
+     */
     static reopenIn(text, id, moved, { started = false } = {}) {
         const lines = text.split("\n");
         const at = Schedule.taskLine(lines, id, ">xX-");
@@ -742,11 +807,12 @@ export default class Schedule {
     // says, its text, ⭕ or 🗃️, 🆓, 🚩 and note link, since those are the newer word (Brian, 2026-10-26); only the
     // old note link stays when the moving line has none. That day's entries stay under the line and count where the
     // line now says (the report lists a billed one that changed). The note link stays last before the ID.
+    /** @param {string} line @param {string} old @returns {string} */
     static keepLinks(line, old) {
         const T = plainday.TaskIds.constructor;
         // Its own note (its ⋯) stays when the moving line has none; the ↗ is the moving line's (OBS-208)
-        const note = (i) => /\|\s*⋯\s*\]\]$/u.test(i);
-        const from = (i) => /\|\s*↗\uFE0F?\s*\]\]$/u.test(i);
+        const note = (/** @type {string} */ i) => /\|\s*⋯\s*\]\]$/u.test(i);
+        const from = (/** @type {string} */ i) => /\|\s*↗\uFE0F?\s*\]\]$/u.test(i);
         const { text, items } = T.splitRun(line);
         const oldNote = T.splitRun(old).items.find(note);
         if (oldNote && !items.some(note)) {
@@ -777,6 +843,11 @@ export default class Schedule {
     // Task `id`'s line in `file`, read as the note is now, among its top lines: { at, task, lines } (the note's
     // lines), or null. A note holds one line of a task, but if a hand edit left two, an open one comes first,
     // then a finished one, so a move never reopens a line beside an open one.
+    /**
+     * @param {TFile} file
+     * @param {string} id
+     * @returns {Promise<{ at: number, task: string, lines: string[] } | null>}
+     */
     async taskLineIn(file, id) {
         const T = plainday.TaskIds.constructor, want = id.toLowerCase();
         const lines = (await plainday.TaskIds.readNow(file)).split("\n");
@@ -790,7 +861,7 @@ export default class Schedule {
     // by name, or by path when another note has it; "10/8", "Wk of 10/4", "Oct. 2026" or "2027"
     /** @param {TFile} file @param {string} id @returns {string} */
     forwardTo(file, id) {
-        const label = this.isDailyNote(file) ? moment(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
+        const label = this.isDailyNote(file) ? /** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
         const linktext = plainday.AddTaskNote.linktextFor(file, app.vault.getMarkdownFiles().map((f) => f.path));
         return plainday.TaskIds.constructor.forwardLink(linktext, label, id);
     }
@@ -798,18 +869,23 @@ export default class Schedule {
     // Where a periodic note puts a task, as a prompt says it: "Thu 10/8", "Wk of 10/4", "Oct. 2026", "2027"
     /** @param {TFile} file @returns {string} */
     labelOf(file) {
-        if (this.isDailyNote(file)) return moment(file.basename, this.dailyOpts().format, true).format("ddd M/D");
+        if (this.isDailyNote(file)) return /** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true).format("ddd M/D");
         const unit = this.periodOf(file);
         if (!unit) return file.basename;
         const rules = plainday.DatePrompt.weekRules();
         const jump = plainday.JumpToDate;
-        const date = moment(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD");
+        const date = /** @type {MomentFn} */ (moment)(file.basename, rules.format[unit], rules.locale, true).format("YYYY-MM-DD");
         return Schedule.periodLabel({ date, unit }, { weekStart: jump.isoWeeks(rules) ? 1 : rules.weekStart, ...jump.monthNames(rules) });
     }
 
     // A period's short name, as short as a day's M/D: "Wk of 10/4" (the day the week starts, weeks
     // starting on `weekStart`, 0 is Sunday), "Oct. 2026" (the locale's short month name, with a period
     // unless it has one or is the whole name: "May 2026"), "2027"
+    /**
+     * @param {{ date: string, unit: Unit }} period
+     * @param {{ weekStart?: number, months?: string[], short?: string[] }} [names]
+     * @returns {string}
+     */
     static periodLabel({ date, unit }, { weekStart = 0, months = [], short = [] } = {}) {
         const [y, mo, d] = date.split("-").map(Number);
         if (unit === "year") return String(y);
@@ -848,6 +924,7 @@ export default class Schedule {
 
     // The folder a periodic note for date `m` sits in: the fixed folder, then its folders by date, as
     // `m` formats them ("Journal" and "YYYY/MM" put 11/21/2026's in "Journal/2026/11"); "" is the top
+    /** @param {{ folder: string, dateFolders: string }} place @param {Moment} m @returns {string} */
     static folderFor({ folder, dateFolders }, m) {
         return [folder, dateFolders ? m.format(dateFolders) : ""].filter(Boolean).join("/");
     }
@@ -865,9 +942,9 @@ export default class Schedule {
     isDailyNote(file) {
         const opts = this.dailyOpts();
         const parent = file.parent?.path ?? "/";
-        if (!opts.dateFolders) return parent === (opts.folder || "/") && moment(file.basename, opts.format, true).isValid();
+        if (!opts.dateFolders) return parent === (opts.folder || "/") && /** @type {MomentFn} */ (moment)(file.basename, opts.format, true).isValid();
         if (opts.folder && !parent.startsWith(`${opts.folder}/`)) return false;
-        const m = moment(file.basename, opts.format, true);
+        const m = /** @type {MomentFn} */ (moment)(file.basename, opts.format, true);
         return m.isValid() && parent === (Schedule.folderFor(opts, m) || "/");
     }
 
@@ -884,13 +961,13 @@ export default class Schedule {
     periodOf(file, rules = plainday.DatePrompt.weekRules(), places = plainday.TimeReport.periodPlaces()) {
         // The top of the vault is "/" to Obsidian and "" to the settings
         const folder = !file.parent || file.parent.path === "/" ? "" : file.parent.path;
-        for (const unit of ["week", "month", "year"]) {
+        for (const unit of /** @type {("week" | "month" | "year")[]} */ (["week", "month", "year"])) {
             const place = places[unit];
             if (!place.dateFolders) {
-                if (folder === place.folder && moment(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
+                if (folder === place.folder && /** @type {MomentFn} */ (moment)(file.basename, rules.format[unit], rules.locale, true).isValid()) return unit;
                 continue;
             }
-            const m = moment(file.basename, rules.format[unit], rules.locale, true);
+            const m = /** @type {MomentFn} */ (moment)(file.basename, rules.format[unit], rules.locale, true);
             if (m.isValid() && folder === Schedule.folderFor(place, m)) return unit;
         }
         return null;
@@ -904,6 +981,7 @@ export default class Schedule {
     // from, after its own ⋯, unless that note is a project or area note, which its ⭕ already names. The
     // ↗ links the task's own line there by its ID, `Source#^id`, the line that keeps the same ID (Brian,
     // 2026-10-28).
+    /** @param {string} line @param {TFile} src @returns {string} */
     sentLine(line, src) {
         const helper = plainday.AddTaskNote;
         const paths = app.vault.getMarkdownFiles().map((f) => f.path);
@@ -920,6 +998,7 @@ export default class Schedule {
         return tagged ? sent : helper.withFrom(sent, `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${Schedule.FROM_MARK}]]`);
     }
 
+    /** @param {TFile} file @returns {boolean} */
     isProjectNote(file) {
         const cache = app.metadataCache.getFileCache(file);
         const tags = cache ? (getAllTags(cache) ?? []) : [];
@@ -927,6 +1006,7 @@ export default class Schedule {
     }
 
     // A line forwarded out of an area note links the area with its own suffix, 🗃️ (OBS-36)
+    /** @param {TFile} file @returns {boolean} */
     isAreaNote(file) {
         const cache = app.metadataCache.getFileCache(file);
         const tags = cache ? (getAllTags(cache) ?? []) : [];
@@ -939,7 +1019,7 @@ export default class Schedule {
     async ensureDailyNote(path) {
         const file = app.vault.getFileByPath(path);
         if (file) return file;
-        const m = moment(path.split("/").pop().replace(/\.md$/, ""), this.dailyOpts().format, true);
+        const m = /** @type {MomentFn} */ (moment)(path.split("/").pop().replace(/\.md$/, ""), this.dailyOpts().format, true);
         if (!m.isValid()) throw new Error(`${path} isn't named like a daily note`);
         return plainday.PeriodicNotes.ensure("day", m.format("YYYY-MM-DD"));
     }
@@ -948,7 +1028,9 @@ export default class Schedule {
     // content plus where the block landed, so the fold pass can find it. Written through the note's editor
     // when it's open (rewrite), so an edit there not yet saved is never merged with this one: a line just
     // taken out in that editor would come back (OBS-232).
+    /** @param {TFile} file @param {string[]} newLines @returns {Promise<Placed>} */
     async appendToTopChecklist(file, newLines) {
+        /** @type {Placed} */
         let out;
         await this.rewrite(file, (content) => {
             out = Schedule.placeInTopList(content, newLines);
@@ -971,6 +1053,7 @@ export default class Schedule {
     // (EventLog.recordEvent). Plainday's own new notes never hold template code (PeriodicNotes, OBS-120).
     // A CRLF note keeps its line endings. Returns { content, at, count, item }: the new content, the line
     // the insert starts at, how many lines it adds, and the line of the first one moved there.
+    /** @param {string} content @param {string[]} newLines @returns {Placed} */
     static placeInTopList(content, newLines) {
         if (/^\s*<%/.test(content)) {
             const eol = content.includes("\r\n") ? "\r\n" : "\n";
@@ -1022,11 +1105,12 @@ export default class Schedule {
 
     // Capture BEFORE the write. Live editor if the note is open, else the saved record —
     // and only trust its line numbers if the saved line count still matches the file.
+    /** @param {TFile} file @param {number} lineCount @returns {FoldsBefore} */
     captureFolds(file, lineCount) {
-        const view = app.workspace.getLeavesOfType("markdown").map(l => l.view).find(v => v?.file === file);
+        const view = app.workspace.getLeavesOfType("markdown").map(l => /** @type {FoldView} */ (l.view)).find(v => v?.file === file);
         const info = view ? view.currentMode.getFoldInfo?.() : app.foldManager.load(file);
         const all = info?.folds ?? [];
-        const isProps = f => f.from === 0 && f.to === 0;   // collapsed frontmatter marker
+        const isProps = (/** @type {Fold} */ f) => f.from === 0 && f.to === 0;   // collapsed frontmatter marker
         return {
             props: all.some(isProps),
             folds: info && info.lines === lineCount ? all.filter(f => !isProps(f)) : null
@@ -1038,6 +1122,15 @@ export default class Schedule {
     // applyFoldInfo silently no-ops unless `lines` matches the document.
     // `at` and `count` say where lines went in and how many; `item` is the line of the first one moved
     // there, when blank lines came before it.
+    /**
+     * @param {TFile} file
+     * @param {string} content
+     * @param {FoldsBefore} prev
+     * @param {number} at
+     * @param {number} count
+     * @param {number} [item]
+     * @returns {Promise<void>}
+     */
     async semiFold(file, content, prev, at, count, item = at) {
         const foldable = this.foldableRanges(content);
         const byLine = new Map(foldable.map(r => [r.from, r]));
@@ -1057,7 +1150,7 @@ export default class Schedule {
         if (prev.props) folds.unshift({ from: 0, to: 0 });
 
         const info = { folds, lines: content.split("\n").length };
-        const view = app.workspace.getLeavesOfType("markdown").map(l => l.view).find(v => v?.file === file);
+        const view = app.workspace.getLeavesOfType("markdown").map(l => /** @type {FoldView} */ (l.view)).find(v => v?.file === file);
         if (view) window.setTimeout(() => view.currentMode.applyFoldInfo(info), 50);
         await app.foldManager.save(file, info);
     }
