@@ -1,16 +1,22 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { TFile } from "obsidian" */
+/** @import { MarkdownView, TFile, WorkspaceLeaf } from "obsidian" */
 /** @import { Period } from "./datePrompt.js" */
+/** @import { Entry } from "../commands/timeReport.js" */
+/** @import { MomentFn, SomeView } from "../host.js" */
 /**
  * A task's checklist line as a command reads it now (gather): its note, its line from 0, its
  * checkbox's status (" ", "x", ">", …) and its text.
  * @typedef {{ file: TFile, line: number, task: string, text: string }} TaskLine
  *
  * A list item with a block ID as Obsidian's cache has it (map, linesOf): `task` is undefined for one
- * that isn't a checklist line.
- * @typedef {{ file: TFile, line: number, task: string | undefined }} CachedLine
+ * that isn't a checklist line, and null for a block that isn't a list item (lineIn).
+ * @typedef {{ file: TFile, line: number, task: string | null | undefined }} CachedLine
+ *
+ * What TaskIds keeps between calls: when a command last wrote each note, by path (touched), and the
+ * draw new IDs are made from, which only tests set (freshId).
+ * @typedef {TaskIds & { recent?: Map<string, number>, random?: () => number }} Kept
  *
  * A reader of periodic note names (PeriodicNotes.reader): a link's name, or its path's last part, as
  * the period it names, or null for any other note.
@@ -30,6 +36,20 @@ import { app, plainday } from "../host.js";
  * forward date points and whether it's missing ("forward").
  * @typedef {{ path: string, line: number, text: string }} CheckedLine
  * @typedef {{ rule: string, id: string, lines: CheckedLine[], detail: { projects?: (string | null)[], clicked?: number, open?: boolean, to?: string | null, missing?: boolean } }} TaskProblem
+ *
+ * A line the one-time conversion changes (linkBackPass): its note and line (from 1), the line before
+ * and after, the mark its old link became and the note a ↗ links back to, whether that was found by
+ * the task's title, whether to check it first, the project its ⭕ names, and the time the report
+ * would count differently (`moves`, each the minutes and the project before and after, null for
+ * none). `dots` is the line as the report reads it before, kept only while the pass runs.
+ * @typedef {{ minutes: number, from: string | null, to: string | null }} TimeMove
+ * @typedef {{ path: string, line: number, before: string, after: string, dots?: string, mark: string, note: string | null, byText: boolean, review: boolean, home: string | null, moves: TimeMove[] }} LinkBack
+ */
+/**
+ * A task's line as the check finds it (check), in a note of the caller's (`N`): its ID, lowercased,
+ * its note's path and kind, its line from 0, its box and its text, the note, and the note's lines.
+ * @template {CheckedNote} [N=CheckedNote]
+ * @typedef {{ id: string, path: string, kind: string, line: number, task: string, text: string, note: N, lines: string[] }} TaskHit
  */
 
 export default class TaskIds {
@@ -59,6 +79,7 @@ export default class TaskIds {
     // checks against it. The pattern takes a forward date by its shape, its name in group 1: runItem reads
     // the name, and a run is only ever walked with runItem.
     static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    /** @param {string} text @returns {RegExpMatchArray | null} */
     static trailItem(text) {
         const item = text.match(TaskIds.TRAIL_ITEM);
         if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
@@ -68,6 +89,7 @@ export default class TaskIds {
     }
     // trailItem's item when it's one, a forward date only when its name is a periodic note's (`read`, a
     // reader of names, PeriodicNotes.reader; Plainday's when none is given). AddTaskNote.runItem is a copy.
+    /** @param {string} text @param {NameReader} [read] @returns {RegExpMatchArray | null} */
     static runItem(text, read) {
         const item = TaskIds.trailItem(text);
         return item && (item[1] === undefined || TaskIds.reader(read)(item[1])) ? item : null;
@@ -75,6 +97,7 @@ export default class TaskIds {
     // `read`, or Plainday's reader of periodic note names when it's not given (PeriodicNotes.reader). Code
     // that runs without Plainday (the time report in the Raycast timer and the demo's render) hands its own
     // in, so a helper with neither throws rather than read a name wrong.
+    /** @param {NameReader} [read] @returns {NameReader} */
     static reader(read) {
         if (read) return read;
         const own = plainday?.PeriodicNotes?.reader?.();
@@ -95,6 +118,7 @@ export default class TaskIds {
     // an event line by, whatever ID it ends in (isEvent).
     static EVENT_LINE = /^\s*[-*+]\s+\[.\]\s+(?:\[\[[^\]]*\]\]\s+)?(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t/i;
 
+    /** @param {string} line @returns {boolean} */
     static isEvent(line) {
         return TaskIds.EVENT_LINE.test(line);
     }
@@ -119,6 +143,7 @@ export default class TaskIds {
     }
 
     // A new ID: ID_LENGTH letters and digits, none of `taken` (IDs in use, lowercased)
+    /** @param {Set<string>} taken @param {() => number} [random] @returns {string} */
     static newId(taken, random = Math.random) {
         for (;;) {
             let id = "";
@@ -145,9 +170,10 @@ export default class TaskIds {
      */
     static splitRun(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
+        /** @type {string[]} */
         const items = [];
         let at = bare.length;
-        for (let m; (m = TaskIds.runItem(bare.slice(0, at), read));) {
+        for (let /** @type {RegExpMatchArray | null} */ m; (m = TaskIds.runItem(bare.slice(0, at), read));) {
             items.unshift(m[0].trim());
             at = m.index;
         }
@@ -286,7 +312,7 @@ export default class TaskIds {
     static RECENT_MS = 10000;
 
     // Marks `file` as just written by a command (Schedule calls it for every note it writes)
-    /** @param {TFile} file */
+    /** @this {Kept} @param {TFile} file */
     touched(file) {
         const now = Date.now();
         (this.recent ??= new Map()).set(file.path, now);
@@ -296,6 +322,7 @@ export default class TaskIds {
     // The folders the system works in besides the Planner's periodic notes (rule 12, OBS-208), and the
     // archive: Projects, the Inbox and Archive, as Settings → Plainday → Folders has them (OBS-283).
     // AddTaskNote's staging folder is the Inbox.
+    /** @returns {{ projects: string, inbox: string, archive: string }} */
     folders() {
         return plainday.Settings.folders();
     }
@@ -346,7 +373,9 @@ export default class TaskIds {
     // checkbox's character (undefined for a list item without one, null for a block that isn't a list
     // item). From Obsidian's metadata cache, so no file is read; it finds where a task's lines are, but
     // the cache trails a write by a moment, so decisions read the notes themselves (gather).
+    /** @param {string} id @returns {CachedLine[]} */
     linesOf(id) {
+        /** @type {CachedLine[]} */
         const out = [];
         // A note's place is asked only of a note holding the ID, so a vault of many notes costs no more
         for (const file of app.vault.getMarkdownFiles()) {
@@ -358,6 +387,7 @@ export default class TaskIds {
 
     // The line of `file` ending in `id`, as linesOf gives it, or null. Obsidian keys `blocks` by the ID,
     // lowercased (Task 1 recorded which); both are tried.
+    /** @param {TFile} file @param {string} id @returns {CachedLine | null} */
     lineIn(file, id) {
         const cache = app.metadataCache.getFileCache(file);
         const block = cache?.blocks?.[id.toLowerCase()] ?? cache?.blocks?.[id];
@@ -372,6 +402,7 @@ export default class TaskIds {
     // (rule 19). A note's place is asked only of a note holding an ID, so a vault of many notes costs no more.
     /** @returns {Map<string, CachedLine[]>} */
     map() {
+        /** @type {Map<string, CachedLine[]>} */
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
             const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
@@ -387,14 +418,16 @@ export default class TaskIds {
 
     // The notes the cache can't be trusted about: every note open in an editor, and those a command wrote a
     // moment ago, which it may not have read again yet
-    /** @returns {TFile[]} */
+    /** @this {Kept} @returns {TFile[]} */
     nowFiles() {
+        /** @type {Map<string, TFile>} */
         const files = new Map();
         for (const [path, at] of this.recent ?? []) {
             const f = Date.now() - at < TaskIds.RECENT_MS ? app.vault.getFileByPath(path) : null;
             if (f) files.set(path, f);
         }
-        for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+        // A Markdown tab's view, which is still a placeholder until the tab is first shown
+        for (const leaf of /** @type {(WorkspaceLeaf & { view: SomeView })[]} */ (app.workspace.getLeavesOfType("markdown"))) {
             const f = leaf.view?.file;
             if (f && leaf.view.editor) files.set(f.path, f);
         }
@@ -411,9 +444,11 @@ export default class TaskIds {
      */
     async gatherMany(ids, map = this.map()) {
         const want = new Set(ids.map((id) => id.toLowerCase()));
+        /** @type {Map<string, TFile>} */
         const files = new Map();
         for (const id of want) for (const l of map.get(id) ?? []) files.set(l.file.path, l.file);
         for (const f of this.nowFiles()) files.set(f.path, f);
+        /** @type {Map<string, TaskLine[]>} */
         const out = new Map();
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
@@ -447,7 +482,7 @@ export default class TaskIds {
     // editor catches up only later (Schedule.rewrite writes the same way).
     /** @param {TFile} file @returns {Promise<string>} */
     async readNow(file) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {MarkdownView} */ (l.view)).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
@@ -462,10 +497,12 @@ export default class TaskIds {
      */
     async gather(id, also = []) {
         const want = id.toLowerCase();
+        /** @type {Map<string, TFile>} */
         const files = new Map();
         for (const l of this.linesOf(id)) files.set(l.file.path, l.file);
         for (const f of also) if (f) files.set(f.path, f);
         for (const f of this.nowFiles()) files.set(f.path, f);
+        /** @type {TaskLine[]} */
         const out = [];
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
@@ -484,6 +521,7 @@ export default class TaskIds {
     // Problems are listed (Brian, 2026-10-28); no command searches there.
     /** @returns {Map<string, CachedLine[]>} */
     allIds() {
+        /** @type {Map<string, CachedLine[]>} */
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
             const items = (app.metadataCache.getFileCache(file)?.listItems ?? []).filter((li) => li.id);
@@ -499,10 +537,11 @@ export default class TaskIds {
 
     // A new ID that no block in the vault has: one lookup per draw, and the first draw almost always
     // does
+    /** @this {Kept} @returns {string} */
     freshId() {
         // Taken anywhere in the vault, in the system or not, so a note moved in later can't bring a
         // second task with the same ID (OBS-208)
-        const taken = (id) => app.vault.getMarkdownFiles().some((f) => this.lineIn(f, id));
+        const taken = (/** @type {string} */ id) => app.vault.getMarkdownFiles().some((f) => this.lineIn(f, id));
         for (;;) {
             const id = TaskIds.newId(new Set(), this.random ?? Math.random);
             if (!taken(id)) return id;
@@ -535,10 +574,11 @@ export default class TaskIds {
      * @returns {TaskProblem[]}
      */
     static check(notes, { projectOf, compared = () => true, resolve, ownNote = () => [], read }) {
-        const found = [], out = [], twice = [];
-        const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
+        const /** @type {TaskHit<N>[]} */ found = [], /** @type {TaskProblem[]} */ out = [], /** @type {TaskProblem[]} */ twice = [];
+        const topLevel = (/** @type {string} */ text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
         for (const note of notes) {
             const lines = note.text.split("\n");
+            /** @type {Map<string, TaskHit<N>>} */
             const seen = new Map();
             lines.forEach((text, line) => {
                 const box = topLevel(text) && !TaskIds.isEvent(text) ? text.match(TaskIds.CHECKBOX) : null;
@@ -550,14 +590,15 @@ export default class TaskIds {
                 else seen.set(hit.id, hit);
             });
         }
+        /** @type {Map<string, TaskHit<N>[]>} */
         const byId = new Map();
         for (const h of found) {
             if (!byId.has(h.id)) byId.set(h.id, []);
             byId.get(h.id).push(h);
         }
-        const isOpen = (h) => h.task === " " || h.task === "/";
+        const isOpen = (/** @type {TaskHit<N>} */ h) => h.task === " " || h.task === "/";
         // Only a task's ID: one a sent line carries (isTask)
-        const isTask = (lines) => TaskIds.isTask(lines, read);
+        const isTask = (/** @type {TaskHit<N>[]} */ lines) => TaskIds.isTask(lines, read);
         for (const [id, hits] of byId) {
             if (!isTask(hits)) continue;
             const open = hits.filter(isOpen);
@@ -607,6 +648,7 @@ export default class TaskIds {
     }
 
     // A line as a check reports it
+    /** @param {{ path: string, line: number, text: string }} h @returns {CheckedLine} */
     static where(h) {
         return { path: h.path, line: h.line, text: h.text };
     }
@@ -626,6 +668,7 @@ export default class TaskIds {
      */
     static oldMarks(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
+        /** @type {{ from: number, to: number, target: string }[]} */
         const out = [];
         let at = bare.length;
         for (;;) {
@@ -654,33 +697,41 @@ export default class TaskIds {
     // With `write`, it writes them (each note through its editor when open) and runs again, which must
     // find nothing, and counts any line still ending in 🗒️ or 🔗, as the time report's guard does:
     // { changes, left, old }.
+    /**
+     * @param {{ write?: boolean }} [options]
+     * @returns {Promise<{ changes: LinkBack[], left?: LinkBack[], old?: number }>}
+     */
     async linkBackPass({ write = false } = {}) {
         const helper = plainday.AddTaskNote;
         const tr = plainday.TimeReport;
         const index = tr.appIndex();
         const paths = app.vault.getMarkdownFiles().map((f) => f.path);
+        /** @type {Map<string, string[]>} */
         const texts = new Map();
-        const textOf = async (file) => {
+        const textOf = async (/** @type {TFile} */ file) => {
             if (!texts.has(file.path)) texts.set(file.path, (await this.readNow(file)).split("\n").map((l) => l.replace(/\r$/, "")));
             return texts.get(file.path);
         };
-        const reads = (file) => this.inSystem(file) || this.inArchive(file.path);
+        const reads = (/** @type {TFile} */ file) => this.inSystem(file) || this.inArchive(file.path);
         // A line a sent task left behind: [>], or a forward date of either form
-        const sent = (l) => /^\s*[-*+] \[>\]/.test(l) || !!TaskIds.forwardOf(l) || !!TaskIds.oldForward(l);
+        const sent = (/** @type {string} */ l) => /^\s*[-*+] \[>\]/.test(l) || !!TaskIds.forwardOf(l) || !!TaskIds.oldForward(l);
         // How the report reads a daily note's entries: entry → its project, or null when disputed
-        const readingOf = (file, lines) => {
-            const date = moment(file.basename, plainday.Schedule.dailyOpts().format, true).format("YYYY-MM-DD");
+        const readingOf = (/** @type {TFile} */ file, /** @type {string[]} */ lines) => {
+            const date = /** @type {MomentFn} */ (moment)(file.basename, plainday.Schedule.dailyOpts().format, true).format("YYYY-MM-DD");
             const model = tr.build([{ date, path: file.path, text: lines.join("\n") }], index, {});
+            /** @type {Map<string, { e: Entry, project: string | null }>} */
             const out = new Map();
             for (const e of model.entries) out.set(`${e.line}|${e.start}|${e.end}`, { e, project: e.project ?? null });
             for (const e of model.disputed ?? []) out.set(`${e.line}|${e.start}|${e.end}`, { e, project: null });
             return out;
         };
+        /** @type {LinkBack[]} */
         const changes = [];
         for (const file of app.vault.getMarkdownFiles()) {
             if (!reads(file)) continue;
             const lines = await textOf(file);
             const periodic = this.kindOf(file) !== "other";
+            /** @type {LinkBack[]} */
             const found = [];
             for (let i = 0; i < lines.length; i++) {
                 const before = lines[i];
@@ -690,7 +741,7 @@ export default class TaskIds {
                 const id = TaskIds.idOf(before);
                 // Its title without the old marks, which no longer read as part of the run that ends it
                 const title = TaskIds.title([...marks].reverse().reduce((t, m) => t.slice(0, m.from) + t.slice(m.to), before));
-                let after = before, dots = before, back = null, byText = false, review = false;
+                let after = before, dots = before, /** @type {TFile | null} */ back = null, byText = false, review = false;
                 // Right to left, so the spans before stay where they are
                 for (const m of [...marks].reverse()) {
                     const dest = app.metadataCache.getFirstLinkpathDest(m.target.split("#")[0].trim(), file.path);
@@ -707,6 +758,7 @@ export default class TaskIds {
                 }
                 // The ⭕ a link back gave it, on a checklist line at the left edge of a periodic note
                 // with no project link of its own and no ⋯ note in a project
+                /** @type {TFile | null} */
                 let home = null;
                 const run = TaskIds.splitRun(after).items;
                 const own = run.filter((x) => /\|\s*⋯\s*\]\]$/u.test(x)).map((x) => x.match(/^\[\[([^\]|#]+)/)?.[1].trim());
@@ -742,6 +794,7 @@ export default class TaskIds {
         // line that was never sent
         changes.sort((a, b) => (b.review - a.review) || ((b.moves.length > 0) - (a.moves.length > 0)) || (b.byText - a.byText) || a.path.localeCompare(b.path) || a.line - b.line);
         if (!write) return { changes };
+        /** @type {Map<string, LinkBack[]>} */
         const byFile = new Map();
         for (const c of changes) {
             if (!byFile.has(c.path)) byFile.set(c.path, []);
