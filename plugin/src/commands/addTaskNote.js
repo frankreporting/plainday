@@ -1,11 +1,24 @@
 import { ButtonComponent, FuzzySuggestModal, Modal, moment, normalizePath, Notice, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { CachedMetadata, Editor, EditorPosition, TFile } from "obsidian" */
+/** @import { CachedMetadata, Editor, EditorPosition, TFile, WorkspaceLeaf } from "obsidian" */
+/** @import { MomentFn, SomeView, Templater } from "../host.js" */
+/** @import { ChangeLine, Found, NoteName } from "../shared/taskChange.js" */
+/** @import { NameReader } from "../shared/taskIds.js" */
 /**
  * A ⭕ project or 🗃️ area link at the end of a line (trailingProjectLinks): the link as written and
  * the note it names.
  * @typedef {{ raw: string, linkpath: string }} ProjectLink
+ *
+ * The line a command runs on (invoke): its editor and note, the line's place and text, and the cursor.
+ * @typedef {{ editor: Editor, source: TFile, at: number, lineText: string, cursor: EditorPosition }} EditorLine
+ *
+ * What to link with nothing selected (target): the task's text or the event's title ("text"), the note
+ * the task links already ("own"), an empty link ("blank"), or why there's nothing (`error`).
+ * @typedef {{ kind?: "task" | "event", mode?: "text" | "own" | "blank", from?: number, to?: number, name?: string, error?: string }} LinkTarget
+ *
+ * A new task note's own properties (createTaskNote): `parent`, a link or "", and `due`, YYYY-MM-DD or "".
+ * @typedef {{ parent: string, due: string }} TaskProps
  */
 export default class AddTaskNote {
     // "- [ ]", "- [x]", "- [<]", … at the start of a line
@@ -48,6 +61,10 @@ export default class AddTaskNote {
     // after a space or a tab: stuck to a word, it's part of the text. Both are found here, not in the
     // pattern: older iPhones can't run a lookbehind (OBS-199), and spaces in it would be tried again from
     // each space of a long run. TaskIds.trailItem is a copy.
+    /**
+     * @param {string} text
+     * @returns {RegExpMatchArray | null}
+     */
     static trailItem(text) {
         const item = text.match(AddTaskNote.TRAIL_ITEM);
         if (!item || (text[item.index] !== "[" && !/\s/.test(text[item.index - 1] ?? ""))) return null;
@@ -57,11 +74,20 @@ export default class AddTaskNote {
     }
     // trailItem's item when it's one, a forward date only when its name is a periodic note's (`read`, a
     // reader of names, PeriodicNotes.reader; Plainday's when none is given). TaskIds.runItem is a copy.
+    /**
+     * @param {string} text
+     * @param {NameReader} [read]
+     * @returns {RegExpMatchArray | null}
+     */
     static runItem(text, read) {
         const item = AddTaskNote.trailItem(text);
         return item && (item[1] === undefined || AddTaskNote.reader(read)(item[1])) ? item : null;
     }
     // `read`, or Plainday's reader of periodic note names when it's not given (TaskIds.reader is a copy)
+    /**
+     * @param {NameReader} [read]
+     * @returns {NameReader}
+     */
     static reader(read) {
         if (read) return read;
         const own = plainday?.PeriodicNotes?.reader?.();
@@ -86,8 +112,9 @@ export default class AddTaskNote {
     // On an event line (`- [<]`), link a event log named with the daily note's day and the event's title
     // (the selection, or the text after its time), at the end of the line like a task's note (OBS-57), and
     // make the log right away, as a task's note is made (see makeLog).
+    /** @returns {Promise<void>} */
     async invoke() {
-        const editor = app.workspace.activeLeaf?.view?.editor;
+        const editor = /** @type {(WorkspaceLeaf & { view: SomeView }) | null} */ (app.workspace.activeLeaf)?.view?.editor;
         const source = app.workspace.getActiveFile();
         if (!editor || !source) return;
         if (plainday.TaskIds && !plainday.TaskIds.works(source)) return;
@@ -164,6 +191,10 @@ export default class AddTaskNote {
     }
 
     // Where an empty link goes when a ↗ or an ID ends the line, or null when neither does
+    /**
+     * @param {string} lineText
+     * @returns {number | null}
+     */
     beforeRun(lineText) {
         const from = lineText.match(AddTaskNote.FROM_LINK);
         if (from) return lineText.slice(0, from.index).replace(/\s+$/, "").length;
@@ -174,6 +205,12 @@ export default class AddTaskNote {
     // The project or area note line `at` of the note at `path` says, a finished one included, or null: in a
     // periodic note its own ⭕ or 🗃️, anywhere else its note's (rule 4). A line that disagrees with itself says
     // none, since nothing decides. The time report's one lookup answers.
+    /**
+     * @param {string[]} lines
+     * @param {number} at
+     * @param {string} path
+     * @returns {TFile | null}
+     */
     lineHomeAt(lines, at, path) {
         const tr = plainday.TimeReport, index = tr.appIndex();
         const project = tr.resolve((n) => lines[n], at, path, index).conflict ? null : tr.lineProject({ path }, at, lines, index);
@@ -181,16 +218,22 @@ export default class AddTaskNote {
     }
 
     // The project or area a line of a daily note at `path` says, for a event log (EventLog), or null
-/**
- * @param {string} lineText
- * @param {string} path
- * @returns {TFile | null}
- */
+    /**
+     * @param {string} lineText
+     * @param {string} path
+     * @returns {TFile | null}
+     */
     lineHomeIn(lineText, path) {
         return this.lineHomeAt([lineText], 0, path);
     }
 
     // The project or area the line at `at` of the note open in `editor` says
+    /**
+     * @param {Editor} editor
+     * @param {TFile} source
+     * @param {number} at
+     * @returns {TFile | null}
+     */
     projectOfLine(editor, source, at) {
         return this.lineHomeAt(plainday.Schedule.constructor.editorLines(editor).map((l) => l.replace(/\r$/, "")), at, source.path);
     }
@@ -202,6 +245,13 @@ export default class AddTaskNote {
     // no doubled space where a date was. The note's name is that name cleaned for a file name (fileName), so a
     // colon doesn't stop it; the line keeps the name as typed. Settling on a project is a project change
     // (rule 9): a new note is made only once the question and the refusal are past.
+    /**
+     * @param {EditorLine} line
+     * @param {string} text
+     * @param {{ from: number, to: number }} span
+     * @param {{ selected?: boolean }} [options]
+     * @returns {Promise<void>}
+     */
     async linkTask(line, text, span, { selected = false } = {}) {
         const { editor, source, at, lineText, cursor } = line;
         const change = plainday.TaskChange;
@@ -226,18 +276,23 @@ export default class AddTaskNote {
         const start = found.lines.find((l) => l.file === source && l.at === at);
         // A task whose other line, by its ID, already links its note takes that note, unless you named one
         const T = plainday.TaskIds.constructor, id = start && T.idOf(start.seen)?.toLowerCase();
-        const sameTask = (l) => l !== start && id && T.idOf(l.seen)?.toLowerCase() === id;
+        const sameTask = (/** @type {ChangeLine} */ l) => l !== start && id && T.idOf(l.seen)?.toLowerCase() === id;
         const others = found.lines.filter(sameTask).map((l) => this.ownNoteOf(l.seen, l.file.path)).filter(Boolean);
         const other = others.find((n) => !this.inArchive(n));
         if (other && !selected) return this.spread(line, other);
         const retitled = lineText.slice(0, span.from) + name + lineText.slice(span.to);
         const keep = lineText.slice(0, span.to);
+        /**
+         * @param {NoteName} note
+         * @param {string | null} [oldPath]
+         * @returns {(t: string, l: ChangeLine) => string}
+         */
         const each = (note, oldPath = null) => (t, l) => {
             const paths = app.vault.getMarkdownFiles().map((f) => f.path).filter((p) => p !== oldPath);
             const named = l === start && t.startsWith(keep) ? retitled.slice(0, span.from + name.length) + t.slice(span.to) : t;
             return this.withOwn(named, `[[${this.linktextFor(note, paths)}|${AddTaskNote.NOTE_MARK}]]`);
         };
-        let done, note = null;
+        let /** @type {boolean | undefined} */ done, /** @type {TFile | null} */ note = null;
         if (existing) done = await this.attach(line, existing, found, each(existing, existing.path), name);
         else {
             const home = this.homeOf(line, found);
@@ -256,7 +311,7 @@ export default class AddTaskNote {
                 new Notice(`${note.basename} is ready, but the line changed, so it wasn't linked`);
                 return false;
             };
-            const own = (t, l) => each(note)(t, l);
+            const own = (/** @type {string} */ t, /** @type {ChangeLine} */ l) => each(note)(t, l);
             done = (await change.run(found, home, { ready: make, each: own, name, adds, start, stale: () => editor.getLine(at) !== lineText })).done;
         }
         if (!done || start.gone) return;
@@ -276,6 +331,14 @@ export default class AddTaskNote {
     //     line's project already has another note of that name, which refuses;
     //   - otherwise the task takes the line's project, or the note's when the line has none, a note waiting in
     //     the Inbox filed there with it (rule 9). With neither, it's only linked.
+    /**
+     * @param {EditorLine} line
+     * @param {TFile} existing
+     * @param {Found} found
+     * @param {(text: string, l: ChangeLine) => string} each
+     * @param {string | null} [name]
+     * @returns {Promise<boolean>}
+     */
     async attach(line, existing, found, each, name = null) {
         const { editor, source, at, lineText } = line;
         const change = plainday.TaskChange;
@@ -299,12 +362,22 @@ export default class AddTaskNote {
 
     // The project a line says, as projectOfLine reads it, or when it names none, the one its task's other
     // lines agree on
+    /**
+     * @param {Pick<EditorLine, "editor" | "source" | "at">} line
+     * @param {Found} found
+     * @returns {TFile | null}
+     */
     homeOf({ editor, source, at }, found) {
         return this.projectOfLine(editor, source, at) ?? plainday.TaskChange.agreedHome(found);
     }
 
     // On a line that already has a ⋯: that note's ⋯ on the task's other lines, and the task takes the note's
     // project, as a change does (rule 9). A line with a ⋯ is left alone.
+    /**
+     * @param {EditorLine} line
+     * @param {TFile | null} [note]
+     * @returns {Promise<void>}
+     */
     async spread(line, note = this.ownNoteOf(line.lineText, line.source.path)) {
         const { editor, source, at, lineText } = line;
         const change = plainday.TaskChange;
@@ -317,7 +390,7 @@ export default class AddTaskNote {
         const found = await change.find({ file: source, at });
         const missing = found.lines.filter((l) => l.task && !T.hasOwnNote(l.seen));
         const linktext = this.linktextFor(note, app.vault.getMarkdownFiles().map((f) => f.path));
-        const each = (t) => this.withOwn(t, `[[${linktext}|${AddTaskNote.NOTE_MARK}]]`);
+        const each = (/** @type {string} */ t) => this.withOwn(t, `[[${linktext}|${AddTaskNote.NOTE_MARK}]]`);
         // A note in the system takes the task to its project, and one waiting in the Inbox is filed where the
         // task's lines say; any other note is only linked. Run again after a failed write, it finishes.
         const home = change.ours(note) ? this.filedAbove(note) ?? this.homeOf(line, found) : null;
@@ -336,6 +409,11 @@ export default class AddTaskNote {
     }
 
     // The note `name` resolves to, preferring one outside Archive when notes there share the name
+    /**
+     * @param {string} name
+     * @param {string} from
+     * @returns {TFile | null}
+     */
     namedNote(name, from) {
         const first = app.metadataCache.getFirstLinkpathDest(name, from);
         if (!first || !this.inArchive(first)) return first;
@@ -344,6 +422,11 @@ export default class AddTaskNote {
     }
 
     // A name for a fresh note that no other note has: `name (Project)`, or with a number after it
+    /**
+     * @param {string} name
+     * @param {TFile | null} home
+     * @returns {string}
+     */
     freshName(name, home) {
         const taken = new Set(app.vault.getMarkdownFiles().map((f) => f.basename.toLowerCase()));
         const base = home ? `${name} (${home.basename})` : name;
@@ -356,10 +439,15 @@ export default class AddTaskNote {
     // number after it or not, or `name 2` (any number) while it waits in the Inbox. A note filed elsewhere
     // with only a number after the name is another task's (Phase 2). The one in `home`, or in the Inbox when
     // there's no `home`, else the only one; null when there's none, or no telling which.
+    /**
+     * @param {string} name
+     * @param {TFile | null} home
+     * @returns {TFile | null}
+     */
     freshNote(name, home) {
         const inbox = `${this.stagingFolder()}/`, files = app.vault.getMarkdownFiles();
         const made = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (?:\\((.+)\\)(?: \\d+)?|\\d+)$`, "i");
-        const isHome = (p) => files.some((f) => f.basename.toLowerCase() === p.toLowerCase() && this.isHomeNote(f));
+        const isHome = (/** @type {string} */ p) => files.some((f) => f.basename.toLowerCase() === p.toLowerCase() && this.isHomeNote(f));
         const found = files.filter((f) => {
             const m = !this.inArchive(f) && f.basename.match(made);
             return m && plainday.TaskChange.ours(f) && (m[1] ? isHome(m[1]) : f.path.startsWith(inbox));
@@ -370,13 +458,20 @@ export default class AddTaskNote {
     }
 
     // Whether `note` is in the archive, as Settings → Plainday → Folders has it (OBS-283)
+    /**
+     * @param {{ path: string }} note
+     * @returns {boolean}
+     */
     inArchive(note) {
         return note.path.startsWith(`${plainday.Settings.folders().archive}/`);
     }
 
     // The template a task note or a log is made from, as Settings → Plainday → Note templates has it
     // (OBS-283); blank means Task.md or Log.md in the vault's template folder
-    /** @param {"task" | "log"} kind */
+    /**
+     * @param {"task" | "log"} kind
+     * @returns {string}
+     */
     templatePath(kind) {
         return plainday.Settings.get().templates[kind] || plainday.Settings.defaultTemplatePath(kind);
     }
@@ -384,27 +479,37 @@ export default class AddTaskNote {
     // The Inbox, as Settings → Plainday → Folders has it (OBS-283): where a task note whose line names no
     // project is made, and a log whose line names none (EventLog). A note there is unfiled: it waits until
     // AddProjectLink or MoveToProject files it (OBS-55).
+    /** @returns {string} */
     stagingFolder() {
         return plainday.Settings.folders().inbox;
     }
 
     // Whether `file` is under Projects, as it's set
+    /**
+     * @param {{ path: string } | null} file
+     * @returns {boolean}
+     */
     inProjects(file) {
         return !!file && file.path.startsWith(`${plainday.Settings.folders().projects}/`);
     }
 
     // The note a line's ⋯ links, or null
+    /**
+     * @param {string} lineText
+     * @param {string} from
+     * @returns {TFile | null}
+     */
     ownNoteOf(lineText, from) {
         const target = this.trailingNote(lineText, AddTaskNote.OWN_NOTE_LINK);
         return target ? app.metadataCache.getFirstLinkpathDest(target, from) : null;
     }
 
     // Whether line `at` of the note open in `editor` is hidden from the system, in a code block or a comment
-/**
- * @param {Editor} editor
- * @param {number} at
- * @returns {boolean}
- */
+    /**
+     * @param {Editor} editor
+     * @param {number} at
+     * @returns {boolean}
+     */
     hiddenAt(editor, at) {
         const tr = plainday?.TimeReport;
         if (!tr) return false;
@@ -415,13 +520,13 @@ export default class AddTaskNote {
     // The cursor where it was, on the same words, once line `at` has gone through `texts` (each a whole line):
     // a change at its end leaves it, and text taken away from under it leaves it where that text was. Run
     // from a line under the task, it stays there (OBS-224).
-/**
- * @param {Editor} editor
- * @param {EditorPosition} cursor
- * @param {number} at
- * @param {...string} texts
- * @returns {void}
- */
+    /**
+     * @param {Editor} editor
+     * @param {EditorPosition} cursor
+     * @param {number} at
+     * @param {...string} texts
+     * @returns {void}
+     */
     keepCursor(editor, cursor, at, ...texts) {
         if (cursor.line !== at) return editor.setCursor(cursor);
         let ch = cursor.ch;
@@ -437,6 +542,10 @@ export default class AddTaskNote {
     }
 
     // Whether a note is tagged exactly #project or #area, finished or not
+    /**
+     * @param {TFile} file
+     * @returns {boolean}
+     */
     isHomeNote(file) {
         const cache = app.metadataCache.getFileCache(file);
         return !!cache && this.tagsOf(cache).some((t) => t === "area" || t === "project");
@@ -444,20 +553,20 @@ export default class AddTaskNote {
 
     // The project or area `file` is filed in: the nearest folder note above it tagged #project or
     // #area, finished or not, or itself for one of those. Null outside any.
-/**
- * @param {TFile} file
- * @returns {TFile | null}
- */
+    /**
+     * @param {TFile} file
+     * @returns {TFile | null}
+     */
     filedIn(file) {
         return this.isHomeNote(file) ? file : this.filedAbove(file);
     }
 
     // The project or area above `file`: the nearest folder note above it tagged #project or #area, finished or
     // not. Null outside any.
-/**
- * @param {TFile} file
- * @returns {TFile | null}
- */
+    /**
+     * @param {TFile} file
+     * @returns {TFile | null}
+     */
     filedAbove(file) {
         for (let dir = file.parent; dir && dir.path !== "/"; dir = dir.parent) {
             const folderNote = app.vault.getFileByPath(`${dir.path}/${dir.name}.md`);
@@ -471,13 +580,13 @@ export default class AddTaskNote {
     // run of links that ends the line (⋯, ↗, 🚩, ⭕, 🗃️, and the ℹ️ and 🆓 marks among them), or at its
     // end when that run has none, so the note links stay last (OBS-90, OBS-208). A block ID stays at the very end. With no
     // `link`, only `drop` comes off. Trailing spaces go; an event's tab after its time stays.
-/**
- * @param {string} lineText
- * @param {string | null} link
- * @param {string[]} [drop]
- * @param {{ inRun?: boolean }} [options]
- * @returns {string}
- */
+    /**
+     * @param {string} lineText
+     * @param {string | null} link
+     * @param {string[]} [drop]
+     * @param {{ inRun?: boolean }} [options]
+     * @returns {string}
+     */
     withHome(lineText, link, drop = [], { inRun = false } = {}) {
         let bare = (inRun ? lineText : this.withoutLinks(lineText, drop)).replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
@@ -486,13 +595,13 @@ export default class AddTaskNote {
         // its title's (Schedule's sentLine)
         if (inRun && drop.length) {
             let start = bare.length;
-            for (let item; (item = AddTaskNote.runItem(bare.slice(0, start)));) start = item.index;
+            for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, start)));) start = item.index;
             const run = this.withoutLinks(bare.slice(start).trim(), drop);
             bare = [bare.slice(0, start).replace(/\s+$/, ""), run].filter(Boolean).join(" ");
         }
         if (!link) return bare + block;
-        let at = bare.length, before = null;
-        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
+        let at = bare.length, /** @type {number | null} */ before = null;
+        for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             if (AddTaskNote.NOTE_LINK.test(item[0])) before = at;
         }
@@ -501,10 +610,11 @@ export default class AddTaskNote {
     }
 
     // Whether `file`, a link's target looked up by name, is `note`
-/**
- * @param {TFile | null} file
- * @param {TFile} note
- */
+    /**
+     * @param {TFile | null} file
+     * @param {TFile} note
+     * @returns {boolean}
+     */
     isSameNote(file, note) {
         return !!file && (file === note || file.path === note.path);
     }
@@ -513,25 +623,25 @@ export default class AddTaskNote {
     // has the same name. Decided from the vault's file list, which is current the moment a note is made,
     // moved or trashed. Obsidian's own shortest-link lookup once wrote a full path for a note whose
     // name was unique, seconds after a cancelled attempt had trashed a note of that name.
-/**
- * @param {{ path: string, basename: string }} note
- * @param {string[]} paths
- * @returns {string}
- */
+    /**
+     * @param {{ path: string, basename: string }} note
+     * @param {string[]} paths
+     * @returns {string}
+     */
     linktextFor(note, paths) {
         const name = note.basename.toLowerCase();
         const clash = paths.some((p) => p !== note.path && p.split("/").pop().replace(/\.md$/, "").toLowerCase() === name);
         return clash ? note.path.replace(/\.md$/, "") : note.basename;
     }
 
-/** @returns {null} */
+    /** @returns {null} */
     cancelled() {
         new Notice("No project or area picked, so nothing changed");
         return null;
     }
 
     // What a note is, as the question names it: "Log", "Task", "Area", "Project" or "Note"
-/** @param {TFile} note */
+    /** @param {TFile} note */
     kindOf(note) {
         const cache = app.metadataCache.getFileCache(note);
         const tags = cache ? this.tagsOf(cache) : [];
@@ -540,7 +650,7 @@ export default class AddTaskNote {
     }
 
     // A project or area with its 🗃️ or ⭕, for the question
-/** @param {TFile | null} file */
+    /** @param {TFile | null} file */
     markOf(file) {
         return file ? `${this.isArea(file) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK} ${file.basename}` : "No project or area";
     }
@@ -552,15 +662,16 @@ export default class AddTaskNote {
     // label), then what follows from it, with no days or lines: the system takes care of those, and `from` and
     // `to` were just picked (Brian, 2026-11-03). The buttons: Leave it or Cancel, then Move. MoveToProject asks
     // for a project or area too, whose `from` can be null (nothing above it).
-/**
- * @param {TFile | null} note
- * @param {TFile | null} from
- * @param {TFile} to
- * @param {{ title?: string | null, label?: string | null, name?: string | null, words?: string | string[] | null, cancel?: string }} [options]
- * @returns {Promise<"move" | "leave" | null>}
- */
+    /**
+     * @param {TFile | null} note
+     * @param {TFile | null} from
+     * @param {TFile} to
+     * @param {{ title?: string | null, label?: string | null, name?: string | null, words?: string | string[] | null, cancel?: string }} [options]
+     * @returns {Promise<"move" | "leave" | null>}
+     */
     confirmMove(note, from, to, { title = null, label = null, name = null, words = null, cancel = "Leave it" } = {}) {
         return new Promise((resolve) => {
+            /** @type {"move" | "leave" | null} */
             let choice = null;
             const modal = new (class extends Modal {
                 onClose() { window.setTimeout(() => resolve(choice), 0); }
@@ -568,7 +679,7 @@ export default class AddTaskNote {
                 // Focused once the modal is open, not straight after open() (OBS-50)
                 onOpen() { window.requestAnimationFrame(() => move.buttonEl.focus()); }
             })(app);
-            const pick = (c) => { choice = c; modal.close(); };
+            const pick = (/** @type {"move" | "leave" | null} */ c) => { choice = c; modal.close(); };
             const kind = note ? this.kindOf(note) : "Task";
             modal.titleEl.setText(title ?? `Move ${kind.toLowerCase()}?`);
             const mark = modal.contentEl.createEl("p").createEl("mark", { cls: "plainday-task-name" });
@@ -577,7 +688,7 @@ export default class AddTaskNote {
             const said = words ?? (kind === "Area" ? "Its time, and its projects', stays their own."
                 : kind === "Project" ? "Its time stays its own. Inside another project, it counts toward that project's totals and takes its rate if it has none of its own."
                 : "Time entries will be reallocated accordingly.");
-            for (const text of [].concat(said)) modal.contentEl.createEl("p", { text });
+            for (const text of /** @type {string[]} */ ([]).concat(said)) modal.contentEl.createEl("p", { text });
             const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
             new ButtonComponent(row).setButtonText(cancel).onClick(() => pick(cancel === "Cancel" ? null : "leave"));
             const move = new ButtonComponent(row).setButtonText("Move").setCta().onClick(() => pick("move"));
@@ -586,12 +697,16 @@ export default class AddTaskNote {
         });
     }
 
+    /**
+     * @param {TFile} file
+     * @returns {boolean}
+     */
     isLiveHome(file) {
         return this.inProjects(file) && this.isHome(file);
     }
 
     // Whether a home note is an area (tagged #area) rather than a project
-/** @param {TFile} file */
+    /** @param {TFile} file */
     isArea(file) {
         const cache = app.metadataCache.getFileCache(file);
         return !!cache && this.tagsOf(cache).includes("area");
@@ -599,7 +714,7 @@ export default class AddTaskNote {
 
     // A event log: a note tagged #log, or any note in a `›logs` folder. Logs are filed in their
     // project's `›logs`, so one waiting in Inbox still goes there when it's moved.
-/** @param {TFile} file */
+    /** @param {TFile} file */
     isLog(file) {
         if (this.isLogsFolderName(file.parent?.name)) return true;
         const cache = app.metadataCache.getFileCache(file);
@@ -607,22 +722,23 @@ export default class AddTaskNote {
     }
 
     // The suffix link for a home: [[Project|⭕]] or [[Area|🗃️]], with `linktext` as linktextFor gives it
-/**
- * @param {TFile} home
- * @param {string} linktext
- */
+    /**
+     * @param {TFile} home
+     * @param {string} linktext
+     * @returns {string}
+     */
     homeLink(home, linktext) {
         return `[[${linktext}|${this.isArea(home) ? AddTaskNote.AREA_MARK : AddTaskNote.PROJECT_MARK}]]`;
     }
 
     // A note's tags: frontmatter `tags` or `tag` (list or string) and inline #tags, lowercased,
     // without the #
-/**
- * @param {CachedMetadata} cache
- * @returns {string[]}
- */
+    /**
+     * @param {CachedMetadata} cache
+     * @returns {string[]}
+     */
     tagsOf(cache) {
-        const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
+        const raw = /** @type {unknown} */ (cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? []);
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .concat((cache.tags ?? []).map((t) => t.tag))
             .map((t) => String(t).replace(/^#/, "").toLowerCase());
@@ -632,21 +748,24 @@ export default class AddTaskNote {
     // to the picked area or project note, or null when dismissed. AddProjectLink and MoveToProject use it,
     // leaving out the ones they can't file into (`exclude(file)` true); MoveToProject asks its own question
     // (`placeholder`).
-/**
- * @param {string} name
- * @param {{ exclude?: (file: TFile) => boolean, placeholder?: string | null }} [options]
- * @returns {Promise<TFile | null>}
- */
+    /**
+     * @param {string} name
+     * @param {{ exclude?: (file: TFile) => boolean, placeholder?: string | null }} [options]
+     * @returns {Promise<TFile | null>}
+     */
     pickHome(name, { exclude = () => false, placeholder = null } = {}) {
-        const aliasOf = (f) => [].concat(app.metadataCache.getFileCache(f)?.frontmatter?.aliases ?? [])[0] || f.basename;
+        const aliasOf = (/** @type {TFile} */ f) => /** @type {string[]} */ ([]).concat(/** @type {string | string[] | undefined} */ (app.metadataCache.getFileCache(f)?.frontmatter?.aliases) ?? [])[0] || f.basename;
         const items = app.vault.getMarkdownFiles()
             .filter((f) => this.inProjects(f.parent) && this.isHome(f) && !exclude(f))
             .sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
         return new Promise((resolve) => {
+            /** @type {TFile | null} */
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
                 getItems() { return items; }
+                /** @param {TFile} f */
                 getItemText(f) { return aliasOf(f); }
+                /** @param {TFile} f */
                 onChooseItem(f) { picked = f; }
                 // Obsidian closes the modal before it reports the choice
                 onClose() { window.setTimeout(() => resolve(picked), 0); }
@@ -657,7 +776,7 @@ export default class AddTaskNote {
     }
 
     // An area or project note still in progress (exact #area or #project, as SyncArea checks)
-/** @param {TFile} file */
+    /** @param {TFile} file */
     isHome(file) {
         const cache = app.metadataCache.getFileCache(file);
         if (!cache || this.isFinished(cache)) return false;
@@ -666,10 +785,10 @@ export default class AddTaskNote {
 
     // A project or area is finished when its `status` is Done or Canceled, in any case (Cancelled
     // too). Finished ones drop out of the menus that file and link notes.
-/**
- * @param {Pick<CachedMetadata, "frontmatter"> | null | undefined} cache
- * @returns {boolean}
- */
+    /**
+     * @param {Pick<CachedMetadata, "frontmatter"> | null | undefined} cache
+     * @returns {boolean}
+     */
     isFinished(cache) {
         return [].concat(cache?.frontmatter?.status ?? [])
             .some((s) => AddTaskNote.FINISHED.includes(String(s).trim().toLowerCase()));
@@ -677,33 +796,39 @@ export default class AddTaskNote {
 
     // The note already in `home`'s folder (or its logs folder, for a log) with the same name as `note`,
     // other than `note` itself; null when there's none. AddTaskNote refuses then (rule 12).
+    /**
+     * @param {TFile} note
+     * @param {TFile} home
+     * @returns {TFile | null}
+     */
     sameNameIn(note, home) {
         const folder = this.isLog(note) ? this.logsFolder(home) : home.parent.path;
         const target = `${folder}/${note.name}`;
-        const twin = app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target);
+        // A file or a folder: only a Markdown file is a twin
+        const twin = /** @type {TFile | null} */ (app.vault.getAbstractFileByPathInsensitive?.(target) ?? app.vault.getAbstractFileByPath(target));
         return twin && twin !== note && twin.extension === "md" ? twin : null;
     }
 
     // Whether a folder's name makes it a logs folder: `›logs`, in any case
-/** @param {string | null | undefined} name */
+    /** @param {string | null | undefined} name */
     isLogsFolderName(name) {
         return String(name ?? "").toLowerCase() === AddTaskNote.LOGS_FOLDER;
     }
 
     // The logs folder of `home` (an area or project note); see logsFolderIn
-/**
- * @param {TFile} home
- * @returns {string}
- */
+    /**
+     * @param {TFile} home
+     * @returns {string}
+     */
     logsFolder(home) {
         return this.logsFolderIn(home.parent.path);
     }
 
     // The `›logs` folder in the folder at `parent`: the one it has, spelled as it is, or where a new one goes
-/**
- * @param {string} parent
- * @returns {string}
- */
+    /**
+     * @param {string} parent
+     * @returns {string}
+     */
     logsFolderIn(parent) {
         const path = `${parent}/${AddTaskNote.LOGS_FOLDER}`;
         return (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path))?.path ?? path;
@@ -711,10 +836,10 @@ export default class AddTaskNote {
 
     // Makes the folder at `path` unless it's there. A logs folder made this way gets Notebook
     // Navigator's history icon, when Navigator is installed.
-/**
- * @param {string} path
- * @returns {Promise<void>}
- */
+    /**
+     * @param {string} path
+     * @returns {Promise<void>}
+     */
     async makeFolder(path) {
         if (app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path)) return;
         const made = await app.vault.createFolder(path);
@@ -731,16 +856,17 @@ export default class AddTaskNote {
 
     // The ⭕ project and 🗃️ area links in the run of links that ends a line: [{ raw, linkpath }], in
     // line order. Only these say where the line's time goes (OBS-90); one in the text is its title's.
-/**
- * @param {string} lineText
- * @returns {ProjectLink[]}
- */
+    /**
+     * @param {string} lineText
+     * @returns {ProjectLink[]}
+     */
     trailingProjectLinks(lineText) {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
+        /** @type {ProjectLink[]} */
         const out = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
+        for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             out.unshift(...this.projectLinks(item[0]));
         }
@@ -748,6 +874,10 @@ export default class AddTaskNote {
     }
 
     // The ⭕ project and 🗃️ area links on a line: [{ raw, linkpath }]
+    /**
+     * @param {string} lineText
+     * @returns {ProjectLink[]}
+     */
     projectLinks(lineText) {
         return [...lineText.matchAll(AddTaskNote.PROJECT_LINK)].map((m) => ({ raw: m[0], linkpath: m[1].trim() }));
     }
@@ -757,12 +887,17 @@ export default class AddTaskNote {
     // must still read as the sync wrote it). Text that touched a link keeps a space from what's on
     // its other side, so `word[[P|⭕]]🆓` doesn't become `word🆓`. The line's indent and checkbox are
     // kept as they are.
+    /**
+     * @param {string} lineText
+     * @param {string[]} links
+     * @returns {string}
+     */
     withoutLinks(lineText, links) {
         if (!links?.length) return lineText;
         const head = this.afterCheckbox(lineText);
         let body = lineText.slice(head);
         for (const link of links) {
-            for (let at; (at = body.indexOf(link)) !== -1;) {
+            for (let /** @type {number} */ at; (at = body.indexOf(link)) !== -1;) {
                 let from = at, to = at + link.length;
                 if (body[from - 1] === " ") from--;
                 else if (body[to] === " ") to++;
@@ -774,6 +909,10 @@ export default class AddTaskNote {
     }
 
     // "2026-09-30 Renew the domain" → "Renew the domain". Text that's only a date is left alone.
+    /**
+     * @param {string} text
+     * @returns {string}
+     */
     withoutDates(text) {
         const name = text.replace(AddTaskNote.DATE, " ").replace(/\s+/g, " ").trim();
         return name || text.trim();
@@ -787,6 +926,12 @@ export default class AddTaskNote {
     // there is one. A note of that name anywhere is refused: Obsidian resolves a shared name to the shortest
     // path, so the new note could take over the other one's links. Resolves to the note, or null when it
     // couldn't be made.
+    /**
+     * @param {string} title
+     * @param {TFile | null} [parent]
+     * @param {string | null} [due]
+     * @returns {Promise<TFile | null>}
+     */
     async createTaskNote(title, parent = null, due = null) {
         const name = this.fileName(this.withoutDates(title));
         if (!name) {
@@ -809,7 +954,7 @@ export default class AddTaskNote {
         let text = this.taskNoteText(own), unused = false;
         if (tplText.trim() && !templater) {
             if (tplText.includes("<%")) unused = true;
-            else text = this.withTaskTemplate(text, notes.fill(tplText, { name, start: moment().format("YYYY-MM-DD") }), own);
+            else text = this.withTaskTemplate(text, notes.fill(tplText, { name, start: /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD") }), own);
         }
         try {
             if (folder && folder !== "/" && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
@@ -818,6 +963,7 @@ export default class AddTaskNote {
         }
         // Templater's trigger is kept off the note from before it's there, so Get Template never runs on it
         notes.hold(path);
+        /** @type {TFile} */
         let note;
         try {
             note = await app.vault.create(path, text);
@@ -834,18 +980,25 @@ export default class AddTaskNote {
     // The Task template run on the new note through Templater, which adds the template's properties to Plainday's,
     // and its text after them. A `parent` or `due` the template sets gives way to Plainday's, which the time
     // report and Due date read; a `tags` it sets is combined with Plainday's. Then its `id` goes first.
+    /**
+     * @param {Templater} templater
+     * @param {TFile} tpl
+     * @param {TFile} note
+     * @param {TaskProps} own
+     * @returns {Promise<void>}
+     */
     async taskTemplate(templater, tpl, note, own) {
         const notes = plainday.PeriodicNotes;
         await templater.write_template_to_file(tpl, note);
         // Templater lets go of the note when it's done; the trigger mustn't take it then
         notes.hold(note.path);
         const front = notes.parts(await app.vault.read(note)).props ?? {};
-        const same = (key) => String(front[key] ?? "") === own[key];
-        const tagged = [].concat(front.tags ?? []).some((t) => String(t).toLowerCase() === "task");
+        const same = (/** @type {"parent" | "due"} */ key) => String(front[key] ?? "") === own[key];
+        const tagged = /** @type {unknown[]} */ ([]).concat(front.tags ?? []).some((t) => String(t).toLowerCase() === "task");
         if (!same("parent") || !same("due") || !tagged) {
-            await app.fileManager.processFrontMatter(note, (f) => {
-                for (const key of ["parent", "due"]) f[key] = own[key] || null;
-                const tags = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
+            await app.fileManager.processFrontMatter(note, (/** @type {Record<string, unknown>} */ f) => {
+                for (const key of /** @type {const} */ (["parent", "due"])) f[key] = own[key] || null;
+                const tags = /** @type {unknown[]} */ ([]).concat(f.tags ?? []).filter((t) => t !== null && t !== "");
                 if (!tags.some((t) => String(t).toLowerCase() === "task")) f.tags = ["task", ...tags];
             });
         }
@@ -856,8 +1009,13 @@ export default class AddTaskNote {
     // A new task note's text, `own` its `parent` (a link, or "") and `due` (YYYY-MM-DD, or ""): a template's `id`
     // first, as in every note (OBS-317), then Plainday's properties in the order the Task template wrote them, then
     // `extra` (a template's other properties), then `body`
+    /**
+     * @param {TaskProps} own
+     * @param {{ tags?: string[], extra?: Record<string, unknown>, body?: string }} [options]
+     * @returns {string}
+     */
     taskNoteText(own, { tags = ["task"], extra = {}, body = "" } = {}) {
-        const scalar = (v) => plainday.PeriodicNotes.scalar(String(v));
+        const scalar = (/** @type {string} */ v) => plainday.PeriodicNotes.scalar(String(v));
         const { id, ...others } = extra;
         const lines = ["tags:", ...tags.map((t) => `  - ${scalar(t)}`), own.parent ? `parent: ${JSON.stringify(own.parent)}` : "parent:", own.due ? `due: ${own.due}` : "due:"];
         const first = "id" in extra ? stringifyYaml({ id }) : "";
@@ -867,25 +1025,40 @@ export default class AddTaskNote {
 
     // `text` with a template's text, `filled`, added, without Templater: the properties combined as
     // PeriodicNotes.merge combines them, Plainday's `parent` and `due` kept, and `task` among the tags
+    /**
+     * @param {string} text
+     * @param {string} filled
+     * @param {TaskProps} own
+     * @returns {string}
+     */
     withTaskTemplate(text, filled, own) {
         const notes = plainday.PeriodicNotes;
         const { props, body } = notes.parts(notes.merge(text, filled));
         const extra = { ...props };
-        const tags = [...new Set(["task", ...[].concat(extra.tags ?? []).filter((t) => t !== null && t !== "").map(String)])];
+        const tags = [...new Set(["task", .../** @type {unknown[]} */ ([]).concat(extra.tags ?? []).filter((t) => t !== null && t !== "").map(String)])];
         for (const key of ["tags", "parent", "due"]) delete extra[key];
         return this.taskNoteText(own, { tags, extra, body });
     }
 
     // A task note's `parent`, as SyncArea writes it: the project or area note by its link text from the note
     // at `path`, with its first alias as the label
+    /**
+     * @param {TFile} parent
+     * @param {string} path
+     * @returns {string}
+     */
     parentLink(parent, path) {
         const linktext = app.metadataCache.fileToLinktext(parent, path, true);
-        const alias = [].concat(app.metadataCache.getFileCache(parent)?.frontmatter?.aliases ?? [])[0];
+        const alias = /** @type {string[]} */ ([]).concat(/** @type {string | string[] | undefined} */ (app.metadataCache.getFileCache(parent)?.frontmatter?.aliases) ?? [])[0];
         return alias ? `[[${linktext}|${alias}]]` : `[[${linktext}]]`;
     }
 
     // The day the line's 🚩 links, YYYY-MM-DD, or null: a new task note's `due` (OBS-66), read as the time report
     // reads a 🚩, by its note's name (OBS-297). With two, the first, as Due date replaces it.
+    /**
+     * @param {string} lineText
+     * @returns {string | null}
+     */
     flagDay(lineText) {
         const tr = plainday.TimeReport;
         if (!tr) return null;
@@ -907,6 +1080,11 @@ export default class AddTaskNote {
     //     `[[2026-09-14 |⋯]]` would point at the daily note itself.
     //   { error }: there's no text to use, or the event links a log already
     // `kind` is "task" or "event".
+    /**
+     * @param {string} lineText
+     * @param {number} ch
+     * @returns {LinkTarget}
+     */
     target(lineText, ch) {
         const kind = this.isEvent(lineText) ? "event" : "task";
         if (kind === "event" && this.linksLog(lineText)) return { error: "This event already links a log" };
@@ -927,7 +1105,7 @@ export default class AddTaskNote {
         // The calendar sync's free mark after an event's title (ℹ️, OBS-47) isn't part of the name,
         // and neither is your 🆓: both stay after the title, before the log link, where the sync
         // expects them
-        for (let mark; kind === "event" && (mark = lineText.slice(from, to).match(/\s(?:ℹ|🆓)\uFE0F?$/u));) {
+        for (let /** @type {RegExpMatchArray | null} */ mark; kind === "event" && (mark = lineText.slice(from, to).match(/\s(?:ℹ|🆓)\uFE0F?$/u));) {
             to -= mark[0].length;
             while (to > from && /\s/.test(lineText[to - 1])) to--;
         }
@@ -939,16 +1117,16 @@ export default class AddTaskNote {
     // The target of the note link in the run of links that ends `lineText` (the first, when there are
     // several: its ⋯, else its ↗), or null when that run has none. `link` picks one mark: OWN_NOTE_LINK
     // for its own note only (Schedule, OBS-208).
-/**
- * @param {string} lineText
- * @param {RegExp} [link]
- * @returns {string | null}
- */
+    /**
+     * @param {string} lineText
+     * @param {RegExp} [link]
+     * @returns {string | null}
+     */
     trailingNote(lineText, link = AddTaskNote.NOTE_LINK) {
         let bare = lineText.replace(/\s+$/, "");
         bare = bare.slice(0, bare.length - (bare.match(AddTaskNote.BLOCK_ID)?.[0].length ?? 0));
-        let at = bare.length, note = null;
-        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
+        let at = bare.length, /** @type {string | null} */ note = null;
+        for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, at)));) {
             at = item.index;
             if (link.test(item[0])) note = item[0].trim();
         }
@@ -958,20 +1136,21 @@ export default class AddTaskNote {
     // `lineText` with `link`, a ↗ to the note it was sent from, in its run (OBS-208): after its ⋯, else
     // after its ⭕ or 🗃️, else at the end, before a block ID. A ↗ it had already gives way: a line was
     // sent from one note.
-/**
- * @param {string} lineText
- * @param {string} link
- * @returns {string}
- */
+    /**
+     * @param {string} lineText
+     * @param {string} link
+     * @returns {string}
+     */
     withFrom(lineText, link) {
         let bare = lineText.replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
         bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
+        /** @type {string[]} */
         const items = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
+        for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
         const run = items.filter((x) => !AddTaskNote.FROM_LINK.test(x));
-        const after = (test) => run.reduce((last, x, i) => (test(x) ? i : last), -1);
+        const after = (/** @type {(x: string) => boolean} */ test) => run.reduce((last, x, i) => (test(x) ? i : last), -1);
         let i = after((x) => AddTaskNote.OWN_NOTE_LINK.test(x));
         if (i < 0) i = after((x) => /\|\s*(?:⭕|🗃)\uFE0F?\s*\]\]$/u.test(x));
         run.splice(i < 0 ? run.length : i + 1, 0, link);
@@ -982,13 +1161,19 @@ export default class AddTaskNote {
 
     // `lineText` with `link`, a ⋯ to its own note, in its run: ahead of a ↗, else at the end, before a block ID.
     // A line with a ⋯ is left alone (rule 8).
+    /**
+     * @param {string} lineText
+     * @param {string} link
+     * @returns {string}
+     */
     withOwn(lineText, link) {
         let bare = lineText.replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
         bare = bare.slice(0, bare.length - block.length).replace(/\s+$/, "");
+        /** @type {string[]} */
         const items = [];
         let at = bare.length;
-        for (let item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
+        for (let /** @type {RegExpMatchArray | null} */ item; (item = AddTaskNote.runItem(bare.slice(0, at)));) { items.unshift(item[0].trim()); at = item.index; }
         if (items.some((x) => AddTaskNote.OWN_NOTE_LINK.test(x))) return lineText;
         const from = items.findIndex((x) => AddTaskNote.FROM_LINK.test(x));
         items.splice(from === -1 ? items.length : from, 0, link);
@@ -997,11 +1182,11 @@ export default class AddTaskNote {
     }
 
     // `lineText` with `link` at its end, before a block ID if it ends in one
-/**
- * @param {string} lineText
- * @param {string} link
- * @returns {string}
- */
+    /**
+     * @param {string} lineText
+     * @param {string} link
+     * @returns {string}
+     */
     endWith(lineText, link) {
         const bare = lineText.replace(/\s+$/, "");
         const block = bare.match(AddTaskNote.BLOCK_ID)?.[0] ?? "";
@@ -1011,19 +1196,24 @@ export default class AddTaskNote {
     // Links an event line to its event log (see eventLine); the cursor stays where it was. A new log is made
     // (makeLog), filed where the line's ⭕ says. A log that exists already is settled the way a task's note is
     // (attach).
+    /**
+     * @param {EditorLine} line
+     * @param {string} name
+     * @returns {Promise<void>}
+     */
     async linkEvent(line, name) {
         const { editor, source, at, lineText, cursor } = line;
         const change = plainday.TaskChange;
         const date = this.dailyNoteDate();
         const logName = plainday.EventLog.nameFor(date, name);
         const fresh = this.eventLine(lineText, logName);
-        if (fresh.error) {
-            new Notice(fresh.error);
+        if (/** @type {{ error?: string }} */ (fresh).error) {
+            new Notice(/** @type {{ error: string }} */ (fresh).error);
             return;
         }
         const existing = this.namedNote(logName, source.path);
         if (!existing) {
-            editor.replaceRange(fresh, { line: at, ch: 0 }, { line: at, ch: lineText.length });
+            editor.replaceRange(/** @type {string} */ (fresh), { line: at, ch: 0 }, { line: at, ch: lineText.length });
             this.keepCursor(editor, cursor, at, lineText);
             await this.makeLog(date, name);
             return;
@@ -1031,7 +1221,7 @@ export default class AddTaskNote {
         if (!change.ready()) return;
         const found = await change.find({ file: source, at }, { note: existing });
         const oldPath = existing.path;
-        const each = (t) => {
+        const each = (/** @type {string} */ t) => {
             const paths = app.vault.getMarkdownFiles().map((f) => f.path).filter((p) => p !== oldPath);
             return this.withOwn(t, `[[${this.linktextFor(existing, paths)}|${AddTaskNote.NOTE_MARK}]]`);
         };
@@ -1042,10 +1232,10 @@ export default class AddTaskNote {
     // slash or bar becomes "-", characters a file name or a link can't hold are dropped, and so are dots
     // and spaces at the end. Cleaning a name twice changes nothing. The line keeps its text as typed
     // (OBS-111).
-/**
- * @param {string} title
- * @returns {string}
- */
+    /**
+     * @param {string} title
+     * @returns {string}
+     */
     fileName(title) {
         return title.replace(/\s*:\s*/g, " - ").replace(/[\\/|]/g, "-").replace(/[*"<>?#^[\]]/g, "")
             .replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
@@ -1055,9 +1245,14 @@ export default class AddTaskNote {
     // opening it, so you stay in the daily note (EventLog.make, OBS-122): filed in the project the event line's ⭕
     // or 🗃️ names, or else in the Inbox with no menu (OBS-55). A log that already has the name is left where it is.
     // The daily note is saved first, so what reads it from disk sees the line just linked.
+    /**
+     * @param {string} date
+     * @param {string} title
+     * @returns {Promise<void>}
+     */
     async makeLog(date, title) {
         try {
-            await app.workspace.activeLeaf?.view?.save?.();
+            await /** @type {(WorkspaceLeaf & { view: SomeView }) | null} */ (app.workspace.activeLeaf)?.view?.save?.();
             await plainday.EventLog.make({ date, title });
         } catch (e) {
             console.error("AddTaskNote: couldn't make the log", e);
@@ -1068,17 +1263,33 @@ export default class AddTaskNote {
     // The event line with a link to its event log, `[[linktext|⋯]]` (the log's name, EventLog.nameFor, or
     // a path): at the end, after the title, its ℹ️ or 🆓 and any ⭕ or 🗃️ links, so the note link ends
     // the line (OBS-90) and the calendar sync reads it (OBS-57). { error } when the line already links a log.
+    /**
+     * @param {string} lineText
+     * @param {string} linktext
+     * @returns {string | { error: string }}
+     */
     eventLine(lineText, linktext) {
         if (this.linksLog(lineText)) return { error: "This event already links a log" };
         return this.endWith(lineText, `[[${linktext}|${AddTaskNote.NOTE_MARK}]]`);
     }
 
     // Whether an event line links a log already: a note link, or its title wrapped in a dated link
+    /**
+     * @param {string} lineText
+     * @returns {boolean}
+     */
     linksLog(lineText) {
         return AddTaskNote.NOTE_LINK.test(lineText) || AddTaskNote.LOG_TITLE.test(lineText);
     }
 
     // Replace the selection with `template`; with nothing selected, put the cursor where the link's name goes
+    /**
+     * @param {Editor} editor
+     * @param {EditorPosition} from
+     * @param {string} selection
+     * @param {string} template
+     * @returns {void}
+     */
     insert(editor, from, selection, template) {
         if (selection) {
             editor.replaceSelection(template);
@@ -1090,20 +1301,28 @@ export default class AddTaskNote {
 
     // An event line: a [<] line, and, told by their form (rule 1, OBS-193), a [-] line the calendar sync wrote
     // and a meeting line in the form used before August 2025
+    /**
+     * @param {string} lineText
+     * @returns {boolean}
+     */
     isEvent(lineText) {
         return /^\s*[-*+]\s+\[<\]/.test(lineText) || ["canceled", "meeting"].includes(plainday?.TimeReport?.eventKind(lineText));
     }
 
     // " " when `followedBy` starts with something other than whitespace, so a link doesn't run into it
+    /**
+     * @param {string} followedBy
+     * @returns {string}
+     */
     spacer(followedBy) {
         return /^\S/.test(followedBy) ? " " : "";
     }
 
     // The column right after a line's checkbox and the space that follows it: "- [ ] |Task"
-/**
- * @param {string} lineText
- * @returns {number}
- */
+    /**
+     * @param {string} lineText
+     * @returns {number}
+     */
     afterCheckbox(lineText) {
         const match = lineText.match(AddTaskNote.CHECKBOX);
         return match ? match[0].length : 0;
@@ -1115,6 +1334,6 @@ export default class AddTaskNote {
     dailyNoteDate() {
         const file = app.workspace.getActiveFile();
         const period = file ? plainday.PeriodicNotes.periodOfName(file.basename) : null;
-        return period?.unit === "day" ? period.date : moment().format("YYYY-MM-DD");
+        return period?.unit === "day" ? period.date : /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
     }
 }
