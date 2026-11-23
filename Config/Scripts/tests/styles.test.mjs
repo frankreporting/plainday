@@ -87,14 +87,14 @@ test("styles.css holds the classes the code gives its dialogs", () => {
     for (const [cls, files] of Object.entries(uses)) for (const file of files) assert.ok(read(file).includes(`"${cls}`) || read(file).includes(` ${cls}"`), `${file} uses ${cls}`);
 });
 
-test("styles.css draws the invoice and the timesheet, under the classes their notes carry", () => {
+test("styles.css draws the invoice under the class its notes carry; a timesheet's table is the theme's (OBS-203)", () => {
     // Notes already written carry these classes, so they can't change
     for (const sel of ["body .pm-invoice .pm-invoice-parties", "body .pm-invoice .pm-invoice-facts", "body .pm-invoice .pm-invoice-label", "body .pm-invoice .pm-invoice-name"]) {
         assert.ok(CSS.includes(`${sel} {`), sel);
     }
     assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice :is\(\.metadata-container,/);
-    assert.match(CSS, /\.pm-timesheet table tbody tr:nth-child\(n\)/);
-    assert.match(CSS, /--pm-timesheet-entry-background/);
+    // No day bands since OBS-203 (they took :has): timesheets and Billed entries look as the theme draws tables
+    assert.doesNotMatch(CSS, /pm-timesheet/);
     // On screen, a line only between the two blocks of names, since many themes underline the title; printed,
     // above the first too
     const block = (sel) => CSS.slice(CSS.indexOf(`${sel} {`)).split("}")[0];
@@ -102,10 +102,9 @@ test("styles.css draws the invoice and the timesheet, under the classes their no
     assert.match(block("body .pm-invoice .cm-html-embed + .cm-html-embed > .pm-invoice-parties"), /border-top: 1px solid/);
     assert.ok(CSS.includes("body .pm-invoice .pm-invoice-parties + .pm-invoice-parties,\n"), "reading view's line");
     assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice \.pm-invoice-parties \{\s*border-top: 1px solid/);
-    // Billed entries take the timesheet's day bands; Billable hours, the table of four columns, doesn't
-    const billed = "body .pm-invoice table:not(:has(> thead > tr > th:nth-child(4):last-child)) tbody tr";
-    assert.ok(CSS.includes(`${billed}:nth-child(n):hover {`), "entries shaded");
-    assert.ok(CSS.includes(`${billed}:has(> td:nth-child(-n + 2) strong):hover {`), "day rows plain");
+    // Printed, Billed entries are hidden: the blocks InvoicePrint marks, from the heading's on
+    assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice \.pm-invoice-billed \{\s*display: none;/);
+    assert.ok(read("plugin/src/startup/invoicePrint.js").includes('static CLASS = "pm-invoice-billed";'));
     // Nothing left to copy into a vault's snippets
     assert.ok(!fs.existsSync(new URL("Config/Scripts/Style Settings/pm-invoice.css", root)));
     assert.ok(!fs.existsSync(new URL("Config/Scripts/Style Settings/pm-timesheet.css", root)));
@@ -120,8 +119,8 @@ test("styles.css: a forwarded or canceled task's text, and the strike, are a don
 });
 
 // The directory's scan (OBS-203): it warns on every !important and every :has, and on text-indent, which
-// its browser check calls partly supported. styles.css has no !important; the rules CSS can't write
-// without :has or text-indent each say why in a stylelint comment, for the scan.
+// its browser check calls partly supported. styles.css has no !important. Two rules CSS can't write
+// without them stay, each saying why in a stylelint comment; the scan lists them anyway (11/23).
 function unexplained(css) {
     const out = [];
     let off = false, next = false, inComment = false;
@@ -139,8 +138,25 @@ function unexplained(css) {
     return out;
 }
 
+// The lines of code (comments left out) that use :has or text-indent
+function kept(css) {
+    let inComment = false;
+    return css.split("\n").flatMap((line) => {
+        let code = line.replace(/\/\*.*?\*\//g, "");
+        if (inComment) { if (!code.includes("*/")) return []; inComment = false; code = code.slice(code.indexOf("*/") + 2); }
+        if (code.includes("/*")) { inComment = true; code = code.slice(0, code.indexOf("/*")); }
+        return /:has\(|text-indent/.test(code) ? [code.trim()] : [];
+    });
+}
+
 test("styles.css: no !important, and each rule that needs :has or text-indent says why (OBS-203)", () => {
     assert.deepEqual(unexplained(CSS), []);
+    // Only the two the plan keeps: the links' indent reset, and a line with a link open for editing,
+    // whose brackets only Obsidian knows it shows. A folded line has a class of its own (TrailingLinks).
+    assert.deepEqual(kept(CSS), ["text-indent: 0;", "& .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {"]);
+    assert.ok(CSS.includes("& .pm-trail-line.pm-trail-folded {"));
+    assert.ok(read("plugin/src/startup/trailingLinks.js").includes('"pm-trail-line pm-trail-folded"'));
+    assert.deepEqual(kept("/* a :has(.x)\n   text-indent */\n.y:has(.z) {}"), [".y:has(.z) {}"]);
     assert.ok(/:has\(/.test(CSS) && /text-indent/.test(CSS), "the kept rules are still there");
     // What the check finds
     assert.deepEqual(unexplained(".a { color: red !important; }\n.b:has(> .c) { color: red; }\n/* x */ .d { text-indent: 0; }"),

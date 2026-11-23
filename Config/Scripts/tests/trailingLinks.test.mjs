@@ -374,3 +374,15 @@ test("subtreeEnd: the last line nested under a line", () => {
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 2), 3);
     assert.equal(TrailingLinks.subtreeEnd(lineAt, NOTE.length, 6), 6);
 });
+
+// A folded line's class (OBS-203): a fold that starts at the line's end, as CodeMirror folds a list item
+const foldsOf = (...ranges) => ({ between: (a, b, f) => { for (const [from, to] of ranges) if (from <= b && to >= a && f(from, to) === false) return; } });
+test("folded: a fold starting at the line's end marks the line folded", () => {
+    assert.equal(TrailingLinks.folded(foldsOf([388, 407]), 388), true);
+    assert.equal(TrailingLinks.folded(foldsOf([200, 250], [388, 407]), 388), true);
+});
+test("folded: no fold, or one that only ends or passes there, leaves the line as it is", () => {
+    assert.equal(TrailingLinks.folded(foldsOf(), 388), false);
+    assert.equal(TrailingLinks.folded(foldsOf([300, 388]), 388), false, "the line above's fold, ending here");
+    assert.equal(TrailingLinks.folded(foldsOf([300, 420]), 388), false, "inside a fold");
+});
