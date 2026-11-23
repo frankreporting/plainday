@@ -10,6 +10,7 @@
     "ical.js": "2.2.1"
   },
   "peerDependencies": {
+    "@codemirror/language": "6.13.1",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.13"
   }

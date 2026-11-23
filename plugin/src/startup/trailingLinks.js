@@ -9,7 +9,6 @@ import { app, plainday } from "../host.js";
 /** @import { Extension, Range, Text } from "@codemirror/state" */
 /** @import { CmEditor, MomentFn } from "../host.js" */
 /** @import { NameReader } from "../shared/taskIds.js" */
-/** @import { FoldedRanges } from "./listCursor.js" */
 /**
  * A stretch of a line, as offsets into it: a task's ID from the space before it (blockId), or a line
  * an edit touched, as offsets into the note.
@@ -405,7 +404,7 @@ export default class TrailingLinks {
             const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
             // The names of periodic notes read as the settings are now, once for the lines drawn
             const read = T.reader();
-            const folds = /** @type {FoldedRanges} */ (foldedRanges)(v.state);
+            const folds = foldedRanges(v.state);
             const outer = /** @type {Range<Decoration>[]} */ ([]), inner = /** @type {Range<Decoration>[]} */ ([]);
             let unmeasured = false;
             for (const { from, to } of ranges) {
@@ -512,7 +511,7 @@ export default class TrailingLinks {
                 // folds, so they're compared only when nothing was typed: an edit redraws its lines anyway
                 const full = now !== this.span || u.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)))
                     || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false)
-                    || (!u.docChanged && /** @type {FoldedRanges} */ (foldedRanges)(u.startState) !== /** @type {FoldedRanges} */ (foldedRanges)(u.state));
+                    || (!u.docChanged && foldedRanges(u.startState) !== foldedRanges(u.state));
                 this.span = now;
                 if (!full && !u.docChanged) {
                     // The cursor moved: redraw the lines it left and reached, when they have a hidden ID

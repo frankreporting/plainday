@@ -7,10 +7,6 @@ import { app, plainday } from "../host.js";
 /** @import { Extension, RangeSet } from "@codemirror/state" */
 /** @import { Decoration, EditorView } from "@codemirror/view" */
 /**
- * The folds CodeMirror's language package says a state shows. Obsidian provides the package, but its
- * types aren't installed, so each call casts `foldedRanges` to this in a comment first.
- * @typedef {(state: EditorState) => RangeSet<Decoration>} FoldedRanges
- *
  * The window, which holds the editor extension's slot, so a second run fills the same one
  * @typedef {Window & { pmListCursor?: { slot: Extension[] } }} HandleWindow
  */
@@ -116,7 +112,7 @@ export default class ListCursor {
             const start = L.textStart(line.text);
             if (head !== line.from + (start ?? 0)) return false;
             const above = v.moveByChar(EditorSelection.cursor(line.from), false);
-            const end = L.rowEnd(/** @type {FoldedRanges} */ (foldedRanges)(s), above.head);
+            const end = L.rowEnd(foldedRanges(s), above.head);
             if (start === null && end === above.head) return false;
             const assoc = end === above.head ? above.assoc : -1;
             v.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(end, assoc)]), scrollIntoView: true, userEvent: "select" });
@@ -127,7 +123,7 @@ export default class ListCursor {
             const { state: s } = v;
             if (!plain(s.selection, s)) return false;
             const { head } = s.selection.main;
-            const end = L.foldEnd(/** @type {FoldedRanges} */ (foldedRanges)(s), head);
+            const end = L.foldEnd(foldedRanges(s), head);
             if (end === head || end === s.doc.length) return false;
             v.dispatch({ selection: { anchor: end + 1 }, scrollIntoView: true, userEvent: "select" });
             return true;
