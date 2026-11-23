@@ -1,6 +1,43 @@
 import { ButtonComponent, FuzzySuggestModal, getFrontMatterInfo, Modal, moment, Notice, parseYaml, Platform, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/** @import { Fold, FoldInfo, FoldView, MomentFn } from "../host.js" */
+/** @import TimeReport from "./timeReport.js" */
+/** @import { Entry, Model, Money, ReportIndex } from "./timeReport.js" */
+/** @import Billing from "../shared/billing.js" */
+/** @import { BilledChange, BilledRow, BillingEntry, HeldBack, InvoiceChange, InvoiceLine, Selection } from "../shared/billing.js" */
+/** @import Settings from "../shared/settings.js" */
+/**
+ * An invoice note as Billing reads it (Billing's `Invoice`, the name of this class here).
+ * @typedef {import("../shared/billing.js").Invoice} InvoiceNote
+ *
+ * Your details from Settings → Plainday → Invoices.
+ * @typedef {ReturnType<Settings["get"]>["invoices"]} InvoiceSettings
+ *
+ * Who an invoice bills (readBillTo): the note, its name, its code ("" when not set yet), billing name
+ * and address, and the nearest `client` (`path` null when it isn't a note); or only `error`, why it
+ * can't be told.
+ * @typedef {{ path: string | null, written: string }} Client
+ * @typedef {{ path?: string, name?: string, code?: string, billingName?: string, address?: string[], client?: Client | null, error?: string }} BillTo
+ *
+ * A name and address, as the invoice prints who it's from and who it bills.
+ * @typedef {{ name: string, address: string[] }} Party
+ *
+ * An invoice line (lines): Billing.rows's, with its label, rate and description.
+ * @typedef {InvoiceLine & { label: string, rate: string, description: string }} Line
+ *
+ * What an invoice note is written from (noteText): its properties, who it's from and who it bills,
+ * the facts it prints, its Billed entries with the link text for a project, the descriptions you
+ * typed, the check block's lines, and its tables' freezes (the default, and what a rebuilt draft held).
+ * @typedef {{
+ *   id?: string, name: string, status?: string, parent?: string, clientLink?: string, billToLink?: string,
+ *   invoiceDate: string, periodStart?: string, periodEnd?: string, minutes: number, cents: number, paid?: string | null,
+ *   from: Party, billTo: Party, projectId: string, requestedBy: string, terms: string, paymentNote: string,
+ *   billed: BilledRow[], linkText: (path: string) => string, descriptions?: Map<string, string>,
+ *   check: string[] | null, tables?: unknown, freezes?: Map<string, unknown[]>,
+ * }} Draft
+ */
 export default class Invoice {
     // Command "Invoice" (OBS-5): makes an invoice note from the time logged in daily notes, and moves
     // one along once it's made. Run on a project note (or pick a project), it asks "Bill through" a
@@ -36,31 +73,43 @@ export default class Invoice {
 
     // ---------------------------------------------------------------- pure
 
+    /** @param {string} date */
     md(date) {
         return `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
     }
 
     // A line item's date: "9/14", or "9/14/26" when the invoice spans two years
+    /**
+     * @param {string} date
+     * @param {boolean} span
+     */
     label(date, span) {
         return span ? `${this.md(date)}/${date.slice(2, 4)}` : this.md(date);
     }
 
     // "9/12/2026", as the header prints the invoice date
+    /** @param {string} date */
     dateText(date) {
         return `${this.md(date)}/${date.slice(0, 4)}`;
     }
 
+    /** @param {unknown} text */
     escape(text) {
         return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
     // A list property, or a string with one item per line: trimmed, blanks dropped
+    /**
+     * @param {unknown} value
+     * @returns {string[]}
+     */
     list(value) {
-        return [].concat(value ?? []).flatMap((v) => String(v ?? "").split(/\r?\n/)).map((v) => v.trim()).filter(Boolean);
+        return /** @type {unknown[]} */ ([]).concat(value ?? []).flatMap((v) => String(v ?? "").split(/\r?\n/)).map((v) => v.trim()).filter(Boolean);
     }
 
     // What the next invoice number goes one past, besides the highest invoice in the vault: the last
     // number given, or one less than the first invoice number when that's higher (Settings → Plainday)
+    /** @param {InvoiceSettings} invoices */
     numberedFrom(invoices) {
         return Math.max(invoices.lastNumber, (invoices.firstNumber ?? 0) - 1);
     }
@@ -68,6 +117,11 @@ export default class Invoice {
     // What a new invoice still needs from Settings → Plainday → Invoices, as the notice that says so,
     // or null when it has it: your name, and, unless `folder` is false (a rebuild, whose draft is
     // already filed), the invoice folder
+    /**
+     * @param {InvoiceSettings} invoices
+     * @param {{ folder?: boolean }} [options]
+     * @returns {string | null}
+     */
     missing(invoices, { folder = true } = {}) {
         const asks = [!invoices.name && "add your name", folder && !invoices.folder && "choose an invoice folder"].filter(Boolean);
         if (!asks.length) return null;
@@ -81,11 +135,17 @@ export default class Invoice {
     // address, client } or { error }. `code` is upper-cased, "" when not set yet. `client` is the
     // nearest `client`, the end client the invoice records: { path, written }, with `path` null when it
     // isn't a note (it stops the invoice only when it's the one billed), or null when there's none.
+    /**
+     * @param {string} project
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @returns {BillTo}
+     */
     readBillTo(project, tr, index) {
-        const nearest = (key) => {
-            for (let p = project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+        const nearest = (/** @type {string} */ key) => {
+            for (let p = project, /** @type {Set<string>} */ seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
                 seen.add(p);
-                const v = [].concat(tr.prop(index.props?.(p) ?? {}, key) ?? [])[0];
+                const v = /** @type {unknown[]} */ ([]).concat(tr.prop(index.props?.(p) ?? {}, key) ?? [])[0];
                 if (v === undefined || v === null || String(v).trim() === "") continue;
                 const raw = String(v).trim();
                 const target = raw.match(/\[\[([^\]|#]+)/)?.[1]?.trim() ?? raw;
@@ -112,29 +172,47 @@ export default class Invoice {
 
     // The link text of the invoice's `client` and `bill_to`: the client's as written when it isn't a
     // note, "" with no client; `linkText(path)` makes the rest
+    /**
+     * @param {BillTo} billed
+     * @param {(path: string) => string} linkText
+     * @returns {{ clientLink: string, billToLink: string }}
+     */
     partyLinks(billed, linkText) {
         const c = billed.client;
         return { clientLink: c ? (c.path ? linkText(c.path) : c.written) : "", billToLink: linkText(billed.path) };
     }
 
     // A link as a frontmatter value: quoted, or blank with no link text
+    /** @param {string} text */
     linkValue(text) {
         return text ? JSON.stringify(`[[${text}]]`) : "";
     }
 
     // A code to suggest for a client: the first letters of its words, or its first three letters
+    /** @param {string} name */
     suggestCode(name) {
         const words = String(name).replace(/^@/, "").split(/[^A-Za-z0-9]+/).filter(Boolean);
         const initials = words.map((w) => w[0]).join("").toUpperCase();
         return (words.length > 1 ? initials : (words[0] ?? "INV").slice(0, 3).toUpperCase()).slice(0, 8);
     }
 
+    /**
+     * @param {number} number
+     * @param {string} code
+     */
     nameFor(number, code) {
         return `${number}-${code}`;
     }
 
     // The invoice's lines (Billing.rows) with their labels and descriptions: a description you typed
     // for that label and rate in `descriptions`, else the day's tasks
+    /**
+     * @param {BilledRow[]} billed
+     * @param {Billing} billing
+     * @param {TimeReport} tr
+     * @param {Map<string, string>} [descriptions]
+     * @returns {Line[]}
+     */
     lines(billed, billing, tr, descriptions = new Map()) {
         const rows = billing.rows(billed);
         const span = rows.length > 0 && rows[0].date.slice(0, 4) !== rows.at(-1).date.slice(0, 4);
@@ -146,8 +224,13 @@ export default class Invoice {
     }
 
     // The note's frontmatter, as lines between the --- markers
+    /**
+     * @param {Draft} d
+     * @param {TimeReport} tr
+     * @returns {string[]}
+     */
     frontmatter(d, tr) {
-        const q = (s) => JSON.stringify(String(s));
+        const q = (/** @type {string} */ s) => JSON.stringify(String(s));
         return [
             "---",
             `id: ${d.id}`,
@@ -174,15 +257,21 @@ export default class Invoice {
 
     // What prints: the header, Billable hours and the payment note; then the Billed entries, which
     // don't. Nothing printed is a link. `d.check` (lines) goes first, between its markers.
+    /**
+     * @param {Draft} d
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @returns {string}
+     */
     body(d, tr, billing) {
-        const e = (s) => this.escape(tr.defuse(s));
-        const lines = (list) => list.map(e).join("<br>");
-        const fact = (label, value, strong = false) => `<p><span class="pm-invoice-label">${label}</span><br>${strong ? `<strong>${e(value)}</strong>` : e(value)}</p>`;
+        const e = (/** @type {unknown} */ s) => this.escape(tr.defuse(s));
+        const lines = (/** @type {string[]} */ list) => list.map(e).join("<br>");
+        const fact = (/** @type {string} */ label, /** @type {string} */ value, strong = false) => `<p><span class="pm-invoice-label">${label}</span><br>${strong ? `<strong>${e(value)}</strong>` : e(value)}</p>`;
         const items = this.lines(d.billed, billing, tr, d.descriptions);
         // The two tables, each under its heading, frozen for Selectable Tables (OBS-238): `d.tables` is the
         // default, and `d.freezes` what a rebuilt draft's tables held (TimeReport.freezesIn), so a freeze
         // you set stays. A table of yours in the payment note is left alone.
-        const frozen = (lines) => tr.withFreezes(lines, d.freezes ?? new Map(), d.tables ?? null);
+        const frozen = (/** @type {string[]} */ lines) => /** @type {(lines: string[], old: Map<string, unknown[]>, settings: unknown) => string[]} */ (tr.withFreezes)(lines, d.freezes ?? /** @type {Map<string, unknown[]>} */ (new Map()), d.tables ?? null);
         const facts = [
             ...(d.requestedBy ? [fact("Requested by", d.requestedBy)] : []),
             ...(d.projectId ? [fact("Project ID", d.projectId)] : []),
@@ -215,6 +304,11 @@ export default class Invoice {
     }
 
     // The whole note. `d.minutes` and `d.cents` are filled in from the billed rows.
+    /**
+     * @param {Omit<Draft, "minutes" | "cents">} d
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     */
     noteText(d, tr, billing) {
         const rows = billing.rows(d.billed);
         const full = { ...d, minutes: rows.reduce((s, r) => s + r.minutes, 0), cents: rows.reduce((s, r) => s + r.amount, 0) };
@@ -222,7 +316,12 @@ export default class Invoice {
     }
 
     // The descriptions in a note's Billable hours table: Map("9/14 $95.00" → description)
+    /**
+     * @param {string} text
+     * @param {Billing} billing
+     */
     descriptions(text, billing) {
+        /** @type {Map<string, string>} */
         const out = new Map();
         const lines = String(text ?? "").split(/\r?\n/);
         const at = lines.findIndex((l) => l.trim() === Invoice.HEADING);
@@ -240,8 +339,15 @@ export default class Invoice {
 
     // The descriptions to carry into a rebuilt draft: the ones you changed, not the defaults (the
     // day's tasks when the draft was made), so a description you never touched follows new tasks
+    /**
+     * @param {string} oldText
+     * @param {BilledRow[]} oldBilled
+     * @param {Billing} billing
+     * @param {TimeReport} tr
+     */
     keepDescriptions(oldText, oldBilled, billing, tr) {
-        const defaults = new Map(this.lines(oldBilled, billing, tr).map((r) => [`${r.label} ${r.rate}`, r.description]));
+        const defaults = new Map(this.lines(oldBilled, billing, tr).map((r) => /** @type {[string, string]} */ ([`${r.label} ${r.rate}`, r.description])));
+        /** @type {Map<string, string>} */
         const kept = new Map();
         for (const [k, v] of this.descriptions(oldText, billing)) {
             if (defaults.get(k) !== v) kept.set(k, v);
@@ -250,11 +356,16 @@ export default class Invoice {
     }
 
     // The check block: a callout between its markers, which doesn't print
+    /**
+     * @param {string} title
+     * @param {string[]} [items]
+     */
     checkLines(title, items = []) {
         return [Invoice.CHECK_START, `> [!${Invoice.CHECK}] ${title}`, ...items.map((i) => `> - ${i}`), Invoice.CHECK_END];
     }
 
     // Where the frontmatter ends: the line index of its closing ---, or -1 with none
+    /** @param {string[]} lines */
     frontmatterEnd(lines) {
         if (lines[0]?.trimEnd() !== "---") return -1;
         return lines.findIndex((l, i) => i > 0 && l.trimEnd() === "---");
@@ -262,6 +373,10 @@ export default class Invoice {
 
     // The note with its check block replaced by `lines`, or removed when `lines` is null; a new one goes
     // right after the frontmatter. Everything else stays as it was.
+    /**
+     * @param {string} text
+     * @param {string[] | null} lines
+     */
     placeCheck(text, lines) {
         const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
         const all = String(text).split(/\r?\n/);
@@ -275,14 +390,20 @@ export default class Invoice {
     // The note with frontmatter keys set to plain values (a status, a date, a number), each on its own
     // line; a key it doesn't have yet goes last, or right after the key `after` names for it when the
     // note has that one. Null when the note has no frontmatter.
+    /**
+     * @param {string} text
+     * @param {Record<string, string | null>} props
+     * @param {{ after?: Record<string, string> }} [options]
+     * @returns {string | null}
+     */
     setProps(text, props, { after = {} } = {}) {
         const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
         const lines = String(text).split(/\r?\n/);
         let end = this.frontmatterEnd(lines);
         if (end === -1) return null;
-        const find = (key) => lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
+        const find = (/** @type {string} */ key) => lines.findIndex((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
         // The line after a key's own, and the list under it
-        const past = (at) => { let next = at + 1; while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++; return next; };
+        const past = (/** @type {number} */ at) => { let next = at + 1; while (next < end && /^\s+\S|^-\s/.test(lines[next])) next++; return next; };
         for (const [key, value] of Object.entries(props)) {
             const line = `${key}: ${value ?? ""}`.trimEnd();
             const at = find(key);
@@ -301,12 +422,23 @@ export default class Invoice {
 
     // A rebuilt draft's frontmatter: who it bills set from the project as it is now (`client`, then
     // `bill_to` right after it on a draft from before OBS-109), and `more`; every other property as it was
+    /**
+     * @param {string} front
+     * @param {BillTo} billed
+     * @param {(path: string) => string} linkText
+     * @param {Record<string, string>} [more]
+     */
     rebuiltFront(front, billed, linkText, more = {}) {
         const { clientLink, billToLink } = this.partyLinks(billed, linkText);
         return this.setProps(front, { client: this.linkValue(clientLink), bill_to: this.linkValue(billToLink), ...more }, { after: { bill_to: "client" } });
     }
 
     // The frontmatter without `keys` (and any list under one), or null when there's none
+    /**
+     * @param {string} text
+     * @param {string[]} keys
+     * @returns {string | null}
+     */
     removeProps(text, keys) {
         const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
         const lines = String(text).split(/\r?\n/);
@@ -324,22 +456,33 @@ export default class Invoice {
     }
 
     // The date the invoice prints in its header, set to `date`; the rest of the note as it was
+    /**
+     * @param {string} text
+     * @param {string} date
+     */
     setPrintedDate(text, date) {
-        return String(text).replace(/(<span class="pm-invoice-label">Invoice date<\/span><br>)[^<]*/, (_, label) => `${label}${this.dateText(date)}`);
+        return String(text).replace(/(<span class="pm-invoice-label">Invoice date<\/span><br>)[^<]*/, (_, /** @type {string} */ label) => `${label}${this.dateText(date)}`);
     }
 
     // A property name as a pattern that matches only itself
+    /** @param {string} key */
     escapeKey(key) {
         return String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
 
     // An invoice's status set, with `props`. On an invoice made before OBS-117, its `status` line is
     // renamed where it stands; any other `status` is taken out, so the note never has two.
+    /**
+     * @param {string} text
+     * @param {string} status
+     * @param {Record<string, string>} [props]
+     * @returns {string | null}
+     */
     setStatus(text, status, props = {}) {
         const lines = String(text).split(/\r?\n/);
         const end = this.frontmatterEnd(lines);
         if (end === -1) return null;
-        const has = (key) => lines.some((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
+        const has = (/** @type {string} */ key) => lines.some((l, i) => i > 0 && i < end && new RegExp(`^${this.escapeKey(key)}\\s*:`, "i").test(l));
         let base = String(text);
         if (!has(Invoice.STATUS) && has("status")) {
             const nl = base.includes("\r\n") ? "\r\n" : "\n";
@@ -352,6 +495,7 @@ export default class Invoice {
     }
 
     // The note split at its frontmatter: { front: "---\n…\n---", body }
+    /** @param {string} text */
     split(text) {
         const nl = String(text).includes("\r\n") ? "\r\n" : "\n";
         const lines = String(text).split(/\r?\n/);
@@ -361,10 +505,15 @@ export default class Invoice {
 
     // What the check says about an invoice: Billing.changes, as list items, each daily note linked by its name
     // (TimeReport.dayLinks, OBS-298)
+    /**
+     * @param {{ changes: BilledChange[], late: Entry[] }} result
+     * @param {TimeReport} tr
+     * @returns {string[]}
+     */
     changeItems(result, tr) {
         const day = tr.dayLinks();
-        const when = (r) => `[[${day(r.date)}|${tr.shortDate(r.date)}]] ${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`;
-        const now = (c) => ({
+        const when = (/** @type {BillingEntry} */ r) => `[[${day(r.date)}|${tr.shortDate(r.date)}]] ${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`;
+        const now = (/** @type {BilledChange} */ c) => /** @type {Record<string, string>} */ ({
             times: `now ${tr.formatTime(c.entry?.start)} - ${tr.formatTime(c.entry?.end)}`,
             free: "now 🆓",
             unassigned: "now on no project",
@@ -385,19 +534,25 @@ export default class Invoice {
     // project, since its time could be on this one now (OBS-215).
     // `others: false` leaves out another project's missing rows: the confirmation warns about them, as
     // the time being billed may be one, but a draft's note is no place for another client's invoice.
+    /**
+     * @param {Pick<Selection, "problems" | "changed" | "heldBack"> & { scope?: Set<string> }} sel
+     * @param {TimeReport} tr
+     * @param {{ others?: boolean }} [options]
+     * @returns {string[]}
+     */
     beforeSendingItems(sel, tr, { others = true } = {}) {
         // Each daily note linked by its name (TimeReport.dayLinks, OBS-298)
         const day = tr.dayLinks();
-        const when = (e) => `[[${day(e.date)}|${tr.shortDate(e.date)}]] ${tr.formatTime(e.start)} - ${tr.formatTime(e.end)}`;
-        const why = {
+        const when = (/** @type {BillingEntry} */ e) => `[[${day(e.date)}|${tr.shortDate(e.date)}]] ${tr.formatTime(e.start)} - ${tr.formatTime(e.end)}`;
+        const why = /** @type {Record<string, (h: HeldBack) => string>} */ ({
             changed: (h) => `overlaps ${tr.formatTime(h.row.start)} - ${tr.formatTime(h.row.end)}, billed on [[${h.invoice.name}]]`,
             duplicate: () => "repeats another entry at the same times",
-        };
+        });
         // Named by the row's own project, else its invoice's: a parent's invoice bills its sub-projects' time
-        const whose = ({ invoice, change }) => change.row.projectPath ?? invoice.project;
-        const other = (c) => c.change.kind === "gone" && !!whose(c) && !sel.scope?.has(whose(c));
-        const gone = (c) => {
-            const line = tr.invoiceProblem(c, (p) => `[[${tr.basename(p)}]]`, day).replace(/^- /, "");
+        const whose = (/** @type {InvoiceChange} */ { invoice, change }) => change.row.projectPath ?? invoice.project;
+        const other = (/** @type {InvoiceChange} */ c) => c.change.kind === "gone" && !!whose(c) && !sel.scope?.has(whose(c));
+        const gone = (/** @type {InvoiceChange} */ c) => {
+            const line = tr.invoiceProblem(c, (/** @type {string} */ p) => `[[${tr.basename(p)}]]`, day).replace(/^- /, "");
             return other(c) ? `${tr.basename(whose(c))}'s ${line}` : line;
         };
         return [
@@ -433,6 +588,10 @@ export default class Invoice {
 
     // The vault has been indexed: projects are known, and so is every invoice (otherwise the ledger
     // would be empty, and everything would look unbilled)
+    /**
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     */
     ready(tr, index) {
         const cache = app.metadataCache;
         if ((cache.inProgressTaskCount ?? 0) > 0 || cache.initialized === false || !app.vault.getMarkdownFiles().some((f) => tr.counts(f.path, index))) {
@@ -443,6 +602,7 @@ export default class Invoice {
     }
 
     // A note tagged `invoice` in its frontmatter
+    /** @param {TFile} file */
     isInvoice(file) {
         const fm = app.metadataCache.getFileCache(file)?.frontmatter;
         return !!fm && plainday.TimeReport.tagsOf({ frontmatter: fm }).includes("invoice");
@@ -450,18 +610,27 @@ export default class Invoice {
 
     // The projects with time to bill: those with an ended, billable, hourly entry on no invoice, and the
     // projects above them that invoice their sub-projects; and the flat fees with time and no `earned`
+    /**
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {ReportIndex} index
+     * @returns {Promise<string | null>}
+     */
     async pickProject(tr, billing, index) {
         const working = new Notice("Working out what's unbilled…", 0);
+        /** @type {Model} */
         let model;
         try { ({ model } = await tr.currentModel({ index })); } finally { working.hide(); }
+        /** @type {Set<string>} */
         const candidates = new Set();
+        /** @type {Map<string, Money>} */
         const money = new Map();
-        const moneyOf = (p) => { if (!money.has(p)) money.set(p, tr.moneyOf(p, index).money); return money.get(p); };
+        const moneyOf = (/** @type {string} */ p) => { if (!money.has(p)) money.set(p, tr.moneyOf(p, index).money); return money.get(p); };
         for (const e of billing.entries(model)) {
             if (!e.project || tr.isArchived(e.project)) continue;
             if (model.money.get(e.project)?.type === "flat") {
                 // Every flat fee its time is part of that isn't earned yet: its own, and any set above it
-                for (let p = e.project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+                for (let p = e.project, /** @type {Set<string>} */ seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
                     seen.add(p);
                     if (moneyOf(p).fee && !moneyOf(p).earned && !tr.isArchived(p)) candidates.add(p);
                 }
@@ -475,13 +644,16 @@ export default class Invoice {
             }
         }
         if (!candidates.size) { new Notice("Nothing unbilled on any project"); return null; }
-        const aliasOf = (p) => [].concat(index.props(p)?.aliases ?? [])[0] || tr.basename(p);
+        const aliasOf = (/** @type {string} */ p) => /** @type {string[]} */ ([]).concat(/** @type {string | string[]} */ (index.props(p)?.aliases) ?? [])[0] || tr.basename(p);
         const items = [...candidates].sort((a, b) => aliasOf(a).localeCompare(aliasOf(b)));
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
                 getItems() { return items; }
+                /** @param {string} p */
                 getItemText(p) { return aliasOf(p); }
+                /** @param {string} p */
                 onChooseItem(p) { picked = p; }
                 // Obsidian closes the modal before it reports the choice
                 onClose() { window.setTimeout(() => resolve(picked), 0); }
@@ -492,6 +664,12 @@ export default class Invoice {
     }
 
     // Makes a draft invoice for `project`; for a flat fee, records when it was earned instead
+    /**
+     * @param {string} project
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {ReportIndex} index
+     */
     async create(project, tr, billing, index) {
         if (tr.moneyOf(project, index).money.type === "flat") {
             // A flat project that invoices its sub-projects' time can do either
@@ -533,13 +711,13 @@ export default class Invoice {
         if (app.vault.getAbstractFileByPath(path)) { new Notice(`${name} already exists`); return; }
 
         const projectFile = app.vault.getFileByPath(project);
-        const alias = [].concat(app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases ?? [])[0] || projectFile.basename;
-        const linkText = (p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, path, true) : tr.basename(p); };
+        const alias = /** @type {string[]} */ ([]).concat(/** @type {string | string[]} */ (app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases) ?? [])[0] || projectFile.basename;
+        const linkText = (/** @type {string} */ p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, path, true) : tr.basename(p); };
         const props = index.props(project) ?? {};
         const text = this.noteText({
-            id: moment().format("YYYYMMDDHHmmssSS"), name, status: "draft",
+            id: /** @type {MomentFn} */ (moment)().format("YYYYMMDDHHmmssSS"), name, status: "draft",
             parent: `[[${linkText(project)}|${alias}]]`, ...this.partyLinks(billed, linkText),
-            invoiceDate: moment().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
+            invoiceDate: /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), periodStart: sel.entries[0].date, periodEnd: through,
             from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
@@ -562,8 +740,14 @@ export default class Invoice {
 
     // The note whose `rate` is the flat fee `project` is part of: itself, or the nearest project above
     // it that sets one; null when none does
+    /**
+     * @param {string} project
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     * @returns {string | null}
+     */
     feeHolder(project, tr, index) {
-        for (let p = project, seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
+        for (let p = project, /** @type {Set<string>} */ seen = new Set(); p && !seen.has(p); p = tr.parentProject(p, index)) {
             seen.add(p);
             if (tr.moneyOf(p, index).money.fee) return p;
         }
@@ -573,6 +757,11 @@ export default class Invoice {
     // A flat fee can't be invoiced yet (OBS-165). Until it can, Invoice asks when the fee was earned and
     // sets `earned` on the note that sets the fee: TimeReport counts the fee as that day's Earnings
     // (OBS-133). Run again, it changes the date.
+    /**
+     * @param {string} project
+     * @param {TimeReport} tr
+     * @param {ReportIndex} index
+     */
     async earnFlat(project, tr, index) {
         const name = tr.basename(project);
         const holder = this.feeHolder(project, tr, index);
@@ -586,7 +775,7 @@ export default class Invoice {
         // the project's summary shows the date, so a year read wrong ("2/1" in October) is easy to see
         const file = app.vault.getFileByPath(holder);
         const read = this.nextChange(file);
-        await app.fileManager.processFrontMatter(file, (fm) => {
+        await app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ fm) => {
             // The property as it's already spelled, if it is
             const key = Object.keys(fm).find((k) => k.toLowerCase() === "earned") ?? "earned";
             fm[key] = date;
@@ -598,6 +787,10 @@ export default class Invoice {
     }
 
     // Resolves when the metadata cache next reads `file`, or after two seconds
+    /**
+     * @param {TFile} file
+     * @returns {Promise<void>}
+     */
     nextChange(file) {
         return new Promise((resolve) => {
             const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
@@ -607,12 +800,20 @@ export default class Invoice {
     }
 
     // The index of the item picked from `items`, or null when dismissed
+    /**
+     * @param {string[]} items
+     * @param {string} placeholder
+     * @returns {Promise<number | null>}
+     */
     pickOne(items, placeholder) {
         return new Promise((resolve) => {
+            /** @type {number | null} */
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
                 getItems() { return items; }
+                /** @param {string} item */
                 getItemText(item) { return item; }
+                /** @param {string} item */
                 onChooseItem(item) { picked = items.indexOf(item); }
                 // Obsidian closes the modal before it reports the choice
                 onClose() { window.setTimeout(() => resolve(picked), 0); }
@@ -624,6 +825,15 @@ export default class Invoice {
 
     // Says why nothing can be billed, and returns false; true when there's something to bill. On a
     // draft being rebuilt, nothing to bill leaves the draft as it is.
+    /**
+     * @param {string} project
+     * @param {Model} model
+     * @param {Selection} sel
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {string} through
+     * @param {{ rebuild?: boolean }} [options]
+     */
     billable(project, model, sel, tr, billing, through, { rebuild = false } = {}) {
         const name = tr.basename(project);
         if (sel.bad.length) {
@@ -644,7 +854,7 @@ export default class Invoice {
             const held = sel.heldBack.length ? `, ${sel.heldBack.length} held back (marked ⚠️ in the project's timesheet)` : "";
             // The time is all billed, or comes later: say which, so it doesn't read as a failure (OBS-149)
             const next = billing.select(model, tr, model.billing.index, { project, through: Invoice.LAST_DAY, ledger: model.billing.ledger }).entries[0];
-            const when = (d) => (d.slice(0, 4) === through.slice(0, 4) ? this.md(d) : tr.shortDate(d));
+            const when = (/** @type {string} */ d) => (d.slice(0, 4) === through.slice(0, 4) ? this.md(d) : tr.shortDate(d));
             const after = next ? ` The next unbilled time is on ${when(next.date)}.` : " There's none after it either.";
             new Notice(`Nothing unbilled on ${name} through ${this.md(through)}${held}.${after}`);
             return false;
@@ -653,6 +863,10 @@ export default class Invoice {
     }
 
     // The draft's check block, when there's anything to fix before it's sent
+    /**
+     * @param {Selection} sel
+     * @param {TimeReport} tr
+     */
     beforeSending(sel, tr) {
         const items = this.beforeSendingItems(sel, tr, { others: false });
         return items.length ? this.checkLines("Before sending", items) : null;
@@ -660,6 +874,7 @@ export default class Invoice {
 
     // Your details from Settings → Plainday → Invoices, or null after saying what a new invoice (or,
     // with `folder` false, a rebuild) still needs. Nothing is made either way.
+    /** @param {{ folder?: boolean }} [options] */
     settings({ folder = true } = {}) {
         const s = plainday.Settings.get().invoices;
         const missing = this.missing(s, { folder });
@@ -668,12 +883,21 @@ export default class Invoice {
     }
 
     // A note's properties, read from its text (the metadata cache can lag an edit)
+    /**
+     * @param {TFile} file
+     * @param {TimeReport} tr
+     * @returns {Promise<Record<string, unknown>>}
+     */
     async propsOf(file, tr) {
-        const info = getFrontMatterInfo(await tr.textOf(file));
-        try { return info.exists ? parseYaml(info.frontmatter) ?? {} : {}; } catch { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
+        const info = getFrontMatterInfo(await /** @type {string | Promise<string>} */ (tr.textOf(file)));
+        try { return info.exists ? /** @type {(text: string) => Record<string, unknown> | null} */ (parseYaml)(info.frontmatter) ?? {} : {}; } catch { return app.metadataCache.getFileCache(file)?.frontmatter ?? {}; }
     }
 
     // Resolves once the metadata cache has read `file` (or after two seconds)
+    /**
+     * @param {TFile} file
+     * @returns {Promise<void>}
+     */
     indexed(file) {
         if (app.metadataCache.getFileCache(file)?.frontmatter) return Promise.resolve();
         return new Promise((resolve) => {
@@ -693,12 +917,17 @@ export default class Invoice {
     // A date from the date prompt (the box starts at "today"), or null when dismissed. A month and day
     // without a year is whichever is closer, this year's or the next (OBS-143): billing looks back at
     // work done as often as ahead, so "9/16" in October is last month's.
+    /**
+     * @param {string} title
+     * @returns {Promise<string | null>}
+     */
     askDate(title) {
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let picked = null;
             const modal = plainday.DatePrompt.open(title, (result, m) => { picked = result.date; m.close(); }, { nearest: true });
             if (!modal) { resolve(null); return; }
-            const closed = modal.onClose?.bind(modal);
+            const closed = /** @type {{ bind(self: Modal): () => void }} */ (modal.onClose)?.bind(modal);
             modal.onClose = () => { closed?.(); window.setTimeout(() => resolve(picked), 0); };
             const input = modal.contentEl.querySelector("input");
             if (input) { input.value = "today"; input.dispatchEvent(new Event("input")); }
@@ -706,8 +935,16 @@ export default class Invoice {
     }
 
     // A line of text from a small prompt, or null when dismissed. `check(value)` returns an error to show.
+    /**
+     * @param {string} title
+     * @param {string} description
+     * @param {string} value
+     * @param {(value: string) => string | null} check
+     * @returns {Promise<string | null>}
+     */
     askText(title, description, value, check) {
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let answer = null;
             const modal = new (class extends Modal {
                 onClose() { window.setTimeout(() => resolve(answer), 0); }
@@ -735,12 +972,17 @@ export default class Invoice {
     }
 
     // The billed note's invoice code (its `bill_to`'s, else its client's), asked once and saved on that note
+    /**
+     * @param {BillTo} billed
+     * @param {TimeReport} tr
+     * @returns {Promise<string | null>}
+     */
     async askCode(billed, tr) {
         const code = await this.askText("Invoice code", `Invoices to ${billed.name} are numbered like 1001-${this.suggestCode(billed.name)}. Its code goes on its note as \`code\`.`,
             this.suggestCode(billed.name), (v) => (Invoice.CODE.test(v.toUpperCase()) ? null : "2 to 8 letters or digits"));
         if (!code) return null;
         const file = app.vault.getFileByPath(billed.path);
-        await app.fileManager.processFrontMatter(file, (fm) => { fm.code = code.toUpperCase(); });
+        await app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ fm) => { fm.code = code.toUpperCase(); });
         return code.toUpperCase();
     }
 
@@ -761,6 +1003,7 @@ export default class Invoice {
     }
 
     // Makes the folders `path` needs, one at a time
+    /** @param {string} path */
     async makeFolders(path) {
         let at = "";
         for (const part of path.split("/")) {
@@ -773,6 +1016,10 @@ export default class Invoice {
 
     // Raises the last invoice number in Plainday's settings to `n`, never lowering it. Should that fail,
     // the new note still holds its number, which the next run counts, so no number is given twice.
+    /**
+     * @param {number} n
+     * @param {string} name
+     */
     async raiseLastNumber(n, name) {
         try {
             await plainday.Settings.raiseLastNumber(n);
@@ -784,9 +1031,10 @@ export default class Invoice {
 
     // A confirmation item's text around its links: [{ text }] and [{ link, text }], a [[link|alias]]
     // showing its alias
+    /** @param {string} text */
     linkParts(text) {
-        const s = String(text), out = [], re = /\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g;
-        let at = 0, m;
+        const s = String(text), /** @type {{ text: string, link?: string }[]} */ out = [], re = /\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g;
+        let at = 0, /** @type {RegExpExecArray | null} */ m;
         while ((m = re.exec(s))) {
             if (m.index > at) out.push({ text: s.slice(at, m.index) });
             out.push({ link: m[1], text: m[2] ?? m[1] });
@@ -797,13 +1045,22 @@ export default class Invoice {
     }
 
     // Shows what an invoice would bill, and asks. Resolves true to create it.
+    /**
+     * @param {string} project
+     * @param {string} through
+     * @param {Selection} sel
+     * @param {Model} model
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @returns {Promise<boolean>}
+     */
     confirm(project, through, sel, model, tr, billing) {
         const hours = sel.entries.reduce((s, e) => s + tr.rounded(e.minutes), 0);
         const rows = billing.rows(billing.snapshot(sel.entries, model, tr));
         const cents = rows.reduce((s, r) => s + r.amount, 0);
-        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems.filter((p) => tr.changesBilling(p)), [], (p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
+        const fix = [...this.beforeSendingItems({ ...sel, heldBack: [] }, tr), ...tr.problemLines(model, [], sel.projectProblems.filter((p) => tr.changesBilling(p)), [], (/** @type {string} */ p) => tr.basename(p)).map((l) => l.replace(/^- /, ""))];
         return new Promise((resolve) => {
-            let go = false, opening = null;
+            let go = false, /** @type {string | null} */ opening = null;
             const modal = new (class extends Modal {
                 onClose() {
                     window.setTimeout(() => {
@@ -823,7 +1080,7 @@ export default class Invoice {
             modal.titleEl.setText(`Invoice ${tr.basename(project)} through ${this.md(through)}?`);
             // Selectable, so a missing entry's task and note can be copied back into its daily note
             modal.contentEl.addClass("plainday-selectable");
-            const section = (title, items) => {
+            const section = (/** @type {string} */ title, /** @type {string[]} */ items) => {
                 if (!items.length) return;
                 modal.contentEl.createEl("h4", { text: title });
                 const ul = modal.contentEl.createEl("ul");
@@ -859,9 +1116,17 @@ export default class Invoice {
     }
 
     // Asks a yes-or-no question with named buttons. Resolves to the picked button's key, or null.
+    /**
+     * @param {string} title
+     * @param {string | string[]} text
+     * @param {[key: string, label: string, cta?: boolean][]} buttons
+     * @returns {Promise<string | null>}
+     */
     choose(title, text, buttons) {
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let picked = null;
+            /** @type {ButtonComponent[]} */
             const made = [];
             const modal = new (class extends Modal {
                 onClose() { window.setTimeout(() => resolve(picked), 0); }
@@ -869,7 +1134,7 @@ export default class Invoice {
                 onOpen() { window.requestAnimationFrame(() => made.at(-1)?.buttonEl.focus()); }
             })(app);
             modal.titleEl.setText(title);
-            for (const line of [].concat(text)) modal.contentEl.createEl("p", { text: line });
+            for (const line of /** @type {string[]} */ ([]).concat(text)) modal.contentEl.createEl("p", { text: line });
             const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
             for (const [key, label, cta] of buttons) {
                 const b = new ButtonComponent(row).setButtonText(label).onClick(() => { picked = key; modal.close(); });
@@ -882,19 +1147,24 @@ export default class Invoice {
 
     // ---------------------------------------------------------------- on an invoice note
 
+    /**
+     * @param {TFile} file
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     */
     async actions(file, tr, billing) {
-        const text = await tr.textOf(file);
+        const text = await /** @type {string | Promise<string>} */ (tr.textOf(file));
         if (!billing.hasBilled(text)) {
             new Notice("This note has no Billed entries, so Invoice leaves it alone");
             return;
         }
         const index = tr.appIndex();
         const invoice = billing.readInvoice({ path: file.path, props: await this.propsOf(file, tr), text }, tr, index);
-        const choices = {
+        const choices = /** @type {Record<string, [string, string][]>} */ ({
             draft: [["rebuild", "Rebuild from the daily notes"], ["sent", "Mark sent"]],
             sent: [["check", "Check for changes"], ["paid", "Mark paid"], ["cancel", "Cancel invoice"]],
             paid: [["check", "Check for changes"]],
-        }[invoice.status] ?? [["check", "Check for changes"]];
+        })[invoice.status] ?? [["check", "Check for changes"]];
         if (invoice.status === "canceled") { new Notice(`${invoice.name} is canceled; its entries are unbilled again`); return; }
         const pick = await this.pickAction(invoice, choices);
         if (!pick) return;
@@ -906,12 +1176,20 @@ export default class Invoice {
         if (pick === "check") await this.check(file, invoice, tr, billing, index);
     }
 
+    /**
+     * @param {InvoiceNote} invoice
+     * @param {[string, string][]} choices
+     * @returns {Promise<string | null>}
+     */
     pickAction(invoice, choices) {
         return new Promise((resolve) => {
+            /** @type {string | null} */
             let picked = null;
             const modal = new (class extends FuzzySuggestModal {
                 getItems() { return choices; }
+                /** @param {[string, string]} c */
                 getItemText(c) { return c[1]; }
+                /** @param {[string, string]} c */
                 onChooseItem(c) { picked = c[0]; }
                 onClose() { window.setTimeout(() => resolve(picked), 0); }
             })(app);
@@ -923,6 +1201,13 @@ export default class Invoice {
     // Writes the whole new text of an invoice note: through its editor when it's open (the editor can be
     // ahead of the file), else in one step that refuses if the file changed since `before` was read.
     // An open editor that doesn't take the change, as with a table cell selected (OBS-238), says so.
+    /**
+     * @param {TFile} file
+     * @param {string} before
+     * @param {string} after
+     * @param {TimeReport} tr
+     * @returns {Promise<boolean>}
+     */
     async write(file, before, after, tr) {
         if (before === after) return true;
         const view = this.editorOf(file);
@@ -942,11 +1227,19 @@ export default class Invoice {
     }
 
     // The open editor showing `file`, or null
+    /**
+     * @param {TFile} file
+     * @returns {FoldView | null}
+     */
     editorOf(file) {
-        return app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file && v.editor) ?? null;
+        return app.workspace.getLeavesOfType("markdown").map((l) => /** @type {FoldView} */ (l.view)).find((v) => v?.file === file && v.editor) ?? null;
     }
 
     // The part of `before` that `after` replaces: before[start, end) becomes `text`
+    /**
+     * @param {string} before
+     * @param {string} after
+     */
     changed(before, after) {
         let start = 0;
         while (start < before.length && start < after.length && before[start] === after[start]) start++;
@@ -958,6 +1251,14 @@ export default class Invoice {
     // write(), keeping the note's folds, Billed entries' among them. An open editor moves them itself;
     // a closed note's saved folds are for its old lines (a check block, a property), so they move here,
     // as TimeReport moves a report's.
+    /**
+     * @param {TFile} file
+     * @param {string} before
+     * @param {string} after
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @returns {Promise<boolean>}
+     */
     async writeKeepingFold(file, before, after, tr, billing) {
         const saved = this.editorOf(file) ? null : app.foldManager.load(file);
         if (!(await this.write(file, before, after, tr))) return false;
@@ -969,7 +1270,7 @@ export default class Invoice {
             start--; end--;
             text = `\n${text.slice(0, -1)}`;
         }
-        await app.foldManager.save(file, { folds: tr.shiftFolds(saved.folds ?? [], before, start, end, text), lines: after.split("\n").length });
+        await app.foldManager.save(file, { folds: /** @type {(folds: Fold[], content: string, start: number, end: number, text: string) => Fold[]} */ (tr.shiftFolds)(saved.folds ?? [], before, start, end, text), lines: after.split("\n").length });
         return true;
     }
 
@@ -977,6 +1278,11 @@ export default class Invoice {
 
     // The Billed entries heading's fold in `text`, as Obsidian keeps folds: { from, to }, 0-based lines
     // from the heading to its section's last line that isn't blank. Null without one.
+    /**
+     * @param {string} text
+     * @param {Billing} billing
+     * @returns {Fold | null}
+     */
     billedFold(text, billing) {
         const lines = String(text ?? "").split("\n");
         const from = lines.findIndex((l) => billing.isHeading(l));
@@ -989,14 +1295,23 @@ export default class Invoice {
     }
 
     // The note's folds as shown, when it's open, else as last saved: { folds, lines }, or null
+    /**
+     * @param {TFile} file
+     * @returns {FoldInfo | null}
+     */
     foldInfo(file) {
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {FoldView} */ (l.view)).find((v) => v?.file === file);
         return (view ? view.currentMode.getFoldInfo?.() : app.foldManager.load(file)) ?? null;
     }
 
     // Folds Billed entries in `text`, the note's new text. An open view folds it too, keeping the folds
     // its editor moved with the write; a closed note keeps only its folded properties, since its saved
     // folds were for the old text (and Obsidian takes saved folds only for a note of as many lines).
+    /**
+     * @param {TFile} file
+     * @param {string} text
+     * @param {Billing} billing
+     */
     async foldBilled(file, text, billing) {
         const fold = this.billedFold(text, billing);
         if (!fold) return;
@@ -1011,6 +1326,14 @@ export default class Invoice {
 
     // A draft rebuilt from the daily notes as they are now, through its period_end, keeping the
     // descriptions you changed and anything you added to its frontmatter
+    /**
+     * @param {TFile} file
+     * @param {InvoiceNote} invoice
+     * @param {string} text
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {ReportIndex} index
+     */
     async rebuild(file, invoice, text, tr, billing, index) {
         if (!invoice.periodEnd) { new Notice(`${invoice.name} has no period_end to rebuild through; set it first`); return; }
         if (!invoice.project) { new Notice(`${invoice.name} has no project`); return; }
@@ -1027,13 +1350,13 @@ export default class Invoice {
             sel = billing.select(model, tr, index, { project: invoice.project, through: invoice.periodEnd, ledger });
         } finally { working.hide(); }
         if (!this.billable(invoice.project, model, sel, tr, billing, invoice.periodEnd, { rebuild: true })) return;
-        const linkText = (p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, file.path, true) : tr.basename(p); };
+        const linkText = (/** @type {string} */ p) => { const f = app.vault.getFileByPath(p); return f ? app.metadataCache.fileToLinktext(f, file.path, true) : tr.basename(p); };
         const props = index.props(invoice.project) ?? {};
         const entries = billing.snapshot(sel.entries, model, tr);
         const rows = billing.rows(entries);
         const minutes = rows.reduce((s, r) => s + r.minutes, 0), cents = rows.reduce((s, r) => s + r.amount, 0);
         const d = {
-            name: invoice.name, invoiceDate: invoice.invoiceDate ?? moment().format("YYYY-MM-DD"), minutes, cents,
+            name: invoice.name, invoiceDate: invoice.invoiceDate ?? /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), minutes, cents,
             from: settings, billTo: { name: billed.billingName, address: billed.address },
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
@@ -1053,6 +1376,13 @@ export default class Invoice {
     }
 
     // Marks a draft sent, after offering to rebuild one that no longer matches the daily notes
+    /**
+     * @param {TFile} file
+     * @param {InvoiceNote} invoice
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {ReportIndex} index
+     */
     async markSent(file, invoice, tr, billing, index) {
         const { model } = await tr.currentModel({ index });
         const result = billing.changes(invoice, model, tr, index, model.billing.ledger);
@@ -1063,7 +1393,7 @@ export default class Invoice {
                 `${stale} ${stale === 1 ? "entry has" : "entries have"} changed or been logged in its period since the draft was made.`,
                 "Rebuild it first, so it bills what the daily notes say now?",
             ], [["cancel", "Cancel"], ["send", "Mark sent anyway"], ["rebuild", "Rebuild", true]]);
-            if (pick === "rebuild") { await this.rebuild(file, invoice, await tr.textOf(file), tr, billing, index); return; }
+            if (pick === "rebuild") { await this.rebuild(file, invoice, await /** @type {string | Promise<string>} */ (tr.textOf(file)), tr, billing, index); return; }
             if (pick !== "send") return;
         }
         // The invoice date is the day it's sent: set with the status, on the property and where it prints
@@ -1072,10 +1402,17 @@ export default class Invoice {
 
     // Sets the status, and the date it happened, then refreshes the timesheets. `printed` also puts the
     // date where the invoice prints it.
+    /**
+     * @param {TFile} file
+     * @param {InvoiceNote} invoice
+     * @param {TimeReport} tr
+     * @param {{ status: string, key: string, title: string, dropCheck?: boolean, printed?: boolean }} how
+     * @param {Billing} billing
+     */
     async mark(file, invoice, tr, { status, key, title, dropCheck = false, printed = false }, billing) {
         const date = await this.askDate(title);
         if (!date) return;
-        const before = await tr.textOf(file);
+        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
         let after = this.setStatus(before, status, { [key]: date });
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (printed) after = this.setPrintedDate(after, date);
@@ -1085,11 +1422,17 @@ export default class Invoice {
         await this.refreshReport();
     }
 
+    /**
+     * @param {TFile} file
+     * @param {InvoiceNote} invoice
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     */
     async cancel(file, invoice, tr, billing) {
         const pick = await this.choose(`Cancel ${invoice.name}?`, "Its entries become unbilled again, for the next invoice. The note stays, marked canceled.",
             [["keep", "Keep it"], ["cancel", "Cancel invoice", true]]);
         if (pick !== "cancel") return;
-        const before = await tr.textOf(file);
+        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
         const after = this.setStatus(before, "canceled");
         if (after === null) { new Notice(`${invoice.name} has no frontmatter`); return; }
         if (!(await this.writeKeepingFold(file, before, after, tr, billing))) return;
@@ -1098,6 +1441,13 @@ export default class Invoice {
     }
 
     // Writes what changed since the invoice was made into its check block
+    /**
+     * @param {TFile} file
+     * @param {InvoiceNote} invoice
+     * @param {TimeReport} tr
+     * @param {Billing} billing
+     * @param {ReportIndex} index
+     */
     async check(file, invoice, tr, billing, index) {
         if (tr.isArchived(invoice.project)) { new Notice(`${invoice.name} is archived; not checked`); return; }
         if (invoice.problem) { new Notice(`${invoice.name} ${invoice.problem}; fix it first`, 0); return; }
@@ -1105,9 +1455,9 @@ export default class Invoice {
         const result = billing.changes(invoice, model, tr, index, model.billing.ledger);
         const items = this.changeItems(result, tr);
         const billingChanges = result.changes.filter((c) => c.kind !== "wording").length;
-        const stamp = tr.shortDate(moment().format("YYYY-MM-DD"));
+        const stamp = tr.shortDate(/** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"));
         const title = billingChanges || result.late.length ? `Changed since invoiced · checked ${stamp}` : `No changes since invoiced · checked ${stamp}`;
-        const before = await tr.textOf(file);
+        const before = await /** @type {string | Promise<string>} */ (tr.textOf(file));
         if (!(await this.writeKeepingFold(file, before, this.placeCheck(before, this.checkLines(title, items)), tr, billing))) return;
         new Notice(billingChanges || result.late.length ? `${invoice.name}: ${billingChanges} changed, ${result.late.length} logged since` : `${invoice.name}: no changes since invoiced`);
     }

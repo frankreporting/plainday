@@ -2,6 +2,8 @@ import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { Model } from "../commands/timeReport.js" */
+/** @import { Invoice } from "./billing.js" */
+/** @import { MomentFn } from "../host.js" */
 /**
  * One Problem as the log lists it: its kind, the link to the note to start from, and that note's
  * name; a line's worth of them, with how many (`count`) and how many are new (`added`, fresh).
@@ -62,6 +64,7 @@ export default class ErrorLog {
         subtask: "Billed entry under a nested task",
     };
     // A project's own Problem, by how its message starts (TimeReport.build and moneyOf)
+    /** @type {[RegExp, string][]} */
     static SETTING = [
         [/^has no `rate_type`/, "No rate_type"],
         [/^has a `rate` that isn't a positive number/, "Rate isn't a number"],
@@ -71,6 +74,10 @@ export default class ErrorLog {
         [/`earned`/, "Earned date problem"],
     ];
 
+    /**
+     * @param {string | null | undefined} path
+     * @returns {string}
+     */
     basename(path) {
         return String(path ?? "").split("/").pop().replace(/\.md$/, "");
     }
@@ -86,14 +93,14 @@ export default class ErrorLog {
      * @returns {ErrorGroup[]}
      */
     fromModel(model, link) {
-        const out = [];
-        const add = (kind, path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
-        const label = (p) => ErrorLog.RULE[p.rule] ?? ErrorLog.ENTRY[p.kind];
+        const /** @type {ErrorItem[]} */ out = [];
+        const add = (/** @type {string} */ kind, /** @type {string | null | undefined} */ path) => { if (path) out.push({ kind, link: link(path), name: this.basename(path) }); };
+        const label = (/** @type {{ rule?: string, kind?: string }} */ p) => /** @type {Record<string, string>} */ (ErrorLog.RULE)[p.rule] ?? /** @type {Record<string, string>} */ (ErrorLog.ENTRY)[p.kind];
         // A task Problem on a line in a note that isn't a day is copied onto each of its projects, and a
         // line that disagrees, or a `parent`, onto both of its: once, at the note it's in. A Problem about a
         // whole task (`group`, two deadlines) is on each of its days: once, at the first
-        const seen = new Set();
-        const once = (kind, path, key) => {
+        const /** @type {Set<string>} */ seen = new Set();
+        const once = (/** @type {string} */ kind, /** @type {string | null | undefined} */ path, /** @type {string} */ key) => {
             if (!path || seen.has(key)) return;
             seen.add(key);
             add(kind, path);
@@ -103,14 +110,14 @@ export default class ErrorLog {
             else add(label(p) ?? "Bad formatting", p.note ?? p.path);
         }
         const b = model.billing;
-        const home = (invoice) => invoice.project ?? invoice.path;
+        const home = (/** @type {Invoice} */ invoice) => invoice.project ?? invoice.path;
         for (const invoice of b?.invoices ?? []) {
             if (invoice.status === "canceled") continue;
             if (invoice.problem) add("Billed entries need fixing", home(invoice));
             if (!invoice.project) add("Invoice with no project", invoice.path);
         }
         for (const [invoice, list] of b?.byInvoice ?? []) {
-            for (const c of list) if (c.kind !== "wording") add(ErrorLog.CHANGE[c.kind] ?? "Billed times changed", home(invoice));
+            for (const c of list) if (c.kind !== "wording") add(/** @type {Record<string, string>} */ (ErrorLog.CHANGE)[c.kind] ?? "Billed times changed", home(invoice));
         }
         for (const twice of b?.ledger?.twice ?? []) add("Entry on two invoices", twice.invoices[1].project ?? twice.invoices[0].project ?? twice.invoices[1].path);
         for (const p of model.projectProblems ?? []) {
@@ -134,21 +141,31 @@ export default class ErrorLog {
      * @returns {ErrorGroup[]}
      */
     group(items) {
-        const byKey = new Map();
+        const /** @type {Map<string, ErrorGroup>} */ byKey = new Map();
         for (const i of items) {
             const k = this.key(i);
             if (byKey.has(k)) byKey.get(k).count++;
             else byKey.set(k, { ...i, count: 1 });
         }
-        const rank = (kind) => { const r = ErrorLog.KINDS.indexOf(kind); return r === -1 ? ErrorLog.KINDS.length : r; };
+        const rank = (/** @type {string} */ kind) => { const r = ErrorLog.KINDS.indexOf(kind); return r === -1 ? ErrorLog.KINDS.length : r; };
         return [...byKey.values()].sort((a, b) => rank(a.kind) - rank(b.kind) || a.name.localeCompare(b.name) || a.link.localeCompare(b.link));
     }
 
+    /**
+     * @param {ErrorItem} g
+     * @returns {string}
+     */
     key(g) {
         return `${g.kind} · ${g.link}`;
     }
 
     // A section of the note: its heading, when it last changed and how many are open, and its lines
+    /**
+     * @param {string} section
+     * @param {ErrorGroup[]} groups
+     * @param {string} stamp
+     * @returns {string}
+     */
     render(section, groups, stamp) {
         const open = groups.reduce((n, g) => n + g.count, 0);
         const lines = [`## ${section}`, "", `Updated ${stamp} · ${open ? `${open} open` : "nothing to fix"}`];
@@ -162,12 +179,12 @@ export default class ErrorLog {
      * @returns {Map<string, ErrorSection>}
      */
     sections(text) {
-        const out = new Map();
+        const /** @type {Map<string, ErrorSection>} */ out = new Map();
         const body = this.split(text).body;
         const parts = body.split(/^(?=## )/m).filter((p) => p.startsWith("## "));
         for (const part of parts) {
             const name = part.slice(3).split(/\r?\n/)[0].trim();
-            const lines = new Map();
+            const /** @type {Map<string, number>} */ lines = new Map();
             for (const l of part.split(/\r?\n/)) {
                 const m = l.match(/^- (.+?)(?: \((\d+)\))? · (.+)$/);
                 if (m) lines.set(`${m[1]} · ${m[3]}`, m[2] ? Number(m[2]) : 1);
@@ -178,6 +195,10 @@ export default class ErrorLog {
     }
 
     // The note's frontmatter (with its closing ---) and what follows it
+    /**
+     * @param {string} text
+     * @returns {{ front: string, body: string }}
+     */
     split(text) {
         const m = String(text ?? "").match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/);
         return m ? { front: m[0].replace(/\r?\n$/, ""), body: String(text).slice(m[0].length) } : { front: "", body: String(text ?? "") };
@@ -185,6 +206,13 @@ export default class ErrorLog {
 
     // The whole note with `section` set to `body`, the sections in their order, and anything you wrote
     // above the first section kept
+    /**
+     * @param {string} text
+     * @param {string} section
+     * @param {string} body
+     * @param {string | null} [id]
+     * @returns {string}
+     */
     place(text, section, body, id = null) {
         const { front, body: rest } = this.split(text);
         const at = rest.search(/^## /m);
@@ -198,12 +226,24 @@ export default class ErrorLog {
 
     // The groups that are new since `text` was written: not in its section, or more of them, each
     // with `added`, how many more
+    /**
+     * @param {string} text
+     * @param {string} section
+     * @param {ErrorGroup[]} groups
+     * @returns {ErrorGroup[]}
+     */
     fresh(text, section, groups) {
         const old = this.sections(text).get(section)?.lines ?? new Map();
         return groups.filter((g) => (old.get(this.key(g)) ?? 0) < g.count).map((g) => ({ ...g, added: g.count - (old.get(this.key(g)) ?? 0) }));
     }
 
     // Whether `section` already lists exactly `groups`
+    /**
+     * @param {string} text
+     * @param {string} section
+     * @param {ErrorGroup[]} groups
+     * @returns {boolean}
+     */
     same(text, section, groups) {
         const old = this.sections(text).get(section)?.lines;
         if (!old || old.size !== groups.length) return false;
@@ -211,8 +251,13 @@ export default class ErrorLog {
     }
 
     // The toast's words for a run's new lines
+    /**
+     * @param {string} source
+     * @param {ErrorGroup[]} fresh
+     * @returns {string}
+     */
     toastText(source, fresh) {
-        const count = (list) => list.reduce((s, g) => s + (g.added ?? g.count), 0);
+        const count = (/** @type {ErrorGroup[]} */ list) => list.reduce((s, g) => s + (g.added ?? g.count), 0);
         const n = count(fresh);
         const named = fresh.slice(0, 3).map((g) => `${g.kind}${(g.added ?? g.count) > 1 ? ` ×${g.added ?? g.count}` : ""} (${g.name})`);
         const more = fresh.length > 3 ? `, and ${count(fresh.slice(3))} more` : "";
@@ -234,13 +279,13 @@ export default class ErrorLog {
         const before = file ? await app.vault.read(file) : "";
         const fresh = this.fresh(before, section, groups);
         if (file && this.same(before, section, groups)) return fresh;
-        const body = this.render(section, groups, moment().format("M/D h:mma"));
+        const body = this.render(section, groups, /** @type {MomentFn} */ (moment)().format("M/D h:mma"));
         if (file) {
             await app.vault.process(file, (text) => this.place(text, section, body));
         } else {
             const folder = path.split("/").slice(0, -1).join("/");
             if (folder && !app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
-            await app.vault.create(path, this.place("", section, body, moment().format("YYYYMMDDHHmmssSS")));
+            await app.vault.create(path, this.place("", section, body, /** @type {MomentFn} */ (moment)().format("YYYYMMDDHHmmssSS")));
         }
         return fresh;
     }

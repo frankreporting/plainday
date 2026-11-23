@@ -1,6 +1,19 @@
 import { FuzzySuggestModal, Keymap, MarkdownView, moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { EditorPosition, Editor, TFile } from "obsidian" */
+/** @import { Fold, FoldView, MomentFn, SomeView } from "../host.js" */
+/** @import TimeReport from "./timeReport.js" */
+/** @import { Toggle } from "./timeReport.js" */
+/**
+ * A dropdown item: a line of a note, the words it shows, the note, its text when read and how many
+ * days before today its date is.
+ * @typedef {{ line: number, label: string }} LineItem
+ * @typedef {LineItem & { file: TFile, text: string, daysAgo: number }} Choice
+ *
+ * A suggest modal's list of items, which Obsidian's types leave out:
+ * @typedef {{ chooser: { useSelectedItem(evt: KeyboardEvent): void } }} WithChooser
+ */
 export default class ToggleTimeEntry {
     // The "Toggle time entry" command, on ⌘ T. On or under a task or event it starts a time entry
     // ("- 9:01am - ") after its sub-bullets, or fills in the end time on its running one (the entry
@@ -16,14 +29,14 @@ export default class ToggleTimeEntry {
     // toggleText, lineCursor, foldsAfterInsert).
     async invoke() {
         const report = plainday.TimeReport;
-        const now = () => moment().format("h:mma");
+        const now = () => /** @type {MomentFn} */ (moment)().format("h:mma");
         const view = app.workspace.getActiveViewOfType(MarkdownView);
         // In reading view the cursor is hidden, so that goes to the dropdown too
         const editor = view?.getMode() === "source" ? view.editor : null;
 
         let file = view?.file ?? null, text = null, line = -1, picked = false;
         let daysAgo = this.daysAgo(file), canStart = this.canStart(file);
-        let r = { pick: true };
+        let /** @type {Toggle} */ r = { pick: true };
         if (editor) {
             text = editor.getValue();
             line = editor.getCursor().line;
@@ -61,39 +74,52 @@ export default class ToggleTimeEntry {
     }
 
     // How many days before today a daily note's date is; 0 for any other note
+    /**
+     * @param {TFile | null} file
+     * @returns {number}
+     */
     daysAgo(file) {
         if (!file || !plainday.Schedule.isDailyNote(file)) return 0;
         const { format } = plainday.Schedule.dailyOpts();
-        return moment().startOf("day").diff(moment(file.basename, format, true), "days");
+        return /** @type {MomentFn} */ (moment)().startOf("day").diff(/** @type {MomentFn} */ (moment)(file.basename, format, true), "days");
     }
 
     // Whether a timer can start in this note: only in today's daily note. The time report reads only
     // daily notes and dates each entry by its note, so a timer anywhere else would be lost or misdated.
+    /**
+     * @param {TFile | null} file
+     * @returns {boolean}
+     */
     canStart(file) {
         return !!file && plainday.Schedule.isDailyNote(file) && this.daysAgo(file) === 0;
     }
 
     // [{ file, text, line, daysAgo, label }]: running timers in every daily note, today's first
     // and then newest day first, followed by today's open tasks and events
+    /**
+     * @param {TimeReport} report
+     * @returns {Promise<Choice[]>}
+     */
     async choices(report) {
         const days = app.vault.getMarkdownFiles()
             .filter((f) => plainday.Schedule.isDailyNote(f))
             .map((file) => ({ file, daysAgo: this.daysAgo(file) }))
             .sort((a, b) => a.daysAgo - b.daysAgo);
-        const texts = await Promise.all(days.map((d) => this.textOf(d.file)));
+        // An open note's text is a string, which Promise.all passes through as it is
+        const texts = await Promise.all(days.map((d) => /** @type {Promise<string>} */ (this.textOf(d.file))));
 
-        const todays = [], others = [], tasks = [];
+        const /** @type {Choice[]} */ todays = [], /** @type {Choice[]} */ others = [], /** @type {Choice[]} */ tasks = [];
         days.forEach((d, i) => {
             const text = texts[i];
             // Most notes have no running entry; skip the ones without anything like a start time
             if (d.daysAgo !== 0 && !/\d:\d\d\s?[ap]m\s*[-–—]/i.test(text)) return;
             const lines = report.lines(text);
-            const at = (item) => ({ ...item, file: d.file, text, daysAgo: d.daysAgo });
+            const at = (/** @type {LineItem} */ item) => ({ ...item, file: d.file, text, daysAgo: d.daysAgo });
             if (d.daysAgo === 0) {
                 todays.push(...report.runningChoices(lines).map(at));
                 tasks.push(...report.taskChoices(lines).map(at));
             } else {
-                others.push(...report.runningChoices(lines, moment().subtract(d.daysAgo, "days").format("M/D")).map(at));
+                others.push(...report.runningChoices(lines, /** @type {MomentFn} */ (moment)().subtract(d.daysAgo, "days").format("M/D")).map(at));
             }
         });
         // Future notes (negative daysAgo) sort ahead of today; timers there are unlikely, but go last
@@ -103,31 +129,46 @@ export default class ToggleTimeEntry {
 
     // A type-to-filter dropdown of { label } items. Resolves to { item, go } (go: picked with ⌘ ↵,
     // to go to its line), or null.
+    /**
+     * @template {LineItem} T
+     * @param {T[]} items
+     * @param {string} placeholder
+     * @returns {Promise<{ item: T, go: boolean } | null>}
+     */
     pick(items, placeholder) {
         return new Promise((resolve) => {
             let chosen = false;
             const modal = new (class extends FuzzySuggestModal {
                 getItems() { return items; }
+                /** @param {T} item */
                 getItemText(item) { return item.label; }
+                /**
+                 * @param {T} item
+                 * @param {MouseEvent | KeyboardEvent} evt
+                 */
                 onChooseItem(item, evt) { chosen = true; resolve({ item, go: !!evt && !!Keymap.isModEvent(evt) }); }
                 // Obsidian closes the modal before it reports the choice
                 onClose() { window.setTimeout(() => { if (!chosen) resolve(null); }, 0); }
             })(app);
             modal.setPlaceholder(placeholder);
             modal.setInstructions([{ command: "↵", purpose: "toggle" }, { command: "⌘ ↵", purpose: "go to line" }]);
-            modal.scope.register(["Mod"], "Enter", (evt) => { modal.chooser.useSelectedItem(evt); return false; });
+            modal.scope.register(["Mod"], "Enter", (evt) => { /** @type {typeof modal & WithChooser} */ (modal).chooser.useSelectedItem(evt); return false; });
             modal.open();
         });
     }
 
     // Opens the note in the current tab (unless it's already in front, in editing view) and puts
     // the cursor at `pos`, unfolding only what hides that line
+    /**
+     * @param {TFile} file
+     * @param {EditorPosition} pos
+     */
     async goTo(file, pos) {
-        let view = app.workspace.getActiveViewOfType(MarkdownView);
+        let /** @type {FoldView | null} */ view = app.workspace.getActiveViewOfType(MarkdownView);
         if (view?.file !== file || view.getMode() !== "source") {
             const leaf = app.workspace.getLeaf(false);
             await leaf.openFile(file, { active: true, state: { mode: "source" } });
-            view = leaf.view;
+            view = /** @type {FoldView} */ (leaf.view);
             // A daily note refolds as it opens (RefoldOnOpen); let that finish before unfolding
             await plainday.RefoldDailyNotes?.onOpen(file);
         }
@@ -142,12 +183,20 @@ export default class ToggleTimeEntry {
     }
 
     // The note as write() will see it: an editing view's text, else the file
+    /**
+     * @param {TFile} file
+     * @returns {string | Promise<string>}
+     */
     textOf(file) {
         return this.editorOf(file)?.getValue() ?? app.vault.cachedRead(file);
     }
 
+    /**
+     * @param {TFile} file
+     * @returns {Editor | undefined}
+     */
     editorOf(file) {
-        return app.workspace.getLeavesOfType("markdown").map((l) => l.view)
+        return app.workspace.getLeavesOfType("markdown").map((l) => /** @type {SomeView & Partial<Pick<MarkdownView, "getMode">>} */ (l.view))
             .find((v) => v?.file === file && v.editor && v.getMode?.() === "source")?.editor;
     }
 
@@ -155,6 +204,18 @@ export default class ToggleTimeEntry {
     // own folds), else in one read-modify-write that moves the saved folds to match. A view in
     // reading view still has an editor, but an edit there never reaches the file (seen 2026-09-15).
     // False, writing nothing, when the note no longer matches `text`.
+    /**
+     * @param {TimeReport} report
+     * @param {TFile} file
+     * @param {string} text
+     * @param {number} line
+     * @param {string} time
+     * @param {number} daysAgo
+     * @param {boolean} canStart
+     * @param {Toggle} r
+     * @param {boolean} moveCursor
+     * @returns {Promise<boolean>}
+     */
     async write(report, file, text, line, time, daysAgo, canStart, r, moveCursor) {
         const editor = this.editorOf(file);
         if (editor) {
@@ -171,7 +232,7 @@ export default class ToggleTimeEntry {
             }
             return true;
         }
-        let result = null;
+        let /** @type {(Toggle & { content?: string }) | null} */ result = null;
         await app.vault.process(file, (raw) => {
             // vault.read drops a byte order mark that process still passes in
             const bom = raw.startsWith("\uFEFF") ? "\uFEFF" : "";
@@ -183,7 +244,8 @@ export default class ToggleTimeEntry {
         const before = report.lines(text), after = report.lines(result.content);
         const saved = app.foldManager.load(file);
         if (saved && saved.lines === before.length && after.length > before.length) {
-            const folds = report.foldsAfterInsert(saved.folds, before, result.edit.from.line, after[result.edit.from.line + 1]);
+            // TimeReport's own types come with OBS-329
+            const folds = /** @type {(folds: Fold[], lines: string[], after: number, inserted: string) => Fold[]} */ (report.foldsAfterInsert)(saved.folds, before, result.edit.from.line, after[result.edit.from.line + 1]);
             await app.foldManager.save(file, { folds, lines: after.length });
         }
         return true;
