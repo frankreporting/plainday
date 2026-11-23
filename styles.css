@@ -292,6 +292,45 @@ body .pm-invoice table tr > :first-child:nth-last-child(4) ~ :is(th, td) {
     }
 }
 
+/* Timesheets and an invoice's Billed entries (OBS-203): every other row shaded, so the rows read apart in
+   every theme and mode. The shade is the theme's text color mixed into the note's background, 4% in light
+   mode and 12% in dark, where a small step near black doesn't show: Baseline stripes a table with
+   --background-primary-alt, a hair off the note's background in dark mode. Until OBS-203, each day's
+   entries shared one shade under a plain day row instead, but finding a day row took :has (OBS-331).
+   In a timesheet, every table's rows; in an invoice, the cells of the rows of five cells or more, which
+   leaves out Billable hours, the one table of four columns. Each rule holds under the mouse too, or
+   Obsidian's own hover rule for odd rows would repaint every other row. Selectable Tables reads the rows'
+   and cells' colors for its frozen cells, so frozen columns take the stripes too.
+   To pick the shade, set --pm-table-stripe in a snippet of your own, for example
+   body { --pm-table-stripe: var(--background-secondary); } */
+/* How much of the text color the stripes take: more in dark mode */
+.pm-timesheet,
+body .pm-invoice {
+    --pm-table-stripe-mix: 4%;
+}
+
+.theme-dark .pm-timesheet,
+.theme-dark .pm-invoice {
+    --pm-table-stripe-mix: 12%;
+}
+
+/* The plain rows: the note's own background, painted rather than clear, since a theme can shade the table
+   under its rows (Baseline gives the table's body --background-primary-alt) */
+.pm-timesheet table tbody tr:nth-child(odd),
+.pm-timesheet table tbody tr:nth-child(odd):hover,
+body .pm-invoice table tbody tr:nth-child(odd) > :first-child:nth-last-child(n + 5),
+body .pm-invoice table tbody tr:nth-child(odd) > :first-child:nth-last-child(n + 5) ~ * {
+    background-color: var(--background-primary);
+}
+
+.pm-timesheet table tbody tr:nth-child(even),
+.pm-timesheet table tbody tr:nth-child(even):hover,
+body .pm-invoice table tbody tr:nth-child(even) > :first-child:nth-last-child(n + 5),
+body .pm-invoice table tbody tr:nth-child(even) > :first-child:nth-last-child(n + 5) ~ * {
+    background-color: var(--pm-table-stripe,
+        color-mix(in oklab, var(--background-primary), var(--text-normal) var(--pm-table-stripe-mix)));
+}
+
 /* Task markers (OBS-140): an event `[<]`, a forwarded task `[>]`, a started `[/]`, a canceled `[-]` and a
    goal `[w]` drawn with looks of their own, in Live Preview and reading view. Obsidian draws every mark
    but a space as a ticked box, so without these they'd all look done. Every rule sits under

@@ -93,8 +93,12 @@ test("styles.css draws the invoice under the class its notes carry; a timesheet'
         assert.ok(CSS.includes(`${sel} {`), sel);
     }
     assert.match(CSS, /@media print \{[\s\S]*?body \.pm-invoice :is\(\.metadata-container,/);
-    // No day bands since OBS-203 (they took :has): timesheets and Billed entries look as the theme draws tables
-    assert.doesNotMatch(CSS, /pm-timesheet/);
+    // Stripes on every other row since OBS-203 (the day bands took :has): a timesheet's rows, and in an invoice
+    // the cells of rows of five cells or more, which leaves out Billable hours, the table of four columns
+    assert.ok(CSS.includes(".pm-timesheet table tbody tr:nth-child(even):hover,\n"), "a timesheet's stripes");
+    assert.ok(CSS.includes("body .pm-invoice table tbody tr:nth-child(even) > :first-child:nth-last-child(n + 5) ~ * {"), "Billed entries' stripes");
+    assert.match(CSS, /--pm-table-stripe,\s*color-mix\(in oklab, var\(--background-primary\), var\(--text-normal\) var\(--pm-table-stripe-mix\)\)\)/);
+    assert.doesNotMatch(CSS, /pm-timesheet-entry/);
     // On screen, a line only between the two blocks of names, since many themes underline the title; printed,
     // above the first too
     const block = (sel) => CSS.slice(CSS.indexOf(`${sel} {`)).split("}")[0];
