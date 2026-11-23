@@ -112,6 +112,26 @@ test("the Log template through Templater: its properties added, then Plainday's 
     assert.match(v.notes()[path], /## Agenda\n$/);
 });
 
+test("a Log template's id goes first, before the log's alias: through Templater, which adds it last, and without, in the one write (OBS-317)", async () => {
+    const path = `${LOGS}/2026-09-17 Kestrel standup.md`;
+    const first = (text) => text.split("\n").slice(0, 4).join("\n");
+    // Through Templater, as the template adds it: after Plainday's properties; nothing of Plainday's to put back
+    const v = standIn({ notes: { ...NOTES, [TPL]: "(the template)" }, open: day("2026-09-17"), at: 0 });
+    const settings = v.app.plugins.getPlugin("templater-obsidian").settings;
+    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { settings, templater: {
+        write_template_to_file: async (t, f) => v.app.vault.process(f, (text) => text.replace("who:\n", "who:\nid: 2026091712000000\n")),
+    } } : null);
+    await v.addTaskNote();
+    assert.equal(first(v.notes()[path]), "---\nid: 2026091712000000\naliases:\n  - 9/17/26 Kestrel standup");
+    assert.equal(v.notes()[path].replace("id: 2026091712000000\n", ""),
+        logText({ alias: "9/17/26 Kestrel standup", parent: "[[Kestrel|Kestrel Outfitters]]", date: "2026-09-17", time: "9:00am", endTime: "9:20am" }), "nothing else moved");
+    // Without Templater, a plain template with an id and a property of its own: the id first, its own after Plainday's
+    const w = standIn({ notes: { ...NOTES, [TPL]: "---\ntopic: Planning\nid: 2026091712000000\n---\n" }, open: day("2026-09-17"), at: 0 });
+    await w.addTaskNote();
+    assert.equal(first(w.notes()[path]), "---\nid: 2026091712000000\naliases:\n  - 9/17/26 Kestrel standup");
+    assert.match(w.notes()[path], /\nwho:\ntopic: Planning\n---\n$/);
+});
+
 test("finish: a blank note an event line's ⋯ links becomes its log, filed where the line says; any other blank dated note is left alone (OBS-122)", async () => {
     const notes = { ...NOTES, [day("2026-09-18")]: "- [<] 10:30am\tWireframe sign-off [[Kestrel|⭕]] [[2026-09-18 Wireframe sign-off|⋯]]\n\t- 11:00am\n" };
     const v = standIn({ notes: { ...notes, "2026-09-18 Wireframe sign-off.md": "", "2026-09-19 Kickoff.md": "" } });

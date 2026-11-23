@@ -739,7 +739,7 @@ export default class AddTaskNote {
 
     // The Task template run on the new note through Templater, which adds the template's properties to Plainday's,
     // and its text after them. A `parent` or `due` the template sets gives way to Plainday's, which the time
-    // report and Due date read; a `tags` it sets is combined with Plainday's.
+    // report and Due date read; a `tags` it sets is combined with Plainday's. Then its `id` goes first.
     async taskTemplate(templater, tpl, note, own) {
         const notes = plainday.PeriodicNotes;
         await templater.write_template_to_file(tpl, note);
@@ -748,22 +748,27 @@ export default class AddTaskNote {
         const front = notes.parts(await app.vault.read(note)).props ?? {};
         const same = (key) => String(front[key] ?? "") === own[key];
         const tagged = [].concat(front.tags ?? []).some((t) => String(t).toLowerCase() === "task");
-        if (same("parent") && same("due") && tagged) return;
-        await app.fileManager.processFrontMatter(note, (f) => {
-            for (const key of ["parent", "due"]) f[key] = own[key] || null;
-            const tags = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
-            if (!tags.some((t) => String(t).toLowerCase() === "task")) f.tags = ["task", ...tags];
-        });
+        if (!same("parent") || !same("due") || !tagged) {
+            await app.fileManager.processFrontMatter(note, (f) => {
+                for (const key of ["parent", "due"]) f[key] = own[key] || null;
+                const tags = [].concat(f.tags ?? []).filter((t) => t !== null && t !== "");
+                if (!tags.some((t) => String(t).toLowerCase() === "task")) f.tags = ["task", ...tags];
+            });
+        }
+        // Templater adds a template's new properties last; its `id` goes first, as in every note (OBS-317)
+        await plainday.ProjectNotes.idFirst(note);
     }
 
-    // A new task note's text, `own` its `parent` (a link, or "") and `due` (YYYY-MM-DD, or ""): Plainday's
-    // properties in the order the Task template wrote them, then `extra` (a template's other properties), then
-    // `body`
+    // A new task note's text, `own` its `parent` (a link, or "") and `due` (YYYY-MM-DD, or ""): a template's `id`
+    // first, as in every note (OBS-317), then Plainday's properties in the order the Task template wrote them, then
+    // `extra` (a template's other properties), then `body`
     taskNoteText(own, { tags = ["task"], extra = {}, body = "" } = {}) {
         const scalar = (v) => plainday.PeriodicNotes.scalar(String(v));
-        const lines = ["---", "tags:", ...tags.map((t) => `  - ${scalar(t)}`), own.parent ? `parent: ${JSON.stringify(own.parent)}` : "parent:", own.due ? `due: ${own.due}` : "due:"];
-        const more = Object.keys(extra).length ? stringifyYaml(extra) : "";
-        return `${lines.join("\n")}\n${more}---\n${body}`;
+        const { id, ...others } = extra;
+        const lines = ["tags:", ...tags.map((t) => `  - ${scalar(t)}`), own.parent ? `parent: ${JSON.stringify(own.parent)}` : "parent:", own.due ? `due: ${own.due}` : "due:"];
+        const first = "id" in extra ? stringifyYaml({ id }) : "";
+        const more = Object.keys(others).length ? stringifyYaml(others) : "";
+        return `---\n${first}${lines.join("\n")}\n${more}---\n${body}`;
     }
 
     // `text` with a template's text, `filled`, added, without Templater: the properties combined as
