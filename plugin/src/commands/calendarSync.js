@@ -1,10 +1,88 @@
 import { moment, Notice, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { CachedMetadata, TFile } from "obsidian" */
+/** @import { Fold, FoldView, MomentFn } from "../host.js" */
+/** @import { Feed, FeedEvent } from "../shared/calendarFeed.js" */
+/** @import { ErrorItem } from "../shared/errorLog.js" */
 /**
  * What ends an event line's title (splitTail): the title without it, its ⭕ and 🗃️ links as written,
  * whether it carries the free mark (ℹ️) and your 🆓, and its log's link as written, or null.
  * @typedef {{ rest: string, projects: string[], free: boolean, nonbillable: boolean, log: string | null }} EventTail
+ *
+ * What this device remembers of an event line (loadCache): its event's key and series ID (uid), its
+ * calendar and day; the title, start and end time the sync last wrote on it (end false for none) and
+ * whether the calendar called the event free then; when it first read the event (seen) and first missed
+ * it (goneSince), in ms; and whether the sync marked the line [-] (canceled).
+ * @typedef {{
+ *   key: string, uid: string, calendarId: string, date: string, title?: string, start?: string,
+ *   end?: string | false, free?: boolean, seen?: number, goneSince?: number, canceled?: boolean,
+ * }} CacheLine
+ * @typedef {{ version: number, lines: Record<string, CacheLine>, seriesTitles: Record<string, string>, dead: Record<string, boolean> }} Cache
+ *
+ * A run's report (newReport): what each line came to, by outcome, as `<date> <title>`; the calendars it
+ * couldn't sync, and the events the reader couldn't read
+ * @typedef {{
+ *   added: string[], adopted: string[], updated: string[], restored: string[], moved: string[],
+ *   forwarded: string[], canceled: string[], removed: string[], merged: string[], skipped: string[],
+ *   notSynced: { id: string, name: string, problem: string }[],
+ *   failedEvents: { calendarId: string, calendar: string, uid: string, title: string }[],
+ *   calendarCount?: number,
+ * }} Report
+ *
+ * A run's timings and each calendar's, saved with its report (saveLast)
+ * @typedef {{
+ *   started: number, calendars: Record<string, unknown>[], fetchMs?: number, applyMs?: number,
+ *   window?: { start: string, end: string }, longestBlockMs?: number,
+ * }} Stats
+ *
+ * A recurring series' entry in the settings, a rename of one (seriesProjects), and an entry's links as
+ * a series' line gets them (seriesMapping)
+ * @typedef {{ title: string, links: string[] }} Recurring
+ * @typedef {{ from: string, to: string, copy: boolean }} Rename
+ * @typedef {{ links: string[], key: string }} SeriesLinks
+ *
+ * Where a line's block is in a note: its first and last lines (blockAt)
+ * @typedef {{ from: number, to: number }} At
+ *
+ * An event line taken apart (parseHead), its end time (parseBlock), and its block (parseBlock)
+ * @typedef {{ box: string, start: string | null, title: string, tail: string, notes: string[], free: boolean, lid: string | null }} Head
+ * @typedef {{ time: string, note: string, line: string, under: string[] }} EndLine
+ * @typedef {{ head: Head | null, groups: string[][], end: EndLine | null, entries?: boolean }} Block
+ *
+ * A moved event's line on another day, and what its lines there bring to its new line (carryFrom)
+ * @typedef {Block & { date: string, raw: string, staying: boolean }} CarryPart
+ * @typedef {{ parts: CarryPart[] }} Carry
+ *
+ * What this device remembers of a line, for reading it (recalled)
+ * @typedef {{ titles: string[], endless: boolean, endAt: string | null }} Recall
+ *
+ * One change to a note (apply): an event's line written (event), a moved event's line on the day it
+ * left (leave), a line removed (drop) or marked [-] (cancel). Each has its event's key, its line's ID
+ * and its title. An event's also has the event, its lines as the sync writes them, what its lines on
+ * other days bring, the day's other events and its series' links; a leave's has the day the event went
+ * to and the lines the run read there (expect).
+ * @typedef {{
+ *   kind: "event" | "leave" | "drop" | "cancel", key: string, lid: string, title: string,
+ *   event?: FeedEvent, lines?: string[], carry?: Carry | null, day?: { key: string, start: string, title: string }[],
+ *   series?: SeriesLinks | null, to?: string, expect?: string[],
+ * }} Op
+ *
+ * The sync's part of an event's line as it's written now, for the cache (writeEvent)
+ * @typedef {{ title: string, free: boolean, start: string, end: string | false }} Wrote
+ *
+ * What one change did (runOps): its outcome, and for an event's line its ID, what changed, whether its
+ * copies differed, and what was written; then the change itself, and once its line is in place, its log
+ * @typedef {{ outcome: string, lid?: string, changed?: string[], differs?: boolean, wrote?: Wrote }} Did
+ * @typedef {Did & { op: Op }} Outcome
+ * @typedef {{ date: string, at: string, op: Op, result: Outcome, log: string | null }} Done
+ *
+ * A run's work across its notes (apply)
+ * @typedef {{ cache: Cache, wrote: Map<string, Wrote>, placed: Map<string, string>, canceled: Set<string>, done: Done[] }} Ctx
+ *
+ * What a run keeps on the instance between calls: links given since a run began (linkChanged) and each
+ * event's lines (lines). Its methods that read them say so with `@this`.
+ * @typedef {CalendarSync & { changedLinks?: Map<string, number>, linesMemo?: WeakMap<FeedEvent, string[]> }} Kept
  */
 
 export default class CalendarSync {
@@ -130,7 +208,9 @@ export default class CalendarSync {
     static END_LINE = /^(\s*[-*+]\s+\d{1,2}:\d{2}\s?[ap]m)(\s*:.*)?$/i;
 
     async invoke() {
+        /** @type {Notice | null} */
         let working = null;
+        /** @type {string} */
         let said;
         try {
             said = await this.run({ working: () => { working = new Notice("Syncing calendars…", 0); } });
@@ -144,6 +224,10 @@ export default class CalendarSync {
 
     // One sync at a time: a second one says so and does nothing. `working` is called once the run
     // has calendars to download, for the notice that shows while it works.
+    /**
+     * @param {{ working?: () => void }} [options]
+     * @returns {Promise<string>}
+     */
     async run({ working = () => {} } = {}) {
         if (this.running) return "A calendar sync is already running";
         this.running = true;
@@ -154,6 +238,11 @@ export default class CalendarSync {
         }
     }
 
+    /**
+     * @this {Kept}
+     * @param {() => void} working
+     * @returns {Promise<string>}
+     */
     async runOnce(working) {
         // Until the one-time conversion has run, an event's 🗒️ log link isn't read (OBS-208): the sync
         // would take it for part of the title and write the title back without it. It waits, changing
@@ -170,6 +259,7 @@ export default class CalendarSync {
         if (!linked.length) return "No calendar is switched on with a link on this device: see Settings → Plainday → Calendars";
         working();
 
+        /** @type {Stats} */
         const stats = { started: Date.now(), calendars: [] };
         const probe = this.blockProbe();
         const reader = plainday.CalendarFeed;
@@ -215,15 +305,23 @@ export default class CalendarSync {
 
     // The timings a read gives, rounded to tenths of a millisecond: the download, the read in the worker,
     // and from the worker's start to its answer
+    /**
+     * @param {Record<string, number>} [s]
+     * @returns {{ downloadMs: number | null, readMs: number | null, workerMs: number | null }}
+     */
     timings(s = {}) {
-        const ms = (v) => (typeof v === "number" ? Math.round(v * 10) / 10 : null);
+        const ms = (/** @type {unknown} */ v) => (typeof v === "number" ? Math.round(v * 10) / 10 : null);
         return { downloadMs: ms(s.downloadMs), readMs: ms(s.readMs), workerMs: ms(s.wallMs) };
     }
 
     // The longest stretch the app was held up while the sync ran, for the speed budget: a timer that
     // should fire every few milliseconds, and how late it was at worst. stop() gives that, in ms.
+    /**
+     * @param {number} [every]
+     * @returns {{ stop: () => number }}
+     */
     blockProbe(every = 4) {
-        let worst = 0, last = performance.now(), timer = null, stopped = false;
+        let worst = 0, last = performance.now(), timer = /** @type {number | null} */ (null), stopped = false;
         const tick = () => {
             const now = performance.now();
             worst = Math.max(worst, now - last - every);
@@ -242,12 +340,16 @@ export default class CalendarSync {
     }
 
     // How far ahead to sync: Settings → Plainday → Calendars → Sync range (OBS-282)
+    /** @returns {number} */
     rangeDays() {
         return plainday.Settings.rangeDays();
     }
 
     // A calendar's link changed (Settings.storeLink): it's no longer the one that stopped working
-    /** @param {string} id */
+    /**
+     * @this {Kept}
+     * @param {string} id
+     */
     linkChanged(id) {
         // A run working now loaded the cache before this; it leaves this calendar's flag off when it saves
         (this.changedLinks ??= new Map()).set(id, Date.now());
@@ -275,17 +377,21 @@ export default class CalendarSync {
     // none), seen (when it first read the event), goneSince (when its event was first missed) },
     // seriesTitles: series ID → title, dead: calendar ID → true }. Anything that doesn't read starts
     // afresh: the device is then one without the cache, which is safe.
+    /** @returns {Cache} */
     loadCache() {
+        /** @type {unknown} */
         let raw;
         try {
             raw = app.loadLocalStorage?.(CalendarSync.CACHE) ?? null;
-            if (typeof raw === "string") raw = JSON.parse(raw);
+            if (typeof raw === "string") raw = /** @type {(text: string) => unknown} */ (JSON.parse)(raw);
         } catch {
             raw = null;
         }
+        /** @type {(v: unknown) => Record<string, unknown>} */
         const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
         const r = obj(raw);
         const fresh = r.version === CalendarSync.CACHE_VERSION;
+        /** @type {Record<string, CacheLine>} */
         const lines = {};
         for (const [lid, m] of Object.entries(fresh ? obj(r.lines) : {})) {
             if (m && typeof m === "object" && typeof m.key === "string" && typeof m.date === "string") lines[lid] = m;
@@ -298,6 +404,7 @@ export default class CalendarSync {
         };
     }
 
+    /** @param {Cache} cache */
     saveCache(cache) {
         app.saveLocalStorage?.(CalendarSync.CACHE, cache);
     }
@@ -309,11 +416,16 @@ export default class CalendarSync {
     }
 
     // The last run's report on this device, with its timings
+    /**
+     * @param {Report} report
+     * @param {Stats} stats
+     */
     saveLast(report, stats) {
         const { failedEvents, notSynced, ...lists } = report;
         app.saveLocalStorage?.(CalendarSync.LAST, { at: new Date().toISOString(), ...lists, notSynced, failedEvents, stats });
     }
 
+    /** @returns {unknown} */
     lastRun() {
         try {
             return app.loadLocalStorage?.(CalendarSync.LAST) ?? null;
@@ -330,13 +442,22 @@ export default class CalendarSync {
     // calendar, day, start and end, are the same event: the new one takes over the old one's line, and
     // its series goes by the old one's title, so seriesProjects renames the series' project to it (as
     // the sync did before Plainday). Only places where one of each pairs up.
+    /**
+     * @param {Feed} feed
+     * @param {Set<string>} selected
+     * @param {Cache} cache
+     * @returns {Promise<void>}
+     */
     async handOver(feed, selected, cache) {
-        const today = moment().format("YYYY-MM-DD");
+        const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
+        /** @type {(calendarId: string, date: string, start: string, end: string | false) => string} */
         const slot = (calendarId, date, start, end) => `${calendarId}|${date}|${start}|${end}`;
+        /** @type {Set<string>} */
         const read = new Set();
         for (const event of feed.events) if (selected.has(event.calendarId) && event.status !== "canceled") read.add(`${event.calendarId}|${event.key}`);
         // The occurrences this device has a line for that the calendars read no longer have: usually none,
         // and then nothing else is looked at
+        /** @type {Map<string, string | null>} */
         const gone = new Map();
         for (const [lid, m] of Object.entries(cache.lines)) {
             if (m.key === m.uid || !m.start || !selected.has(m.calendarId) || read.has(`${m.calendarId}|${m.key}`)) continue;
@@ -346,6 +467,7 @@ export default class CalendarSync {
         if (!gone.size) return;
         const known = new Set(Object.values(cache.lines).map((m) => m.key));
         const places = new Set([...gone.keys()].map((at) => at.split("|").slice(0, 2).join("|")));
+        /** @type {Map<string, FeedEvent | null>} */
         const fresh = new Map();
         for (const event of feed.events) {
             await this.breathe();
@@ -372,7 +494,14 @@ export default class CalendarSync {
     // same title share an entry. A series' links go on a line when the sync first writes it. Choosing a
     // series' projects in the panel comes with OBS-276; until then they're the ones already in
     // Plainday's settings.
+    /**
+     * @param {Feed} feed
+     * @param {Set<string>} selected
+     * @param {Cache} cache
+     * @returns {Promise<Map<string, SeriesLinks>>}
+     */
     async seriesProjects(feed, selected, cache) {
+        /** @type {Map<string, string>} */
         const named = new Map();   // series ID -> title; the feed is sorted by start
         for (const event of feed.events) {
             if (event.recurring && selected.has(event.calendarId) && event.status !== "canceled" && !named.has(event.id)) {
@@ -382,6 +511,7 @@ export default class CalendarSync {
         const settings = plainday.Settings;
         const list = settings.get().calendars.recurring ?? [];
         const known = cache.seriesTitles ?? {};
+        /** @type {Rename[]} */
         const renames = [];
         for (const [id, title] of named) {
             // A title another series still has stays listed; the renamed series gets a copy of its entry
@@ -396,9 +526,11 @@ export default class CalendarSync {
         if (JSON.stringify(renamed) !== JSON.stringify(list)) await settings.set("calendars", { recurring: renamed });
         const mapping = this.seriesMapping(renamed);
 
+        /** @type {Map<string, SeriesLinks>} */
         const byId = new Map();
         for (const [id, title] of named) if (mapping.has(title)) byId.set(id, mapping.get(title));
         // A series missing from this read is remembered while its entry has a project
+        /** @type {Record<string, string>} */
         const remembered = {};
         for (const [id, title] of Object.entries(known)) if (!named.has(id) && mapping.has(title)) remembered[id] = title;
         cache.seriesTitles = { ...remembered, ...Object.fromEntries(named) };
@@ -410,12 +542,20 @@ export default class CalendarSync {
     // away unless `copy` (another series still has that title) or another rename gives it a new
     // project. A `to` entry with links of its own keeps them, unless its series has been renamed away
     // too. A renamed series' new entry goes where its old one was.
+    /**
+     * @param {Recurring[]} list
+     * @param {Rename[]} renames
+     * @returns {Recurring[]}
+     */
     renameSeries(list, renames) {
         if (!renames.length) return list;
+        /** @type {Map<string, string[]>} */
         const items = new Map();   // title -> links, the first entry for it
         for (const r of list) if (!items.has(r.title)) items.set(r.title, r.links);
         const vacated = new Set(renames.filter((r) => !r.copy).map((r) => r.from));
+        /** @type {Map<string, string[]>} */
         const assign = new Map();   // title -> links it ends up with
+        /** @type {Set<string>} */
         const dropped = new Set();  // old entries whose links went to a new title
         for (const { from, to, copy } of renames) {
             const source = items.get(from);
@@ -425,7 +565,9 @@ export default class CalendarSync {
             assign.set(to, source);
             if (!copy) dropped.add(from);
         }
+        /** @type {Recurring[]} */
         const out = [];
+        /** @type {Set<string>} */
         const placed = new Set();
         for (const r of list) {
             if (assign.has(r.title)) { if (!placed.has(r.title)) out.push({ title: r.title, links: assign.get(r.title) }); placed.add(r.title); }
@@ -440,7 +582,12 @@ export default class CalendarSync {
     }
 
     // The recurring list as title -> { links, key }
+    /**
+     * @param {Recurring[]} list
+     * @returns {Map<string, SeriesLinks>}
+     */
     seriesMapping(list) {
+        /** @type {Map<string, SeriesLinks>} */
         const mapping = new Map();
         for (const { title, links } of list) {
             const all = [...new Set([...(mapping.get(title)?.links ?? []), ...links])];
@@ -452,6 +599,10 @@ export default class CalendarSync {
     // MARK: event line IDs
 
     // A 53-bit hash of a string (cyrb53): the same on every device, for an event line's ID
+    /**
+     * @param {string} text
+     * @returns {number}
+     */
     static hash(text) {
         let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
         for (let i = 0; i < text.length; i++) {
@@ -468,12 +619,21 @@ export default class CalendarSync {
 
     // An event's line ID from its key: `e-` and six letters and digits. `step` gives the next one, for an
     // ID another line already uses (stepped the same way on every device).
+    /**
+     * @param {string} key
+     * @param {number} [step]
+     * @returns {string}
+     */
     lineId(key, step = 0) {
         const n = CalendarSync.hash(step ? `${key}#${step}` : String(key)) % CalendarSync.ID_SPACE;
         return CalendarSync.ID_PREFIX + n.toString(36).padStart(CalendarSync.ID_LENGTH, "0");
     }
 
     // The IDs an event's line can have, in the order they're tried
+    /**
+     * @param {string} key
+     * @returns {string[]}
+     */
     lineIds(key) {
         return Array.from({ length: CalendarSync.ID_STEPS }, (_, i) => this.lineId(key, i));
     }
@@ -484,34 +644,56 @@ export default class CalendarSync {
     static ID_IN_RUN = /\s\^([A-Za-z0-9-]+)((?:\s+(?:\[\[[^[\]]*\]\]|ℹ️?|🆓️?))*)\s*$/u;
 
     // The block ID a line ends with, or that sits ahead of links typed after it, lowercased, or null
+    /**
+     * @param {string} line
+     * @returns {string | null}
+     */
     lidOf(line) {
         return String(line).match(CalendarSync.ID_IN_RUN)?.[1]?.toLowerCase() ?? null;
     }
 
     // The ID of an event line wherever it is in the line, even with words typed after it, or null: how
     // the sync still finds a line you added to (it's yours then, and left as it is)
+    /**
+     * @param {string} line
+     * @returns {string | null}
+     */
     lidIn(line) {
         const text = String(line);
         if (!text.includes("^")) return null;
         const run = this.lidOf(text);
         if (run) return run;
+        /** @type {string | null} */
         let found = null;
         for (const m of text.matchAll(/\s\^([A-Za-z0-9-]{1,32})(?=\s|$)/g)) found = m[1].toLowerCase();
         return found;
     }
 
     // Whether a line's ID is where the sync writes it, last
+    /**
+     * @param {string} line
+     * @returns {boolean}
+     */
     lidAtEnd(line) {
         return CalendarSync.ID_AT_END.test(line);
     }
 
     // A line without its block ID, wherever in the run that ends the line it is
+    /**
+     * @param {string} line
+     * @returns {string}
+     */
     bare(line) {
         const m = String(line).match(CalendarSync.ID_IN_RUN);
         return m ? String(line).slice(0, m.index) + m[2] : String(line);
     }
 
     // A line ending in ` ^lid`, in place of any ID it ends in; without one when `lid` is null
+    /**
+     * @param {string} line
+     * @param {string | null} lid
+     * @returns {string}
+     */
     withLid(line, lid) {
         const plain = this.bare(line).replace(/\s+$/, "");
         return lid ? `${plain} ^${lid}` : plain;
@@ -522,18 +704,28 @@ export default class CalendarSync {
     // Plans this run and writes it: `feed` holds the events of the calendars read this time (`selected`),
     // `cache` is this device's (loadCache), `series` the recurring events' projects, and `report`
     // collects what happened (newReport; its failedEvents are the events the reader couldn't read).
+    /**
+     * @param {Feed} feed
+     * @param {Cache} cache
+     * @param {Set<string>} selected
+     * @param {Map<string, SeriesLinks>} [series]
+     * @param {Report} [report]
+     * @returns {Promise<Report>}
+     */
     async apply(feed, cache, selected, series = new Map(), report = this.newReport()) {
-        const today = moment().format("YYYY-MM-DD");
-        const upcoming = (date) => typeof date === "string" && date >= today;
+        const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
+        const upcoming = (/** @type {unknown} */ date) => typeof date === "string" && date >= today;
         // Only days this read covered can say anything about their events: with a one-week range,
         // everything past next week is simply unknown, not canceled
-        const covered = (date) => (!feed.windowStart || date >= feed.windowStart) && (!feed.windowEnd || date <= feed.windowEnd);
+        const covered = (/** @type {string} */ date) => (!feed.windowStart || date >= feed.windowStart) && (!feed.windowEnd || date <= feed.windowEnd);
         const read = new Set(feed.calendars.map((c) => c.id));
         // An event the reader couldn't read: its line is left as it is, never taken for canceled
         const unread = new Set((report.failedEvents ?? []).map((f) => `${f.calendarId}|${f.uid}`));
         const outside = feed.outside ?? new Set();
 
+        /** @type {Map<string, FeedEvent>} */
         const events = new Map();
+        /** @type {Set<string>} */
         const inFeed = new Set();   // every event the calendars read have, whatever its day
         for (const event of feed.events) {
             if (!selected.has(event.calendarId) || event.status === "canceled") continue;
@@ -549,9 +741,11 @@ export default class CalendarSync {
         const lids = await this.assignLids(events, cache, where);
         const claimed = new Set(lids.values());
 
+        /** @type {Map<string, Op[]>} */
         const plan = new Map();   // date -> operations
-        const add = (date, op) => { if (!plan.has(date)) plan.set(date, []); plan.get(date).push(op); };
+        const add = (/** @type {string} */ date, /** @type {Op} */ op) => { if (!plan.has(date)) plan.set(date, []); plan.get(date).push(op); };
         // Each day's events by start and title, so a line from before IDs goes to the event it's for
+        /** @type {Map<string, { key: string, start: string, title: string }[]>} */
         const onDay = new Map();
         for (const event of events.values()) {
             await this.breathe();
@@ -603,8 +797,9 @@ export default class CalendarSync {
         // for the cache; `placed`: each event's line ID where its line is in place; `canceled`: the lines
         // this run marked [-], remembered so their [<] comes back with their event; `done`: what each
         // event's line came to (tell).
+        /** @type {Ctx} */
         const ctx = { cache, wrote: new Map(), placed: new Map(), canceled: new Set(), done: [] };
-        const pass = async (wanted) => {
+        const pass = async (/** @type {(op: Op) => boolean} */ wanted) => {
             for (const date of [...plan.keys()].sort()) {
                 const ops = plan.get(date).filter(wanted);
                 if (!ops.length) continue;
@@ -619,6 +814,7 @@ export default class CalendarSync {
         };
         await pass((op) => op.kind === "event");
         await this.tell(ctx.done, report);
+        /** @type {Set<string>} */
         const waiting = new Set();
         for (const ops of plan.values()) {
             for (const op of ops) {
@@ -633,14 +829,16 @@ export default class CalendarSync {
         // from their calendars, which keep the time they were first missed. The title, free or busy and
         // end time are what the sync wrote on the line: a line it didn't write (one you'd marked another
         // way, or one that couldn't be written) keeps what was remembered of it.
+        /** @type {Record<string, CacheLine>} */
         const lines = {};
         for (const [key, event] of events) {
             const lid = ctx.placed.get(key) ?? (where.has(lids.get(key)) ? lids.get(key) : null);
             if (!lid) continue;
             const old = cache.lines[lid]?.key === key ? cache.lines[lid] : null;
-            const now = ctx.wrote.get(key) ?? old ?? {};
+            const now = /** @type {Partial<CacheLine>} */ (ctx.wrote.get(key) ?? old ?? {});
+            /** @type {CacheLine} */
             const m = { key, uid: String(event.id ?? ""), calendarId: event.calendarId, date: ctx.placed.has(key) ? event.date : where.get(lid)[0], seen: old?.seen ?? this.now() };
-            for (const k of ["title", "free", "end", "start"]) if (now[k] !== undefined) m[k] = now[k];
+            for (const k of /** @type {("title" | "free" | "end" | "start")[]} */ (["title", "free", "end", "start"])) if (now[k] !== undefined) m[k] = now[k];
             lines[lid] = m;
         }
         for (const [lid, dates] of where) if (!claimed.has(lid) && cache.lines[lid]) lines[lid] = { ...cache.lines[lid], date: dates[0], ...(ctx.canceled.has(lid) ? { canceled: true } : {}) };
@@ -652,15 +850,22 @@ export default class CalendarSync {
     // on a line marked another way ([x], [!]) }, from the daily notes from `from` through `to` and on
     // `also`. Read from the notes themselves, which are ahead of Obsidian's index right after a write.
     // A forwarded line carries no ID.
+    /**
+     * @param {string} from
+     * @param {string} to
+     * @param {string[]} [also]
+     * @returns {Promise<{ where: Map<string, string[]> }>}
+     */
     async lineIndex(from, to, also = []) {
         const days = new Set(also.filter((d) => typeof d === "string" && d >= from));
         for (let d = from; d <= to; d = this.addDays(d, 1)) days.add(d);
+        /** @type {Map<string, string[]>} */
         const where = new Map();
         for (const date of [...days].sort()) {
             await this.breathe();
             const file = app.vault.getFileByPath(this.dailyPath(date));
             if (!file) continue;
-            const text = await (app.vault.cachedRead ?? app.vault.read).call(app.vault, file);
+            const text = await /** @type {Promise<string>} */ ((app.vault.cachedRead ?? app.vault.read).call(app.vault, file));
             for (const raw of text.split("\n")) {
                 const line = raw.replace(/\r$/, "");
                 const lid = line.includes("^") && this.topEvent(line) ? this.lidIn(line) : null;
@@ -674,6 +879,11 @@ export default class CalendarSync {
     }
 
     // YYYY-MM-DD, `n` days on
+    /**
+     * @param {string} date
+     * @param {number} n
+     * @returns {string}
+     */
     addDays(date, n) {
         const [y, m, d] = date.split("-").map(Number);
         const t = new Date(Date.UTC(y, m - 1, d + n));
@@ -684,13 +894,20 @@ export default class CalendarSync {
     // first of its IDs a line already has (it may have stepped past a task's ID in its note), else its
     // first. Two events in this run whose keys give one ID are told apart: the later key, in sorted
     // order, steps on, the same on every device.
+    /**
+     * @param {Map<string, FeedEvent>} events
+     * @param {Cache} cache
+     * @param {Map<string, string[]>} where
+     * @returns {Promise<Map<string, string>>}
+     */
     async assignLids(events, cache, where) {
         const seen = new Map(Object.entries(cache.lines).map(([lid, m]) => [m.key, lid]));
-        const out = new Map(), used = new Set();
+        const out = /** @type {Map<string, string>} */ (new Map()), used = /** @type {Set<string>} */ (new Set());
         for (const key of [...events.keys()].sort()) {
             await this.breathe();
             const known = seen.get(key);
             const first = this.lineId(key);
+            /** @type {string} */
             let lid;
             if (known && where.has(known) && !used.has(known)) lid = known;
             else if (where.has(first) && !used.has(first)) lid = first;
@@ -707,7 +924,14 @@ export default class CalendarSync {
     // What a moved event's lines on other days bring to its new line: { parts: [parseBlock's block, with
     // its date, its text (raw) and whether it will stay behind, forwarded (staying), with what's under
     // it, when it brings only your part of its line] }. `recall`: what this device remembers (recalled).
+    /**
+     * @param {string[]} dates
+     * @param {string} lid
+     * @param {Partial<Recall>} [recall]
+     * @returns {Promise<Carry>}
+     */
     async carryFrom(dates, lid, recall = {}) {
+        /** @type {CarryPart[]} */
         const parts = [];
         for (const date of dates) {
             const file = app.vault.getFileByPath(this.dailyPath(date));
@@ -725,6 +949,13 @@ export default class CalendarSync {
     }
 
     // `ctx`: the run's { cache, wrote, placed } (apply)
+    /**
+     * @param {string} date
+     * @param {Op[]} ops
+     * @param {Ctx} ctx
+     * @param {Report} report
+     * @returns {Promise<void>}
+     */
     async applyToNote(date, ops, ctx, report) {
         const path = this.dailyPath(date);
         let file = app.vault.getFileByPath(path);
@@ -760,10 +991,17 @@ export default class CalendarSync {
     }
 
     // Applies the operations to `text` in order, each seeing the one before it: { text, outcomes }
+    /**
+     * @param {string} text
+     * @param {Op[]} ops
+     * @param {Partial<Ctx>} [ctx]
+     * @returns {{ text: string, outcomes: Outcome[] }}
+     */
     runOps(text, ops, ctx = { cache: { lines: {} } }) {
         // A CRLF note is read without its CRs, and keeps them
         const cr = String(text).includes("\r\n");
         let lines = String(text).split("\n").map((l) => l.replace(/\r$/, ""));
+        /** @type {Outcome[]} */
         const outcomes = [];
         for (const op of ops) {
             const result = op.kind === "event" ? this.writeEvent(lines, op, ctx) : op.kind === "leave" ? this.leaveIn(lines, op) : op.kind === "drop" ? this.dropIn(lines, op) : this.cancelIn(lines, op);
@@ -781,6 +1019,12 @@ export default class CalendarSync {
     // Returns { lines, outcome, lid, changed, differs, wrote }: outcome is added, adopted, updated,
     // restored, merged, moved (written from its line on another day), present (as it was) or left
     // (yours); wrote is what the sync's part of the line is now ({ title, free, end }), for the cache.
+    /**
+     * @param {string[]} lines
+     * @param {Op} op
+     * @param {Partial<Ctx>} [ctx]
+     * @returns {Did & { lines: string[] }}
+     */
     writeEvent(lines, op, ctx = {}) {
         let found = this.blocksWith(lines, op.lid);
         let adopted = false;
@@ -806,15 +1050,17 @@ export default class CalendarSync {
         // A new line: the event's own (ℹ️ after the title when it's free) and a series' ⭕. A line already
         // there: your part as you wrote it, with ℹ️ set to match when the calendar has switched a timed
         // event between free and busy since the last sync that wrote the line (the latest change wins)
-        let tail = part.tail, flipped = null;
+        let tail = part.tail, flipped = /** @type {string | null} */ (null);
         if (!sources.length) tail = op.series?.links?.length ? ` ${op.series.links.join(" ")}` : "";
         else if (start !== "all day" && typeof memory?.free === "boolean" && memory.free !== free) {
             flipped = free ? "free" : "busy";
             tail = !free ? this.dropFree(tail) : this.hasFree(tail) ? tail : this.addFree(tail);
         }
         const block = this.blockFor(op.lines, lid, { title: op.title, tail, box, fresh: !sources.length }, sources);
+        /** @type {Wrote} */
         const wrote = { title: op.title, free, start, end: op.lines.length > 1 ? op.lines[1].replace(/^\s*[-*+]\s+/, "").toLowerCase() : false };
 
+        /** @type {string[]} */
         let out;
         if (!copies.length) out = this.insert(lines, block).split("\n");
         else {
@@ -828,6 +1074,7 @@ export default class CalendarSync {
         }
         if (out.join("\n") === lines.join("\n")) return { lines, outcome: "present", lid, differs: part.differs, wrote };
 
+        /** @type {string[]} */
         const changed = [];
         const was = copies[0];
         if (adopted && !was.head.start) changed.push("time added");
@@ -847,6 +1094,12 @@ export default class CalendarSync {
     // What this device remembers of a line, for reading it (parseBlock): the titles it may start with
     // (the one the sync last wrote on it, then the event's own), whether it was written with no end time
     // under it (endless), and the end time it was written with (endAt)
+    /**
+     * @param {CacheLine | null | undefined} memory
+     * @param {string} key
+     * @param {string} title
+     * @returns {Recall}
+     */
     recalled(memory, key, title) {
         const m = memory?.key === key ? memory : null;
         return { titles: [...new Set([m?.title, title].filter(Boolean))], endless: m?.end === false, endAt: typeof m?.end === "string" ? m.end : null };
@@ -857,6 +1110,11 @@ export default class CalendarSync {
     // stay with it. One that changed since the run read it (`op.expect`: you typed under it meanwhile)
     // is forwarded too, so nothing new is lost. A line marked another way stays. `outcome`: moved,
     // forwarded or gone (not there).
+    /**
+     * @param {string[]} lines
+     * @param {Op} op
+     * @returns {{ lines: string[], outcome: string }}
+     */
     leaveIn(lines, op) {
         let out = [...lines], outcome = "gone";
         for (;;) {
@@ -878,6 +1136,11 @@ export default class CalendarSync {
     // An event moved further ahead than the range: its line goes, with what's under it, and comes back
     // when its day is in range. One with time entries under it stays as it is, since they're time worked
     // there. A line marked another way stays. `outcome`: removed, or present (nothing to remove).
+    /**
+     * @param {string[]} lines
+     * @param {Op} op
+     * @returns {{ lines: string[], outcome: string }}
+     */
     dropIn(lines, op) {
         let out = [...lines], outcome = "present";
         for (const at of this.blocksWith(lines, op.lid).reverse()) {
@@ -890,6 +1153,11 @@ export default class CalendarSync {
 
     // A gone event's lines marked [-], kept as a record of what was planned, whatever is under them; a
     // line marked another way stays. `outcome`: canceled, or present (nothing to mark).
+    /**
+     * @param {string[]} lines
+     * @param {Op} op
+     * @returns {{ lines: string[], outcome: string }}
+     */
     cancelIn(lines, op) {
         const out = [...lines];
         let outcome = "present";
@@ -902,6 +1170,14 @@ export default class CalendarSync {
 
     // What one operation did, into the report; for an event, whether its line is in place (ctx.placed),
     // and its log's times
+    /**
+     * @param {string} date
+     * @param {Outcome} result
+     * @param {string[]} after
+     * @param {Ctx} ctx
+     * @param {Report} report
+     * @returns {Promise<void>}
+     */
     async record(date, result, after, ctx, report) {
         const { op, outcome } = result;
         const at = `${date} ${op.title}`;
@@ -934,7 +1210,13 @@ export default class CalendarSync {
     // What an event's line came to, into the report, once its log (if one line alone links it) has the
     // line's times. A log more than one event line links (one kept across a series' events, say)
     // keeps its own: which line's times it should have would be a guess.
+    /**
+     * @param {Done[]} done
+     * @param {Report} report
+     * @returns {Promise<void>}
+     */
     async tell(done, report) {
+        /** @type {Map<string, number>} */
         const links = new Map();
         for (const d of done) if (d.log) links.set(d.log, (links.get(d.log) ?? 0) + 1);
         for (const { date, at, op, result, log } of done) {
@@ -954,6 +1236,12 @@ export default class CalendarSync {
 
     // `want`, or the next of `key`'s IDs, when another line of the note that isn't an event line
     // already ends in it
+    /**
+     * @param {string[]} lines
+     * @param {string} key
+     * @param {string} want
+     * @returns {string}
+     */
     freeLid(lines, key, want) {
         if (!lines.some((l) => l.includes(want))) return want;
         const taken = new Set(lines.filter((l) => !this.head(l)).map((l) => this.lidOf(l)).filter(Boolean));
@@ -964,19 +1252,35 @@ export default class CalendarSync {
     // MARK: reading an event line
 
     // The sync's own boxes: [<], and [-] for an event gone from its calendar. Any other is yours.
+    /**
+     * @param {string} box
+     * @returns {boolean}
+     */
     ours(box) {
         return box === "<" || box === "-";
     }
 
     // Whether a moved event's line stays behind, forwarded: time entries are under it, or lines of
     // yours below a blank line under it, which would be left under another line
+    /**
+     * @param {string[]} lines
+     * @param {At} at
+     * @param {Block} block
+     * @returns {boolean}
+     */
     staysBehind(lines, at, block) {
         return block.entries || lines.slice(at.from + 1, at.to + 1).some((l) => CalendarSync.ENTRYISH.test(l)) || this.detached(lines, at);
     }
 
     // The blocks of the event lines whose ID is `lid`, in order: at the left edge, with the ID at the
     // end or links or words typed after it
+    /**
+     * @param {string[]} lines
+     * @param {string} lid
+     * @returns {At[]}
+     */
     blocksWith(lines, lid) {
+        /** @type {At[]} */
         const out = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -993,10 +1297,17 @@ export default class CalendarSync {
     // that day has it (`day`: [{ start, title }]). At the left edge only: a nested line is a subtask. Not
     // a line marked [-] (a gone event's line isn't another's to take), and not one with any ID: an
     // event's, a task's, or a block link of yours.
+    /**
+     * @param {string[]} lines
+     * @param {string[]} eventLines
+     * @param {{ start: string, title: string }[]} [day]
+     * @param {string | null} [title]
+     * @returns {At | null}
+     */
     adoptable(lines, eventLines, day = [], title = null) {
         const wanted = this.head(eventLines[0]);
         if (!wanted) return null;
-        let same = null, log = null;
+        let same = /** @type {number | null} */ (null), log = /** @type {number | null} */ (null);
         for (let i = 0; i < lines.length; i++) {
             const l = lines[i];
             if (!/^[-*+]\s+\[(?!-)/.test(l) || this.lidIn(l)) continue;
@@ -1019,6 +1330,11 @@ export default class CalendarSync {
     // space before it, its ID left out), notes (its note links, as the sync writes them), free (an ℹ️ in
     // your part), lid }, or null when it isn't one. `titles`: the titles the line may start with
     // (splitTitle).
+    /**
+     * @param {string} line
+     * @param {string[]} [titles]
+     * @returns {Head | null}
+     */
     parseHead(line, titles = []) {
         const lid = this.lidIn(line);
         const text = lid ? String(line).replace(new RegExp(`\\s\\^${lid}(?=\\s|$)`, "i"), "") : String(line);
@@ -1034,6 +1350,11 @@ export default class CalendarSync {
     // typed. Otherwise your part starts at your first link or mark (FIRST_MARK),
     // and the words before it are taken for the title. A title wrapped in a link to its log, from before
     // OBS-57, reads as its title, and the log link goes last in your part, as the sync writes one.
+    /**
+     * @param {string} text
+     * @param {string[]} [titles]
+     * @returns {{ title: string, tail: string }}
+     */
     splitTitle(text, titles = []) {
         let body = String(text).trimEnd();
         let log = "";
@@ -1051,15 +1372,27 @@ export default class CalendarSync {
     }
 
     // The note links and whether there's an ℹ️ in your part of a line
+    /**
+     * @param {string} tail
+     * @returns {{ notes: string[], free: boolean }}
+     */
     marksOf(tail) {
         return { notes: [...String(tail).matchAll(CalendarSync.NOTE_LINKS)].map((m) => this.noteLink(m[0])), free: this.hasFree(tail) };
     }
 
+    /**
+     * @param {string} tail
+     * @returns {boolean}
+     */
     hasFree(tail) {
         return /(?:^|\s)ℹ️?(?=\s|$)/u.test(String(tail));
     }
 
     // Your part of a line with every ℹ️ taken out
+    /**
+     * @param {string} tail
+     * @returns {string}
+     */
     dropFree(tail) {
         return String(tail).replace(/\s+ℹ️?(?=\s|$)/gu, "");
     }
@@ -1067,10 +1400,14 @@ export default class CalendarSync {
     // Your part of a line with ℹ️ added at the start of the run of links and marks that ends it, after
     // your last word: the time report reads ℹ️ only there (OBS-90), and on a line of links alone that's
     // right after the title
+    /**
+     * @param {string} tail
+     * @returns {string}
+     */
     addFree(tail) {
         const text = String(tail);
         let at = text.length;
-        for (let m; (m = text.slice(0, at).match(CalendarSync.RUN_END));) at = m.index;
+        for (let /** @type {RegExpMatchArray | null} */ m; (m = text.slice(0, at).match(CalendarSync.RUN_END));) at = m.index;
         return `${text.slice(0, at)} ${CalendarSync.FREE_MARK}${text.slice(at)}`;
     }
 
@@ -1083,13 +1420,20 @@ export default class CalendarSync {
     // is among the lines under it (you may have typed a line above it); else the first line under a timed
     // line, one tab in, holding a time alone or a time and a note. Under an all-day line, or one this
     // device wrote with no end time, nothing is the sync's.
+    /**
+     * @param {string[]} block
+     * @param {Partial<Recall>} [recall]
+     * @returns {Block}
+     */
     parseBlock(block, { titles = [], endless = false, endAt = null } = {}) {
         let head = this.parseHead(block[0], titles);
         if (!head) {
             const log = this.logLine(block[0]);
             if (log) head = { box: "<", start: null, title: log.shown, tail: log.tail, notes: [log.log], free: this.hasFree(log.tail), lid: null };
         }
+        /** @type {string[][]} */
         const groups = [];
+        /** @type {number | null} */
         let base = null;
         for (const line of block.slice(1)) {
             if (line.trim() === "") {
@@ -1103,11 +1447,12 @@ export default class CalendarSync {
                 groups.push([line]);
             } else groups[groups.length - 1].push(line);
         }
+        /** @type {EndLine | null} */
         let end = null;
         const first = groups.findIndex((g) => g[0].trim() !== "");
         const timed = !!head?.start && head.start !== "all day" && !endless;
-        const endOf = (g) => (this.indentWidth(g[0]) === 4 ? g[0].match(CalendarSync.END_LINE) : null);
-        const timeOf = (m) => m[1].replace(/^\s*[-*+]\s+/, "").toLowerCase();
+        const endOf = (/** @type {string[]} */ g) => (this.indentWidth(g[0]) === 4 ? g[0].match(CalendarSync.END_LINE) : null);
+        const timeOf = (/** @type {RegExpMatchArray} */ m) => m[1].replace(/^\s*[-*+]\s+/, "").toLowerCase();
         let at = timed && endAt ? groups.findIndex((g) => { const m = endOf(g); return m && timeOf(m) === endAt; }) : -1;
         if (at === -1 && timed && first !== -1 && endOf(groups[first])) at = first;
         if (at !== -1) {
@@ -1122,8 +1467,12 @@ export default class CalendarSync {
 
     // Your part of an event's line, from its copies in order: the first that has one. `differs` when
     // another copy's is different.
+    /**
+     * @param {Block[]} sources
+     * @returns {{ tail: string, differs: boolean }}
+     */
     partOf(sources) {
-        const norm = (t) => String(t ?? "").replace(/\s+/g, " ").trim();
+        const norm = (/** @type {unknown} */ t) => String(t ?? "").replace(/\s+/g, " ").trim();
         const tail = sources.map((s) => s.head.tail ?? "").find((t) => norm(t)) ?? "";
         return { tail, differs: sources.some((s) => norm(s.head.tail) && norm(s.head.tail) !== norm(tail)) };
     }
@@ -1135,15 +1484,23 @@ export default class CalendarSync {
     // one under an earlier copy is there once (two the same under one copy both stay). With no end time
     // now (all day, or ending on a later day), an end line with a note stays as it was, and a bare one
     // goes.
+    /**
+     * @param {string[]} eventLines
+     * @param {string} lid
+     * @param {{ title: string, tail: string, box: string, fresh: boolean }} part
+     * @param {Block[]} sources
+     * @returns {string[]}
+     */
     blockFor(eventLines, lid, part, sources) {
         const first = eventLines[0];
         const tab = first.indexOf("\t");
         const tail = part.tail ?? "";
-        const box = (l) => l.replace(/^(\s*[-*+]\s+)\[<\]/, `$1[${part.box ?? "<"}]`);
+        const box = (/** @type {string} */ l) => l.replace(/^(\s*[-*+]\s+)\[<\]/, `$1[${part.box ?? "<"}]`);
         const line = part.fresh ? `${first}${tail}` : box(`${first.slice(0, tab)}\t${part.title}${tail}`);
-        const groups = [], seen = new Set(), notes = [], noted = [], under = [];
-        const said = (n) => n.replace(/^\s*:?\s*/, "");
+        const groups = /** @type {string[][]} */ ([]), seen = /** @type {Set<string>} */ (new Set()), notes = /** @type {string[]} */ ([]), noted = /** @type {string[]} */ ([]), under = /** @type {string[]} */ ([]);
+        const said = (/** @type {string} */ n) => n.replace(/^\s*:?\s*/, "");
         for (const s of sources) {
+            /** @type {string[][]} */
             const mine = [];
             for (const g of s.groups) if (!seen.has(g.join("\n"))) mine.push(g);
             groups.push(...mine);
@@ -1159,12 +1516,14 @@ export default class CalendarSync {
     }
 
     // Now, in ms (a test sets it)
+    /** @returns {number} */
     now() {
         return Date.now();
     }
 
     // Hands the app a turn once the sync has held it for SLICE_MS, so a long run never holds it up
     // for more than that at a time
+    /** @returns {Promise<void>} */
     async breathe() {
         if (performance.now() - (this.sliceAt ?? 0) < CalendarSync.SLICE_MS) return;
         await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -1200,6 +1559,10 @@ export default class CalendarSync {
 
     // Where an event line sorts: all-day events first by title, then timed ones by time, then
     // event lines with no time (a log's line, see `timeless`), which nothing can order
+    /**
+     * @param {string} line
+     * @returns {[number, number, string] | null}
+     */
     rank(line) {
         // Most lines of a long note are neither: tell them cheaply
         if (!line.includes("\t")) return line.includes("[<]") && this.timeless(line) ? [2, 0, ""] : null;
@@ -1211,6 +1574,11 @@ export default class CalendarSync {
         return [1, hour * 60 + Number(match[3]), ""];
     }
 
+    /**
+     * @param {(number | string)[]} a
+     * @param {(number | string)[]} b
+     * @returns {boolean}
+     */
     sortsBefore(a, b) {
         for (let i = 0; i < a.length; i++) {
             if (a[i] < b[i]) return true;
@@ -1261,6 +1629,12 @@ export default class CalendarSync {
     // day's other events (the one place a daily note carries a date link at the front of a line). It
     // gives up its ID: the event's line is on the other day now, and a [>] line with an ID would read
     // as a sent task's.
+    /**
+     * @param {string[]} lines
+     * @param {At} block
+     * @param {string} date
+     * @returns {string}
+     */
     forward(lines, block, date) {
         const moved = lines.slice(block.from, block.to + 1);
         const lid = this.lidIn(moved[0]);
@@ -1283,6 +1657,11 @@ export default class CalendarSync {
 
     // The block a line starts: it and the indented lines under it, and those below a blank line that
     // are still indented (the time report reads them as the line's too), so they move with it
+    /**
+     * @param {string[]} lines
+     * @param {number} from
+     * @returns {At}
+     */
     blockAt(lines, from) {
         let to = from;
         for (;;) {
@@ -1295,6 +1674,11 @@ export default class CalendarSync {
 
     // Where an insert at `at` goes so as not to come between a block and its lines below a blank line:
     // past blank lines followed by indented ones, and those lines
+    /**
+     * @param {string[]} lines
+     * @param {number} at
+     * @returns {number}
+     */
     pastDetached(lines, at) {
         let k = at;
         while (k < lines.length && lines[k].trim() === "") k++;
@@ -1305,12 +1689,21 @@ export default class CalendarSync {
 
     // An event line where the sync writes them: at the left edge. A line in that shape nested under
     // another is a subtask, never an event's (nesting decides what a line is)
+    /**
+     * @param {string} line
+     * @returns {boolean}
+     */
     topEvent(line) {
         return /^[-*+]\s/.test(line) && !!this.head(line);
     }
 
     // Whether indented lines follow a block after a blank line: the block would end at the blank,
     // and whatever is below it would stay behind under the line above
+    /**
+     * @param {string[]} lines
+     * @param {At} block
+     * @returns {boolean}
+     */
     detached(lines, block) {
         let next = block.to + 1;
         while (next < lines.length && lines[next].trim() === "") next++;
@@ -1320,6 +1713,10 @@ export default class CalendarSync {
     // The start and displayed title of an event line, or null if it isn't one. Any checkbox
     // marker counts: marking a line [!] or [x] annotates it, it doesn't delete it. ⭕ links, the
     // free mark and the log link after the title aren't part of it.
+    /**
+     * @param {string} line
+     * @returns {{ start: string, title: string } | null}
+     */
     head(line) {
         const match = this.bare(line).match(/^\s*[-*+]\s+\[.\]\s+((?:all day|\d{1,2}:\d{2}\s?[ap]m))\t(.*)$/i);
         if (!match) return null;
@@ -1328,6 +1725,10 @@ export default class CalendarSync {
 
     // An event line with no time: `- [<] Title [[log|⋯]]`, which a new log writes for a
     // log whose event the calendar doesn't have (OBS-10). Sorts after the timed events.
+    /**
+     * @param {string} line
+     * @returns {boolean}
+     */
     timeless(line) {
         return /^\s*[-*+]\s+\[<\]\s+(?!(?:all day|\d{1,2}:\d{2}\s?[ap]m)\t)\S/i.test(line);
     }
@@ -1335,6 +1736,10 @@ export default class CalendarSync {
     // A timeless line that links a log, at the end or (from before OBS-57) around its title, taken
     // apart: { log, shown, projects, free, nonbillable, tail (yours: everything after the title, the log
     // link last) }. Null for any other line.
+    /**
+     * @param {string} line
+     * @returns {{ log: string, shown: string, projects: string[], free: boolean, nonbillable: boolean, tail: string } | null}
+     */
     logLine(line) {
         if (!this.timeless(line)) return null;
         const text = this.bare(line).replace(/^\s*[-*+]\s+\[<\]\s+/, "").trimEnd();
@@ -1357,8 +1762,9 @@ export default class CalendarSync {
      */
     splitTail(text, note = false) {
         let rest = this.bare(text).trimEnd();
+        /** @type {string[]} */
         const projects = [];
-        let free = false, nonbillable = false, log = null;
+        let free = false, nonbillable = false, log = /** @type {string | null} */ (null);
         for (;;) {
             const link = rest.match(CalendarSync.PROJECT_LINK);
             if (link) { projects.unshift(link[0].trim()); rest = rest.slice(0, link.index); continue; }
@@ -1375,12 +1781,20 @@ export default class CalendarSync {
 
     // An event's log link as the sync writes it, `[[target|⋯]]`, from either form (the note link
     // at the end, or a title wrapped in the link), whatever its alias; null for no link
+    /**
+     * @param {string | null} link
+     * @returns {string | null}
+     */
     noteLink(link) {
         const target = link?.match(/^\[\[([^[\]|]+)/)?.[1];
         return target ? `[[${target}|${CalendarSync.NOTE_MARK}]]` : null;
     }
 
     // Tabs count as four spaces
+    /**
+     * @param {string} line
+     * @returns {number}
+     */
     indentWidth(line) {
         let width = 0;
         for (const ch of line.match(/^\s*/)[0]) width += ch === "\t" ? 4 : 1;
@@ -1412,6 +1826,11 @@ export default class CalendarSync {
     // gets no end line, unless it only runs past midnight (pm to am, under a day), which TimeReport
     // reads as one span: otherwise its end's clock time would read as a span on the first day
     // (OBS-24), so it's listed as an event with no end time instead.
+    /**
+     * @this {Kept}
+     * @param {FeedEvent} event
+     * @returns {string[]}
+     */
     lines(event) {
         // Worked out once a run for each event: moment's formatting is the slow part
         const memo = (this.linesMemo ??= new WeakMap());
@@ -1421,6 +1840,10 @@ export default class CalendarSync {
         return [...out];
     }
 
+    /**
+     * @param {FeedEvent} event
+     * @returns {string[]}
+     */
     renderLines(event) {
         const title = this.title(event);
         if (event.allDay) return [`- [<] All day\t${title}`];
@@ -1431,10 +1854,19 @@ export default class CalendarSync {
         return event.endsSameDay === false && !overnight ? [head] : [head, `\t- ${end}`];
     }
 
+    /**
+     * @param {string} iso
+     * @returns {string}
+     */
     time(iso) {
-        return moment(iso).format("h:mma");
+        return /** @type {MomentFn} */ (moment)(iso).format("h:mma");
     }
 
+    /**
+     * @param {unknown[] | null} a
+     * @param {unknown[] | null} b
+     * @returns {boolean}
+     */
     same(a, b) {
         return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((line, i) => line === b[i]);
     }
@@ -1456,21 +1888,28 @@ export default class CalendarSync {
     // another day) leaves `endTime` alone. `lines` are the sync's own for the event. Only a log
     // is changed (see isLog): a ⋯ on an event line can point at any note. Returns whether the
     // log changed; checking the cached frontmatter first keeps an unchanged log unread.
+    /**
+     * @param {string} log
+     * @param {string[]} lines
+     * @param {string} date
+     * @returns {Promise<boolean>}
+     */
     async fillLog(log, lines, date) {
         const target = log.match(/^\[\[([^[\]|#]+)/)?.[1]?.trim();
         const start = this.head(lines[0])?.start;
         if (!target || !start || start === "all day") return false;
         const file = app.metadataCache?.getFirstLinkpathDest?.(target, this.dailyPath(date));
         if (!file || !app.fileManager?.processFrontMatter) return false;
+        /** @type {CachedMetadata} */
         const cache = app.metadataCache.getFileCache?.(file) ?? {};
         if (!this.isLog(file, cache)) return false;
-        const clean = (t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
+        const clean = (/** @type {unknown} */ t) => String(t ?? "").replace(/\s/g, "").toLowerCase();
         const time = clean(start);
         const end = (lines[1] ?? "").match(/^\s+[-*+]\s+(\d{1,2}:\d{2}\s?[ap]m)\s*$/i)?.[1];
         const endTime = end === undefined ? undefined : clean(end);
         const cached = cache.frontmatter ?? {};
         if (clean(cached.time) === time && (endTime === undefined || clean(cached.endTime) === endTime)) return false;
-        await app.fileManager.processFrontMatter(file, (front) => {
+        await app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ front) => {
             front.time = time;
             if (endTime !== undefined) front.endTime = endTime;
         });
@@ -1479,9 +1918,15 @@ export default class CalendarSync {
 
     // A event log, as AddTaskNote.isLog and MoveToProject know one: filed in a `›logs` folder
     // (AddTaskNote.isLogsFolderName), or tagged #log (in its frontmatter or its text) wherever it waits
+    /**
+     * @param {TFile} file
+     * @param {CachedMetadata} cache
+     * @returns {boolean}
+     */
     isLog(file, cache) {
         const folder = (file.path ?? "").split("/").slice(-2, -1)[0];
         if (folder && plainday?.AddTaskNote?.isLogsFolderName?.(folder) === true) return true;
+        /** @type {unknown} */
         const raw = cache.frontmatter?.tags ?? cache.frontmatter?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .concat((cache.tags ?? []).map((t) => t.tag))
@@ -1493,35 +1938,53 @@ export default class CalendarSync {
     // A day's note, named and placed as Plainday names daily notes (Schedule.dailyNotePath: the Daily
     // notes plugin's folder and format, or Notebook Navigator's, OBS-283), so a vault whose daily notes
     // aren't named YYYY-MM-DD gets its events in its own notes (OBS-124)
+    /**
+     * @param {string} date
+     * @returns {string}
+     */
     dailyPath(date) {
-        return plainday.Schedule.dailyNotePath(moment(date, "YYYY-MM-DD", true));
+        return plainday.Schedule.dailyNotePath(/** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true));
     }
 
     // A day's note for an event's line, made as every periodic note is made (PeriodicNotes.ensure): its alias,
     // then its template
+    /**
+     * @param {string} date
+     * @returns {Promise<TFile>}
+     */
     async createDaily(date) {
         return plainday.PeriodicNotes.ensure("day", date);
     }
 
     // The link a forwarded line carries to the day its event moved to: the note's name (its path when
     // the name alone isn't enough), labelled M/D
+    /**
+     * @param {string} date
+     * @returns {string}
+     */
     dayLink(date) {
         const path = this.dailyPath(date);
         const name = path.split("/").pop().replace(/\.md$/, "");
         const target = app.metadataCache?.getFirstLinkpathDest?.(name, "")?.path;
         const text = !target || target === path ? name : path.replace(/\.md$/, "");
-        return `[[${text}|${moment(date, "YYYY-MM-DD", true).format("M/D")}]]`;
+        return `[[${text}|${/** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true).format("M/D")}]]`;
     }
 
+    /**
+     * @param {TFile} file
+     * @param {string} text
+     * @returns {Fold[]}
+     */
     currentFolds(file, text) {
         const saved = app.foldManager.load(file);
         if (saved && saved.lines === text.split("\n").length) return saved.folds;
-        const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file === file);
+        const view = app.workspace.getLeavesOfType("markdown").map((l) => /** @type {FoldView} */ (l.view)).find((v) => v?.file === file);
         return view?.currentMode.getFoldInfo?.()?.folds ?? [];
     }
 
     // MARK: the report
 
+    /** @returns {Report} */
     newReport() {
         return {
             added: [], adopted: [], updated: [], restored: [], moved: [], forwarded: [], canceled: [], removed: [], merged: [], skipped: [],
@@ -1537,13 +2000,18 @@ export default class CalendarSync {
     // the device it's about, since a link is on one device and each device reads for itself: a run
     // writes this device's lines and keeps the other devices' as they are. The log's own rule toasts
     // only what's new, so a calendar that keeps failing says so once. Never a link: a calendar is named.
+    /**
+     * @param {Report} report
+     * @returns {Promise<void>}
+     */
     async logProblems(report) {
         const log = plainday.ErrorLog;
         if (!log) return;
         try {
             const on = ` (on ${this.deviceName()})`;
+            /** @type {ErrorItem[]} */
             const items = [];
-            const mine = (kind, link, name) => items.push({ kind, link: `${link}${on}`, name });
+            const mine = (/** @type {string} */ kind, /** @type {string} */ link, /** @type {string} */ name) => items.push({ kind, link: `${link}${on}`, name });
             for (const c of report.notSynced) mine(c.problem === "dead" ? "Link stopped working" : "Calendar not synced", c.name, c.name);
             for (const e of report.failedEvents) {
                 const name = `${e.title} (${e.calendar})`;
@@ -1557,7 +2025,8 @@ export default class CalendarSync {
             }
             // The other devices' lines, as the log has them
             const file = app.vault.getFileByPath(log.path());
-            const had = file ? log.sections(await app.vault.read(file)).get("Calendar sync")?.lines ?? new Map() : new Map();
+            /** @type {Map<string, number>} */
+            const had = file ?log.sections(await app.vault.read(file)).get("Calendar sync")?.lines ?? new Map() : new Map();
             for (const [key, count] of had) {
                 const cut = key.indexOf(" · ");
                 const kind = key.slice(0, cut), link = key.slice(cut + 3);
@@ -1573,6 +2042,7 @@ export default class CalendarSync {
     }
 
     // What this device is called in the error log, until OBS-276 lets you name it
+    /** @returns {string} */
     deviceName() {
         if (Platform?.isIosApp) return Platform.isTablet ? "iPad" : "iPhone";
         if (Platform?.isAndroidApp) return Platform.isTablet ? "Android tablet" : "Android phone";
@@ -1582,6 +2052,10 @@ export default class CalendarSync {
         return "this device";
     }
 
+    /**
+     * @param {Report} report
+     * @returns {string}
+     */
     summary(report) {
         const counts = [
             report.added.length && `${report.added.length} added`,

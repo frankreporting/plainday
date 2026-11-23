@@ -44,6 +44,38 @@
 //   read at all is "unreadable", so nothing in it looks canceled.
 import ICAL from "ical.js";
 
+/** @import { FeedEvent, FeedProblem, FeedRead } from "../shared/calendarFeed.js" */
+/**
+ * What a read is given (read): the calendar as its events carry it, the instants (or ms) an event's
+ * start must fall between, and the address or addresses whose declined invitations are left out
+ * @typedef {{
+ *   calendar?: { id?: string | null, name?: string | null, account?: string | null },
+ *   window: { start: number | Date, end: number | Date },
+ *   owner?: string | string[] | null,
+ * }} ReadOptions
+ *
+ * The window as instants (read)
+ * @typedef {{ start: Date, end: Date }} Range
+ *
+ * What a read counted (read): the events in the feed's text and those dropped as old (skipped), the
+ * series, the invitations left out as declined, the events left out and why, and how long it took
+ * @typedef {{
+ *   blocks: number, skipped: number, series: number, declined: number, failed: number,
+ *   unknownZones: number, events?: number, readMs?: number,
+ * }} ReadStats
+ *
+ * One UID's events: its series (master, or none in the feed), its overrides, and its title (read)
+ * @typedef {{ master: ICAL.Component | null, exceptions: ICAL.Component[], title: string }} Series
+ *
+ * Hands one occurrence to the read (expand): the event it comes from, its start and end, and, for an
+ * occurrence of a series, its original start
+ * @typedef {(item: ICAL.Component, startTime: ICAL.Time, endTime: ICAL.Time | null, recurrenceId: ICAL.Time | null) => void} Emit
+ *
+ * ical.js's reader of a calendar's text, which its types leave returning anything: a component (its
+ * name first) or a list of them, as nested lists
+ * @typedef {(input: string) => unknown[]} Parse
+ */
+
 export class CalendarReader {
     // Occurrences stepped through in one series before giving up on it
     static MAX_STEPS = 100000;
@@ -51,7 +83,8 @@ export class CalendarReader {
     // Obsidian's main thread, and a series that repeats every minute would hold it up copying them
     static MAX_IN_WINDOW = 2000;
     static DAY_MS = 24 * 3600 * 1000;
-    static STATUS = { CONFIRMED: "confirmed", TENTATIVE: "tentative", CANCELLED: "canceled", CANCELED: "canceled" };
+    /** @type {Record<string, string>} */
+    static STATUS ={ CONFIRMED: "confirmed", TENTATIVE: "tentative", CANCELLED: "canceled", CANCELED: "canceled" };
     // A property's date in an event's text: the date's digits, whatever zone they're written in.
     // The value is what follows the last colon on the line, so a quoted zone name with a colon in
     // it (`TZID="(UTC+01:00) Amsterdam"`) doesn't confuse it. A line folded inside the property
@@ -64,6 +97,7 @@ export class CalendarReader {
     static IANA = /^(?:[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+|UTC|GMT)$/;
     // Windows zone names, as Outlook writes them, and the IANA name of each: Unicode CLDR 46's
     // windowsZones.xml, its "001" (whole zone) rows
+    /** @type {Record<string, string>} */
     static WINDOWS = {
         "Dateline Standard Time": "Etc/GMT+12", "UTC-11": "Etc/GMT+11",
         "Aleutian Standard Time": "America/Adak", "Hawaiian Standard Time": "Pacific/Honolulu",
@@ -160,6 +194,7 @@ export class CalendarReader {
 
     constructor() {
         // Zones by the name a feed gives them: the device's zone for that name, or null
+        /** @type {Map<string, ICAL.Timezone | null>} */
         this.deviceZones = new Map();
     }
 
@@ -167,6 +202,11 @@ export class CalendarReader {
     // `calendar` is the calendar's { id, name, account } in Plainday's settings, `window` the
     // instants (or ms) an event's start must fall between, and `owner` the address, or addresses, whose
     // declined invitations are left out, when one is known.
+    /**
+     * @param {unknown} text
+     * @param {ReadOptions} options
+     * @returns {FeedRead | FeedProblem}
+     */
     read(text, { calendar = {}, window, owner = null }) {
         const started = performance.now();
         try {
@@ -176,8 +216,8 @@ export class CalendarReader {
             const split = this.split(text.trimStart(), cutoff);
             if (!split) return { problem: "unreadable" };
             const { head, blocks, skipped } = split;
-            const parsed = ICAL.parse(head);
-            const roots = (typeof parsed[0] === "string" ? [parsed] : parsed).map((j) => new ICAL.Component(j));
+            const parsed = /** @type {Parse} */ (ICAL.parse)(head);
+            const roots = /** @type {unknown[][]} */ (typeof parsed[0] === "string" ? [parsed] : parsed).map((j) => new ICAL.Component(j));
             // Every event was split out of the text: one left in the rest is one the split didn't
             // recognise, and reading without it would make it look canceled
             if (roots.some((r) => r.getAllSubcomponents("vevent").length)) return { problem: "unreadable" };
@@ -188,16 +228,20 @@ export class CalendarReader {
             const name = roots.map((r) => String(r.getFirstPropertyValue("x-wr-calname") ?? "").trim()).find(Boolean) ?? null;
             const known = this.zones(root);
 
+            /** @type {ReadStats} */
             const stats = { blocks: blocks.length + skipped, skipped, series: 0, declined: 0, failed: 0, unknownZones: 0 };
             // The events left out, by UID, with the title to name each by
+            /** @type {Map<string, string | null>} */
             const failed = new Map();
-            const fail = (uid, title) => { if (!failed.get(uid)) failed.set(uid, title || null); };
+            const fail = (/** @type {string} */ uid, /** @type {string | null} */ title) => { if (!failed.get(uid)) failed.set(uid, title || null); };
+            /** @type {Map<string, Series>} */
             const series = new Map();
             for (const block of blocks) {
+                /** @type {ICAL.Component | null} */
                 let ve = null;
                 try {
                     // The calendar as its parent, so its times find their zones through it
-                    ve = new ICAL.Component(ICAL.parse(block), root);
+                    ve = new ICAL.Component(/** @type {Parse} */ (ICAL.parse)(block), root);
                 } catch {
                     ve = null;
                 }
@@ -227,13 +271,18 @@ export class CalendarReader {
             stats.series = series.size;
 
             const owners = this.owners(owner);
+            /** @type {FeedEvent[]} */
             const events = [];
             // The keys of events the feed has outside the window
+            /** @type {Set<string>} */
             const outside = new Set();
             for (const [uid, { master, exceptions, title }] of series) {
                 if (failed.has(uid)) continue;
+                /** @type {FeedEvent[]} */
                 const found = [];
+                /** @type {Set<string>} */
                 const keys = new Set();
+                /** @type {Emit} */
                 const emit = (item, startTime, endTime, recurrenceId) => {
                     const event = this.event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats, outside });
                     if (!event) return;
@@ -244,6 +293,7 @@ export class CalendarReader {
                     keys.add(event.key);
                     found.push(event);
                 };
+                /** @type {boolean} */
                 let whole;
                 try {
                     whole = this.expand(master, exceptions, range, emit);
@@ -276,10 +326,17 @@ export class CalendarReader {
     // the next that is END:VEVENT, in any case: a line inside a property starts with a space, so
     // it can't be either. An old one-off event (see old()) is dropped here. Null when an event
     // runs into the next one without closing.
+    /**
+     * @param {string} text
+     * @param {number} cutoff
+     * @returns {{ head: string, blocks: string[], skipped: number } | null}
+     */
     split(text, cutoff) {
         const begin = /^BEGIN:VEVENT[ \t]*\r?$/gim;
         const end = /^END:VEVENT[ \t]*\r?$/gim;
+        /** @type {string[]} */
         const head = [];
+        /** @type {string[]} */
         const blocks = [];
         let skipped = 0;
         let pos = 0;
@@ -315,6 +372,11 @@ export class CalendarReader {
     // an occurrence of a series can be moved by another (a this-and-following change), so
     // whether one matters depends on more than its own text. An event whose dates can't be read
     // is kept.
+    /**
+     * @param {string} block
+     * @param {number} cutoff
+     * @returns {boolean}
+     */
     old(block, cutoff) {
         if (CalendarReader.REPEATS.test(block)) return false;
         const m = CalendarReader.DTEND.exec(block) ?? CalendarReader.DTSTART.exec(block);
@@ -324,8 +386,12 @@ export class CalendarReader {
     // The UID and title of an event that doesn't parse, read as ical.js reads those of events that
     // do (parameters left out, escapes undone), from the event's own lines: not those of an alarm
     // or anything else inside it, which can have a UID of its own
+    /**
+     * @param {string} block
+     * @returns {{ uid: string | null, title: string | null }}
+     */
     unparsed(block) {
-        let depth = 0, uid = null, title = null;
+        let depth = 0, uid = /** @type {string | null} */ (null), title = /** @type {string | null} */ (null);
         for (const line of block.replace(/\r?\n[ \t]/g, "").split(/\r?\n/)) {
             if (/^BEGIN:/i.test(line)) { depth++; continue; }
             if (/^END:/i.test(line)) { depth--; continue; }
@@ -344,17 +410,26 @@ export class CalendarReader {
     // Readies the zones for the read: a time in a zone the device knows by its full name is read
     // from the device's own zone data, and only one it doesn't from the feed's definition.
     // Returns whether a zone name is known, one way or the other.
+    /**
+     * @param {ICAL.Component} root
+     * @returns {(tzid: string) => boolean}
+     */
     zones(root) {
         const defined = new Set(root.getAllSubcomponents("vtimezone").map((vtz) => String(vtz.getFirstPropertyValue("tzid") ?? "")));
-        const own = root.getTimeZoneByID.bind(root);
+        const own = /** @type {(root: ICAL.Component) => (tzid: string) => ICAL.Timezone} */ (root.getTimeZoneByID.bind)(root);
         root.getTimeZoneByID = (tzid) => this.deviceZone(tzid) ?? own(tzid);
         return (tzid) => !!this.deviceZone(tzid) || defined.has(tzid) || ICAL.TimezoneService.has(tzid);
     }
 
     // Whether an event names a zone that isn't known, on any of its times
+    /**
+     * @param {ICAL.Component} ve
+     * @param {(tzid: string) => boolean} known
+     * @returns {boolean}
+     */
     unknownZone(ve, known) {
         return ve.getAllProperties().some((p) => {
-            const tzid = p.getParameter("tzid");
+            const tzid = /** @type {(name: string) => string} */ (p.getParameter)("tzid");
             return !!tzid && !known(tzid);
         });
     }
@@ -362,11 +437,16 @@ export class CalendarReader {
     // The device's zone for a name a feed gives, or null: a full IANA name the device knows, or a
     // Windows name in WINDOWS. It answers ical.js's one question of a zone, its offset at a local
     // time there, from the device's own zone data.
+    /**
+     * @param {string} tzid
+     * @returns {ICAL.Timezone | null}
+     */
     deviceZone(tzid) {
         if (this.deviceZones.has(tzid)) return this.deviceZones.get(tzid);
         const name = String(tzid ?? "").trim();
         const iana = Object.prototype.hasOwnProperty.call(CalendarReader.WINDOWS, name) ? CalendarReader.WINDOWS[name]
             : CalendarReader.IANA.test(name) ? name : null;
+        /** @type {ICAL.Timezone | null} */
         let zone = null;
         if (iana) {
             try {
@@ -375,15 +455,17 @@ export class CalendarReader {
                     hour: "numeric", minute: "numeric", second: "numeric",
                 });
                 // The offset at an instant: the local time there, less the instant
-                const at = (ms) => {
+                const at = (/** @type {number} */ ms) => {
+                    /** @type {Record<string, number>} */
                     const parts = {};
                     for (const { type, value } of format.formatToParts(new Date(ms))) parts[type] = Number(value);
                     return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - (ms - (((ms % 1000) + 1000) % 1000));
                 };
                 // Each local day's offsets a day either side of it: the same on a day with no change
                 // near it, which is nearly every day, so its times need nothing more
+                /** @type {Map<number, number[]>} */
                 const days = new Map();
-                const around = (day) => {
+                const around = (/** @type {number} */ day) => {
                     let pair = days.get(day);
                     if (!pair) {
                         if (days.size > 5000) days.clear();
@@ -416,6 +498,13 @@ export class CalendarReader {
     // occurrence that starts in the window to `emit`. ical.js works the occurrences out, as it is.
     // False when the series holds something calendar apps don't write (see written()), which is
     // skipped rather than worked out by hand; it throws when `emit` does.
+    /**
+     * @param {ICAL.Component | null} master
+     * @param {ICAL.Component[]} exceptions
+     * @param {Range} range
+     * @param {Emit} emit
+     * @returns {boolean}
+     */
     expand(master, exceptions, range, emit) {
         if (!master) {
             // Overrides with no series in the feed: invitations to single occurrences
@@ -442,10 +531,12 @@ export class CalendarReader {
         const to = range.end.getTime() + CalendarReader.DAY_MS;
         // The instants EXDATE takes out: ical.js takes out only one copy of an occurrence an RDATE
         // repeats
-        const out = new Set(master.getAllProperties("exdate").flatMap((p) => p.getValues()).map((t) => t.toJSDate().getTime()));
+        const out = new Set(master.getAllProperties("exdate").flatMap((p) => /** @type {() => ICAL.Time[]} */ (p.getValues)()).map((t) => t.toJSDate().getTime()));
+        /** @type {Set<ICAL.Event>} */
         const matched = new Set();
         // ical.js gives an occurrence twice when an RDATE repeats one the rule makes; RFC 5545
         // counts it once
+        /** @type {Set<number>} */
         const seen = new Set();
         const it = ev.iterator(this.startFor(ev, from));
         let steps = 0;
@@ -477,13 +568,18 @@ export class CalendarReader {
     // them in UTC, or as dates for an all-day series, iCloud's midnights read by asDates()), and
     // split a series in two for a "this and all following" change rather than writing one
     // (RANGE=THISANDFUTURE).
+    /**
+     * @param {ICAL.Event} ev
+     * @param {Map<number, ICAL.Event>} byInstant
+     * @returns {boolean}
+     */
     written(ev, byInstant) {
         const zone = this.zoneOf(ev.startDate);
         for (const e of byInstant.values()) {
             if (e.modifiesFuture() || this.zoneOf(e.recurrenceId) !== zone) return false;
         }
         for (const p of ev.component.getAllProperties("rdate")) {
-            if (p.type === "period" || p.getValues().some((t) => this.zoneOf(t) !== zone)) return false;
+            if (p.type === "period" || /** @type {() => ICAL.Time[]} */ (p.getValues)().some((t) => this.zoneOf(t) !== zone)) return false;
         }
         return true;
     }
@@ -498,39 +594,56 @@ export class CalendarReader {
     // day: ical.js compares a floating one, or midnight in UTC, with the dates as written, the
     // same on every device. Any other time in UTC was converted from a zone the feed doesn't
     // name, so which day is the last can't be told: false.
+    /**
+     * @param {ICAL.Component} master
+     * @param {ICAL.Component[]} exceptions
+     * @returns {boolean}
+     */
     asDates(master, exceptions) {
         for (const ex of exceptions) {
             const p = ex.getFirstProperty("recurrence-id");
-            const t = p?.getFirstValue();
+            const t = /** @type {ICAL.Time | null} */ (p?.getFirstValue());
             if (!t || !this.midnight(t)) continue;
             p.removeParameter("tzid");
             p.setValue(this.dayOf(t));
         }
         for (const p of master.getAllProperties("exdate")) {
-            const values = p.getValues();
+            const values = /** @type {() => ICAL.Time[]} */ (p.getValues)();
             if (values.every((t) => t.isDate)) continue;
             if (!values.every((t) => this.midnight(t))) return false;
             p.removeParameter("tzid");
             p.setValues(values.map((t) => this.dayOf(t)));
         }
         for (const p of master.getAllProperties("rrule")) {
-            const until = p.getFirstValue()?.until;
+            const until = /** @type {ICAL.Recur | null} */ (p.getFirstValue())?.until;
             if (until && this.zoneOf(until) === "utc" && !this.midnight(until)) return false;
         }
         return true;
     }
 
     // Whether a time is midnight, written as a time, not a date
+    /**
+     * @param {ICAL.Time} t
+     * @returns {boolean}
+     */
     midnight(t) {
         return !t.isDate && !t.hour && !t.minute && !t.second;
     }
 
     // A time's date as written, as ical.js reads a date
+    /**
+     * @param {ICAL.Time} t
+     * @returns {ICAL.Time}
+     */
     dayOf(t) {
         return new ICAL.Time({ year: t.year, month: t.month, day: t.day, isDate: true });
     }
 
     // How a time is written: as a date, in UTC, floating, or in a named zone
+    /**
+     * @param {ICAL.Time | null | undefined} time
+     * @returns {string | null}
+     */
     zoneOf(time) {
         if (!time) return null;
         if (time.isDate) return "date";
@@ -541,7 +654,12 @@ export class CalendarReader {
 
     // A series' overrides by the instant of the occurrence each changes. Two for one occurrence
     // can't both be right, so the series can't be read.
+    /**
+     * @param {ICAL.Component[]} exceptions
+     * @returns {Map<number, ICAL.Event>}
+     */
     overrides(exceptions) {
+        /** @type {Map<number, ICAL.Event>} */
         const byInstant = new Map();
         for (const ex of exceptions) {
             const e = new ICAL.Event(ex);
@@ -559,13 +677,18 @@ export class CalendarReader {
     // the last such start at least one period before `from`. An occurrence there that the rule
     // wouldn't have made falls before `from`, where nothing is read. Anything else starts at the
     // series' start, as does one with an RDATE.
+    /**
+     * @param {ICAL.Event} ev
+     * @param {number} from
+     * @returns {ICAL.Time}
+     */
     startFor(ev, from) {
         const start = ev.startDate;
         const rules = ev.component.getAllProperties("rrule");
         // ical.js starts from an RDATE before the given start, and then steps its EXDATEs out of
         // line, so a series with any RDATE starts at its start
         if (rules.length !== 1 || ev.component.hasProperty("rdate")) return start;
-        const rule = rules[0].getFirstValue();
+        const rule = /** @type {ICAL.Recur} */ (rules[0].getFirstValue());
         const days = rule.freq === "DAILY" ? 1 : rule.freq === "WEEKLY" ? 7 : 0;
         if (!days || rule.count) return start;
         const period = days * (rule.interval || 1);
@@ -579,6 +702,14 @@ export class CalendarReader {
 
     // One occurrence as the events file holds it, or null when it doesn't start in the window or
     // the calendar's own address declined it. `recurrenceId` is its original start, for an occurrence of a series.
+    /**
+     * @param {ICAL.Component} item
+     * @param {ICAL.Time} startTime
+     * @param {ICAL.Time | null} endTime
+     * @param {ICAL.Time | null} recurrenceId
+     * @param {{ calendar: ReadOptions["calendar"], range: Range, owners: Set<string> | null, stats: ReadStats, outside?: Set<string> }} context
+     * @returns {FeedEvent | null}
+     */
     event(item, startTime, endTime, recurrenceId, { calendar, range, owners, stats, outside }) {
         const start = startTime.toJSDate();
         if (start < range.start || start >= range.end) {
@@ -624,9 +755,13 @@ export class CalendarReader {
     }
 
     // An event's LAST-MODIFIED as ms since 1970, or null when it has none or it doesn't read
+    /**
+     * @param {ICAL.Component} item
+     * @returns {number | null}
+     */
     modified(item) {
         try {
-            const value = item.getFirstPropertyValue("last-modified");
+            const value = /** @type {ICAL.Time | null} */ (item.getFirstPropertyValue("last-modified"));
             const ms = value && typeof value.toJSDate === "function" ? value.toJSDate().getTime() : NaN;
             return Number.isFinite(ms) ? ms : null;
         } catch {
@@ -635,45 +770,78 @@ export class CalendarReader {
     }
 
     // An attendee's address: its EMAIL parameter (iCloud's), or its value without `mailto:`
+    /**
+     * @param {ICAL.Property} property
+     * @returns {string}
+     */
     attendee(property) {
-        return this.address(property.getParameter("email") ?? property.getFirstValue());
+        return this.address(/** @type {(name: string) => string | undefined} */ (property.getParameter)("email") ?? property.getFirstValue());
     }
 
+    /**
+     * @param {unknown} value
+     * @returns {string}
+     */
     address(value) {
         return String(value ?? "").trim().replace(/^mailto:/i, "").toLowerCase();
     }
 
     // The addresses whose declined invitations are left out, as a set, from one address or a list;
     // null for none
+    /**
+     * @param {string | string[] | null} owner
+     * @returns {Set<string> | null}
+     */
     owners(owner) {
-        const list = [].concat(owner ?? []).map((o) => this.address(o)).filter(Boolean);
+        const list = /** @type {string[]} */ ([]).concat(owner ?? []).map((o) => this.address(o)).filter(Boolean);
         return list.length ? new Set(list) : null;
     }
 
     // Whether one of those addresses, when there are any, declined this invitation
+    /**
+     * @param {ICAL.Component} item
+     * @param {Set<string> | null} owners
+     * @returns {boolean}
+     */
     declined(item, owners) {
         if (!owners) return false;
-        return item.getAllProperties("attendee").some((a) => owners.has(this.attendee(a)) && String(a.getParameter("partstat") ?? "").toUpperCase() === "DECLINED");
+        return item.getAllProperties("attendee").some((a) => owners.has(this.attendee(a)) && String(/** @type {(name: string) => string | undefined} */ (a.getParameter)("partstat") ?? "").toUpperCase() === "DECLINED");
     }
 
     // By start, then title, as the Mac's fetcher sorted them
+    /**
+     * @param {FeedEvent[]} events
+     * @returns {FeedEvent[]}
+     */
     sorted(events) {
         return events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
     }
 
     // A day as YYYY-MM-DD, in this device's time zone
+    /**
+     * @param {Date} d
+     * @returns {string}
+     */
     date(d) {
         return `${d.getFullYear()}-${this.pad(d.getMonth() + 1)}-${this.pad(d.getDate())}`;
     }
 
     // An instant as local time with its offset, as moment().format() writes it and the Mac's
     // fetcher did: 2026-11-13T09:30:00-05:00
+    /**
+     * @param {Date} d
+     * @returns {string}
+     */
     stamp(d) {
         const offset = -d.getTimezoneOffset();
         const abs = Math.abs(offset);
         return `${this.date(d)}T${this.pad(d.getHours())}:${this.pad(d.getMinutes())}:${this.pad(d.getSeconds())}${offset < 0 ? "-" : "+"}${this.pad(Math.floor(abs / 60))}:${this.pad(abs % 60)}`;
     }
 
+    /**
+     * @param {number} n
+     * @returns {string}
+     */
     pad(n) {
         return String(n).padStart(2, "0");
     }
