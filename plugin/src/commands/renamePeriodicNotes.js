@@ -93,7 +93,7 @@ export default class RenamePeriodicNotes {
         };
         // Enter in a box previews, and on the preview renames; on a button, it presses that button
         modal.scope.register([], "Enter", () => {
-            if (document.activeElement?.tagName === "BUTTON") return true;
+            if (el.ownerDocument.activeElement?.tagName === "BUTTON") return true;
             void onEnter?.();
             return false;
         });
