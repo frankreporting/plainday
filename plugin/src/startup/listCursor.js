@@ -4,6 +4,16 @@ import { EditorSelection, EditorState, Prec } from "@codemirror/state";
 import { foldedRanges } from "@codemirror/language";
 import { app, plainday } from "../host.js";
 
+/** @import { Extension, RangeSet } from "@codemirror/state" */
+/** @import { Decoration, EditorView } from "@codemirror/view" */
+/**
+ * The folds CodeMirror's language package says a state shows. Obsidian provides the package, but its
+ * types aren't installed, so each call casts `foldedRanges` to this in a comment first.
+ * @typedef {(state: EditorState) => RangeSet<Decoration>} FoldedRanges
+ *
+ * The window, which holds the editor extension's slot, so a second run fills the same one
+ * @typedef {Window & { pmListCursor?: { slot: Extension[] } }} HandleWindow
+ */
 export default class ListCursor {
     // Startup script (OBS-221): on a list line in Live Preview, the cursor rests after the bullet or
     // checkbox, never in front of them, so a drawn checkbox doesn't turn back into `- [ ]`. The idea is
@@ -29,12 +39,21 @@ export default class ListCursor {
     static MARKER = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(?:\[.\][ \t]+)?/;
 
     // Where a list line's text starts, or null on a line that isn't a list line
+    /**
+     * @param {string} text
+     * @returns {number | null}
+     */
     static textStart(text) {
         return text.match(ListCursor.MARKER)?.[0].length ?? null;
     }
 
     // Where ← arriving at `pos` stops. Folded lines have no row of their own, so a fold's end belongs
     // to the line the fold hangs from: it starts at that line's end. `folds` is CodeMirror's foldedRanges.
+    /**
+     * @param {RangeSet<Decoration>} folds
+     * @param {number} pos
+     * @returns {number}
+     */
     static rowEnd(folds, pos) {
         let end = pos;
         folds.between(pos, pos, (from, to) => { if (to === pos) end = Math.min(end, from); });
@@ -42,6 +61,11 @@ export default class ListCursor {
     }
 
     // The way back: from the very end of a folded line, the end of what it hides
+    /**
+     * @param {RangeSet<Decoration>} folds
+     * @param {number} pos
+     * @returns {number}
+     */
     static foldEnd(folds, pos) {
         let end = pos;
         folds.between(pos, pos, (from, to) => { if (from === pos) end = Math.max(end, to); });
@@ -57,14 +81,14 @@ export default class ListCursor {
         const ws = app.workspace;
 
         // One registered slot per load of Plainday; a rerun swaps what's in it
-        const kept = window.pmListCursor;
+        const kept = /** @type {HandleWindow} */ (window).pmListCursor;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         const handles = { slot: slot ?? [] };
-        window.pmListCursor = handles;
+        /** @type {HandleWindow} */ (window).pmListCursor = handles;
         if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
         // Whether `selection` is one plain cursor, in Live Preview
-        const plain = (selection, s) => selection.ranges.length === 1 && selection.main.empty && s.field(editorLivePreviewField, false);
+        const plain = (/** @type {EditorSelection} */ selection, /** @type {EditorState} */ s) => selection.ranges.length === 1 && selection.main.empty && s.field(editorLivePreviewField, false);
 
         // Runs on every cursor move and edit, so it looks at one line and stops there. It keeps the
         // column ↑ and ↓ remember, so the next one goes back to the column they started from.
@@ -84,7 +108,7 @@ export default class ListCursor {
         // the marker and be pushed straight back. Above a folded line that spot is on the last hidden
         // line, drawn beside the "…" and left of the links, so any line goes to the folded line's end
         // instead. The cursor leans left there, or it's drawn beside the "…" all the same.
-        const left = (v) => {
+        const left = (/** @type {EditorView} */ v) => {
             const { state: s } = v;
             if (!plain(s.selection, s)) return false;
             const { head } = s.selection.main;
@@ -92,18 +116,18 @@ export default class ListCursor {
             const start = L.textStart(line.text);
             if (head !== line.from + (start ?? 0)) return false;
             const above = v.moveByChar(EditorSelection.cursor(line.from), false);
-            const end = L.rowEnd(foldedRanges(s), above.head);
+            const end = L.rowEnd(/** @type {FoldedRanges} */ (foldedRanges)(s), above.head);
             if (start === null && end === above.head) return false;
             const assoc = end === above.head ? above.assoc : -1;
             v.dispatch({ selection: EditorSelection.create([EditorSelection.cursor(end, assoc)]), scrollIntoView: true, userEvent: "select" });
             return true;
         };
         // → and Option-→ from the very end of a folded line go past what it hides, as ← came
-        const right = (v) => {
+        const right = (/** @type {EditorView} */ v) => {
             const { state: s } = v;
             if (!plain(s.selection, s)) return false;
             const { head } = s.selection.main;
-            const end = L.foldEnd(foldedRanges(s), head);
+            const end = L.foldEnd(/** @type {FoldedRanges} */ (foldedRanges)(s), head);
             if (end === head || end === s.doc.length) return false;
             v.dispatch({ selection: { anchor: end + 1 }, scrollIntoView: true, userEvent: "select" });
             return true;
@@ -121,7 +145,7 @@ export default class ListCursor {
     }
 
     deconstructor() {
-        const handles = window.pmListCursor;
+        const handles = /** @type {HandleWindow} */ (window).pmListCursor;
         if (!handles) return;
         // The slot stays registered for the next run to fill
         handles.slot.length = 0;

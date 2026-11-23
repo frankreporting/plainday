@@ -1,7 +1,19 @@
 import { getFrontMatterInfo, Notice, parseYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
-/** @import { TFile } from "obsidian" */
+/** @import { EventRef, TAbstractFile, TFile } from "obsidian" */
+/**
+ * A note's properties, as read from its YAML or as processFrontMatter hands them over: any value under
+ * any name.
+ * @typedef {Record<string, unknown>} Front
+ *
+ * What to write (sync's plan): the frontmatter's own spelling of `parent`, the older `area` if it has
+ * one, and the value.
+ * @typedef {{ key: string, old: string | null, value: unknown }} ParentWrite
+ *
+ * The window, which holds the listener so a second run can undo the first
+ * @typedef {Window & { syncAreaRef?: EventRef | null }} HandleWindow
+ */
 
 export default class SyncArea {
     // Startup script: when notes move to another folder (one at a time or as a whole folder),
@@ -25,22 +37,34 @@ export default class SyncArea {
         // The handle lives on window, so a second run undoes the first: a single listener, however
         // often it runs.
         this.deconstructor();
+        // Moved notes waiting for the next batch, with the path each had first
+        /** @type {Map<TFile, string>} */
         this.queue = new Map();
+        // Folders just renamed where they are, by their old path: their new path, and when
+        /** @type {Map<string, { to: string, at: number }>} */
         this.renamedFolders = new Map();
-        window.syncAreaRef = app.vault.on("rename", (file, oldPath) => this.onRename(file, oldPath));
+        /** @type {HandleWindow} */ (window).syncAreaRef = app.vault.on("rename", (file, oldPath) => this.onRename(file, oldPath));
     }
 
     // Whether a note is in the archive, where nothing moves it
+    /**
+     * @param {TAbstractFile} file
+     * @returns {boolean}
+     */
     ignored(file) {
         return file.path.startsWith(`${plainday.Settings.folders().archive}/`);
     }
 
     deconstructor() {
-        if (window.syncAreaRef) app.vault.offref(window.syncAreaRef);
-        window.syncAreaRef = null;
+        if (/** @type {HandleWindow} */ (window).syncAreaRef) app.vault.offref(/** @type {HandleWindow} */ (window).syncAreaRef);
+        /** @type {HandleWindow} */ (window).syncAreaRef = null;
         window.clearTimeout(this.timer);
     }
 
+    /**
+     * @param {TAbstractFile} file
+     * @param {string} oldPath
+     */
     onRename(file, oldPath) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin) return;
@@ -58,14 +82,21 @@ export default class SyncArea {
 
         // Keyed by the TFile so a note moved twice in quick succession is handled once;
         // keeps the first old path, which is the one Templater knows it by.
-        if (!this.queue.has(file)) this.queue.set(file, oldPath);
+        if (!this.queue.has(/** @type {TFile} */ (file))) this.queue.set(/** @type {TFile} */ (file), oldPath);
         window.clearTimeout(this.timer);
+        /** @type {number} */
         this.timer = window.setTimeout(() => {
             // One batch at a time, so a note is never written by two batches at once
+            /** @type {Promise<void>} */
             this.chain = (this.chain ?? Promise.resolve()).then(() => this.flush());
         }, SyncArea.DEBOUNCE_MS);
     }
 
+    /**
+     * @param {TAbstractFile} file
+     * @param {string} oldPath
+     * @returns {boolean}
+     */
     insideRenamedFolder(file, oldPath) {
         for (const [from, { to, at }] of this.renamedFolders) {
             if (Date.now() - at > 5000) { this.renamedFolders.delete(from); continue; }
@@ -74,6 +105,7 @@ export default class SyncArea {
         return false;
     }
 
+    /** @returns {Promise<void>} */
     async flush() {
         const batch = [...this.queue];
         this.queue.clear();
@@ -90,6 +122,11 @@ export default class SyncArea {
     }
 
     // Returns true if the note was mid-template when it moved
+    /**
+     * @param {TFile} file
+     * @param {string} oldPath
+     * @returns {Promise<boolean>}
+     */
     async waitForTemplater(file, oldPath) {
         const pending = app.plugins.plugins["templater-obsidian"]?.templater?.files_with_pending_templates;
         const isPending = () => pending?.has(oldPath) || pending?.has(file.path);
@@ -111,13 +148,14 @@ export default class SyncArea {
         if (!parent) return false;
 
         const linktext = app.metadataCache.fileToLinktext(parent, file.path, true);
-        const alias = [].concat(app.metadataCache.getFileCache(parent)?.frontmatter?.aliases ?? [])[0];
+        const alias = /** @type {string[]} */ ([]).concat(/** @type {{ aliases?: string | string[] } | undefined} */ (app.metadataCache.getFileCache(parent)?.frontmatter)?.aliases ?? [])[0];
         const link = alias ? `[[${linktext}|${alias}]]` : `[[${linktext}]]`;
 
         // What to write, or null if the parent is already right and there's no older `area` to
         // rename. Decided from the frontmatter as written, not the metadata cache, which can lag a
         // template's final write. `parent` counts only when it holds a link, as TimeReport reads it,
         // so an empty or blank one takes the older `area`'s value rather than losing it.
+        /** @type {(f: Front) => ParentWrite | null} */
         const plan = (f) => {
             const { key, old } = this.parentKeys(f);
             const current = this.hasText(f[key]) ? f[key] : old && this.hasText(f[old]) ? f[old] : undefined;
@@ -129,13 +167,13 @@ export default class SyncArea {
         // processFrontMatter rewrites the whole YAML block even when nothing changes, so check first
         const text = await app.vault.read(file);
         const info = getFrontMatterInfo(text);
-        const front = info.exists ? parseYaml(info.frontmatter) ?? {} : {};
+        const front = info.exists ? /** @type {(yaml: string) => Front | null} */ (parseYaml)(info.frontmatter) ?? {} : {};
         // An invoice that lost its tag but still has its Billed entries still bills, so it's left alone too
         if (this.isInvoice(front) || plainday.Billing?.hasBilled?.(text) || !plan(front)) return false;
 
         let wrote = false;
         const recached = this.waitForCache(file);
-        await app.fileManager.processFrontMatter(file, (f) => {
+        await app.fileManager.processFrontMatter(file, (/** @type {Front} */ f) => {
             if (this.isInvoice(f)) return;
             const p = plan(f);
             if (!p) return;
@@ -149,6 +187,10 @@ export default class SyncArea {
     }
 
     // Resolves once the metadata cache has re-read the note, or after 2 seconds
+    /**
+     * @param {TFile} file
+     * @returns {Promise<void>}
+     */
     waitForCache(file) {
         return new Promise((resolve) => {
             const done = () => { app.metadataCache.offref(ref); window.clearTimeout(timer); resolve(); };
@@ -157,13 +199,17 @@ export default class SyncArea {
         });
     }
 
+    /**
+     * @param {TFile} file
+     * @returns {TFile | null}
+     */
     nearestProjectOrArea(file) {
         let folder = file.parent;
         // A folder note belongs to the folder above its own
         if (folder && file.basename === folder.name) folder = folder.parent;
         while (folder && !folder.isRoot()) {
             const note = app.vault.getAbstractFileByPath(`${folder.path}/${folder.name}.md`);
-            if (note && note !== file && this.isProjectOrArea(note)) return note;
+            if (note && note !== file && this.isProjectOrArea(/** @type {TFile} */ (note))) return /** @type {TFile} */ (note);
             folder = folder.parent;
         }
         return null;
@@ -171,6 +217,10 @@ export default class SyncArea {
 
     // Whether frontmatter makes the note an invoice: its tags include `invoice`, as the Invoice
     // command writes them and Billing finds invoices. Pure, so it's tested.
+    /**
+     * @param {Front | null | undefined} front
+     * @returns {boolean}
+     */
     isInvoice(front) {
         const raw = front?.tags ?? front?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
@@ -178,10 +228,14 @@ export default class SyncArea {
     }
 
     // Exact #project or #area tag, in frontmatter or inline (same rule as AddTaskNote's menus)
+    /**
+     * @param {TFile} note
+     * @returns {boolean}
+     */
     isProjectOrArea(note) {
         const c = app.metadataCache.getFileCache(note);
         if (!c) return false;
-        const raw = c.frontmatter?.tags ?? c.frontmatter?.tag ?? [];
+        const raw = /** @type {Front | undefined} */ (c.frontmatter)?.tags ?? /** @type {Front | undefined} */ (c.frontmatter)?.tag ?? [];
         return (Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/))
             .filter(Boolean)
             .map((t) => String(t).replace(/^#/, ""))
@@ -191,6 +245,10 @@ export default class SyncArea {
 
     // The frontmatter's own spelling of `parent` (or "parent" when it has none), and of the older
     // `area` if it still has one. Pure, so it's tested.
+    /**
+     * @param {Front | null | undefined} front
+     * @returns {{ key: string, old: string | null }}
+     */
     parentKeys(front) {
         const keys = Object.keys(front ?? {});
         return {
@@ -201,13 +259,22 @@ export default class SyncArea {
 
     // Whether a property holds text: the value, or a list's first, not empty or blank (TimeReport's
     // firstLink rule). Pure, so it's tested.
+    /**
+     * @param {unknown} value
+     * @returns {boolean}
+     */
     hasText(value) {
-        const first = Array.isArray(value) ? value[0] : value;
+        const first = Array.isArray(value) ? /** @type {unknown[]} */ (value)[0] : value;
         return typeof first === "string" && first.trim() !== "";
     }
 
     // Sets `parent` in a frontmatter object, in place of `area` when there is one, so the property
     // keeps its spot in the note's frontmatter. Pure, so it's tested.
+    /**
+     * @param {Front} f
+     * @param {ParentWrite} write
+     * @returns {Front}
+     */
     setParent(f, { key, old, value }) {
         if (!old) { f[key] = value; return f; }
         const entries = Object.entries(f);
@@ -222,8 +289,14 @@ export default class SyncArea {
 
     // Whether an existing parent value (a "[[Link|Alias]]" string, or a list of them) already
     // points at the parent, so an alias or path difference alone doesn't cause a rewrite
+    /**
+     * @param {unknown} value
+     * @param {TFile} file
+     * @param {TFile} parent
+     * @returns {boolean}
+     */
     linksTo(value, file, parent) {
-        const first = [].concat(value ?? [])[0];
+        const first = /** @type {unknown[]} */ ([]).concat(value ?? [])[0];
         const match = typeof first === "string" && first.match(/\[\[([^\]|#]+)/);
         return !!match && app.metadataCache.getFirstLinkpathDest(match[1].trim(), file.path) === parent;
     }

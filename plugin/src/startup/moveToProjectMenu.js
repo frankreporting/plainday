@@ -1,6 +1,16 @@
 import { Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { EventRef, TAbstractFile } from "obsidian" */
+/** @import { AddMenuItem, NavigatorApi } from "../host.js" */
+/**
+ * What a run added, so the next run can take it off: Obsidian's listeners, what takes the items off
+ * Notebook Navigator's menus, the API they went to, and the retry waiting for it.
+ * @typedef {{ refs: EventRef[], offs: (() => void)[], api: NavigatorApi | null, timer: number | null }} MenuState
+ *
+ * The window, which holds them
+ * @typedef {Window & { moveToProjectMenu?: MenuState | null }} HandleWindow
+ */
 export default class MoveToProjectMenu {
     // Startup script: puts *Move to project…* (MoveToProject's move) in the menus that act on files:
     //   - Notebook Navigator's menu for a note, or for several selected, and for a project or area's
@@ -18,8 +28,9 @@ export default class MoveToProjectMenu {
         // The handles live on window, so a second run undoes the first: one set of menu items, however
         // often it runs
         this.deconstructor();
+        /** @type {MenuState} */
         const state = { refs: [], offs: [], api: null, timer: null };
-        window.moveToProjectMenu = state;
+        /** @type {HandleWindow} */ (window).moveToProjectMenu = state;
         state.refs.push(
             app.workspace.on("file-menu", (menu, file, source) => this.add((build) => menu.addItem(build), [file], { homes: source !== "link-context-menu" })),
             app.workspace.on("files-menu", (menu, files) => this.add((build) => menu.addItem(build), files)),
@@ -30,18 +41,22 @@ export default class MoveToProjectMenu {
     }
 
     deconstructor() {
-        const state = window.moveToProjectMenu;
+        const state = /** @type {HandleWindow} */ (window).moveToProjectMenu;
         if (!state) return;
         for (const ref of state.refs) app.workspace.offref(ref);
         for (const off of state.offs) off();
         window.clearTimeout(state.timer);
-        window.moveToProjectMenu = null;
+        /** @type {HandleWindow} */ (window).moveToProjectMenu = null;
     }
 
     // Registers the items with Notebook Navigator's current API, once per API object; retries
     // `tries - 1` more times while it isn't there yet
+    /**
+     * @param {MenuState} state
+     * @param {number} tries
+     */
     addToNavigator(state, tries) {
-        if (window.moveToProjectMenu !== state || !app.plugins.enabledPlugins.has("notebook-navigator")) return;
+        if (/** @type {HandleWindow} */ (window).moveToProjectMenu !== state || !app.plugins.enabledPlugins.has("notebook-navigator")) return;
         const api = app.plugins.plugins["notebook-navigator"]?.api;
         if (api && api === state.api) return;
         if (!api?.menus) {
@@ -63,13 +78,18 @@ export default class MoveToProjectMenu {
 
     // Adds the item through `addItem` (a menu's, or Notebook Navigator's) when MoveToProject would
     // move any of `files`. Menus are built synchronously; the move runs on the click.
+    /**
+     * @param {AddMenuItem} addItem
+     * @param {TAbstractFile[]} files
+     * @param {{ homes?: boolean }} [options]
+     */
     add(addItem, files, { homes = true } = {}) {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin) return;
         const mover = plainday.MoveToProject;
         if (!mover || !files.length || !mover.movable(files, { homes })) return;
         addItem((item) => item.setTitle(MoveToProjectMenu.TITLE).setIcon(MoveToProjectMenu.ICON).onClick(() => {
-            plainday.MoveToProject.move(files).catch((e) => {
+            plainday.MoveToProject.move(files).catch((/** @type {Error} */ e) => {
                 console.error("MoveToProject failed", e);
                 new Notice(`Move to project failed: ${e.message}`);
             });

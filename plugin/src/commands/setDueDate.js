@@ -1,6 +1,22 @@
 import { getFrontMatterInfo, MarkdownView, Notice, parseYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/** @import { Moment } from "moment" */
+/** @import { FoldView } from "../host.js" */
+/** @import { ChangeLine, Found, LineAt } from "../shared/taskChange.js" */
+/** @import { NameReader } from "../shared/taskIds.js" */
+/**
+ * Where the due link goes on a line, and the text that goes there (placement).
+ * @typedef {{ from: number, to: number, text: string }} Placement
+ *
+ * How setting a task note's `due` went (setDue).
+ * @typedef {"set" | "same" | "odd" | "unread"} DueSet
+ *
+ * What didn't go as you'd expect (said): the lines that changed meanwhile, the notes it couldn't write,
+ * and the task notes it left alone.
+ * @typedef {{ missed?: ChangeLine[], failed?: TFile[], kept?: TFile[], unread?: TFile[], odd?: TFile[] }} Untold
+ */
 export default class DueDate {
     // Note links end a line (⋯ task note or log, ↗ the note it was sent from, ⭕ project, 🗃️ area), so End reaches the note; the
     // due date goes in front of them (OBS-36), and in front of a sent line's forward date (OBS-107): a
@@ -19,6 +35,12 @@ export default class DueDate {
     // first one if there are more, which go (OBS-65); else right before the line's trailing note links
     // and forward date (with one space either side), else at the end, ahead of an ID. `read` reads a
     // forward date's name (Plainday's reader when it's not given).
+    /**
+     * @param {string} lineText
+     * @param {string} dueLink
+     * @param {NameReader} [read]
+     * @returns {Placement}
+     */
     placement(lineText, dueLink, read) {
         const flags = [...lineText.matchAll(DueDate.DUE_LINK)];
         if (flags.length) {
@@ -47,22 +69,31 @@ export default class DueDate {
 
     // Where a cursor at `ch` ends up after that change: on the same words, ahead of a 🚩 added right
     // where it is. One inside a replaced 🚩 goes to the start of the new one.
-/**
- * @param {number} ch
- * @param {{ from: number, to: number, text: string }} change
- * @returns {number}
- */
+    /**
+     * @param {number} ch
+     * @param {Placement} change
+     * @returns {number}
+     */
     cursorAfter(ch, { from, to, text }) {
         return ch <= from ? ch : ch < to ? from : ch + text.length - (to - from);
     }
 
     // The due link for a date (a moment), to the day's note by `linktext`: [[2026-09-25|🚩 9/25]]
+    /**
+     * @param {Moment} m
+     * @param {string} linktext
+     * @returns {string}
+     */
     static link(m, linktext) {
         return `[[${linktext}|🚩 ${m.format("M/D")}]]`;
     }
 
     // The due link for a date (a moment), to the day's note by its real name (Schedule.dailyNotePath), or by
     // its path when another note has that name, as Schedule links a day (OBS-297)
+    /**
+     * @param {Moment} m
+     * @returns {string}
+     */
     dueLink(m) {
         const path = plainday.Schedule.dailyNotePath(m);
         const name = path.split("/").pop().replace(/\.md$/, "");
@@ -70,6 +101,10 @@ export default class DueDate {
     }
 
     // `read`, or Plainday's reader of periodic note names (PeriodicNotes.reader)
+    /**
+     * @param {NameReader} [read]
+     * @returns {NameReader}
+     */
     static reader(read) {
         if (read) return read;
         const own = plainday?.PeriodicNotes?.reader?.();
@@ -78,13 +113,18 @@ export default class DueDate {
     }
 
     // `lineText` with the due link placed on it (placement)
+    /**
+     * @param {string} lineText
+     * @param {string} dueLink
+     * @returns {string}
+     */
     placed(lineText, dueLink) {
         const { from, to, text } = this.placement(lineText, dueLink);
         return lineText.slice(0, from) + text + lineText.slice(to);
     }
 
     async invoke() {
-        const view = app.workspace.getActiveViewOfType(MarkdownView);
+        const view = /** @type {FoldView | null} */ (app.workspace.getActiveViewOfType(MarkdownView));
         if (!view) { new Notice("Need an active editor"); return; }
         if (view.file && plainday.TaskIds && !plainday.TaskIds.works(view.file)) return;
 
@@ -147,9 +187,15 @@ export default class DueDate {
     // which keeps its own deadline. An event line among them gets none. Says nothing when it all went through, only
     // what it couldn't write or left alone (Brian, 2026-11-07: no notice for what you'd expect); never throws into
     // the date box.
+    /**
+     * @param {LineAt} start
+     * @param {Moment} m
+     * @returns {Promise<void>}
+     */
     async spread(start, m) {
         const change = plainday.TaskChange, tr = plainday.TimeReport;
         const dueLink = this.dueLink(m), date = m.format("YYYY-MM-DD");
+        /** @type {Found} */
         let found;
         try {
             found = await change.find(start, { family: false });
@@ -158,6 +204,7 @@ export default class DueDate {
             new Notice("Only this line got the deadline: the task's other lines couldn't be found. Run DueDate again");
             return;
         }
+        /** @type {Map<string, ChangeLine[]>} */
         const byFile = new Map();
         for (const l of found.lines) {
             if (!l.task || tr.eventKind(l.seen) || (l.file.path === start.file.path && l.at === start.at)) continue;
@@ -205,19 +252,25 @@ export default class DueDate {
     // is open (Schedule.rewrite), so the other properties stay exactly as they are and an edit not yet saved isn't
     // lost; and only when Obsidian reads the result as the same properties with the new `due` (Brian, 2026-11-06:
     // no processFrontMatter, which lays the block out again and works from the saved file).
+    /**
+     * @param {TFile} note
+     * @param {string} date
+     * @returns {Promise<DueSet>}
+     */
     async setDue(note, date) {
-        const props = (text) => {
+        const props = (/** @type {string} */ text) => {
             try {
                 const info = getFrontMatterInfo(text);
-                return info.exists ? parseYaml(info.frontmatter) ?? {} : {};
+                return info.exists ? /** @type {(yaml: string) => Record<string, unknown> | null} */ (parseYaml)(info.frontmatter) ?? {} : {};
             } catch {
                 return undefined;
             }
         };
-        const others = (fm) => { const rest = { ...fm }; delete rest.due; return JSON.stringify(rest); };
+        const others = (/** @type {Record<string, unknown>} */ fm) => { const rest = { ...fm }; delete rest.due; return JSON.stringify(rest); };
         // What the edit makes of `text`, and the result to report
+        /** @type {DueSet} */
         let result = "odd";
-        const edit = (text) => {
+        const edit = (/** @type {string} */ text) => {
             const before = props(text);
             if (before === undefined) { result = "unread"; return text; }
             const now = DueDate.withDue(text, date);
@@ -239,15 +292,15 @@ export default class DueDate {
     // plain (empty, or a date, quoted or not) followed by another key or the end, which is replaced, or no `due`
     // at all, which is added last. Anything else (a quoted key, a comment, a value over several lines, no
     // properties block) is null, so it can never write YAML that Obsidian can't read: that `due` is set by hand.
-/**
- * @param {string} text
- * @param {string} date
- * @returns {{ text?: string, same?: boolean } | null}
- */
+    /**
+     * @param {string} text
+     * @param {string} date
+     * @returns {{ text?: string, same?: boolean } | null}
+     */
     static withDue(text, date) {
         const lines = text.split("\n");
-        const bare = (l) => l.replace(/\r$/, "");
-        const fence = (l) => /^---[ \t]*$/.test(bare(l));
+        const bare = (/** @type {string} */ l) => l.replace(/\r$/, "");
+        const fence = (/** @type {string} */ l) => /^---[ \t]*$/.test(bare(l));
         if (!fence((lines[0] ?? "").replace(/^\uFEFF/, ""))) return null;
         const end = lines.findIndex((l, i) => i > 0 && fence(l));
         if (end === -1) return null;
@@ -272,8 +325,12 @@ export default class DueDate {
     }
 
     // A `due` as "YYYY-MM-DD", whether YAML read it as text or as a date; else null
+    /**
+     * @param {unknown} value
+     * @returns {string | null}
+     */
     static dayOf(value) {
-        if (typeof value?.toISOString === "function") return value.toISOString().slice(0, 10);
+        if (typeof /** @type {Date | null | undefined} */ (value)?.toISOString === "function") return /** @type {Date} */ (value).toISOString().slice(0, 10);
         return typeof value === "string" ? value.trim().replace(/^["']|["']$/g, "") || null : null;
     }
 
@@ -282,10 +339,14 @@ export default class DueDate {
     // the other lines not found as they were; `failed`: notes it couldn't write; `unread`: task notes whose
     // properties Obsidian can't read, so running again wouldn't help; `odd`: task notes whose `due` is written in
     // a way DueDate doesn't change; `kept`: task notes outside where the commands work.
+    /**
+     * @param {Untold} untold
+     * @returns {string[]}
+     */
     said({ missed = [], failed = [], kept = [], unread = [], odd = [] }) {
         const out = [];
-        const list = (names) => (names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-        const where = (file) => plainday.TaskChange.dayName(file);
+        const list = (/** @type {string[]} */ names) => (names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+        const where = (/** @type {TFile} */ file) => plainday.TaskChange.dayName(file);
         if (failed.length) out.push(`Couldn't write to ${list(failed.map(where))}; run DueDate again to finish`);
         if (missed.length === 1) out.push(`${where(missed[0].file)}'s line changed meanwhile, so it kept its old deadline. Run DueDate again to finish`);
         else if (missed.length) out.push(`${missed.length} lines (${list([...new Set(missed.map((l) => where(l.file)))])}) changed meanwhile, so they kept their old deadline. Run DueDate again to finish`);
