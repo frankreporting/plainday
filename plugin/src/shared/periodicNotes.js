@@ -1,6 +1,15 @@
 import { getFrontMatterInfo, moment, Notice, parseYaml, stringifyYaml } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { Editor, TFile } from "obsidian" */
+/** @import { Templater } from "../host.js" */
+/** @import { Period, Unit, WeekRules } from "./datePrompt.js" */
+/**
+ * Where a periodic note goes and what it's called (where): its unit, the date asked for, its period's
+ * first day, its path, folder and name, and its kind ("daily", "weekly", "monthly" or "yearly").
+ * @typedef {{ unit: Unit, date: string, start: string, path: string, folder: string, name: string, kind: string }} PeriodicPlace
+ */
+
 export default class PeriodicNotes {
     // The daily, weekly, monthly and yearly notes, made in one place (OBS-120). Plan, Jump to date, Schedule,
     // the calendar sync, the time report and EventLog all make theirs with ensure(), and
@@ -26,6 +35,7 @@ export default class PeriodicNotes {
     constructor() {
         // The notes being made now, by path: a second call for the same note gets the first one's (the
         // sync and Schedule making the same day at once). FinishPeriodicNotes leaves these alone.
+        /** @type {Map<string, Promise<TFile>>} */
         this.making = new Map();
         // Plainday's own holds on Templater's trigger, by path
         this.holds = new Map();
@@ -44,6 +54,12 @@ export default class PeriodicNotes {
     // period) goes, and what it's called: { unit, date, start, path, folder, name, kind }. Its folder is
     // the one the settings give, then the folders by date they give, read from the period's first day
     // (OBS-310), so it's where Schedule.isDailyNote and periodOf look for it.
+    /**
+     * @param {Unit} unit
+     * @param {string} date
+     * @param {WeekRules} [rules]
+     * @returns {PeriodicPlace}
+     */
     where(unit, date, rules = plainday.DatePrompt.weekRules()) {
         const start = this.start(unit, date, rules);
         let path;
@@ -62,6 +78,12 @@ export default class PeriodicNotes {
 
     // A periodic note's alias: "9/20/26 Sunday", "Week of 9/13/26" (the week's first day), "September 2026",
     // and none for a year, in the week settings' language
+    /**
+     * @param {Unit} unit
+     * @param {string} date
+     * @param {WeekRules} [rules]
+     * @returns {string | null}
+     */
     alias(unit, date, rules = plainday.DatePrompt.weekRules()) {
         const day = (d) => moment(d, "YYYY-MM-DD", true).locale(rules.locale);
         if (unit === "day") return day(date).format("M/D/YY dddd");
@@ -74,6 +96,12 @@ export default class PeriodicNotes {
     // week settings' patterns for the rest): { unit, date } (date the period's first day), or null. A day's
     // name is read in the language where() writes it in, Obsidian's (moment's own); the rest in the week
     // settings' language.
+    /**
+     * @param {string} name
+     * @param {WeekRules} [rules]
+     * @param {string} [day]
+     * @returns {Period | null}
+     */
     periodOfName(name, rules = plainday.DatePrompt.weekRules(), day = plainday.Schedule.dailyOpts().format) {
         const formats = { day, ...rules.format };
         for (const unit of ["day", "week", "month", "year"]) {
@@ -93,6 +121,7 @@ export default class PeriodicNotes {
     // languages that read it, so a changed setting gives a new reader, and the editor's links, drawn on
     // every keystroke, cost a lookup.
     static NAMES_KEPT = 5000;
+    /** @returns {(linktext: string | null | undefined) => Period | null} */
     reader() {
         const rules = plainday.DatePrompt.weekRules();
         const day = plainday.Schedule.dailyOpts().format;
@@ -124,6 +153,7 @@ export default class PeriodicNotes {
     }
 
     // Templater, when it's on
+    /** @returns {Templater | null} */
     templater() {
         const t = app.plugins?.getPlugin?.("templater-obsidian")?.templater;
         return typeof t?.write_template_to_file === "function" ? t : null;
@@ -131,6 +161,12 @@ export default class PeriodicNotes {
 
     // The note for `date`'s period, made if it isn't there: the one function every creator calls. A note
     // there already is returned as it is.
+    /**
+     * @param {Unit} unit
+     * @param {string} date
+     * @param {{ rules?: WeekRules }} [options]
+     * @returns {Promise<TFile>}
+     */
     async ensure(unit, date, { rules = plainday.DatePrompt.weekRules() } = {}) {
         const target = this.where(unit, date, rules);
         const there = app.vault.getFileByPath(target.path);
@@ -188,6 +224,10 @@ export default class PeriodicNotes {
     // template run by whatever made it); then its alias, when it lacks it. Nothing already in the note changes. A note still holding Templater code
     // (Templater's trigger is off) is left as it is, and so is one renamed since to a name that isn't a
     // periodic note's. Returns what happened: "finished", "left" or null.
+    /**
+     * @param {TFile | null} file
+     * @returns {Promise<"finished" | "left" | null>}
+     */
     async finish(file) {
         if (!file || !app.vault.getFileByPath(file.path)) return null;
         const rules = plainday.DatePrompt.weekRules();
@@ -248,6 +288,10 @@ export default class PeriodicNotes {
     }
 
     // Adds `alias` to the note's aliases when it isn't among them
+    /**
+     * @param {TFile} file
+     * @param {string | null} alias
+     */
     async addAlias(file, alias) {
         if (!alias) return;
         const text = await app.vault.read(file);
@@ -267,6 +311,10 @@ export default class PeriodicNotes {
 
     // The note's editor (in editing view) when the note is open there with no properties and the cursor at its
     // very start, else null
+    /**
+     * @param {TFile} file
+     * @returns {Editor | null}
+     */
     cursorAtTopOf(file) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         const editor = view?.editor, cursor = editor?.getCursor();
@@ -275,6 +323,7 @@ export default class PeriodicNotes {
 
     // A cursor still at the very start of a note that now has properties goes below them; one a template put
     // elsewhere (tp.file.cursor) stays
+    /** @param {Editor} editor */
     cursorBelowProperties(editor) {
         const cursor = editor.getCursor();
         if (cursor.line !== 0 || cursor.ch !== 0) return;
@@ -301,6 +350,11 @@ export default class PeriodicNotes {
 
     // A note's text with a template's added: the properties combined (a template's value replaces the note's,
     // aliases and tags keep both, each value once), the template's text after the note's
+    /**
+     * @param {string} text
+     * @param {string} tpl
+     * @returns {string}
+     */
     merge(text, tpl) {
         const a = this.parts(text), b = this.parts(tpl);
         if (!b.props || !Object.keys(b.props).length) return `${text}${b.body}`;
@@ -316,6 +370,10 @@ export default class PeriodicNotes {
     }
 
     // { props, body }: a note's properties (null when it has none, or they don't read) and the text after them
+    /**
+     * @param {string} text
+     * @returns {{ props: Record<string, unknown> | null, body: string }}
+     */
     parts(text) {
         const info = getFrontMatterInfo(text);
         if (!info.exists) return { props: null, body: text };
@@ -333,12 +391,21 @@ export default class PeriodicNotes {
     }
 
     // A value for a line of properties: bare when YAML reads it back as the same text, else quoted
+    /**
+     * @param {string} value
+     * @returns {string}
+     */
     scalar(value) {
         return /^[\p{L}\p{N}][\p{L}\p{N} ./,-]*$/u.test(value) && !/^\d+$/.test(value) ? value : JSON.stringify(value);
     }
 
     // A template's text with {{title}}, {{date}}, {{date:FORMAT}}, {{time}} and {{time:FORMAT}} filled in, as
     // Obsidian's Templates plugin fills them (its date and time formats), the date being the period's first day
+    /**
+     * @param {string} text
+     * @param {{ name: string, start: string }} target
+     * @returns {string}
+     */
     fill(text, { name, start }) {
         const opts = app.internalPlugins?.plugins?.templates?.instance?.options ?? {};
         const day = moment(start, "YYYY-MM-DD", true);
@@ -352,6 +419,7 @@ export default class PeriodicNotes {
 
     // Keeps Templater's trigger for new notes off `path` for HOLD_MS (from now, or more when it's held
     // already): it looks 300 ms after a note appears, and runs Get Template on one with only properties
+    /** @param {string} path */
     hold(path) {
         const pending = this.pending();
         if (!pending || !path) return;
@@ -364,6 +432,7 @@ export default class PeriodicNotes {
     }
 
     // Templater's set of notes it's still writing, or null when Templater is off or has changed
+    /** @returns {Set<string> | null} */
     pending() {
         const set = app.plugins?.plugins?.["templater-obsidian"]?.templater?.files_with_pending_templates;
         return ["has", "add", "delete"].every((m) => typeof set?.[m] === "function") ? set : null;

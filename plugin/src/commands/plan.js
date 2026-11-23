@@ -1,6 +1,15 @@
 import { DropdownComponent, MarkdownView, Modal, moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile, WorkspaceLeaf } from "obsidian" */
+/** @import { Moment } from "moment" */
+/** @import { SomeView } from "../host.js" */
+/**
+ * A pane, whose scroll position and cursor Plan carries across by hand: what Obsidian hands back
+ * (as any) only goes back to setEphemeralState
+ * @typedef {Omit<WorkspaceLeaf, "getEphemeralState"> & { getEphemeralState?(): unknown }} OpenLeaf
+ */
+
 export default class Plan {
     // A single day is the note you're already on, so the range starts at two.
     // Beyond five, the panes are too narrow to be useful on a laptop screen.
@@ -18,7 +27,7 @@ export default class Plan {
         dropdown.setValue(String(min));
         dropdown.selectEl.addClass("plainday-wide-input");
 
-        const run = (days) => { modal.close(); this.openDays(days); };
+        const run = (/** @type {number} */ days) => { modal.close(); this.openDays(days); };
 
         // Number keys act in a single keystroke; Enter takes whatever the dropdown shows
         for (let i = min; i <= max; i++) {
@@ -32,6 +41,7 @@ export default class Plan {
         modal.open();
     }
 
+    /** @param {number} days */
     async openDays(days) {
         const { format } = this.dailyOpts();
 
@@ -71,6 +81,11 @@ export default class Plan {
     // A day already open elsewhere is moved into place rather than duplicated:
     // detaching and reopening is the only way to reposition a pane, so its
     // scroll position and cursor are carried across by hand.
+    /**
+     * @param {Moment} m
+     * @param {WorkspaceLeaf} anchor
+     * @returns {Promise<WorkspaceLeaf>}
+     */
     async placeDay(m, anchor) {
         const file = await this.ensureDailyNote(m);
 
@@ -85,9 +100,14 @@ export default class Plan {
     }
 
     // An existing pane in the main editor area showing this file, if there is one
+    /**
+     * @param {TFile} file
+     * @returns {OpenLeaf | null}
+     */
     findOpenLeaf(file) {
+        /** @type {OpenLeaf | null} */
         let found = null;
-        app.workspace.iterateRootLeaves((leaf) => {
+        app.workspace.iterateRootLeaves((/** @type {WorkspaceLeaf & { view: SomeView }} */ leaf) => {
             if (!found && leaf.view?.file?.path === file.path) found = leaf;
         });
         return found;
@@ -100,15 +120,18 @@ export default class Plan {
     }
 
     // Where a day's note goes, and whether a note is one: Schedule's, folders by date included (OBS-310)
+    /** @param {Moment} m */
     dailyNotePath(m) {
         return plainday.Schedule.dailyNotePath(m);
     }
 
+    /** @param {TFile} file */
     isDailyNote(file) {
         return plainday.Schedule.isDailyNote(file);
     }
 
     // The day's note, made if it isn't there, as every periodic note is made (PeriodicNotes.ensure)
+    /** @param {Moment} m */
     async ensureDailyNote(m) {
         return plainday.PeriodicNotes.ensure("day", m.format("YYYY-MM-DD"));
     }

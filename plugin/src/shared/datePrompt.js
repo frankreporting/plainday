@@ -1,6 +1,20 @@
 import { getLanguage, Modal, moment, Notice, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { Moment } from "moment" */
+/**
+ * A periodic note's kind, a period a date names, and what the prompt reads: `date` is a day as
+ * YYYY-MM-DD (a period's first day, or a day in it), `m` that day as a moment, and `readAs` the
+ * words read when only some of them were.
+ * @typedef {"day" | "week" | "month" | "year"} Unit
+ * @typedef {{ date: string, unit: Unit }} Period
+ * @typedef {Period & { m: Moment, readAs?: string }} DateResult
+ *
+ * How weeks are counted and periodic notes named (weekRules): the locale, the day weeks start on (0
+ * is Sunday), and each period's name format.
+ * @typedef {{ locale: string, weekStart: number, format: { week: string, month: string, year: string } }} WeekRules
+ */
+
 export default class DatePrompt {
     // The date prompt behind Schedule, Due, JumpToDate and Invoice: type a date in words, see the
     // date it means while you type, and Enter hands it on. Plainday reads English words itself
@@ -134,6 +148,7 @@ export default class DatePrompt {
     // moment's, and Plainday's own names (gggg[w]ww, YYYY-MM, YYYY), even with Navigator installed
     // (OBS-120). "en" weeks start on Sunday. Where Settings isn't loaded (tests), Navigator when it's there.
     // Returns { locale, weekStart (0 is Sunday), format: { week, month, year } }.
+    /** @returns {WeekRules} */
     weekRules() {
         const source = plainday?.Settings?.periodicSource?.();
         const nn = source === undefined || source === "notebook-navigator" ? app.plugins?.plugins?.["notebook-navigator"]?.settings : null;
@@ -165,6 +180,11 @@ export default class DatePrompt {
             ?? null;
     }
 
+    /**
+     * @param {string} date
+     * @param {Unit} unit
+     * @returns {DateResult}
+     */
     result(date, unit) {
         return { date, unit, m: moment(date, "YYYY-MM-DD", true) };
     }
@@ -192,6 +212,11 @@ export default class DatePrompt {
 
     // The same, spelled out for a sentence: "Friday, October 2, 2026", "the week starting 10/4/26",
     // "October 2026", "2027"
+    /**
+     * @param {Period} period
+     * @param {number} [weekStart]
+     * @returns {string}
+     */
     spell({ date, unit }, weekStart = 0) {
         const [y, mo, d] = date.split("-").map(Number);
         const day = DatePrompt.toDay(date);
@@ -220,6 +245,18 @@ export default class DatePrompt {
     // fails, Enter can be tried again. `periods`, `name` and `nearest` as in read(); `label(result)` adds a word
     // to the preview. `extra(contentEl, { focus })` adds anything under the preview, and `focus()`
     // puts the cursor back in the box. Returns the modal.
+    /**
+     * @param {string} title
+     * @param {(result: DateResult, modal: Modal, event: KeyboardEvent) => unknown} onPick
+     * @param {{
+     *   periods?: boolean,
+     *   name?: ((text: string) => Period | null) | null,
+     *   nearest?: boolean,
+     *   label?: ((result: DateResult) => string | null) | null,
+     *   extra?: (contentEl: HTMLElement, controls: { focus: () => void }) => void,
+     * }} [options]
+     * @returns {Modal}
+     */
     open(title, onPick, { periods = false, name = null, nearest = false, label = null, extra } = {}) {
         let weekStart = 0;
         try { weekStart = this.weekRules().weekStart; } catch { weekStart = 0; }
@@ -283,6 +320,11 @@ export default class DatePrompt {
     }
 
     // The first day of the week a date is in, for weeks starting on `weekStart` (0 is Sunday)
+    /**
+     * @param {string} date
+     * @param {number} [weekStart]
+     * @returns {string}
+     */
     static weekFirst(date, weekStart = 0) {
         const day = DatePrompt.toDay(date);
         return DatePrompt.fromDay(day - (new Date(day * 864e5).getUTCDay() - weekStart + 7) % 7);

@@ -1,6 +1,32 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/** @import { MoveStep } from "../commands/moveToProject.js" */
+/**
+ * A note's lines as a change reads them (shown): as written, as the system sees them (a hidden line is
+ * ""), and which are hidden (in the properties, a code block or a comment).
+ * @typedef {{ raw: string[], visible: string[], hidden: boolean[] }} Shown
+ *
+ * A line a change covers (find): its note and line, as written and as seen, whether it's one of the
+ * start's task's lines, the notes its links name (null for a link to no note), and `gone` once a
+ * write has moved it to a project's To Do.
+ * @typedef {{ file: TFile, at: number, raw: string, seen: string, task: boolean, targets: (TFile | null)[], gone?: boolean }} ChangeLine
+ *
+ * What a change covers (find): the notes that move with it, own notes it doesn't move, its lines, and
+ * the notes the start's task's lines link (null from a note).
+ * @typedef {{ notes: TFile[], stays: TFile[], lines: ChangeLine[], own?: TFile[] | null }} Found
+ *
+ * Where a change starts (find): a line ({ file, at }) or a note ({ note }).
+ * @typedef {{ file?: TFile, at?: number, note?: TFile }} ChangeStart
+ *
+ * What a change wrote (write): the notes it moved, how many lines it gave the project, the lines that
+ * went to a To Do, the notes it couldn't write, the lines whose text it changed, and those it gave the project.
+ * @typedef {{ moved: MoveStep[], wrote: number, toDo: ChangeLine[], failed: TFile[], written: Set<ChangeLine>, rehomed: ChangeLine[] }} Written
+ *
+ * How a change ended (run): cancelled, refused, or done, with the project it went to and what it wrote.
+ * @typedef {{ cancelled?: boolean, refused?: boolean, done?: boolean, target?: TFile | null } & Partial<Written>} ChangeResult
+ */
 export default class TaskChange {
     // A project change (rules 8 to 12, OBS-225): the edit you'd make by hand, on every copy a command can
     // find. Every command that changes a line's ⭕ or 🗃️, or moves a note into another project, goes through
@@ -14,6 +40,7 @@ export default class TaskChange {
     // run does all of it. What a line reads is TimeReport.resolve's to say; nothing here works it out again.
 
     // Until Obsidian has indexed the vault at startup, a task's other lines can't be found
+/** @returns {boolean} */
     ready() {
         if (app.metadataCache.initialized !== false) return true;
         new Notice("Obsidian is still indexing the vault; try again in a moment");
@@ -28,6 +55,7 @@ export default class TaskChange {
 
     // Whether a change moves `note` when a line's ⋯ links it: a task note, log or plain note in the system.
     // A project or area note moves only by MoveToProject, as its folder (rule 8).
+/** @param {TFile} note */
     ours(note) {
         const tasks = plainday.TaskIds;
         // A note in a folder of its own name that the cache doesn't know yet may be a project made a moment ago
@@ -88,6 +116,11 @@ export default class TaskChange {
 
     // Whether `note` is a task note: tagged #task, and not a log (tagged #log, or in a `›logs` folder); read from
     // its own text when the cache doesn't know it yet. Wherever it is: the caller asks whether it's in the system.
+/**
+ * @param {TFile | null} note
+ * @param {Map<string, Shown>} [memo]
+ * @returns {Promise<boolean>}
+ */
     async isTaskNote(note, memo = new Map()) {
         const helper = plainday.AddTaskNote;
         if (note?.extension !== "md" || helper.isLogsFolderName(note.parent?.name)) return false;
@@ -133,6 +166,11 @@ export default class TaskChange {
     //   since a deadline is the task's alone and a subtask keeps its own (OBS-229). Its lines then include
     //   those whose ⋯ links a task note no change moves (in Archive or outside the system), which share that
     //   deadline though they can't share a project, and they don't depend on which line it starts from.
+/**
+ * @param {ChangeStart} start
+ * @param {{ note?: TFile | null, family?: boolean }} [options]
+ * @returns {Promise<Found>}
+ */
     async find(start, { note = null, family = true } = {}) {
         const tasks = plainday.TaskIds, T = tasks.constructor, mover = plainday.MoveToProject;
         // Every task ID's lines, one pass over the cache, made the first time a line has an ID: a line with none
@@ -250,6 +288,10 @@ export default class TaskChange {
     // else null. For AddTaskNote on a line that names none. A line in a project's own note names that project,
     // and one in a task note, log or other note names the project the note is filed in: a task and everything
     // under it share one project (Brian, 2026-11-02).
+/**
+ * @param {Found} found
+ * @returns {TFile | null}
+ */
     agreedHome(found) {
         const tr = plainday.TimeReport, index = tr.appIndex();
         const named = new Set();
@@ -347,6 +389,10 @@ export default class TaskChange {
     }
 
     // A day as the notices name it: "9/11", or a week's, month's or year's own name
+/**
+ * @param {TFile} file
+ * @returns {string}
+ */
     dayName(file) {
         const schedule = plainday.Schedule;
         return schedule.isDailyNote(file) ? moment(file.basename, schedule.dailyOpts().format, true).format("M/D") : schedule.labelOf(file);
@@ -492,6 +538,12 @@ export default class TaskChange {
     // when it's open, and takes a daily note's fold snapshot again. Each line it wrote holds what it now says,
     // for whatever writes it next; resolves to { missed: the lines it couldn't find, changed: those whose text
     // it changed }.
+/**
+ * @param {TFile} file
+ * @param {ChangeLine[]} list
+ * @param {(text: string, l: ChangeLine) => string} next
+ * @returns {Promise<{ missed: ChangeLine[], changed: ChangeLine[] }>}
+ */
     async rewrite(file, list, next) {
         let wrote = [];
         await plainday.Schedule.rewrite(file, (text) => {
@@ -619,6 +671,21 @@ export default class TaskChange {
     // the question when no note moves; `adds`, the note `each` links on the task's lines; `start`, AddTaskNote's
     // line, for what `said` names. Resolves to
     // { cancelled }, { refused }, or { done, ... } (write's).
+/**
+ * @param {Found} found
+ * @param {TFile | null} home
+ * @param {{
+ *   leave?: TFile | null,
+ *   stale?: (() => boolean) | null,
+ *   ready?: (() => Promise<boolean>) | null,
+ *   each?: ((text: string, l: ChangeLine) => string) | null,
+ *   here?: string | null,
+ *   name?: string | null,
+ *   adds?: { path: string, basename: string } | null,
+ *   start?: ChangeLine | null,
+ * }} [options]
+ * @returns {Promise<ChangeResult>}
+ */
     async run(found, home, { leave = null, stale = null, ready = null, each = null, here = null, name = null, adds = null, start = null } = {}) {
         const weighed = await this.weigh(found, home, { adds });
         if (weighed.clash) {

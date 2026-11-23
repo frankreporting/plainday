@@ -14,9 +14,10 @@
 //   lint does too, and runs Obsidian's rules that need it (`no-unsupported-api` among them, which
 //   fails a call to an API newer than the manifest's minAppVersion). The class files reach Obsidian
 //   through typed imports (OBS-271), so the rule sees their calls too. typescript-eslint's own type
-//   checks run only on Plainday's own files (plugin/src/main.js, host.js and the three indexes),
-//   at warn, where lint's second run fails on any: the class files have no types, and the scan's
-//   `no-unsafe-*` warnings on them wait until they do. Obsidian's types come from the `obsidian`
+//   checks run on Plainday's own files (plugin/src/main.js, host.js, settingsTab.js and the three
+//   indexes) and on the class files that carry types (TYPED, below), at warn, where lint's second
+//   run fails on any. The other class files have no types yet, and the scan's `no-unsafe-*`
+//   warnings on them wait until they do (OBS-318). Obsidian's types come from the `obsidian`
 //   package, pinned at its newest version, since older types don't know the newer APIs.
 // - Globals: `no-undef` at the recommended level (warn) in plugin/src/, whose files import what
 //   they use; off elsewhere, where the Templater scripts read Templater's globals.
@@ -25,8 +26,9 @@
 //   with --suppressions-location (`npm run lint` and CI do). Not at the root, where ESLint would
 //   read it on its own and the directory's scan stops on it (OBS-268). A new error fails, in any
 //   file; so does an error that's fixed but still in the baseline, until `npm run lint:prune`
-//   takes it out. Warnings never fail in the class files or outside plugin/src/ (`npm run lint`
-//   passes --max-warnings only for Plainday's own code, in a second run).
+//   takes it out. Warnings never fail outside plugin/src/, or in a class file that isn't in TYPED:
+//   `npm run lint` passes --max-warnings only for Plainday's own code and TYPED, in a second run,
+//   which sets LINT_TYPED so this config leaves every other class file out.
 import { defineConfig, globalIgnores } from "eslint/config";
 import obsidianmd from "eslint-plugin-obsidianmd";
 import tseslint from "typescript-eslint";
@@ -34,6 +36,28 @@ import tseslint from "typescript-eslint";
 // typescript-eslint's type-checked rules, at warn, as the scan runs them
 const warn = (rules) => Object.fromEntries(Object.entries(rules).map(([k, v]) => [k, v === "off" || v === 0 ? v : Array.isArray(v) ? ["warn", ...v.slice(1)] : "warn"]));
 const typeChecked = warn(Object.assign({}, ...tseslint.configs.recommendedTypeChecked.map((c) => c.rules ?? {})));
+
+// The class files that carry types (OBS-318), whose warnings fail lint's second run as Plainday's own
+// files' do, so a file cleared of the scan's warnings stays clear. Each of OBS-318's sub-issues adds the
+// files it types; the files that never had a warning are here from the start.
+export const TYPED = [
+    "plugin/src/commands/convertToProject.js",
+    "plugin/src/commands/newArea.js",
+    "plugin/src/commands/newEventLog.js",
+    "plugin/src/commands/newProject.js",
+    "plugin/src/commands/plan.js",
+    "plugin/src/commands/viewErrorLogs.js",
+    "plugin/src/shared/refoldDailyNotes.js",
+    "plugin/src/shared/snapshotDailyNotes.js",
+    "plugin/src/startup/finishLinkedLogs.js",
+    "plugin/src/startup/refoldOnOpen.js",
+    "plugin/src/startup/taskMarkers.js",
+    "plugin/src/startup/timeReportOnStartup.js",
+];
+// In them, the type checks, but for the rules the scan doesn't report (OBS-314): a warning there
+// would fail CI over something the directory never shows
+const SCAN_SKIPS = ["@typescript-eslint/require-await", "@typescript-eslint/unbound-method", "@typescript-eslint/no-floating-promises", "@typescript-eslint/no-base-to-string", "prefer-const", "obsidianmd/prefer-active-doc"];
+const typedRules = { ...typeChecked, ...Object.fromEntries(SCAN_SKIPS.map((r) => [r, "off"])) };
 
 export default defineConfig([
     ...obsidianmd.configs.recommended,
@@ -66,6 +90,13 @@ export default defineConfig([
         files: ["plugin/src/*.js", "plugin/src/*/index.js"],
         rules: typeChecked,
     },
+    {
+        // The class files that carry types: the same, but for the rules the scan doesn't report
+        files: TYPED,
+        rules: typedRules,
+    },
+    // lint's second run reads only the files whose warnings fail: Plainday's own and TYPED
+    ...(process.env.LINT_TYPED ? [globalIgnores(["plugin/src/*/*.js", "!plugin/src/*/index.js", ...TYPED.map((f) => `!${f}`)])] : []),
     globalIgnores([
         "main.js", "**/*.min.js", "node_modules", ".dev-vault", "dist", "build", ".obsidian", "**/.obsidian/**",
         "**/*.test.*", "**/test/**", "**/tests/**", "**/*.cjs", "**/*.mjs", "**/scripts/**", "**/docs/**",

@@ -17,6 +17,9 @@
 //   so there's no import cycle.
 // - Then `export default class <Name>` at the left edge: the file's only export, and nothing else
 //   at the top level.
+// - Types are comments (OBS-318): typedefs above the class, and a type from another module comes in
+//   by `/** @import { TaskLine } from "../shared/taskIds.js" */`, which is a comment to the build and
+//   to scriptOf(), so a class file may name another's types.
 //
 // The build checks the shape of every class file it bundles (plugin/esbuild.config.mjs), and CI
 // checks it too, with each file's folder and index (.github/ci/checkScripts.mjs).

@@ -746,6 +746,10 @@ export default class Invoice {
 
     // `path` with each folder the vault already has spelled as it is there, matched in any case: on a
     // Mac, createFolder refuses a folder that differs from one it has only in case
+    /**
+     * @param {string} path
+     * @returns {string}
+     */
     realFolder(path) {
         let parent = app.vault.getRoot();
         return path.split("/").map((part) => {

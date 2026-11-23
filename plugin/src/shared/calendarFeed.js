@@ -1,6 +1,37 @@
 import { requestUrl } from "obsidian";
 import { calendarWorkerSource } from "../host.js";
 
+/**
+ * A calendar as Plainday's settings have it, as far as a read needs it (its link is never among these).
+ * @typedef {{ id?: string | null, name?: string | null, account?: string | null, address?: string | null }} FeedCalendar
+ *
+ * The days a sync reads (window): the instants an event's start falls between, and the first and last
+ * days as YYYY-MM-DD.
+ * @typedef {{ start: Date, end: Date, windowStart: string, windowEnd: string }} FeedWindow
+ *
+ * An event as calendar-events.json held it, as the worker reads it (plugin/src/worker/): `key` is one
+ * occurrence's, `id` its series' (the feed's UID), `start` and `end` local times with their offsets,
+ * `modified` when the calendar last changed it, in ms.
+ * @typedef {{
+ *   key: string, id: string, calendarId: string | null, calendar: string | null, account: string | null,
+ *   title: string, date: string, start: string, end: string, endsSameDay: boolean, allDay: boolean,
+ *   recurring: boolean, status: string, availability: "free" | "busy", modified: number | null,
+ * }} FeedEvent
+ *
+ * One feed read (load): its own name, its events, those it couldn't read, the keys of those outside the
+ * window, and how long each part took; or why it couldn't be read, with the download's status code.
+ * @typedef {{ name: string, events: FeedEvent[], failed: { uid: string, title: string | null }[], outside: string[], stats: Record<string, number>, problem?: undefined, status?: undefined }} FeedRead
+ * @typedef {{ problem: string, status?: number, name?: undefined, events?: undefined, failed?: undefined, outside?: undefined, stats?: undefined }} FeedProblem
+ *
+ * The whole events file, as the Mac's fetcher wrote it (feed); the sync adds the keys of events each
+ * calendar has outside the window (`outside`).
+ * @typedef {{
+ *   generatedAt: string, source: string, windowStart: string, windowEnd: string,
+ *   calendars: { id: string | null, title: string | null, account: string | null }[],
+ *   events: FeedEvent[], outside?: Set<string>,
+ * }} Feed
+ */
+
 export default class CalendarFeed {
     // Downloads a calendar's private link (Google's secret address, iCloud's public calendar link,
     // Outlook's published calendar) and has it read into the events the calendar sync writes into
@@ -45,6 +76,11 @@ export default class CalendarFeed {
     ];
 
     // Downloads a link and reads it: the read, with how long the download took, or the problem
+    /**
+     * @param {string} link
+     * @param {{ calendar: FeedCalendar, window: FeedWindow }} options
+     * @returns {Promise<FeedRead | FeedProblem>}
+     */
     async load(link, { calendar, window }) {
         const started = performance.now();
         const got = await this.download(link);
@@ -241,6 +277,11 @@ export default class CalendarFeed {
     // The window the Mac's fetcher used: today, through `days` days after it. `start` and `end`
     // are the instants an event's start must fall between (local midnight today, and local
     // midnight after the last day); windowStart and windowEnd are the first and last days.
+    /**
+     * @param {number} days
+     * @param {Date} [now]
+     * @returns {FeedWindow}
+     */
     window(days, now = new Date()) {
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const last = new Date(start.getFullYear(), start.getMonth(), start.getDate() + days);
@@ -250,6 +291,12 @@ export default class CalendarFeed {
 
     // The whole events file, as the Mac's fetcher wrote it, from one or more calendars' reads:
     // [{ calendar: { id, name, account }, events }]
+    /**
+     * @param {{ calendar: FeedCalendar, events: FeedEvent[] }[]} reads
+     * @param {FeedWindow} window
+     * @param {Date} [now]
+     * @returns {Feed}
+     */
     feed(reads, window, now = new Date()) {
         return {
             generatedAt: this.stamp(now),

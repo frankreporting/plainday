@@ -1,6 +1,8 @@
 import { Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { ClassName } from "../host.js" */
+
 export default class TimeReportOnStartup {
     // Startup script, desktop only: refreshes the time reports (see TimeReport) once Obsidian has
     // loaded and finished indexing the vault, so the project notes and timesheets are current after
@@ -12,6 +14,7 @@ export default class TimeReportOnStartup {
     // startup scripts run, so one that's missing is one Plainday couldn't start.
     static READY_WAIT_MS = 5000;
     // Billing reads the invoice notes for the project timesheets (OBS-5)
+    /** @type {ClassName[]} */
     static NEEDS = ["TimeReport", "Schedule", "Billing", "TaskIds"];
 
     async invoke() {
@@ -35,16 +38,17 @@ export default class TimeReportOnStartup {
     }
 
     // Resolves true once the metadata cache is clean, or false after INDEX_WAIT_MS
+    /** @returns {Promise<boolean>} */
     async indexed() {
         const cache = app.metadataCache;
         const clean = typeof cache.onCleanCache === "function"
-            ? new Promise((resolve) => cache.onCleanCache(() => resolve(true)))
+            ? /** @type {Promise<boolean>} */ (new Promise((resolve) => cache.onCleanCache(() => resolve(true))))
             : (async () => {
                 // Fallback if Obsidian drops onCleanCache: poll its own indexing state
                 while (!(cache.initialized && !cache.inProgressTaskCount)) await new Promise((r) => window.setTimeout(r, 250));
                 return true;
             })();
-        const timeout = new Promise((resolve) => window.setTimeout(() => resolve(false), TimeReportOnStartup.INDEX_WAIT_MS));
+        const timeout = /** @type {Promise<boolean>} */ (new Promise((resolve) => window.setTimeout(() => resolve(false), TimeReportOnStartup.INDEX_WAIT_MS)));
         return Promise.race([clean, timeout]);
     }
 

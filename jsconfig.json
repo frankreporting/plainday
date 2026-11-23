@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM"],
     "checkJs": false,
+    "useUnknownInCatchVariables": true,
     "noEmit": true
   },
   "include": ["plugin/src/**/*.js", "Config/Scripts/Templater/**/*.js"]

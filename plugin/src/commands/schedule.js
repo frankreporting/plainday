@@ -1,6 +1,28 @@
 import { getAllTags, MarkdownView, moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { Editor, TFile } from "obsidian" */
+/** @import { Moment } from "moment" */
+/** @import { Fold } from "../host.js" */
+/** @import { DateResult, Unit, WeekRules } from "../shared/datePrompt.js" */
+/** @import { TaskLine } from "../shared/taskIds.js" */
+/**
+ * Where the daily notes are, what names them and what they're made from (dailyOpts).
+ * @typedef {{ folder: string, dateFolders: string, format: string, template: string }} DailyOpts
+ *
+ * Where a date sends a line (destination): its note's path, its unit, its kind ("daily" or a periodic
+ * note's), its short name, the forward mark's link text and link, and the note, made if it isn't there.
+ * @typedef {{ path: string, unit: Unit, kind: string, label: string, linktext: () => string, link: () => string, ensure: () => Promise<TFile> }} Destination
+ *
+ * What moving a task did (moveTask): whether it worked, what Schedule says, whether a line on the
+ * destination was reopened, "moved" or "forwarded" (null when nothing moved), and the note the line came from.
+ * @typedef {{ ok: boolean, notice: string, reopened: boolean, moved: "moved" | "forwarded" | null, from: TFile | null }} MoveResult
+ *
+ * Where the weekly, monthly and yearly notes go (TimeReport.periodPlaces): each one's fixed folder, and
+ * its folders by date ("" for none).
+ * @typedef {Record<"week" | "month" | "year", { folder: string, dateFolders: string }>} PeriodPlaces
+ */
+
 export default class Schedule {
     // A task's link to its own note: ⋯ (OBS-208). Schedule reads a line's note link through AddTaskNote
     // (trailingNote), whose NOTE_LINK reads its ⋯, else its ↗.
@@ -259,11 +281,16 @@ export default class Schedule {
     }
 
     // A task line's name for a notice: its text, without checkbox, links that end it, or ID
+    /** @param {string} line @returns {string} */
     nameOf(line) {
         return plainday.TimeReport.taskText(line.replace(/^\s*[-*+]\s+/, ""));
     }
 
     // The editor's lines, as an array
+    /**
+     * @param {Pick<Editor, "lineCount" | "getLine"> & Partial<Pick<Editor, "getValue">>} editor
+     * @returns {string[]}
+     */
     static editorLines(editor) {
         return editor.getValue ? editor.getValue().split("\n") : Array.from({ length: editor.lineCount() }, (_, n) => editor.getLine(n));
     }
@@ -272,6 +299,11 @@ export default class Schedule {
     // A day is its daily note; a week, a month or a year its periodic note, named and filed the way
     // JumpToDate finds it, and made from its template the same way when it doesn't exist yet. `label`
     // is its short name ("10/2", "Wk of 10/4", "Oct. 2026", "2027"), `link()` the forward mark's link.
+    /**
+     * @param {DateResult} result
+     * @param {WeekRules} rules
+     * @returns {Destination}
+     */
     destination(result, rules) {
         const { unit, m } = result;
         if (unit === "day") {
@@ -314,6 +346,11 @@ export default class Schedule {
 
     // The notes `text` (a line) links, as found from `from`: a moving line's own notes, its source among
     // them, which a lookup reads whatever the cache says (OBS-181)
+    /**
+     * @param {string | null | undefined} text
+     * @param {string} from
+     * @returns {(TFile | null)[]}
+     */
     linkedNotes(text, from) {
         return [...(text ?? "").matchAll(/\[\[([^\]|#]+)/g)].map((m) => app.metadataCache.getFirstLinkpathDest(m[1].trim(), from));
     }
@@ -322,6 +359,11 @@ export default class Schedule {
     // the span that differs so the editor keeps its cursor and folds, else through the vault (OBS-181). Only an
     // editor in editing view: one in reading view still has an editor, but an edit there never reaches the file
     // (as ToggleTimeEntry found, 2026-09-15).
+    /**
+     * @param {TFile} file
+     * @param {(text: string) => string} fn
+     * @returns {Promise<string>}
+     */
     async rewrite(file, fn) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         plainday.TaskIds?.touched?.(file);
@@ -343,6 +385,13 @@ export default class Schedule {
     // line is now (OBS-181). Only a sent line still ending in the task's ID changes, and an older
     // breadcrumb in front of it comes off (TaskIds.setForwardIn). `reopen` sets a finished one to [>]; `mark`
     // ("x" or "-") finishes each one instead (CheckOff, OBS-232).
+    /**
+     * @param {string} id
+     * @param {Destination} dest
+     * @param {{ file: TFile }[]} sources
+     * @param {{ reopen?: boolean, mark?: string | null }} [options]
+     * @returns {Promise<void>}
+     */
     async followForward(id, dest, sources, { reopen = false, mark = null } = {}) {
         const T = plainday.TaskIds.constructor;
         const link = T.forwardLink(dest.linktext(), dest.label, id);
@@ -432,6 +481,10 @@ export default class Schedule {
     // open line in a periodic note; `done`: with none, its done or canceled line there, since scheduling a
     // finished task reopens it (rule 13); `current`: whichever of the two it has; `sources`: its sent lines
     // outside the periodic notes ([>], or done or canceled once finished).
+    /**
+     * @param {TaskLine[]} lines
+     * @returns {{ open: TaskLine | null, done: TaskLine | null, current: TaskLine | null, sources: TaskLine[] }}
+     */
     whereIs(lines) {
         const tasks = plainday.TaskIds;
         const periodic = (l) => tasks.kindOf(l.file) !== "other";
@@ -448,6 +501,10 @@ export default class Schedule {
     // and `lineText`: a source clicked back to [ ] (reschedule). A refusal writes nothing. Returns { ok, notice,
     // reopened, moved, from }: what Schedule says, whether a line on `dest` was reopened, "moved" or "forwarded"
     // (null when nothing moved), and the note the line came from.
+    /**
+     * @param {{ editor?: Editor | null, srcFile?: TFile | null, lineNum?: number | null, lineText?: string | null, id: string, lines: TaskLine[], restore?: number | null, named?: string | null, dest: Destination }} move
+     * @returns {Promise<MoveResult>}
+     */
     async moveTask({ editor = null, srcFile = null, lineNum = null, lineText = null, id, lines, restore = null, named = null, dest }) {
         const tasks = plainday.TaskIds, T = tasks.constructor;
         const { open, done, current, sources } = this.whereIs(lines);
@@ -549,6 +606,7 @@ export default class Schedule {
 
     // Where `file`, a periodic note, puts a task, as destination() gives it for that day, week, month or year:
     // how CheckOff moves a task onto a note it has (OBS-232). Null for any other note.
+    /** @param {TFile} file @returns {Destination | null} */
     destinationOf(file) {
         const rules = plainday.DatePrompt.weekRules();
         if (this.isDailyNote(file)) return this.destination(plainday.DatePrompt.result(moment(file.basename, this.dailyOpts().format, true).format("YYYY-MM-DD"), "day"), rules);
@@ -595,6 +653,7 @@ export default class Schedule {
     }
 
     // Whether the task has time logged under any of `lines` (its lines, from gather) in a daily note
+    /** @param {TaskLine[]} lines @returns {Promise<boolean>} */
     async started(lines) {
         for (const l of lines) {
             if (!this.isDailyNote(l.file)) continue;
@@ -701,6 +760,12 @@ export default class Schedule {
     // The index in `lines` of the checklist line at the top of its nest ending in block ID `id`, with its box
     // one of `boxes` (" /" open, ">" forwarded; any box when omitted), or -1. A nested line is a sub-task, and
     // its ID counts for nothing (rule 5).
+    /**
+     * @param {string[]} lines
+     * @param {string} id
+     * @param {string | null} [boxes]
+     * @returns {number}
+     */
     static taskLine(lines, id, boxes = null) {
         const T = plainday.TaskIds.constructor, want = id.toLowerCase();
         return lines.findIndex((l, i) => {
@@ -723,6 +788,7 @@ export default class Schedule {
 
     // The forward date to task `id`'s line in `file`, a periodic note, as Schedule writes one for a date it's given:
     // by name, or by path when another note has it; "10/8", "Wk of 10/4", "Oct. 2026" or "2027"
+    /** @param {TFile} file @param {string} id @returns {string} */
     forwardTo(file, id) {
         const label = this.isDailyNote(file) ? moment(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
         const linktext = plainday.AddTaskNote.linktextFor(file, app.vault.getMarkdownFiles().map((f) => f.path));
@@ -730,6 +796,7 @@ export default class Schedule {
     }
 
     // Where a periodic note puts a task, as a prompt says it: "Thu 10/8", "Wk of 10/4", "Oct. 2026", "2027"
+    /** @param {TFile} file @returns {string} */
     labelOf(file) {
         if (this.isDailyNote(file)) return moment(file.basename, this.dailyOpts().format, true).format("ddd M/D");
         const unit = this.periodOf(file);
@@ -762,6 +829,7 @@ export default class Schedule {
     // the fixed folder (the setting's, then the format's leading [literal] folders), `dateFolders` the
     // format's folders by date ("YYYY/MM", "" for none) and `format` the name alone, which gives the
     // note's date.
+    /** @returns {DailyOpts} */
     dailyOpts() {
         const nn = plainday.Settings?.periodicSource?.() === "notebook-navigator" ? plainday.Settings.navigatorNote("day") : null;
         if (nn) return { folder: nn.folder, dateFolders: nn.dateFolders, format: nn.format || "YYYY-MM-DD", template: nn.template };
@@ -784,6 +852,7 @@ export default class Schedule {
         return [folder, dateFolders ? m.format(dateFolders) : ""].filter(Boolean).join("/");
     }
 
+    /** @param {Moment} m @returns {string} */
     dailyNotePath(m) {
         const opts = this.dailyOpts();
         const folder = Schedule.folderFor(opts, m);
@@ -792,6 +861,7 @@ export default class Schedule {
 
     // A daily note is named by the format and sits in the folder its own date gives (OBS-310): a note
     // of that name anywhere else isn't one
+    /** @param {TFile} file @returns {boolean} */
     isDailyNote(file) {
         const opts = this.dailyOpts();
         const parent = file.parent?.path ?? "/";
@@ -805,6 +875,12 @@ export default class Schedule {
     // by its pattern (DatePrompt.weekRules: "2026-09", not "2026-09-07") and lives in the folder its own
     // date gives (TimeReport.periodPlaces, OBS-310), so a note elsewhere with such a name isn't one. A
     // report passes the two in, read when it began, so the whole run uses the same ones.
+    /**
+     * @param {TFile} file
+     * @param {WeekRules} [rules]
+     * @param {PeriodPlaces} [places]
+     * @returns {"week" | "month" | "year" | null}
+     */
     periodOf(file, rules = plainday.DatePrompt.weekRules(), places = plainday.TimeReport.periodPlaces()) {
         // The top of the vault is "/" to Obsidian and "" to the settings
         const folder = !file.parent || file.parent.path === "/" ? "" : file.parent.path;
@@ -859,6 +935,7 @@ export default class Schedule {
 
     // The day's note at `path` (dailyNotePath), made if it isn't there, as every periodic note is made
     // (PeriodicNotes.ensure). EventLog calls it for a log's day.
+    /** @param {string} path @returns {Promise<TFile>} */
     async ensureDailyNote(path) {
         const file = app.vault.getFileByPath(path);
         if (file) return file;
@@ -924,6 +1001,7 @@ export default class Schedule {
     }
 
     // Every list item that has children is foldable; headings never get an entry
+    /** @param {string} content @returns {Fold[]} */
     foldableRanges(content) {
         const lines = content.split("\n");
         const ranges = [];

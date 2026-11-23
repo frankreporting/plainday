@@ -1,6 +1,16 @@
 import { Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TAbstractFile, TFile } from "obsidian" */
+/**
+ * One thing to move (itemFor): what was picked (a note, or a project or area's folder), the note that
+ * says what it is, its path and name, its label for notices, whether it moves as its folder, whether
+ * it's a project or area, whether it's a log, the project or area it's in now and that one's folder.
+ * @typedef {{ file: TAbstractFile, note: TFile, path: string, name: string, label: string, folder: boolean, home: boolean, log: boolean, from: TFile | null, homeFolder: string | null }} MoveItem
+ *
+ * Where a thing goes (plan): the folder it goes into, its path there, and why it doesn't move, or null.
+ * @typedef {MoveItem & { into: string, to: string, skip: "inside" | "loop" | "here" | "clash" | null }} MoveStep
+ */
 export default class MoveToProject {
     // Moves the note you're on into a project or area picked from the menu AddProjectLink uses, or, when
     // Notebook Navigator's pane has the focus, the notes selected there (rule 8):
@@ -48,6 +58,10 @@ export default class MoveToProject {
     }
 
     // "invoice" or "timesheet" for a note the time report writes and reads wherever it is, else null
+/**
+ * @param {TFile} file
+ * @returns {"invoice" | "timesheet" | null}
+ */
     billingNote(file) {
         const cache = app.metadataCache.getFileCache(file);
         const tags = cache ? plainday.AddTaskNote.tagsOf(cache) : [];
@@ -56,6 +70,11 @@ export default class MoveToProject {
 
     // Whether any of `files` is something this command moves, for the file menus. A link's menu
     // offers it for notes only: a slip there shouldn't be one pick away from moving a whole project.
+/**
+ * @param {TAbstractFile[]} files
+ * @param {{ homes?: boolean }} [options]
+ * @returns {boolean}
+ */
     movable(files, { homes = true } = {}) {
         return files.some((f) => {
             const item = this.itemFor(f);
@@ -65,6 +84,10 @@ export default class MoveToProject {
 
     // Moves `files` (notes, and projects or areas as their folders) into a project or area picked
     // from the menu
+/**
+ * @param {TAbstractFile[]} files
+ * @returns {Promise<void>}
+ */
     async move(files) {
         const helper = plainday.AddTaskNote;
         if (!helper) return;
@@ -147,6 +170,10 @@ export default class MoveToProject {
     //   { file, note (a project or area's own note), path, name, label, folder: it moves as its
     //     folder, home: it's a project or area, log, from: the project or area it's in now (for a
     //     project or area, the one above it), homeFolder: that one's folder }
+/**
+ * @param {TAbstractFile} f
+ * @returns {MoveItem | null}
+ */
     itemFor(f) {
         const helper = plainday.AddTaskNote;
         if (f.children) {
@@ -174,6 +201,7 @@ export default class MoveToProject {
 
     // A project or area's folder note (Folder/Folder.md, tagged exactly #project or #area),
     // finished or not: moving it moves its folder
+/** @param {TFile} file */
     isFolderNote(file) {
         return file.extension === "md" && !!file.parent && file.basename === file.parent.name && this.isHomeNote(file);
     }
@@ -188,6 +216,7 @@ export default class MoveToProject {
         return folders.some((f) => path.startsWith(`${f}/`));
     }
 
+/** @param {string} path */
     exists(path) {
         return !!(app.vault.getAbstractFileByPathInsensitive?.(path) ?? app.vault.getAbstractFileByPath(path));
     }
@@ -201,6 +230,13 @@ export default class MoveToProject {
     //     `›logs`, a folder already in that folder, anything already at the very path);
     //   "clash": something of that name is there already (`exists`, any case), or another item in
     //     this move is going there.
+/**
+ * @param {MoveItem[]} items
+ * @param {string} into
+ * @param {(path: string) => boolean} exists
+ * @param {string} [logs]
+ * @returns {MoveStep[]}
+ */
     plan(items, into, exists, logs = plainday.AddTaskNote.logsFolderIn(into)) {
         const folders = items.filter((i) => i.folder).map((i) => i.path);
         const parentOf = (path) => path.slice(0, Math.max(path.lastIndexOf("/"), 0));
@@ -246,6 +282,10 @@ export default class MoveToProject {
     }
 
     // The notes that link `note`, other than itself
+/**
+ * @param {TFile} note
+ * @returns {TFile[]}
+ */
     linkingNotes(note) {
         return Object.entries(app.metadataCache.resolvedLinks ?? {})
             .filter(([path, links]) => path !== note.path && links?.[note.path])
@@ -254,6 +294,10 @@ export default class MoveToProject {
     }
 
     // "2 lines now link ⭕ Pinecrest Library Brochure"
+/**
+ * @param {number} count
+ * @param {TFile} home
+ */
     linesNow(count, home) {
         const mark = plainday.AddTaskNote.isArea(home) ? "🗃️" : "⭕";
         return `${count === 1 ? "A line now links" : `${count} lines now link`} ${mark} ${home.basename}`;

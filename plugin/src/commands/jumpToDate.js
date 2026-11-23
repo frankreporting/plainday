@@ -1,6 +1,14 @@
 import { Modal, moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/** @import { Period, WeekRules } from "../shared/datePrompt.js" */
+/**
+ * The note a date opens (target): where PeriodicNotes puts it, its kind, the date in words, and the
+ * date read.
+ * @typedef {{ path: string, name: string, kind: string, when: string, result: Period }} JumpTarget
+ */
+
 export default class JumpToDate {
     // Set on this device when "Don't ask again" is ticked; the prompt offers to undo it
     static SKIP_KEY = "obsidian-pm-jump-create-without-asking";
@@ -70,6 +78,10 @@ export default class JumpToDate {
 
     // The locale's month names, full and short (a locale can keep separate forms for "in a date" and
     // "on its own"; the ones on their own are what you'd type)
+    /**
+     * @param {WeekRules} rules
+     * @returns {{ months: string[], short: string[] }}
+     */
     monthNames(rules) {
         const data = moment.localeData(rules.locale);
         const list = (names) => (Array.isArray(names) ? names : names?.standalone ?? names?.format ?? []);
@@ -79,6 +91,12 @@ export default class JumpToDate {
     // A week or a month in words, or a periodic note's own name as typed ("2026w41", "2026-10",
     // "2027"): { date, unit }, or null. With `ahead` (Schedule), words without a year for a week or a
     // month that's over mean next year's: "jan" in October is the coming January.
+    /**
+     * @param {string} text
+     * @param {WeekRules} rules
+     * @param {{ ahead?: boolean }} [options]
+     * @returns {Period | null}
+     */
     fromName(text, rules, { ahead = false } = {}) {
         const words = JumpToDate.periodWords(text, { ...this.monthNames(rules), year: moment().year() });
         if (words) {
@@ -112,17 +130,31 @@ export default class JumpToDate {
     }
 
     // Whether the weekly notes count ISO weeks, Monday first: their pattern uses GGGG or WW outside [brackets]
+    /**
+     * @param {WeekRules} rules
+     * @returns {boolean}
+     */
     isoWeeks(rules) {
         return /[GW]/.test(rules.format.week.replace(/\[[^\]]*\]/g, ""));
     }
 
     // A week's, month's or year's note name, in the pattern's spelling and the user's locale
+    /**
+     * @param {{ date: string, unit: "week" | "month" | "year" }} period
+     * @param {WeekRules} rules
+     * @returns {string}
+     */
     periodName({ date, unit }, rules) {
         return moment(date, "YYYY-MM-DD", true).locale(rules.locale).format(rules.format[unit]);
     }
 
     // The note a date opens: { path, name, kind, when, result }, where PeriodicNotes puts it. CalNav calls
     // this and create() from outside (RAY-68), so both keep their arguments and results.
+    /**
+     * @param {Period} result
+     * @param {WeekRules} rules
+     * @returns {JumpTarget}
+     */
     target(result, rules) {
         const { unit, date } = result;
         const when = plainday.DatePrompt.spell(result, rules.weekStart);
@@ -141,6 +173,11 @@ export default class JumpToDate {
     // (OBS-283), else Notebook Navigator's for that calendar, else Weekly Note, Monthly Note or Yearly
     // Note in Templater's template folder; null when none is there. `asBefore` leaves the setting out,
     // for the panel to show what blank means.
+    /**
+     * @param {"week" | "month" | "year"} unit
+     * @param {{ asBefore?: boolean }} [options]
+     * @returns {TFile | null}
+     */
     templateFor(unit, { asBefore = false } = {}) {
         const settings = plainday.Settings;
         // Notebook Navigator's calendar as the source: its own template for that calendar, and nothing

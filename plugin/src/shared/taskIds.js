@@ -1,6 +1,37 @@
 import { moment, Notice } from "obsidian";
 import { app, plainday } from "../host.js";
 
+/** @import { TFile } from "obsidian" */
+/** @import { Period } from "./datePrompt.js" */
+/**
+ * A task's checklist line as a command reads it now (gather): its note, its line from 0, its
+ * checkbox's status (" ", "x", ">", …) and its text.
+ * @typedef {{ file: TFile, line: number, task: string, text: string }} TaskLine
+ *
+ * A list item with a block ID as Obsidian's cache has it (map, linesOf): `task` is undefined for one
+ * that isn't a checklist line.
+ * @typedef {{ file: TFile, line: number, task: string | undefined }} CachedLine
+ *
+ * A reader of periodic note names (PeriodicNotes.reader): a link's name, or its path's last part, as
+ * the period it names, or null for any other note.
+ * @typedef {(linktext: string) => Period | null} NameReader
+ *
+ * A forward date in the run that ends a line (forwardOf): the link as written, the note it names, the
+ * task's ID in it (null when it has none) and its label.
+ * @typedef {{ raw: string, linkpath: string, id: string | null, label: string }} ForwardDate
+ *
+ * A note the task check reads (check): its path, its kind as kindOf says, and its text.
+ * @typedef {{ path: string, kind: string, text: string }} CheckedNote
+ *
+ * A line as the check reports it (where), and what the check found: the rule ("project", "open",
+ * "finished", "forward", "notes", "ownNotes", "twice" or "trailing"), the task's ID, lowercased, its
+ * lines, and the rule's detail: the projects the lines count toward ("project"), which open line a
+ * click turned from [>] ("open", -1 for none), whether a line is open ("finished"), and where the
+ * forward date points and whether it's missing ("forward").
+ * @typedef {{ path: string, line: number, text: string }} CheckedLine
+ * @typedef {{ rule: string, id: string, lines: CheckedLine[], detail: { projects?: (string | null)[], clicked?: number, open?: boolean, to?: string | null, missing?: boolean } }} TaskProblem
+ */
+
 export default class TaskIds {
     // Task identity (OBS-181). Every line of a task carries the same block ID at its end, `^k3x9m2`.
     // Obsidian only needs a block ID to be unique within its note, so one ID on lines in several notes
@@ -69,17 +100,20 @@ export default class TaskIds {
     }
 
     // The block ID a line ends with, or null
+    /** @param {string} line @returns {string | null} */
     static idOf(line) {
         return line.match(TaskIds.ID_AT_END)?.[1] ?? null;
     }
 
     // `line` ending in ` ^id`, unless it ends in an ID already: that one is the task's, so a link made
     // with Copy link to block keeps working
+    /** @param {string} line @param {string} id @returns {string} */
     static withId(line, id) {
         return TaskIds.idOf(line) ? line : `${line.replace(/\s+$/, "")} ^${id}`;
     }
 
     // `line` without its block ID at the end
+    /** @param {string} line @returns {string} */
     static withoutId(line) {
         return line.replace(TaskIds.ID_AT_END, "");
     }
@@ -96,6 +130,7 @@ export default class TaskIds {
     // [[2026-10-08#^k3x9m2|10/8]]: `linktext` is the periodic note's name, or its path when another
     // note shares the name; `label` is "10/8", "Wk of 10/4", "Oct. 2026" or "2027". Just the date: the
     // [>] box already says it's where the task went, and a link to a line can't be taken for a 🚩.
+    /** @param {string} linktext @param {string} label @param {string} id @returns {string} */
     static forwardLink(linktext, label, id) {
         return `[[${linktext}#^${id}|${label}]]`;
     }
@@ -103,6 +138,11 @@ export default class TaskIds {
     // The run of links that ends a line, its ID set aside: { text, items }, the text before the run
     // with no trailing spaces, and the run's links and marks in line order. `read` reads a forward date's
     // name (runItem), here and in every helper below that takes one.
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {{ text: string, items: string[] }}
+     */
     static splitRun(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
         const items = [];
@@ -115,6 +155,11 @@ export default class TaskIds {
     }
 
     // The forward date in the run that ends a line: { raw, linkpath, id, label }, or null
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {ForwardDate | null}
+     */
     static forwardOf(line, read) {
         for (const raw of TaskIds.splitRun(line, read).items) {
             const m = raw.match(TaskIds.FORWARD);
@@ -125,6 +170,12 @@ export default class TaskIds {
 
     // `line` with `link` as its forward date (null: none), in the spec's order: in place of one it has, after
     // any 🚩, before the ⭕, 🗃️ and note link that end the line, the ID last
+    /**
+     * @param {string} line
+     * @param {string | null} link
+     * @param {NameReader} [read]
+     * @returns {string}
+     */
     static withForward(line, link, read) {
         const id = TaskIds.idOf(line);
         const { text, items } = TaskIds.splitRun(line, read);
@@ -138,6 +189,11 @@ export default class TaskIds {
 
     // A line sent before OBS-181, its date in front: { linkpath, label, line } (the line without the
     // breadcrumb), or null
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {{ linkpath: string, label: string, line: string } | null}
+     */
     static oldForward(line, read) {
         // A line with a forward date is in the new shape already: a date at its start is its title's
         if (TaskIds.forwardOf(line, read)) return null;
@@ -147,6 +203,11 @@ export default class TaskIds {
     }
 
     // Whether the run that ends a line has a ⋯, wherever it links
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {boolean}
+     */
     static hasOwnNote(line, read) {
         return TaskIds.splitRun(line, read).items.some((i) => /\|\s*⋯\s*\]\]$/u.test(i));
     }
@@ -154,6 +215,11 @@ export default class TaskIds {
     // A task's title, for matching lines written before IDs: its text before the links that end it, any
     // link in it read as its alias (or name), without the checkbox, a breadcrumb, the ID, case or extra
     // spaces
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {string}
+     */
     static title(line, read) {
         const body = (TaskIds.oldForward(line, read)?.line ?? line).replace(TaskIds.CHECKBOX, "");
         return TaskIds.splitRun(body, read).text
@@ -164,6 +230,7 @@ export default class TaskIds {
     // Whether line `i` of `lines` is at the top of its nest (rule 5): a line nested under a checklist line
     // is a sub-task, and nothing on it counts, its ID included. TimeReport.nestTop decides, plain bullets
     // skipped; loaded alone (the statics in tests), a line with no indent.
+    /** @param {string[]} lines @param {number} i @returns {boolean} */
     static isTop(lines, i) {
         const tr = plainday?.TimeReport;
         return tr ? tr.nestTop((n) => lines[n], i) === i : !/^\s/.test(lines[i]);
@@ -173,6 +240,13 @@ export default class TaskIds {
     // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
     // too, since the task is open elsewhere now (rule 13); with `mark` ("x" or "-"), each one is finished
     // instead, since the task was (CheckOff, OBS-232). { text, changed }. Line endings are kept.
+    /**
+     * @param {string} text
+     * @param {string} id
+     * @param {string | null} link
+     * @param {{ reopen?: boolean, mark?: string | null, read?: NameReader }} [options]
+     * @returns {{ text: string, changed: boolean }}
+     */
     static setForwardIn(text, id, link, { reopen = false, mark = null, read } = {}) {
         let changed = false;
         const all = text.split("\n");
@@ -194,6 +268,7 @@ export default class TaskIds {
 
     // `text` with each top-level done or canceled checklist line ending in `id` set to [>], nothing else on
     // it touched: the task is open elsewhere now (rule 13). { text, changed }
+    /** @param {string} text @param {string} id @returns {{ text: string, changed: boolean }} */
     static reopenIn(text, id) {
         let changed = false;
         const all = text.split("\n");
@@ -211,6 +286,7 @@ export default class TaskIds {
     static RECENT_MS = 10000;
 
     // Marks `file` as just written by a command (Schedule calls it for every note it writes)
+    /** @param {TFile} file */
     touched(file) {
         const now = Date.now();
         (this.recent ??= new Map()).set(file.path, now);
@@ -225,23 +301,27 @@ export default class TaskIds {
     }
 
     // Whether `path` is in Projects or the Inbox, or in the archive
+    /** @param {string | null | undefined} path @returns {boolean} */
     inWorkFolders(path) {
         const { projects, inbox } = this.folders();
         return !!path && (path.startsWith(`${projects}/`) || path.startsWith(`${inbox}/`));
     }
 
+    /** @param {string | null | undefined} path @returns {boolean} */
     inArchive(path) {
         return !!path && path.startsWith(`${this.folders().archive}/`);
     }
 
     // Whether a note is in the system: a daily, weekly, monthly or yearly note, or a note in Projects or
     // the Inbox (rule 12). A line anywhere else is a plain checklist line: no command works on it.
+    /** @param {TFile | null | undefined} file @returns {boolean} */
     inSystem(file) {
         return !!file && (this.inWorkFolders(file.path) || this.kindOf(file) !== "other");
     }
 
     // What a command that works on a line says when its note is outside the system, and does nothing
     // (rule 12), naming the folders as they're set: a note in the archive is in it (OBS-283)
+    /** @param {TFile} file @returns {string} */
     outside(file) {
         const { projects, archive } = this.folders();
         if (this.inArchive(file.path)) return `${file.basename} is in ${archive}, where no command works, so nothing changed`;
@@ -249,6 +329,7 @@ export default class TaskIds {
     }
 
     // Whether a command may work on a line of `file`; when not, it says so (rule 12, OBS-208)
+    /** @param {TFile} file @returns {boolean} */
     works(file) {
         if (this.inSystem(file)) return true;
         new Notice(this.outside(file));
@@ -256,6 +337,7 @@ export default class TaskIds {
     }
 
     // A note no command finds a task's lines in: one outside the system (OBS-208)
+    /** @param {TFile} file @returns {boolean} */
     ignored(file) {
         return !this.inSystem(file);
     }
@@ -288,6 +370,7 @@ export default class TaskIds {
     // Every task ID's lines in the notes in the system, in one pass over Obsidian's cache: Map from the ID,
     // lowercased, to its lines, as linesOf gives them. A command builds it once and looks every ID up there
     // (rule 19). A note's place is asked only of a note holding an ID, so a vault of many notes costs no more.
+    /** @returns {Map<string, CachedLine[]>} */
     map() {
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
@@ -304,6 +387,7 @@ export default class TaskIds {
 
     // The notes the cache can't be trusted about: every note open in an editor, and those a command wrote a
     // moment ago, which it may not have read again yet
+    /** @returns {TFile[]} */
     nowFiles() {
         const files = new Map();
         for (const [path, at] of this.recent ?? []) {
@@ -320,6 +404,11 @@ export default class TaskIds {
     // Several tasks' checklist lines as they are now, top-level lines only: Map from each of `ids` that is a
     // task's (isTask) to its lines, as gather gives them. `map` is the command's (map()). A block ID of your
     // own on lines that were never sent joins nothing.
+    /**
+     * @param {string[]} ids
+     * @param {Map<string, CachedLine[]>} [map]
+     * @returns {Promise<Map<string, TaskLine[]>>}
+     */
     async gatherMany(ids, map = this.map()) {
         const want = new Set(ids.map((id) => id.toLowerCase()));
         const files = new Map();
@@ -344,6 +433,11 @@ export default class TaskIds {
 
     // Whether lines sharing a block ID are a task's: one of them is sent, a [>] line or one with a forward
     // date. Lines that only share a block ID of your own were never one task (rule 2).
+    /**
+     * @param {{ task?: string | null, text: string }[]} lines
+     * @param {NameReader} [read]
+     * @returns {boolean}
+     */
     static isTask(lines, read) {
         return lines.some((l) => l.task === ">" || TaskIds.forwardOf(l.text, read));
     }
@@ -351,6 +445,7 @@ export default class TaskIds {
     // A note's text as it is now: from its editor when it's open in one in editing view (ahead of the saved
     // file and the cache while you type), else as the vault has it. Reading view writes the file itself and its
     // editor catches up only later (Schedule.rewrite writes the same way).
+    /** @param {TFile} file @returns {Promise<string>} */
     async readNow(file) {
         const view = app.workspace.getLeavesOfType("markdown").map((l) => l.view).find((v) => v?.file?.path === file.path && v.editor && (v.getMode?.() ?? "source") === "source");
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
@@ -360,6 +455,11 @@ export default class TaskIds {
     // The notes the cache names for `id`, every note open in an editor, and `also` (files a caller knows of,
     // such as the note a forward date points at), each read through readNow, so a line written a moment
     // ago isn't missed.
+    /**
+     * @param {string} id
+     * @param {(TFile | null | undefined)[]} [also]
+     * @returns {Promise<TaskLine[]>}
+     */
     async gather(id, also = []) {
         const want = id.toLowerCase();
         const files = new Map();
@@ -382,6 +482,7 @@ export default class TaskIds {
     // Every list item with a block ID: Map from the ID, lowercased, to its lines, as linesOf gives them.
     // For the task checks, which also read `Archive`, as before OBS-208, since an archived project's
     // Problems are listed (Brian, 2026-10-28); no command searches there.
+    /** @returns {Map<string, CachedLine[]>} */
     allIds() {
         const out = new Map();
         for (const file of app.vault.getMarkdownFiles()) {
@@ -421,6 +522,18 @@ export default class TaskIds {
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
     // notes), "ownNotes" (two different ⋯ notes), "twice" (an ID twice in a note), "trailing" (text after
     // a task's ID, which Obsidian then doesn't read).
+    /**
+     * @template {CheckedNote} N
+     * @param {N[]} notes
+     * @param {{
+     *   projectOf: (note: N, i: number, lines: string[]) => string | null,
+     *   compared?: (note: N) => boolean,
+     *   resolve: (linkpath: string, fromPath: string) => string | null,
+     *   ownNote?: (text: string, path: string) => string[],
+     *   read?: NameReader,
+     * }} options
+     * @returns {TaskProblem[]}
+     */
     static check(notes, { projectOf, compared = () => true, resolve, ownNote = () => [], read }) {
         const found = [], out = [], twice = [];
         const topLevel = (text) => TaskIds.CHECKBOX.test(text) && !/^\s/.test(text);
@@ -506,6 +619,11 @@ export default class TaskIds {
 
     // The old-mark links in the run that ends `line`: [{ from, to, target }] in line order, `target`
     // the link's text before its `|`
+    /**
+     * @param {string} line
+     * @param {NameReader} [read]
+     * @returns {{ from: number, to: number, target: string }[]}
+     */
     static oldMarks(line, read) {
         const bare = TaskIds.withoutId(line).replace(/\s+$/, "");
         const out = [];
@@ -654,6 +772,7 @@ export default class TaskIds {
 
     // "day", "week", "month" or "year" for a periodic note (Schedule's own test), else "other": a note a
     // task is sent from
+    /** @param {TFile} file @returns {"day" | "week" | "month" | "year" | "other"} */
     kindOf(file) {
         const schedule = plainday.Schedule;
         return schedule.isDailyNote(file) ? "day" : schedule.periodOf(file) ?? "other";
