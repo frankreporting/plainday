@@ -825,20 +825,19 @@ Asks for a date (see *Typing a date*) and opens its note in the pane you're in; 
 Asks for a name and makes the project: a folder of that name at the top of the Projects folder (*Settings → Plainday → Folders*), with the project's note inside it, named like the folder, then opens the note with the cursor below its properties. *Move to project* files it under an area or another project afterwards.
 
 ```
-Harbor Mural 2026-10-01 2026-11-15   →   Projects/Harbor Mural/Harbor Mural.md
-                                          aliases: ⭕.Harbor Mural, status: To Do,
-                                          start: 2026-10-01, due: 2026-11-15
+Harbor Mural   →   Projects/Harbor Mural/Harbor Mural.md
+                    aliases: ⭕.Harbor Mural, tags: project, status: To Do
 ```
 
-- **Dates in the name**, as `YYYY-MM-DD` (the box says so), become its `start` (the first) and `due` (the second), and come off the name.
-- **What it gets:** the properties under *Areas, projects and task notes*, in one write, then the Project template if there is one (see *Note templates*). A template's values fill or replace Plainday's (your own `rate_type` or `status`), but not the name's dates, and Plainday's alias stays first. A template's `id` goes first, as in every note. A cursor marker the template leaves (`tp.file.cursor`) is where the cursor goes.
-- **A name that can't be used** keeps the box open, with a line saying why: another note has the name, anywhere in the vault (the new note would take over that note's links, and the time on them); a folder of that name is already in the Projects folder (it may have a note of its own); or it holds a character a file or a link can't (`\ / : * ? " < > | # ^ [ ]`). Change it and press Enter; Esc makes nothing.
+- **The name is only its name:** a date typed in it stays part of it, and `start` and `due` start empty, to fill in on the note.
+- **What it gets:** the properties under *Areas, projects and task notes*, in one write, then the Project template if there is one (see *Note templates*). A template's values fill or replace Plainday's (your own `rate_type` or `status`), and Plainday's alias stays first. A template's `id` goes first, as in every note. A cursor marker the template leaves (`tp.file.cursor`) is where the cursor goes.
+- **A name that can't be used** keeps the box open, with a line saying why: another note has the name, anywhere in the vault (the new note would take over that note's links, and the time on them); a folder of that name is already in the Projects folder (it may have a note of its own); it's how daily, weekly, monthly or yearly notes are named (`2026-10-01`), so links to that note would be mixed up; or it holds a character a file or a link can't (`\ / : * ? " < > | # ^ [ ]`). Change it and press Enter; Esc makes nothing.
 - **Beside a folder-note plugin:** the note sits where Notebook Navigator and the Folder Notes plugin look for a folder's note by default. When Folder Notes is set to make a note for every new folder, it makes this one first, and Plainday writes its properties into it, keeping what's there. A plugin set to keep folder notes elsewhere doesn't take Plainday's note for the folder's.
 - It replaces typing `!project …` as a new note's title.
 
 ### New area
 
-The same for an area: `Studio` makes `Projects/Studio/Studio.md`, with `aliases: 🗃️.Studio` and `tags: area`, then the Area template. Dates stay in an area's name. It replaces typing `!area …` as a title, or clicking a `🗃️.Name` link to an area not made yet.
+The same for an area: `Studio` makes `Projects/Studio/Studio.md`, with `aliases: 🗃️.Studio` and `tags: area`, then the Area template. It replaces typing `!area …` as a title, or clicking a `🗃️.Name` link to an area not made yet.
 
 ### Convert to project
 
@@ -913,7 +912,7 @@ What each kind of note Plainday makes is made from. The periodic notes' template
 	- **with Templater off,** a template with no Templater code goes in with `{{title}}`, `{{date}}` and `{{time}}` filled in, as Obsidian's own Templates plugin fills them; one with Templater code is left out, with a notice;
 	- **with none** (blank, or a note that isn't in the vault, which the row says), the note has Plainday's properties only.
 - **Logs:** what a new event log gets after Plainday's properties (an agenda, headings) — `Config/Templates/Log.md` as it comes, which is empty. It's optional, and runs the way the Tasks template does: through Templater when it's on, filled in without it, left out when it holds Templater code and Templater is off. A template that isn't in the vault says so, and logs are made without one.
-- **Projects** and **Areas:** what *New project*, *New area* and *Convert to project* add once Plainday has made the note — `Config/Templates/Project.md` and `Area.md` as they come, which write only an `id`. They're optional, and run the way the Tasks template does. A template's values fill or replace Plainday's, but not the dates in the name, and Plainday's alias stays first (see *New project*).
+- **Projects** and **Areas:** what *New project*, *New area* and *Convert to project* add once Plainday has made the note — `Config/Templates/Project.md` and `Area.md` as they come, which write only an `id`. They're optional, and run the way the Tasks template does. A template's values fill or replace Plainday's, and Plainday's alias stays first (see *New project*).
 - **A property Plainday writes itself:** when a template sets one that Plainday's own command writes into that kind of note, a line under it says so: "Your template also sets `date`; Plainday writes its own." Plainday's value wins when the note is made, and a list property (`tags`, `aliases`) is combined with the template's, not replaced. Plainday writes an alias into weekly and monthly notes, a list, so their rows never warn; a task note's row warns about `parent` and `due`, a log's about `parent`, `date`, `time`, `endTime` and `who`. The Projects and Areas rows never warn: their templates may set any of Plainday's other properties.
 
 A settings file that doesn't read (a write cut off, a sync conflict) is left as it is, with a notice: Plainday uses the defaults until you change a setting or paste your settings again, and meanwhile the time report leaves every table's freeze as it is.

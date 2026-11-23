@@ -144,8 +144,8 @@ const NOTES = {
 };
 const TPL = "Config/Templates/Project.md";
 // A new project as Plainday writes it: the old Project template's properties, in its order, without `id`
-const projectText = ({ name, start = "", due = "", body = "" }) => [
-    "---", "aliases:", `  - "⭕.${name}"`, "tags:", "  - project", "status: To Do", "parent:", start ? `start: ${start}` : "start:", due ? `due: ${due}` : "due:",
+const projectText = ({ name, body = "" }) => [
+    "---", "aliases:", `  - "⭕.${name}"`, "tags:", "  - project", "status: To Do", "parent:", "start:", "due:",
     "who:", "client:", "bill_to:", "rate:", "rate_type:", "max_hours:", "include_subprojects: false", "---", body,
 ].join("\n");
 const props = (text) => YAML.parseYaml(YAML.getFrontMatterInfo(text).frontmatter);
@@ -160,21 +160,21 @@ const withTemplater = (v, run) => {
     return ran;
 };
 
-test("make: a project in a folder of its name at the top of Projects, its note inside, Plainday's properties in one write, its dates from its name", async () => {
+test("make: a project in a folder of its name at the top of Projects, its note inside, Plainday's properties in one write; a date in its name stays there", async () => {
     const v = standIn({ notes: NOTES });
     const held = [];
     const hold = v.plainday.PeriodicNotes.hold.bind(v.plainday.PeriodicNotes);
     v.plainday.PeriodicNotes.hold = (path) => { held.push([path, !!v.app.vault.getFolderByPath("Projects/Harbor Mural")]); hold(path); };
-    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural 2026-10-01 2026-11-15" });
+    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural" });
     assert.equal(file.path, "Projects/Harbor Mural/Harbor Mural.md");
-    assert.equal(v.notes()[file.path], projectText({ name: "Harbor Mural", start: "2026-10-01", due: "2026-11-15" }));
+    assert.equal(v.notes()[file.path], projectText({ name: "Harbor Mural" }));
     assert.deepEqual(held[0], [file.path, false], "Templater's trigger is kept off the note from before its folder appears");
     assert.deepEqual(v.notices, []);
-    // No dates: empty start and due; one date: the start
-    await v.plainday.ProjectNotes.make({ kind: "project", name: "Ferry Timetable Poster" });
-    assert.equal(v.notes()["Projects/Ferry Timetable Poster/Ferry Timetable Poster.md"], projectText({ name: "Ferry Timetable Poster" }));
-    await v.plainday.ProjectNotes.make({ kind: "project", name: "2026-10-05  Lantern   Walk" });
-    assert.equal(v.notes()["Projects/Lantern Walk/Lantern Walk.md"], projectText({ name: "Lantern Walk", start: "2026-10-05" }));
+    // Dates typed in the name are part of it, with start and due empty (Brian, 11/22; OBS-315 gives them fields)
+    await v.plainday.ProjectNotes.make({ kind: "project", name: "Ferry Poster 2026-10-01 2026-11-15" });
+    assert.equal(v.notes()["Projects/Ferry Poster 2026-10-01 2026-11-15/Ferry Poster 2026-10-01 2026-11-15.md"], projectText({ name: "Ferry Poster 2026-10-01 2026-11-15" }));
+    await v.plainday.ProjectNotes.make({ kind: "project", name: "  Lantern   Walk " });
+    assert.equal(v.notes()["Projects/Lantern Walk/Lantern Walk.md"], projectText({ name: "Lantern Walk" }), "spaces closed up");
 });
 
 test("make: an area gets its alias and its tag, and keeps a date in its name", async () => {
@@ -197,15 +197,16 @@ test("problem: a name another note has, a folder already in Projects, a characte
     const p = v.plainday.ProjectNotes;
     assert.equal(p.problem("kestrel outfitters 2026"), "A note named “kestrel outfitters 2026” already exists. Give this one another name.", "any case, anywhere");
     assert.equal(p.problem("Mosaic", "area"), "A note named “Mosaic” already exists. Give this one another name.");
-    assert.equal(p.problem("Kestrel Outfitters 2026 2026-10-01"), "A note named “Kestrel Outfitters 2026” already exists. Give this one another name.", "checked after its dates come out");
-    assert.equal(p.problem("Orchard tour"), "A folder named “Orchard Tour” is already in Projects. Give this one another name.", "its name after its dates come out, in any case");
-    assert.equal(p.problem("Orchard Tour 2026-10-01"), "A folder named “Orchard Tour” is already in Projects. Give this one another name.");
+    assert.equal(p.problem("Orchard tour"), "A folder named “Orchard Tour” is already in Projects. Give this one another name.", "in any case");
     assert.equal(p.problem("Freelance", "area"), "A note named “Freelance” already exists. Give this one another name.");
     assert.equal(p.problem("Q4: launch"), "A name can't contain “:”. Files and links can't hold it.");
     assert.equal(p.problem("a#b|c"), "A name can't contain “#” or “|”. Files and links can't hold them.");
     assert.equal(p.problem("two\nlines"), "A name can't contain a line break. Files and links can't hold it.");
     assert.equal(p.problem("a\r\nb: c"), "A name can't contain a line break or “:”. Files and links can't hold them.");
-    assert.equal(p.problem("2026-10-01 2026-11-15"), "A project's dates become its start and due, so its name needs words too.");
+    // A periodic note's name: links to that note would find the project
+    assert.equal(p.problem("2026-10-01"), "“2026-10-01” is how daily notes are named, so links to it would be mixed up. Give this one another name.");
+    assert.equal(p.problem("2026-10", "area"), "“2026-10” is how monthly notes are named, so links to it would be mixed up. Give this one another name.");
+    assert.equal(p.problem("Launch 2026-10-01"), "", "a date with words is a name like any other");
     assert.equal(p.problem("   "), "Type a name for the project.");
     assert.equal(p.problem("", "area"), "Type a name for the area.");
     assert.equal(p.problem("Harbor Mural 2026-10-01"), "");
@@ -242,11 +243,11 @@ test("another plugin makes the folder's note as the folder appears (Folder Notes
 test("the Project template without Templater: a plain one filled in and combined, Plainday's alias first, the name's dates and its own values kept; one with Templater code is left out, with a notice", async () => {
     const tpl = "---\nstatus: Active\nrate_type: hourly\nstart: 2020-01-01\nwho:\nparent:\naliases:\n  - Mural\ntopic: Murals\nid: 20260916\n---\n## {{title}}\n\nStarted {{date}}\n";
     const v = standIn({ notes: { ...NOTES, [TPL]: tpl } });
-    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural 2026-10-01" });
+    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural" });
     const text = v.notes()[file.path];
     const fm = props(text);
     assert.deepEqual(fm.aliases, ["⭕.Harbor Mural", "Mural"], "Plainday's alias first");
-    assert.deepEqual([fm.status, fm.rate_type, fm.start, fm.topic, fm.include_subprojects], ["Active", "hourly", "2026-10-01", "Murals", "false"], "the template's values fill or replace Plainday's, but not the name's dates");
+    assert.deepEqual([fm.status, fm.rate_type, fm.start, fm.topic, fm.include_subprojects], ["Active", "hourly", "2020-01-01", "Murals", "false"], "the template's values fill or replace Plainday's");
     assert.match(text, /\ninclude_subprojects: false\ntopic: Murals\n---\n## Harbor Mural\n\nStarted 2026-09-16\n$/, "the template's other properties after Plainday's, its text filled in");
     assert.match(text, /^---\nid: "?20260916"?\naliases:\n/, "its id first");
     assert.deepEqual(v.notices, []);
@@ -262,16 +263,16 @@ test("the Project template without Templater: a plain one filled in and combined
     assert.equal(x.notes()[area.path], '---\naliases:\n  - "🗃️.Studio"\ntags:\n  - area\nicon: box\n---\n');
 });
 
-test("the Project template through Templater: run on the closed note, then the name's dates and Plainday's values a template emptied put back; its cursor marker taken out and remembered", async () => {
+test("the Project template through Templater: run on the closed note, then Plainday's values a template emptied put back and its id first; its cursor marker taken out and remembered", async () => {
     const v = standIn({ notes: { ...NOTES, [TPL]: "(the template)" } });
     const ran = withTemplater(v, (text) => text
-        .replace("status: To Do\n", "status: Active\n").replace("start: 2026-10-01\n", "start: 2020-01-01\n").replace("include_subprojects: false\n", "include_subprojects:\n")
+        .replace("status: To Do\n", "status: Active\n").replace("start:\n", "start: 2020-01-01\n").replace("include_subprojects: false\n", "include_subprojects:\n")
         .replace(/\n---\n$/, "\nid: 2026091612000000\n---\nIntro <% tp.file.cursor(1) %> and more\n"));
-    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural 2026-10-01" });
+    const file = await v.plainday.ProjectNotes.make({ kind: "project", name: "Harbor Mural" });
     assert.deepEqual(ran, [`${TPL} on ${file.path}`]);
     const text = v.notes()[file.path];
     const fm = props(text);
-    assert.deepEqual([fm.status, fm.start, fm.id, fm.include_subprojects], ["Active", "2026-10-01", "2026091612000000", "false"]);
+    assert.deepEqual([fm.status, fm.start, fm.id, fm.include_subprojects], ["Active", "2020-01-01", "2026091612000000", "false"], "the template's start fills the empty one; Plainday's include_subprojects put back");
     assert.ok(text.startsWith("---\nid: 2026091612000000\naliases:\n"), "the template's id first, as in every note");
     assert.doesNotMatch(text, /<%/, "no Templater code left in the note (OBS-177)");
     const at = v.plainday.ProjectNotes.cursorAt;
@@ -283,7 +284,7 @@ test("New project: the name box's name made, then opened once read, with the cur
     const v = standIn({ notes: NOTES, open: DAY, at: 0 });
     const p = v.plainday.ProjectNotes;
     const asked = [];
-    p.ask = async (kind, value) => { asked.push([kind, value]); return "Harbor Mural 2026-10-01 2026-11-15"; };
+    p.ask = async (kind, value) => { asked.push([kind, value]); return "Harbor Mural"; };
     const opened = [];
     v.app.workspace.getLeaf = () => ({ openFile: async (f, opts) => { opened.push([f.path, JSON.parse(JSON.stringify(opts))]); v.open(f.path, 0); } });
     Object.defineProperty(v.app.workspace, "activeEditor", { get: () => v.app.workspace.getActiveViewOfType() });

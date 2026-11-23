@@ -9,18 +9,17 @@ export default class ProjectNotes {
     //   inside it named like the folder, where Notebook Navigator and the Folder Notes plugin look for a folder's
     //   note. Move to project files it under an area afterwards.
     // - What it gets, in one write: the properties the scripts read, in the old Project template's order, `id`
-    //   aside (no code reads it; the template writes it). A project's dates come out of its name: the first is
-    //   its `start`, the second its `due`.
+    //   aside (no code reads it; the template writes it). The name is only the name: dates typed in it stay in it,
+    //   and `start` and `due` start empty (Brian, 11/22: date fields of their own are OBS-315).
     // - Then that kind's template, when it has anything in it, as Add note runs the Task template (OBS-121):
     //   through Templater when it's on; else its text with {{title}}, {{date}} and {{time}} filled in; one with
     //   Templater code while Templater is off isn't used, with a notice. Plainday's own values stay: its alias
-    //   first, its tag, the name's dates, and any of its values a template would leave empty.
+    //   first, its tag, and any of its values a template would leave empty.
     // - Then its folder's look in Notebook Navigator, and its pin, as Navigator would give a folder note (OBS-142).
     static KINDS = {
         project: { tag: "project", mark: "⭕.", word: "project", title: "New project" },
         area: { tag: "area", mark: "🗃️.", word: "area", title: "New area" },
     };
-    static DATE = /[0-9]{4}-[0-9]{2}-[0-9]{2}/g;
     // Characters a file name or a link can't hold
     static BAD = /[\\/:*?"<>|#^[\]\r\n]/g;
     // A cursor marker a template leaves (tp.file.cursor): Templater moves the cursor there only in a note that's
@@ -31,8 +30,7 @@ export default class ProjectNotes {
         project: { icon: "circle", color: "#ef4444" },
         area: { icon: "archive", color: "#168a42" },
     };
-    // What New project's box says about dates
-    static DATES_HINT = "Optional start and due dates, as YYYY-MM-DD: Harbor Mural 2026-10-01 2026-11-15";
+    static PERIODS = { day: "daily", week: "weekly", month: "monthly", year: "yearly" };
     // How long make() waits for the metadata cache to read a new note before opening it anyway
     static READ_MS = 1000;
 
@@ -43,14 +41,9 @@ export default class ProjectNotes {
 
     // ---------------------------------------------------------------- names
 
-    // What a typed name gives: { name, start, due }. A project's dates come out of its name, the first its
-    // `start`, the second its `due`; an area keeps its name as typed.
-    parse(typed, kind = "project") {
-        const text = String(typed ?? "").trim();
-        if (kind !== "project") return { name: text.replace(/\s+/g, " "), start: "", due: "" };
-        const dates = text.match(ProjectNotes.DATE) ?? [];
-        const name = text.replace(ProjectNotes.DATE, " ").replace(/\s+/g, " ").trim();
-        return { name, start: dates[0] ?? "", due: dates[1] ?? "" };
+    // The name a typed name gives: trimmed, its runs of spaces made one
+    nameOf(typed) {
+        return String(typed ?? "").trim().replace(/\s+/g, " ");
     }
 
     // Why `typed` can't name a new project or area, or "" when it can. The note would take over the links of a
@@ -58,14 +51,16 @@ export default class ProjectNotes {
     // folder of its name in Projects may hold a folder note of its own already.
     problem(typed, kind = "project") {
         const raw = String(typed ?? "").trim();
-        const { name } = this.parse(raw, kind);
+        const name = this.nameOf(raw);
         if (!raw) return `Type a name for the ${ProjectNotes.KINDS[kind].word}.`;
-        if (!name) return "A project's dates become its start and due, so its name needs words too.";
         const bad = [...new Set((raw.match(ProjectNotes.BAD) ?? []).map((c) => (c === "\n" || c === "\r" ? "a line break" : `“${c}”`)))];
         if (bad.length) {
             const list = bad.length === 1 ? bad[0] : `${bad.slice(0, -1).join(", ")} or ${bad.at(-1)}`;
             return `A name can't contain ${list}. Files and links can't hold ${bad.length === 1 ? "it" : "them"}.`;
         }
+        // A daily, weekly, monthly or yearly note's name ("2026-10-01", "2026"): links to that note would find this one
+        const period = plainday.PeriodicNotes.periodOfName(name);
+        if (period) return `“${name}” is how ${ProjectNotes.PERIODS[period.unit]} notes are named, so links to it would be mixed up. Give this one another name.`;
         const lower = name.toLowerCase();
         if (app.vault.getMarkdownFiles().some((f) => f.basename.toLowerCase() === lower)) return `A note named “${name}” already exists. Give this one another name.`;
         const projects = plainday.Settings.folders().projects;
@@ -76,15 +71,15 @@ export default class ProjectNotes {
 
     // ---------------------------------------------------------------- making one
 
-    // Makes the project or area `name` (as typed: a project's dates in it too) and resolves to its note, not
+    // Makes the project or area `name` (as typed) and resolves to its note, not
     // opened. Throws when the name can't be used (problem()), for a caller that didn't ask first.
     async make({ kind = "project", name: typed }) {
         const why = this.problem(typed, kind);
         if (why) throw new Error(why);
-        const { name, start, due } = this.parse(typed, kind);
+        const name = this.nameOf(typed);
         const folder = `${plainday.Settings.folders().projects}/${name}`;
         const path = `${folder}/${name}.md`;
-        const own = this.own(kind, name, { start, due });
+        const own = this.own(kind, name);
         const notes = plainday.PeriodicNotes;
         const tpl = app.vault.getFileByPath(this.templatePath(kind));
         const tplText = tpl ? await app.vault.read(tpl) : "";
@@ -129,12 +124,12 @@ export default class ProjectNotes {
     }
 
     // Plainday's properties for a new project or area, in the Project template's order: { key: value }
-    own(kind, name, { start = "", due = "" } = {}) {
+    own(kind, name) {
         const k = ProjectNotes.KINDS[kind];
         const props = { aliases: [`${k.mark}${name}`], tags: [k.tag] };
         if (kind !== "project") return props;
         return {
-            ...props, status: "To Do", parent: "", start, due, who: "", client: "", bill_to: "", rate: "", rate_type: "", max_hours: "",
+            ...props, status: "To Do", parent: "", start: "", due: "", who: "", client: "", bill_to: "", rate: "", rate_type: "", max_hours: "",
             include_subprojects: false,
         };
     }
@@ -172,8 +167,8 @@ export default class ProjectNotes {
         return this.noteText(ordered, body);
     }
 
-    // `props` with Plainday's own values kept: its alias first, its tag, the name's `start` and `due`, and any
-    // value of Plainday's a template left empty
+    // `props` with Plainday's own values kept: its alias first, its tag, and any value of Plainday's a template left
+    // empty
     ownValues(props, own) {
         const out = { ...props };
         const list = (v) => [].concat(v ?? []).filter((x) => x !== null && x !== "").map(String);
@@ -186,7 +181,6 @@ export default class ProjectNotes {
             const blank = out[key] === null || out[key] === undefined || out[key] === "";
             if (blank && value !== "") out[key] = value;
         }
-        for (const key of ["start", "due"]) if (own[key]) out[key] = own[key];
         return out;
     }
 
@@ -322,8 +316,6 @@ export default class ProjectNotes {
                 onOpen() { requestAnimationFrame(() => { input.inputEl.focus(); input.inputEl.select(); }); }
             })(app);
             modal.titleEl.setText(k.title);
-            // How to give a project its dates, which a placeholder would hide once you type (Brian, 11/22)
-            if (kind === "project") modal.contentEl.createEl("p", { cls: "setting-item-description", text: ProjectNotes.DATES_HINT });
             const input = new TextComponent(modal.contentEl).setPlaceholder(kind === "project" ? "Project name" : "Area name").setValue(value);
             input.inputEl.addClass("plainday-wide-input");
             const why = modal.contentEl.createDiv({ cls: "setting-item-description plainday-caution plainday-name-problem" });
