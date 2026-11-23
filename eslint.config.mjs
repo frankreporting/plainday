@@ -42,11 +42,15 @@ const typeChecked = warn(Object.assign({}, ...tseslint.configs.recommendedTypeCh
 // files it types; the files that never had a warning are here from the start.
 export const TYPED = [
     "plugin/src/commands/convertToProject.js",
+    "plugin/src/commands/jumpToDate.js",
     "plugin/src/commands/newArea.js",
     "plugin/src/commands/newEventLog.js",
     "plugin/src/commands/newProject.js",
     "plugin/src/commands/plan.js",
+    "plugin/src/commands/schedule.js",
     "plugin/src/commands/viewErrorLogs.js",
+    "plugin/src/shared/datePrompt.js",
+    "plugin/src/shared/dateWords.js",
     "plugin/src/shared/refoldDailyNotes.js",
     "plugin/src/shared/snapshotDailyNotes.js",
     "plugin/src/startup/finishLinkedLogs.js",

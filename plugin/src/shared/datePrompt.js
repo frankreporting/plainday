@@ -2,6 +2,8 @@ import { getLanguage, Modal, moment, Notice, TextComponent } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { Moment } from "moment" */
+/** @import { Component } from "chrono-node" */
+/** @import { DateReader, MomentFn, ParsedPeriod } from "../host.js" */
 /**
  * A periodic note's kind, a period a date names, and what the prompt reads: `date` is a day as
  * YYYY-MM-DD (a period's first day, or a day in it), `m` that day as a moment, and `readAs` the
@@ -13,6 +15,9 @@ import { app, plainday } from "../host.js";
  * How weeks are counted and periodic notes named (weekRules): the locale, the day weeks start on (0
  * is Sunday), and each period's name format.
  * @typedef {{ locale: string, weekStart: number, format: { week: string, month: string, year: string } }} WeekRules
+ *
+ * How read() and readWith() read (readWith says what each does):
+ * @typedef {{ periods?: boolean, weekStart?: number, name?: ((text: string) => Period | null) | null, nearest?: boolean, today?: string, now?: Date }} ReadOptions
  */
 
 export default class DatePrompt {
@@ -21,6 +26,7 @@ export default class DatePrompt {
     // (DateWords, OBS-139), as Natural Language Dates (Revived) reads them. Words it can't read go to
     // Revived when it's on, which reads the other languages turned on in its settings. The original
     // Natural Language Dates isn't asked: it reads a bare weekday as last week's (OBS-58).
+    /** @type {"nldates-revived"} */
     static REVIVED = "nldates-revived";
 
     // The first reading after Plainday loads takes about 20ms (chrono-node warming up), and Revived's
@@ -32,6 +38,7 @@ export default class DatePrompt {
     static MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
     // Natural Language Dates (Revived) when it's on, or null
+    /** @returns {Partial<DateReader> | null} */
     revived() {
         const p = app.plugins?.getPlugin?.(DatePrompt.REVIVED);
         return typeof p?.parseDate === "function" ? p : null;
@@ -40,6 +47,11 @@ export default class DatePrompt {
     // What `text` names, as readWith() says: read by Plainday's own reader, and when that can't read
     // the words, by Revived when it's on (another language: "lundi prochain"). Options as in
     // readWith().
+    /**
+     * @param {string} text
+     * @param {ReadOptions} [opts]
+     * @returns {DateResult | null}
+     */
     read(text, opts = {}) {
         const now = opts.now ?? new Date();
         const own = this.readWith(plainday.DateWords.at(now), text, { ...opts, now });
@@ -60,7 +72,13 @@ export default class DatePrompt {
     //   closer, this year's or the next, where the readers always take the next one.
     // "week of <a date>" is the week that date is in.
     // - `today` and `now` are for tests.
-    readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = moment().format("YYYY-MM-DD"), now = new Date() } = {}) {
+    /**
+     * @param {Partial<DateReader> | null} nld
+     * @param {string} text
+     * @param {ReadOptions} [opts]
+     * @returns {DateResult | null}
+     */
+    readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), now = new Date() } = {}) {
         const t = String(text ?? "").trim();
         if (!t || !nld) return null;
 
@@ -124,6 +142,12 @@ export default class DatePrompt {
     // What the reader's date parser makes of the words: { date, words, yearless } (the day, or null;
     // the longest stretch of the words it read; and whether all of them name a month and a day but no
     // year), or null for a reader without one
+    /**
+     * @param {Partial<DateReader>} nld
+     * @param {string} text
+     * @param {Date} now
+     * @returns {{ date: string | null, words: string, yearless: boolean } | null}
+     */
     chronoRead(nld, text, now) {
         const parser = nld.parser;
         if (typeof parser?.getParsedDateResult !== "function") return null;
@@ -135,7 +159,7 @@ export default class DatePrompt {
         try {
             const best = [...(parser.getParsedResult?.(text) ?? [])].sort((a, b) => String(b.text ?? "").length - String(a.text ?? "").length)[0];
             words = String(best?.text ?? "");
-            const said = (part) => !!best?.start?.isCertain?.(part);
+            const said = (/** @type {Component} */ part) => !!best?.start?.isCertain?.(part);
             yearless = !!best && said("month") && said("day") && !said("year") && DatePrompt.squash(words) === DatePrompt.squash(text);
         } catch { words = ""; yearless = false; }
         return { date, words, yearless };
@@ -170,6 +194,7 @@ export default class DatePrompt {
 
     // The moment locale a language or locale code names ("en_US" → "en-us" or "en"), matched the way
     // Notebook Navigator matches them, or null
+    /** @param {unknown} code @returns {string | null} */
     knownLocale(code) {
         const all = moment.locales();
         const exact = String(code ?? "").replace(/_/g, "-");
@@ -186,17 +211,23 @@ export default class DatePrompt {
      * @returns {DateResult}
      */
     result(date, unit) {
-        return { date, unit, m: moment(date, "YYYY-MM-DD", true) };
+        return { date, unit, m: /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true) };
     }
 
     // The line under the input: what Enter would pick. `weekStart` as in read(). A week says the day
     // it starts, so "week of oct 5" reads "Week starting 10/4" rather than seeming to disagree.
-    describe(result, today = moment().format("YYYY-MM-DD"), weekStart = 0) {
+    /**
+     * @param {DateResult | null} result
+     * @param {string} [today]
+     * @param {number} [weekStart]
+     * @returns {string}
+     */
+    describe(result, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), weekStart = 0) {
         if (!result) return "";
         const { date, unit } = result;
         const [y, mo] = date.split("-").map(Number);
         // M/D, with the year when it isn't this year's
-        const md = (day) => {
+        const md = (/** @type {number} */ day) => {
             const [yy, mm, dd] = DatePrompt.fromDay(day).split("-");
             return `${Number(mm)}/${Number(dd)}${yy === today.slice(0, 4) ? "" : `/${yy.slice(2)}`}`;
         };
@@ -233,6 +264,7 @@ export default class DatePrompt {
     // Read a few words of each kind once, so neither chrono-node's first-parse cost nor the first run
     // of each path is paid on a keystroke. A word it doesn't know goes through every step, down to
     // its date parser, and on to Revived when it's on.
+    /** @returns {void} */
     warmUp() {
         if (DatePrompt.warmed) return;
         DatePrompt.warmed = true;
@@ -268,6 +300,7 @@ export default class DatePrompt {
         const preview = modal.contentEl.createDiv({ cls: "setting-item-description plainday-date-preview" });
         extra?.(modal.contentEl, { focus: () => input.inputEl.focus() });
 
+        /** @type {DateResult | null} */
         let result = null;
         let picked = false;
         const update = () => {
@@ -276,7 +309,7 @@ export default class DatePrompt {
             const more = result ? label?.(result) : null;
             preview.setText(!text.trim() ? "" : result ? `${this.describe(result, undefined, weekStart)}${more ? ` · ${more}` : ""}` : "Not a date I can read");
         };
-        const failed = (err) => {
+        const failed = (/** @type {unknown} */ err) => {
             picked = false;
             console.error(`${title}:`, err);
             new Notice(`${title} failed — check console`);
@@ -306,15 +339,18 @@ export default class DatePrompt {
 
     // ---------------------------------------------------------------- dates as "YYYY-MM-DD"
 
+    /** @param {string} date @returns {number} */
     static toDay(date) {
         const [y, m, d] = date.split("-").map(Number);
         return Date.UTC(y, m - 1, d) / 864e5;
     }
 
+    /** @param {number} n @returns {string} */
     static fromDay(n) {
         return new Date(n * 864e5).toISOString().slice(0, 10);
     }
 
+    /** @param {string} date @param {number} n @returns {string} */
     static addDays(date, n) {
         return DatePrompt.fromDay(DatePrompt.toDay(date) + n);
     }
@@ -331,6 +367,7 @@ export default class DatePrompt {
     }
 
     // The same month and day a year earlier, or null for a February 29th
+    /** @param {string} date @returns {string | null} */
     static yearEarlier(date) {
         const [y, m, d] = date.split("-").map(Number);
         const back = new Date(Date.UTC(y - 1, m - 1, d));
@@ -338,19 +375,22 @@ export default class DatePrompt {
     }
 
     // Lowercase letters and digits only, to compare words however they're spaced or punctuated
+    /** @param {string} text @returns {string} */
     static squash(text) {
         return String(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
     }
 
     // The Monday of a date's ISO week, as a day number
+    /** @param {string} date @returns {number} */
     static isoMonday(date) {
         const day = DatePrompt.toDay(date);
         return day - (new Date(day * 864e5).getUTCDay() + 6) % 7;
     }
 
     // A Date's calendar day where Obsidian runs
+    /** @param {Date} d @returns {string} */
     static localDate(d) {
-        const pad = (n) => String(n).padStart(2, "0");
+        const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
         return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     }
 }
