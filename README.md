@@ -98,7 +98,7 @@ All of them are in the command palette as "Plainday: …". [The manual's *Comman
 | Plan | Opens the next 2 to 5 daily notes side by side |
 | Sync calendars | Downloads your calendars and writes their events into your daily notes |
 | Time report | Writes time totals into project, area, weekly, monthly and yearly notes, and each project's timesheet |
-| Invoice | Makes a draft invoice from a project's unbilled time, or marks an invoice sent, paid or canceled |
+| Invoice | Makes a draft invoice from a project's unbilled time, billed to the note its `client` links ([*Clients*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#clients)), or marks an invoice sent, paid or canceled |
 | View error logs | Opens the list of Problems the time report and the calendar sync found |
 
 The Obsidian command-line tool runs them from a terminal too: `obsidian command id=plainday:add-note`.

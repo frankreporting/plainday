@@ -70,9 +70,24 @@ Area and project names are yours. The folders above are the ones a new vault sta
 - Daily and monthly notes are the exception: their frontmatter is only an alias (see *The periodic notes*).
 - Notes are made by Templater, and `Config/Templates/Get Template.md` picks the template from the title you type; the periodic notes, task notes, event logs, projects and areas are Plainday's (see *The periodic notes*, *Add note*, *Log notes* and *New project*). A note made any other way (a script, the CLI) needs its frontmatter written the same way by hand.
 
-## People and entities
+## Clients
 
-- **People** go in `People` and **entities** (companies, organizations) in `Entities`; `!person` and `!entity` make their notes. A person's `affiliation` links their entity. A project's `client` links the entity the work is for, and its `bill_to` the one that pays, when that's someone else.
+A client is a note of your own, anywhere in the vault. A project's `client` links the note for whoever the work is for, and its `bill_to` the one that pays, when that's someone else. The demo's Kestrel Outfitters 2026 has `client: "[[Kestrel Outfitters]]"`, and its client note holds:
+
+```yaml
+code: KES
+address:
+  - 40 Trailhead Road
+  - Pinecrest, ST 00000
+```
+
+- **The note needs nothing in it.** *Invoice* only needs it to exist: a name typed in `client` or `bill_to` with no note of that name stops it with "isn't a note yet". Make the note, then run *Invoice* again.
+- **What an invoice reads from it,** all optional:
+	- `billing_name`: the name on the invoice, when it isn't the note's name (the demo's Friends of Pinecrest Library);
+	- `address`: a list, a line each;
+	- `code`: the letters after an invoice's number (`1001-KES`). *Invoice* asks for it the first time and saves it here.
+- **Which note an invoice bills,** the project's or a parent's: see *Invoices → Making one*.
+- **The demo** keeps clients in `Reference/Entities` and people in `Reference/People`, made with `!entity` and `!person` through its own Templater setup (see *Templates*). Plainday needs neither.
 
 ## Areas, projects and task notes
 
@@ -616,7 +631,7 @@ It needs your details first, from *Settings → Plainday → Invoices* (see *Set
 - **First invoice number:** where numbering starts, from 1 to 999999, 1001 as it comes. A new invoice takes the next number past the highest invoice note in the vault and past the last number given, or this one if that's higher, so set it once to continue the numbers you used before, or to start a new series. Plainday remembers the last number it gave, so a deleted invoice's number isn't given again; typing a first number numbers from it, past the invoices still in the vault.
 - **Invoice folder:** where every new invoice goes, like `Invoices` or `Business/Invoices`. You choose it; the field suggests `Invoices`. It can't be inside `Archive`. Invoices already in a project's own `invoices/` folder, where a blank `folder` used to file them, still count.
 
-**Who it bills:** one note, whose details head the invoice under *Bill to*.
+**Who it bills:** one note, whose details head the invoice under *Bill to* (see *Clients* for what it holds).
 
 - **The bill-to,** when there is one: the note the project's `bill_to` links to, else its nearest parent's. A sub-project billed through its parent's agency needs no `bill_to` of its own, even when it repeats its parent's `client`; one with its own `bill_to` is billed there instead, on its own invoices. Its time on its parent's invoice (`include_subprojects`) is billed to whoever that invoice bills.
 - **Else the client:** the note the project's `client` links to, else its nearest parent's.
