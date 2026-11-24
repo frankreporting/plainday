@@ -411,7 +411,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", undefined, ["Backup and transfer"]],
             ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
             ["group", "Note templates", ["Tasks", "Logs", "Projects", "Areas"]],
-            ["group", "Dates", ["Use my region's format", "Date format"]],
+            ["group", "Dates", ["Use custom display format", "Date format"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox", "Draw task markers"]],

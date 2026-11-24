@@ -26,8 +26,10 @@ export default class Settings {
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221), and whether Plainday draws the task markers
     //     (`taskMarkers`, TaskMarkers, OBS-140).
-    //   - dates (OBS-309): the format Plainday writes dates in (Dates): the region's while `region` is
-    //     on, else `format` ("D.M."), which is only ever one Dates.parse takes, or "" for the region's.
+    //   - dates (OBS-309): the format Plainday writes dates in (Dates): `format` ("DD.MM.YYYY", only ever
+    //     one Dates.parse takes, or "") while `custom` is on, else the daily notes' names'. A data file
+    //     saved before OBS-309 has none, and loads as { custom: true, format: "M/D/YY" } (upgraded), so a
+    //     vault that already used Plainday keeps writing what it did.
     //   - calendars (OBS-282): how far ahead Sync calendars writes events (`range`), and the calendars
     //     added by their private links, each { id, name, account, address, on }: `address` is your email
     //     address on that calendar, by which the calendar reader leaves out an invitation you declined. A calendar's link is never here: it's in this device's secret storage, under
@@ -158,7 +160,7 @@ export default class Settings {
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean, taskMarkers: boolean },
-     *   dates: { region: boolean, format: string },
+     *   dates: { custom: boolean, format: string },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
      *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
      *   templates: { week: string, month: string, year: string, task: string, log: string, project: string, area: string },
@@ -170,7 +172,7 @@ export default class Settings {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true, taskMarkers: true },
-            dates: { region: true, format: "" },
+            dates: { custom: false, format: "" },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
             folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
             templates: { week: "", month: "", year: "", task: "", log: "", project: "", area: "" },
@@ -297,7 +299,7 @@ export default class Settings {
         if (typeof editor.listCursor === "boolean") out.editor.listCursor = editor.listCursor;
         if (typeof editor.taskMarkers === "boolean") out.editor.taskMarkers = editor.taskMarkers;
         const dates = obj(r.dates), format = this.text(dates.format), parse = plainday?.Dates?.constructor?.parse;
-        if (typeof dates.region === "boolean") out.dates.region = dates.region;
+        if (typeof dates.custom === "boolean") out.dates.custom = dates.custom;
         // Only a format Dates takes (without Dates loaded, as in a test, Dates.format() checks it again)
         out.dates.format = format && (!parse || parse(format)) ? format : "";
         const calendars = obj(r.calendars);
@@ -944,7 +946,7 @@ export default class Settings {
         this.saved = raw !== null;
         this.calendarsSaved = this.hasCalendars(raw);
         this.foldersSaved = this.hasFolders(raw);
-        this.data = this.normalize(raw ?? {});
+        this.data = this.normalize(this.upgraded(raw) ?? {});
         if (this.foldersDropped(raw, this.data)) new Notice(this.droppedNotice(), 0);
         if (this.unreadable) {
             new Notice(`Plainday couldn't read its settings file, ${plugin.manifest.dir}/data.json, so it's using the defaults. It leaves the file as it is until you change a setting in Settings → Plainday or paste your settings again.`, 0);
@@ -1000,6 +1002,19 @@ export default class Settings {
      */
     hasDates(raw) {
         return typeof raw === "object" && raw !== null && typeof raw.dates === "object" && raw.dates !== null;
+    }
+
+    // A data file as loaded, with a date format given when it was saved before OBS-309 had one: the
+    // switch on with "M/D/YY", which is what Plainday wrote then. No file (null) or one that doesn't
+    // read (undefined) stays as it is, so a new install starts with the switch off. load() and the demo
+    // render (renderReports.mjs) both read a file through this.
+    /**
+     * @param {Raw} raw
+     * @returns {Raw}
+     */
+    upgraded(raw) {
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw) || this.hasDates(raw)) return raw;
+        return { ...raw, dates: { custom: true, format: "M/D/YY" } };
     }
 
     // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read

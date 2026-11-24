@@ -79,7 +79,8 @@ export function vaultSettings(vault, billing = loadBilling()) {
     const settings = new Settings();
     // A vault made in memory, as the tests make them, has no root and no data file
     const file = vault.root ? path.join(vault.root, SETTINGS_FILE) : null;
-    if (file && fs.existsSync(file)) return settings.normalize(JSON.parse(fs.readFileSync(file, "utf8")), billing);
+    // A data file saved before OBS-309 reads as Settings.load reads it: dates in M/D/YY (upgraded)
+    if (file && fs.existsSync(file)) return settings.normalize(settings.upgraded(JSON.parse(fs.readFileSync(file, "utf8"))), billing);
     return settings.defaults();
 }
 

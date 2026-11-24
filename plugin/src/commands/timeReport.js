@@ -1336,8 +1336,8 @@ export default class TimeReport {
     // The month and day a link's label shows, read in the date format set now (Dates, OBS-309): { month, day,
     // shows }, `shows` the date as written ("9/19", "18.9."), or null when it shows none in that format. The labels
     // Plainday writes a day with, each in the format: 🚩 9/17, 9/17, Thu 9/17, 9/17/26. A label written in another
-    // format isn't read (under D.M., "9/17" isn't), and neither is one whose month or day can't be one: under D/M,
-    // "9/30" reads as nothing, since 30 isn't a month.
+    // format isn't read (under DD.MM.YYYY, "9/17" isn't), and neither is one whose month or day can't be one: under
+    // D/M/YY, "9/30" reads as nothing, since 30 isn't a month.
     /**
      * @param {unknown} label
      * @param {string} [format]
@@ -1349,8 +1349,12 @@ export default class TimeReport {
         if (!reader) {
             // A dash needs no escape, and in a "u" pattern can't have one
             const sep = (/[./-]/.exec(format) ?? ["/"])[0], s = sep === "-" ? "-" : `\\${sep}`;
+            // The year where the format puts it: after the day and month ("9/17/26", "17.09.2026"), or before
+            // them ("2026-09-17"); a label leaves it out on a task line
+            const yearFirst = format.trim().startsWith("Y"), year = "(?:\\d{2}|\\d{4})";
+            const body = yearFirst ? `(?:${year}${s})?(\\d{1,2})${s}(\\d{1,2})` : `(\\d{1,2})${s}(\\d{1,2})(?:${s}${year})?${s}?`;
             reader = { dayFirst: format.indexOf("D") < format.indexOf("M"),
-                re: new RegExp(`^(?:\\p{L}{2,9}\\.?,?\\s+)?((\\d{1,2})${s}(\\d{1,2})(?:${s}(?:\\d{2}|\\d{4}))?${s}?)\\s*$`, "u") };
+                re: new RegExp(`^(?:\\p{L}{2,9}\\.?,?\\s+)?(${body})\\s*$`, "u") };
             TimeReport.labelReaders.set(format, reader);
         }
         const m = reader.re.exec(bare);
@@ -1363,10 +1367,10 @@ export default class TimeReport {
     /** @type {Map<string, { dayFirst: boolean, re: RegExp }>} */
     static labelReaders = new Map();
 
-    // The date format Plainday writes in (Dates, OBS-309); "M/D" where Plainday isn't loaded (the Raycast timer)
+    // The date format Plainday writes in (Dates, OBS-309); "M/D/YY" where Plainday isn't loaded (the Raycast timer)
     /** @returns {string} */
     static dateFormat() {
-        return plainday?.Dates?.format?.() ?? "M/D";
+        return plainday?.Dates?.format?.() ?? "M/D/YY";
     }
 
     // Whether what a label shows (labelDay) is a date's month and day

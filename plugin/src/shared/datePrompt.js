@@ -79,7 +79,7 @@ export default class DatePrompt {
      * @returns {DateResult | null}
      */
     readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), now = new Date() } = {}) {
-        // A day and month typed with the date format's own joiner ("5.10." under D.M., OBS-309) is read as
+        // A day and month typed with the date format's own joiner ("5.10." under DD.MM.YYYY, OBS-309) is read as
         // with slashes, which the readers read in the format's order (DateWords.chrono)
         const typed = String(text ?? "").trim();
         const t = plainday?.Dates?.slashed?.(typed) ?? typed;

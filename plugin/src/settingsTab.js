@@ -16,8 +16,8 @@
 // leaving it the field goes back to the saved value.
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
-// Folders and Note templates (OBS-283), Dates (OBS-309: the region's format, or one typed while the
-// switch is off, saved only once Dates takes it), Invoices, Tables (a switch, then the two freezes while it's on),
+// Folders and Note templates (OBS-283), Dates (OBS-309: the daily notes' names' format, or one typed while the
+// switch is on, saved only once Dates takes it), Invoices, Tables (a switch, then the two freezes while it's on),
 // Editor, and Calendars (OBS-282): Add calendar, the sync range and the help, then a group for each
 // account with its calendars.
 //
@@ -618,8 +618,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const freezes = [];
         // Folders and Note templates sit near the top; Other, which the same helper builds, goes last
         const [folders, templates, other] = this.folderSections(store, problem);
-        // Whether the date format box shows: while the region's format is off (OBS-309)
-        let ownFormat = !now().dates.region;
+        // Whether the date format box shows: while a custom display format is on (OBS-309)
+        let ownFormat = now().dates.custom;
         const Dates = plainday.Dates.constructor;
         const sample = "2026-09-17";
 
@@ -651,19 +651,20 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             {
                 heading: "Dates",
                 rows: [
-                    row("Use my region's format", `Write dates the way this computer's region does: ${plainday.Dates.day(sample, plainday.Dates.region())}.`,
-                        (s) => s.addToggle((t) => t.setValue(!ownFormat).onChange((on) => {
-                            ownFormat = !on;
-                            void store(s, "dates", { region: on });
+                    row("Use custom display format", "Ex. Set your daily notes to YYYY-MM-DD but display dates in system dialogs and note aliases as M/D/YY.",
+                        (s) => s.addToggle((t) => t.setValue(ownFormat).onChange((on) => {
+                            ownFormat = on;
+                            void store(s, "dates", { custom: on });
                             this.refreshShown();
                         }))),
                     {
-                        ...row("Date format", "The day and month as numbers (D or DD, M or MM), in either order, joined by a slash, a dot or a dash: D/M, D.M., DD-MM. Plainday adds the year after them where it writes one.", (s) => {
+                        ...row("Date format", "The day, month and year as numbers (ex. M/D/YY or DD.MM.YYYY). Plainday leaves out the year where it's clear, such as on task lines and in reports.", (s) => {
                             s.addText((t) => {
-                                t.setPlaceholder(Dates.FALLBACK).setValue(now().dates.format).onChange((v) => {
+                                // The faint text is what an empty box gives: the daily notes' names' format
+                                t.setPlaceholder(plainday.Dates.names()).setValue(now().dates.format).onChange((v) => {
                                     const format = v.trim();
                                     if (format && !Dates.parse(format)) {
-                                        problem(s, `Not used: use numbers for the day and month (D or DD, M or MM), joined by /, . or -. Plainday keeps writing ${plainday.Dates.day(sample)}.`);
+                                        problem(s, `Not used: use numbers for the day, month and year (D or DD, M or MM, YY or YYYY), joined by /, . or -. Plainday keeps writing ${plainday.Dates.year(sample)}.`);
                                         return;
                                     }
                                     problem(s, "");

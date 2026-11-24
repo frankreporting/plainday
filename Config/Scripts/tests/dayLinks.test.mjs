@@ -170,17 +170,18 @@ test("a 🚩 in the vault's names is a deadline the report compares with its tas
 
 test("labelDay: the month and day a label shows, in the date format set now (OBS-309)", () => {
     const read = (label, format) => { const r = TimeReport.labelDay(label, format); return r && `${r.month}/${r.day} ${r.shows}`; };
-    // Without Plainday's settings, M/D
+    // Without Plainday's settings, M/D/YY
     for (const [label, shows] of [["🚩 9/19", "9/19 9/19"], ["🚩" + String.fromCharCode(0xfe0f) + " 9/19", "9/19 9/19"], ["9/16", "9/16 9/16"], ["Thu 9/17", "9/17 9/17"], ["9/17/26", "9/17 9/17/26"], ["09/07", "9/7 09/07"]]) assert.equal(read(label), shows, label);
     for (const label of ["Wk of 9/20", "Sep. 2026", "2027", "brief", "🚩 launch", "2026-09-18", "13/1", "18.9."]) assert.equal(read(label), null, label);
     // Day first, with dots, a trailing dot and a year: the label as written is what a Problem quotes
-    for (const [label, shows] of [["🚩 30.9.", "9/30 30.9."], ["Thu 17.9.", "9/17 17.9."], ["17.9.26", "9/17 17.9.26"], ["17.9", "9/17 17.9"], ["01.10.2026", "10/1 01.10.2026"]]) assert.equal(read(label, "D.M."), shows, label);
+    for (const [label, shows] of [["🚩 30.09.", "9/30 30.09."], ["Thu 17.9.", "9/17 17.9."], ["17.09.2026", "9/17 17.09.2026"], ["17.9.26", "9/17 17.9.26"], ["17.9", "9/17 17.9"]]) assert.equal(read(label, "DD.MM.YYYY"), shows, label);
     // A label in another format isn't read, and neither is one whose month can't be one
-    for (const label of ["9/30", "Fri 9/11", "17-9"]) assert.equal(read(label, "D.M."), null, label);
-    assert.equal(read("Fri 9/11", "D/M"), "11/9 9/11", "an old M/D label reads the other way round under D/M");
-    assert.equal(read("9/30", "D/M"), null, "30 isn't a month");
-    assert.equal(read("17-09", "DD-MM"), "9/17 17-09");
-    assert.equal(read("9.17.", "M.D."), "9/17 9.17.");
+    for (const label of ["9/30", "Fri 9/11", "17-9"]) assert.equal(read(label, "DD.MM.YYYY"), null, label);
+    assert.equal(read("Fri 9/11", "D/M/YY"), "11/9 9/11", "an old M/D label reads the other way round under D/M/YY");
+    assert.equal(read("9/30", "D/M/YY"), null, "30 isn't a month");
+    // The year first: a task line's label leaves it out, a Problem's keeps it in front
+    for (const [label, shows] of [["🚩 09-30", "9/30 09-30"], ["Fri 09-11", "9/11 09-11"], ["2026-09-11", "9/11 2026-09-11"], ["Wk of 09-20", null]]) assert.equal(read(label, "YYYY-MM-DD"), shows, label);
+    assert.equal(read("9.17.", "M.D.YY"), "9/17 9.17.");
 });
 
 test("a day link whose label shows another day still reads by its name, and is listed to be fixed", () => {

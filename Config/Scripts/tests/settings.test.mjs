@@ -22,7 +22,7 @@ const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
-    dates: { region: true, format: "" },
+    dates: { custom: false, format: "" },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -32,8 +32,8 @@ const JUNIPER = {
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
-    // The demo's: dates written M/D, whatever the computer's region (OBS-309)
-    dates: { region: false, format: "M/D" },
+    // The demo's: dates written M/D/YY, whatever the daily notes' names (OBS-309)
+    dates: { custom: true, format: "M/D/YY" },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -63,7 +63,7 @@ test("normalize: each value that reads, else its default", () => {
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false, taskMarkers: false },
-        dates: { region: true, format: "" },
+        dates: { custom: false, format: "" },
         calendars: { range: "2 months", list: [], recurring: null },
         folders: FOLDERS,
         templates: TEMPLATES,
@@ -117,19 +117,24 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     assert.deepEqual(plain([odd.settings.invoices.name, odd.settings.invoices.folder]), ["J", ""]);
 });
 
-test("the date format (OBS-309): the region's until it's switched off, and only a format Dates takes", () => {
+test("the date format (OBS-309): the daily notes' names' until a custom one is switched on, and only a format Dates takes", () => {
     const own = new (load("settings.js", "Settings", vm.createContext({ URL, plainday: withDates({}) })))();
     const dates = (d) => plain(own.normalize({ dates: d }, billing).dates);
-    assert.deepEqual(dates({ region: false, format: " D.M. " }), { region: false, format: "D.M." });
-    assert.deepEqual(dates({ region: false, format: "DD-MM" }), { region: false, format: "DD-MM" });
-    for (const format of ["D MMM", "D/M/YY", "D", "DD/DD", "D/M.", "dd/mm", 7, null]) assert.deepEqual(dates({ region: false, format }), { region: false, format: "" }, String(format));
-    assert.deepEqual(dates({ region: "no", format: "D/M" }), { region: true, format: "D/M" }, "a switch that doesn't read is on");
+    assert.deepEqual(dates({ custom: true, format: " DD.MM.YYYY " }), { custom: true, format: "DD.MM.YYYY" });
+    assert.deepEqual(dates({ custom: true, format: "YYYY-MM-DD" }), { custom: true, format: "YYYY-MM-DD" });
+    for (const format of ["D MMM YYYY", "D/M", "D.M.", "D", "DD/DD/YY", "D/M/YYY", "dd/mm/yy", 7, null]) assert.deepEqual(dates({ custom: true, format }), { custom: true, format: "" }, String(format));
+    assert.deepEqual(dates({ custom: "no", format: "D/M/YY" }), { custom: false, format: "D/M/YY" }, "a switch that doesn't read is off");
+    // A data file saved before the format (OBS-309) keeps M/D/YY; no file, or one that doesn't read, starts with the switch off
+    assert.deepEqual(plain(own.upgraded({ invoices: { name: "J" } }).dates), { custom: true, format: "M/D/YY" });
+    assert.deepEqual(plain(own.upgraded({ dates: { custom: false, format: "" } }).dates), { custom: false, format: "" });
+    assert.equal(own.upgraded(null), null);
+    assert.equal(own.upgraded(undefined), undefined);
     // A copy from before the format leaves this device's as it is; one with it brings its own
-    own.data = own.normalize({ dates: { region: false, format: "D.M." } }, billing);
+    own.data = own.normalize({ dates: { custom: true, format: "DD.MM.YYYY" } }, billing);
     const old = own.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J" }, folders: FOLDERS }), billing).settings;
-    assert.deepEqual(plain(old.dates), { region: false, format: "D.M." });
-    const copy = own.readCopy(JSON.stringify({ "plainday-settings": 1, dates: { region: true, format: "" }, folders: FOLDERS }), billing).settings;
-    assert.deepEqual(plain(copy.dates), { region: true, format: "" });
+    assert.deepEqual(plain(old.dates), { custom: true, format: "DD.MM.YYYY" });
+    const copy = own.readCopy(JSON.stringify({ "plainday-settings": 1, dates: { custom: false, format: "" }, folders: FOLDERS }), billing).settings;
+    assert.deepEqual(plain(copy.dates), { custom: false, format: "" });
 });
 
 test("pasted: the copy's settings, with the higher last invoice number of the two", () => {
@@ -205,6 +210,7 @@ test("load: the saved settings, normalized; the defaults on a device with none s
     await some.s.load();
     assert.equal(some.s.saved, true);
     assert.deepEqual(plain([some.s.get().invoices.name, some.s.get().invoices.folder]), ["Juniper Hale", ""]);
+    assert.deepEqual(plain(some.s.get().dates), { custom: true, format: "M/D/YY" }, "saved before the date format (OBS-309): M/D/YY, as Plainday wrote then");
     assert.deepEqual(some.saves, [], "loading never writes");
 });
 

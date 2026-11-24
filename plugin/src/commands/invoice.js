@@ -332,7 +332,9 @@ export default class Invoice {
             if (!t) { if (out.size || i > at + 2) break; continue; }
             if (!t.startsWith("|")) break;
             const cells = billing.cells(t);
-            const item = cells[0].match(/^(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2})?\.?) — (.*)$/);
+            // A line's date in any format Plainday writes, with its year before or after when the invoice spans two
+            // years (OBS-309): "9/14", "14.09.", "12/30/26", "30.12.2026", "2026-12-30"
+            const item = cells[0].match(/^((?:(?:\d{4}|\d{2})[./-])?\d{1,2}[./-]\d{1,2}(?:[./-](?:\d{4}|\d{2}))?\.?) — (.*)$/);
             if (item) out.set(`${item[1]} ${cells[2]}`, item[2].replace(/\|/g, "\\|"));
         }
         return out;

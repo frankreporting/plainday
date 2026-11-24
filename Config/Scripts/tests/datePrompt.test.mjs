@@ -308,7 +308,7 @@ const jumpMoment = (current, locales) => {
     return m;
 };
 const PLANNER = "Reference/Planner";
-const loadJump = ({ nn, language = "en", current = "en", format = "M/D" } = {}) => {
+const loadJump = ({ nn, language = "en", current = "en", format = "M/D/YY" } = {}) => {
     const moment = jumpMoment(current, { en: 0, "en-gb": 1, "en-au": 1, de: 1, fr: 1 });
     const plainday = withDates({
         Schedule: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
@@ -349,10 +349,10 @@ test("JumpToDate: where each kind of date's note is, named in the user's locale"
 
 test("JumpToDate's question names a day in the date format Plainday writes, not by its file name (OBS-309)", () => {
     const title = (format, date, unit) => { const { j, dp } = loadJump({ nn: NN_PATTERNS, format }); return j.title(j.target(dp.result(date, unit), dp.weekRules())); };
-    assert.equal(title("M/D", "2026-09-20", "day"), "9/20/26");
-    assert.equal(title("D.M.", "2026-09-20", "day"), "20.9.26");
-    assert.equal(title("DD-MM", "2026-09-20", "day"), "20-09-26");
-    assert.equal(title("D.M.", "2026-09-20", "week"), "2026-09-20|en|gggg[w]ww", "a week by its note's name, in the user's own pattern");
+    assert.equal(title("M/D/YY", "2026-09-20", "day"), "9/20/26");
+    assert.equal(title("DD.MM.YYYY", "2026-09-20", "day"), "20.09.2026");
+    assert.equal(title("YYYY-MM-DD", "2026-09-20", "day"), "2026-09-20");
+    assert.equal(title("DD.MM.YYYY", "2026-09-20", "week"), "2026-09-20|en|gggg[w]ww", "a week by its note's name, in the user's own pattern");
 });
 
 test("the warm-up reads a few words once per session, and a failure in it is harmless", () => {

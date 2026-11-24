@@ -20,8 +20,8 @@
     "taskMarkers": true
   },
   "dates": {
-    "region": false,
-    "format": "M/D"
+    "custom": true,
+    "format": "M/D/YY"
   },
   "calendars": {
     "range": "2 months",

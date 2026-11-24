@@ -422,7 +422,7 @@ Before task IDs, a sent line had a link to the day (or week, month, year) it was
 - **Schedule rewrites an older line when you schedule it again.** It matches the line to the task's open line on that day, the one line with the same title that links back to this note, and writes both the new way: the text, the forward date, the ID. If that day's line was worked on and forwarded since (it's `[>]` and has an ID), the older line takes that ID instead, with its forward date pointing where the task is now (its open line, or its done line), and the task's open line moves from there. With no single match it's treated as a first send. Moving or forwarding the task from its day leaves the older line as it is.
 - **The time report doesn't flag an older line** as a forward-date Problem. It has no ID to check.
 - **The calendar sync's forwarded events** keep the date in front until they move to the new form (OBS-183). Schedule won't touch a forwarded event.
-- A day's alias is its day and month in the date format (`9/17` as it comes, `17.9.` under `D.M.`; see *Settings → Dates*), with no year; a week's is `Wk of` and its first day the same way (`Wk of 9/20`), a month's its short name and year (`Oct. 2026`), and a year is linked by its name alone.
+- A day's alias is its day and month in the date format (`9/17` in the demo, `17.09.` under `DD.MM.YYYY`; see *Settings → Dates*), with no year; a week's is `Wk of` and its first day the same way (`Wk of 9/20`), a month's its short name and year (`Oct. 2026`), and a year is linked by its name alone.
 
 ### What Schedule does to a line
 
@@ -572,7 +572,7 @@ Obsidian saves folds separately on each device, and forgets a note's folds when 
 
 ### Rules for agents
 
-- Read this section before editing any daily, weekly, monthly or yearly note, and write lines exactly as the scripts would: the tab after an event's time, the symbol aliases, link aliases in the date format (*Settings → Dates*; `M/D` in the demo).
+- Read this section before editing any daily, weekly, monthly or yearly note, and write lines exactly as the scripts would: the tab after an event's time, the symbol aliases, link aliases in the date format (*Settings → Dates*; `M/D/YY` in the demo).
 - A line that links a note ends `[[Project|⭕]] [[Note|⋯]]` (or `[[Area|🗃️]]`), with the ⭕ for the project the note is filed in and any `🚩 M/D` before both: keep the note link last and its project next to it. A line *Schedule* sent from a note also ends `[[Source#^id|↗]]`, after the ⋯: the task's line in that note, by its ID. A subtask's line names the project its task note or log is filed in. Never write 🗒️ or 🔗: nothing reads them. Only the links at the end say where time counts; a link in the text doesn't.
 - Put nothing on a nested task: no ⭕, 🗃️, 🚩, ⋯, ↗, task ID or time. Those go on the line at the top of the nest. No ⭕ or 🗃️ on any line outside a daily, weekly, monthly or yearly note. A ↗ decides nothing: it only says where a line was sent from.
 - Keep events at the top: `All day` events first, then timed events in time order. Add tasks after the last item of the top list, the checklist the note opens with. In a note with none, start one right under the properties, then a blank line, as Schedule does.
@@ -698,7 +698,7 @@ Each command has its own icon, from the icons Obsidian ships with. It shows when
 - **Words it can't read:** the line says "Not a date I can read", and Enter does nothing but say so, so a typo like `fridya` never picks today.
 - **Words it only partly read:** the line says which (`Thu 10/1 · in 4 days · read as "october"` for `mid october`), and Enter takes that date. A partial reading that comes out as today (`tomorow at 5pm` read as `at 5pm`) counts as unreadable.
 - **Weeks start on the day your settings say:** with Notebook Navigator as the periodic notes' source (*Settings → Plainday → Folders → Periodic notes*), its calendar **Locale** (Settings → Notebook Navigator → Calendar), where *System default* means Obsidian's language, or Obsidian's language when its **Periodic notes locale** is set to follow Obsidian. Otherwise Obsidian's language decides, and the weekly, monthly and yearly notes are named `gggg[w]ww`, `YYYY-MM` and `YYYY`. English starts weeks on Sunday. This is the week `next week` means, and the one Notebook Navigator's weekly notes cover.
-- **Dates in numbers follow the date format** (*Settings → Dates*): the table shows `M/D`. With the day first (`D/M`, `D.M.`), `2/10` is 2 October, and the line under the box shows `Fri 2.10.`; a date typed with the format's own joiner (`2.10.`, `2-10`) reads the same.
+- **Dates in numbers follow the date format** (*Settings → Dates*): the table shows `M/D/YY`. With the day first (`D/M/YY`, `DD.MM.YYYY`), `2/10` is 2 October, and the line under the box shows `Fri 02.10.`; a date typed with the format's own joiner (`2.10.`, `2-10`) reads the same. Under a format that starts with the year (`YYYY-MM-DD`), dates read the way Obsidian's language writes them: day first in English (UK), German or French.
 - **Other languages:** with [Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived) on, words Plainday can't read go to it, so the languages turned on in its settings work too (`lundi prochain`, `demain`, `nächsten Montag`). English reads the same with it or without it. Weeks and months in other languages work only in part: in *Jump to date*, `la semaine prochaine` opens a day, not the weekly note.
 
 What the words mean, typed on Sunday 9/27/26:
@@ -933,23 +933,24 @@ A settings file that doesn't read (a write cut off, a sync conflict) is left as 
 
 ### Dates
 
-How Plainday writes a date: in a 🚩, a forward date, a report, a timesheet, an invoice, a Problem, a notice, the date box and an alias.
+How Plainday writes a date: in a 🚩, a forward date, a report, a timesheet, an invoice, a Problem, a notice, the date box and an alias. As it comes, it writes dates the way your daily notes are named.
 
-| Where | `M/D` | `D.M.` |
-|---|---|---|
-| 🚩 and forward dates | `🚩 9/30`, `9/18`, `Wk of 9/20` | `🚩 30.9.`, `18.9.`, `Wk of 20.9.` |
-| Reports, timesheets, invoices | `Fri 9/11`, `9/13-9/19` | `Fri 11.9.`, `13.9.-19.9.` |
-| Problems, aliases, *New event log* | `9/11/26`, `9/20/26 Sunday` | `11.9.26`, `20.9.26 Sunday` |
-| Invoice date | `9/12/2026` | `12.9.2026` |
-| *Jump to date*, spelled out | `Friday, October 2, 2026` | `Friday 2 October 2026` |
+| Where | Daily notes named `YYYY-MM-DD` | `M/D/YY` | `DD.MM.YYYY` |
+|---|---|---|---|
+| 🚩 and forward dates | `🚩 09-30`, `09-18`, `Wk of 09-20` | `🚩 9/30`, `9/18`, `Wk of 9/20` | `🚩 30.09.`, `18.09.`, `Wk of 20.09.` |
+| Reports, timesheets, invoices | `Fri 09-11`, `09-13–09-19` | `Fri 9/11`, `9/13-9/19` | `Fri 11.09.`, `13.09.-19.09.` |
+| Problems, aliases, dialogs | `2026-09-11`, `2026-09-20 Sunday` | `9/11/26`, `9/20/26 Sunday` | `11.09.2026`, `20.09.2026 Sunday` |
+| Invoice date | `2026-09-12` | `9/12/2026` | `12.09.2026` |
+| *Jump to date*, spelled out | `Friday, October 2, 2026` | `Friday, October 2, 2026` | `Friday 2 October 2026` |
 
-- **Use my region's format:** on as it comes. Plainday writes dates the way this computer's region does, and the line under the switch shows how: `9/17` on a US Mac, `17/09` in the UK, `17.9.` in Germany.
-- **Date format:** shown while the switch is off. The day and the month as numbers (`D` or `DD`, `M` or `MM`), in either order, joined by a slash, a dot or a dash: `D/M`, `D.M.`, `DD-MM`. A format it can't use, such as one with a month's name or a year, gets a red line, and Plainday keeps the last one that worked. Left empty, the region's holds.
-- **The year** goes after the day and month, joined the same way. Links on task lines leave it out; aliases, dialogs and Problems keep it. A weekday goes in front (`Thu 17.9.`).
-- **The date box reads the format too:** under `D.M.` or `D/M`, `5/10` is 5 October, and so is `5.10.` under `D.M.`.
-- **Changing it** changes what Plainday writes from then on. Reports switch on their next run (opening the vault, *Time report* or *Invoice*). Labels already in notes stay as written, and are read in the new format only: one in another format isn't checked, but one that reads as another day is a Problem. After a switch from `M/D` to `D/M`, an old `Fri 9/11` reads as 9 November, and on an invoice that stops *Invoice* on its project until the label is fixed.
-- **Each device keeps its own,** as it does Plainday's other settings, and *Copy* and *Paste* carry it. Set the same format on each computer, or each writes the reports in its own.
-- The demo vault saves `M/D`.
+- **The daily notes' names:** as *Settings → Plainday → Folders → Periodic notes* reads them, from the Daily notes plugin or Notebook Navigator. A name that isn't the day, month and year as numbers joined by `/`, `.` or `-` (Notebook Navigator's `YYYYMMDD`, say) gives `YYYY-MM-DD`.
+- **Use custom display format:** off as it comes. Turned on, it shows **Date format**, whose faint text is your daily notes' format.
+- **Date format:** the day (`D` or `DD`), the month (`M` or `MM`) and the year (`YY` or `YYYY`) as numbers, joined by the same `/`, `.` or `-`, with the year first or last: `M/D/YY`, `DD.MM.YYYY`, `YYYY-MM-DD`. A format it can't use, such as one with a month's name, gets a red line, and Plainday keeps the last one that worked. Left empty, the daily notes' names hold.
+- **The year** is left out on task lines, in reports, timesheets, invoice lines and notices, with the joiner beside it (`M/D/YY` → `9/30`); a dotted date keeps its last dot (`30.09.`). Aliases, dialogs, Problems and the invoice date keep it. A weekday goes in front (`Thu 17.09.`).
+- **The date box reads the format too:** under `D/M/YY` or `DD.MM.YYYY`, `5/10` is 5 October, and so is `5.10.` under `DD.MM.YYYY`. Under a format that starts with the year, it reads the way Obsidian's language writes dates: day first in English (UK), German or French, month first in English.
+- **Changing it** changes what Plainday writes from then on. Reports switch on their next run (opening the vault, *Time report* or *Invoice*). Labels already in notes stay as written, and are read in the new format only: one in another format isn't checked, but one that reads as another day is a Problem. After a switch from `M/D/YY` to `D/M/YY`, an old `Fri 9/11` reads as 9 November, and on an invoice that stops *Invoice* on its project until the label is fixed. Renaming your daily notes does the same while the switch is off.
+- **Each device keeps its own,** as it does Plainday's other settings, and *Copy* and *Paste* carry it. Set the same on each device, or each writes the reports its own way.
+- **A vault that used Plainday before this setting** keeps writing `M/D/YY`: its switch is on with that format. The demo vault saves the same.
 
 ### Invoices
 

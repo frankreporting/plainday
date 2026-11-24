@@ -38,8 +38,8 @@ export function withFolders(plainday, folders = {}) {
 
 // How Plainday writes a date (Dates, OBS-309), in `format`, put on `plainday` where it has none of its own,
 // with a stand-in Settings that says only that. Without one, Dates writes M/D. Returns `plainday`.
-export function withDates(plainday, format = "M/D") {
-    const own = { plainday: { Settings: { get: () => ({ dates: { region: false, format } }) } } };
+export function withDates(plainday, format = "M/D/YY") {
+    const own = { plainday: { Settings: { get: () => ({ dates: { custom: true, format } }) } } };
     plainday.Dates ??= new (vm.runInContext(`${src("dates")}\n;Dates`, vm.createContext(own)))();
     return plainday;
 }
@@ -357,8 +357,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     if (!aliases) plainday.PeriodicNotes.alias = () => null;
     // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's
     Object.assign(plainday.Settings.get().folders, setFolders);
-    // Dates written M/D, whatever this computer's region (OBS-309), as the demo vault saves it
-    Object.assign(plainday.Settings.get().dates, { region: false, format: "M/D" });
+    // Dates written M/D/YY, whatever the daily notes' names (OBS-309), as the demo vault saves it
+    Object.assign(plainday.Settings.get().dates, { custom: true, format: "M/D/YY" });
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);
     plainday.TaskChange.ask = async (weighed, ...rest) => {
         const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => plainday.TaskChange.dayName(l.file)))].join(", ");
