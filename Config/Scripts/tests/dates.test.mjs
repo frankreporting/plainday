@@ -84,6 +84,20 @@ test("slashed: a day and month typed with the format's own joiner, as the date r
     const iso = datesWith({ custom: false, format: "" });
     assert.deepEqual(["10-02", "2026-10-02"].map((t) => iso.slashed(t)), ["10/02", null], "a year typed first goes to the readers as typed");
     assert.equal(datesWith({ custom: true, format: "M/D/YY" }).slashed("5/10"), null, "slashes go to the readers as typed");
+    // A format that starts with the year: its own short form reads in its own order (MM-DD), whatever order the
+    // language's readers take, so a typed 🚩 label means what it says
+    assert.equal(datesWith({ custom: false, format: "" }, { language: "DD/MM/YYYY" }).slashed("09-10"), "10/09", "turned round for a day-first reader");
+    assert.equal(datesWith({ custom: false, format: "" }, { language: "MM/DD/YYYY" }).slashed("09-10"), "09/10");
+});
+
+test("a daily note's own name typed in the date box is read as a name first, before its joiner turns into slashes", () => {
+    const plainday = withDates({}, "YYYY-MM-DD");
+    const ctx = vm.createContext({ plainday, moment: () => ({ format: () => "2026-09-17" }) });
+    const dp = new (loadClass("datePrompt.js", ctx))();
+    const seen = [];
+    const name = (text) => { seen.push(text); return text === "26-09-20" ? { date: "2026-09-20", unit: "day" } : null; };
+    assert.equal(dp.readWith({}, "26-09-20", { name })?.date, "2026-09-20");
+    assert.deepEqual(seen, ["26-09-20"]);
 });
 
 // ---------------------------------------------------------------- the writers, under DD.MM.YYYY

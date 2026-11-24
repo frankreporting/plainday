@@ -195,18 +195,23 @@ export default class Dates {
 
     /**
      * A day and month typed with the format's own joiner when that isn't a slash ("5.10." under DD.MM.YYYY,
-     * "5-10" under YYYY-MM-DD), with a year after or without, as the date readers read it: with slashes, in
-     * the same order ("5/10"), which they read in the order dayFirst() gives (DateWords.chrono). Null for
-     * anything else, which they read as typed.
+     * "09-10" under YYYY-MM-DD), with a year after or without, as the date readers read it: with slashes, in
+     * the order dayFirst() reads them (DateWords.chrono), so it reads in the format's own order, as Plainday
+     * writes it ("09-10" under YYYY-MM-DD is 10 September, whatever Obsidian's language). Null for anything
+     * else, which they read as typed.
      * @param {string} text
      * @param {string} [format]
      * @returns {string | null}
      */
     slashed(text, format = this.format()) {
-        const { sep } = this.parts(format);
-        if (sep === "/") return null;
-        const s = sep === "." ? "\\." : "-";
+        const p = this.parts(format);
+        if (p.sep === "/") return null;
+        const s = p.sep === "." ? "\\." : "-";
         const m = String(text ?? "").trim().match(new RegExp(`^(\\d{1,2})${s}(\\d{1,2})(?:${s}(\\d{2}|\\d{4}))?${s}?$`));
-        return m ? `${m[1]}/${m[2]}${m[3] ? `/${m[3]}` : ""}` : null;
+        if (!m) return null;
+        // The readers' order is the language's for a format that starts with the year: turn the two round when
+        // it isn't the format's
+        const swap = p.yearFirst && Dates.languageDayFirst() !== p.dayFirst;
+        return `${swap ? m[2] : m[1]}/${swap ? m[1] : m[2]}${m[3] ? `/${m[3]}` : ""}`;
     }
 }

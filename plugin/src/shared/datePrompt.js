@@ -81,11 +81,12 @@ export default class DatePrompt {
     readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), now = new Date() } = {}) {
         // A day and month typed with the date format's own joiner ("5.10." under DD.MM.YYYY, OBS-309) is read as
         // with slashes, which the readers read in the format's order (DateWords.chrono)
+        // A note's own name ("26-09-20" for daily notes named YY-MM-DD) is read as typed, first
         const typed = String(text ?? "").trim();
         const t = plainday?.Dates?.slashed?.(typed) ?? typed;
         if (!t || !nld) return null;
 
-        const named = name?.(t);
+        const named = name?.(typed) ?? (t !== typed ? name?.(t) : null);
         if (named) return this.result(named.date, named.unit);
 
         // "week of oct 5", "the week of friday", "week starting oct 4": the week that day is in (its
