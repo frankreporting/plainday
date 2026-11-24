@@ -285,11 +285,13 @@ test("each command in the list is added with its id, name and icon, and runs its
 test("with no periodic notes source chosen, or the chosen one off, a command that needs them says so and doesn't run; the others run (OBS-336)", async () => {
     const PERIODIC = ["Schedule", "DueDate", "AddTaskNote", "NewEventLog", "AddProjectLink", "ToggleTimeEntry", "JumpToDate", "Plan", "TimeReport", "Invoice", "CalendarSync"];
     assert.deepEqual(COMMANDS.filter((c) => c.periodic).map((c) => c.script), PERIODIC, "the commands that read or write periodic notes");
-    for (const [stored, said] of [
+    for (const [stored, said, dailyNotesOff] of [
         [null, "Choose who keeps your periodic notes in Settings → Plainday → Folders → Periodic notes. Until then, Plainday finds none."],
         [{ folders: { periodic: "notebook-navigator" } }, "Plainday's periodic notes come from Notebook Navigator, which isn't on. Turn it on, or choose another in Settings → Plainday → Folders → Periodic notes."],
+        [{ folders: { periodic: "daily-notes" } }, "Plainday's periodic notes come from the Daily notes plugin, which is off. Turn it on in Settings → Core plugins, or choose another in Settings → Plainday → Folders → Periodic notes.", true],
     ]) {
         const { plugin, notices } = load(BUNDLE, { stored });
+        if (dailyNotesOff) plugin.app.internalPlugins.plugins["daily-notes"].enabled = false;
         await plugin.onload();
         try {
             for (const { id, script, periodic } of COMMANDS) {
