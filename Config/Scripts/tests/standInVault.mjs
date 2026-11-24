@@ -36,6 +36,14 @@ export function withFolders(plainday, folders = {}) {
     return plainday;
 }
 
+// How Plainday writes a date (Dates, OBS-309), in `format`, put on `plainday` where it has none of its own,
+// with a stand-in Settings that says only that. Without one, Dates writes M/D. Returns `plainday`.
+export function withDates(plainday, format = "M/D") {
+    const own = { plainday: { Settings: { get: () => ({ dates: { region: false, format } }) } } };
+    plainday.Dates ??= new (vm.runInContext(`${src("dates")}\n;Dates`, vm.createContext(own)))();
+    return plainday;
+}
+
 // Dates as "YYYY-MM-DD", moved by days, and their weekday (0 is Sunday)
 export const utc = (date) => { const [y, m, d] = date.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 export const plus = (date, n) => new Date(utc(date).getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -68,7 +76,7 @@ export const momentOn = (today) => {
         diff: (other, unit) => (unit === "days" ? (utc(date) - utc(other.date)) / 864e5 : assert.fail(`diff ${unit}`)),
         format: (f) => ({ "YYYY-MM-DD": date, "gggg[w]ww": weekKey(date), "GGGG-[W]WW": isoName(date), "YYYY-MM": date.slice(0, 7), YYYY: date.slice(0, 4), "M/D": `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`, "ddd M/D": `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dow(date)]} ${Number(date.slice(5, 7))}/${Number(date.slice(8))}`,
             // The aliases PeriodicNotes writes (OBS-120)
-            "M/D/YY": short(date), "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "ddd M/D/YY": `${DAY_NAMES[dow(date)].slice(0, 3)} ${short(date)}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
+            "M/D/YY": short(date), ddd: DAY_NAMES[dow(date)].slice(0, 3), dddd: DAY_NAMES[dow(date)], "h:mma": "3:00pm", "M/D/YY dddd": `${short(date)} ${DAY_NAMES[dow(date)]}`, "ddd M/D/YY": `${DAY_NAMES[dow(date)].slice(0, 3)} ${short(date)}`, "MMMM YYYY": `${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`, "DD-MM-YYYY": `${date.slice(8)}-${date.slice(5, 7)}-${date.slice(0, 4)}` })[f] ?? assert.fail(`format ${f}`),
     });
     const moment = (text, format) => {
         if (text === undefined) return make(today);
@@ -336,7 +344,7 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     // `plant(name, text)` changes a script's text, to show a test catches a bug
     const make = (name, cls) => new (vm.runInContext(`${plant ? plant(name, src(name)) : src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {
-        Settings: make("settings", "Settings"),
+        Settings: make("settings", "Settings"), Dates: make("dates", "Dates"),
         DatePrompt: make("datePrompt", "DatePrompt"), JumpToDate: make("jumpToDate", "JumpToDate"), TimeReport: make("timeReport", "TimeReport"),
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"), TaskIds: make("taskIds", "TaskIds"), DueDate: make("setDueDate", "DueDate"),
         AddProjectLink: make("addProjectLink", "AddProjectLink"), MoveToProject: make("moveToProject", "MoveToProject"),
@@ -349,6 +357,8 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     if (!aliases) plainday.PeriodicNotes.alias = () => null;
     // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's
     Object.assign(plainday.Settings.get().folders, setFolders);
+    // Dates written M/D, whatever this computer's region (OBS-309), as the demo vault saves it
+    Object.assign(plainday.Settings.get().dates, { region: false, format: "M/D" });
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);
     plainday.TaskChange.ask = async (weighed, ...rest) => {
         const days = (list) => [...new Set([...list].sort((a, b) => a.file.basename.localeCompare(b.file.basename)).map((l) => plainday.TaskChange.dayName(l.file)))].join(", ");

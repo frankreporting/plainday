@@ -4,12 +4,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withFolders, YAML } from "./standInVault.mjs";
+import { src, PLANNER, NN, MONTHS, SHORT, momentOn, standIn, withDates, withFolders, YAML } from "./standInVault.mjs";
 import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 const code = src("schedule");
 // Schedule's statics, beside a TaskIds for the ones that read its text rules (reopenIn) and the
 // calendar sync, whose top list placeInTopList writes into (OBS-280)
-const statics = withWindow(vm.createContext({ plainday: withFolders({}) }));
+const statics = withWindow(vm.createContext({ plainday: withDates(withFolders({})) }));
 const Schedule = vm.runInContext(code + "\n;Schedule", statics);
 statics.plainday.TaskIds = new (vm.runInContext(src("taskIds") + "\n;TaskIds", statics))();
 statics.plainday.TimeReport = new (vm.runInContext(src("timeReport") + "\n;TimeReport", statics))();
@@ -79,7 +79,7 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
             process: async (f, fn) => { vault.set(f.path, fn(vault.get(f.path))); return vault.get(f.path); },
         },
     };
-    const plainday = {};
+    const plainday = withDates({});
     const context = withWindow(vm.createContext({ ...YAML, MarkdownView: class {}, getAllTags: (cache) => cache.frontmatter.tags.map((t) => `#${t}`), getLanguage: () => "en", app, plainday, moment: momentOn(today), Notice: class { constructor(m) { notices.push(m); } }, setTimeout: () => 0, console: { ...console, error: () => {} } }));
     const make = (name, cls) => new (vm.runInContext(`${src(name)}\n;${cls}`, context))();
     Object.assign(plainday, {

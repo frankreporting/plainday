@@ -18,9 +18,11 @@ process.env.TZ = RECORD.timeZone;
 
 // The reader and the date box in one context, with this realm's Date: chrono-node takes a reference
 // date only when it's a Date of its own realm
-const load = ({ revived = null } = {}) => {
+// `format`: the date format Plainday writes and reads in (Dates, OBS-309), M/D unless given
+const load = ({ revived = null, format = null } = {}) => {
     const plainday = {};
     const context = vm.createContext({ moment, chronoEn, Date, plainday, app: { plugins: { getPlugin: (id) => (id === "nldates-revived" ? revived : null) } }, console });
+    plainday.Dates = new (loadClass("dates.js", vm.createContext({ plainday: { Settings: { get: () => ({ dates: { region: false, format: format ?? "M/D" } }) } } })))();
     plainday.DateWords = new (loadClass("dateWords.js", context))();
     plainday.DatePrompt = new (loadClass("datePrompt.js", context))();
     return plainday;
@@ -169,13 +171,21 @@ test("OBS-162's shorthands read as nothing, so they're free to mean something", 
     }
 });
 
-test("English (UK) reads day before month, as Revived does", () => {
+test("a date format with the day first reads day before month, with slashes or its own joiner (OBS-309)", () => {
     const now = tenAm("2026-09-27");
+    assert.equal(local(words.parseDate("3/10", now)), "2027-03-10");
+    for (const format of ["D/M", "D.M.", "DD-MM"]) assert.equal(local(load({ format }).DateWords.parseDate("3/10", now)), "2026-10-03", format);
+    const { DatePrompt: dm } = load({ format: "D.M." });
+    const on = { today: "2026-09-17", now: tenAm("2026-09-17") };
+    for (const typed of ["5/10", "5.10.", "5.10"]) assert.equal(dm.read(typed, on)?.date, "2026-10-05", typed);
+    assert.equal(dm.read("2/10/2027", { ...on, periods: true, nearest: true })?.date, "2027-10-02");
+    assert.equal(dm.read("week of 20/9", on)?.date, "2026-09-20");
+    assert.equal(load({ format: "D-M" }).DatePrompt.read("5-10", on)?.date, "2026-10-05");
+    // English (UK) alone no longer turns the order round: the format does
     const before = moment.locale();
     try {
-        assert.equal(local(words.parseDate("3/10", now)), "2027-03-10");
         moment.locale("en-gb");
-        assert.equal(local(words.parseDate("3/10", now)), "2026-10-03");
+        assert.equal(local(words.parseDate("3/10", now)), "2027-03-10");
     } finally {
         moment.locale(before);
     }

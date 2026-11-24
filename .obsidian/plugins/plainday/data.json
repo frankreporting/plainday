@@ -19,6 +19,10 @@
     "listCursor": true,
     "taskMarkers": true
   },
+  "dates": {
+    "region": false,
+    "format": "M/D"
+  },
   "calendars": {
     "range": "2 months",
     "list": [],

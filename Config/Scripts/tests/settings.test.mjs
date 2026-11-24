@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const load = (file, name, context = vm.createContext({ URL })) => vm.runInContext(classScript(file) + `\n;${name}`, context);
 const billing = new (load("billing.js", "Billing"))();
@@ -21,6 +22,7 @@ const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
+    dates: { region: true, format: "" },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -30,6 +32,8 @@ const JUNIPER = {
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
     tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
+    // The demo's: dates written M/D, whatever the computer's region (OBS-309)
+    dates: { region: false, format: "M/D" },
     calendars: { range: "2 months", list: [], recurring: null },
     folders: FOLDERS,
     templates: TEMPLATES,
@@ -59,6 +63,7 @@ test("normalize: each value that reads, else its default", () => {
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
         tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false, taskMarkers: false },
+        dates: { region: true, format: "" },
         calendars: { range: "2 months", list: [], recurring: null },
         folders: FOLDERS,
         templates: TEMPLATES,
@@ -110,6 +115,21 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     // a copy is read as any settings are: a bad value becomes its default
     const odd = settings.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J", folder: "../x" } }), billing);
     assert.deepEqual(plain([odd.settings.invoices.name, odd.settings.invoices.folder]), ["J", ""]);
+});
+
+test("the date format (OBS-309): the region's until it's switched off, and only a format Dates takes", () => {
+    const own = new (load("settings.js", "Settings", vm.createContext({ URL, plainday: withDates({}) })))();
+    const dates = (d) => plain(own.normalize({ dates: d }, billing).dates);
+    assert.deepEqual(dates({ region: false, format: " D.M. " }), { region: false, format: "D.M." });
+    assert.deepEqual(dates({ region: false, format: "DD-MM" }), { region: false, format: "DD-MM" });
+    for (const format of ["D MMM", "D/M/YY", "D", "DD/DD", "D/M.", "dd/mm", 7, null]) assert.deepEqual(dates({ region: false, format }), { region: false, format: "" }, String(format));
+    assert.deepEqual(dates({ region: "no", format: "D/M" }), { region: true, format: "D/M" }, "a switch that doesn't read is on");
+    // A copy from before the format leaves this device's as it is; one with it brings its own
+    own.data = own.normalize({ dates: { region: false, format: "D.M." } }, billing);
+    const old = own.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J" }, folders: FOLDERS }), billing).settings;
+    assert.deepEqual(plain(old.dates), { region: false, format: "D.M." });
+    const copy = own.readCopy(JSON.stringify({ "plainday-settings": 1, dates: { region: true, format: "" }, folders: FOLDERS }), billing).settings;
+    assert.deepEqual(plain(copy.dates), { region: true, format: "" });
 });
 
 test("pasted: the copy's settings, with the higher last invoice number of the two", () => {

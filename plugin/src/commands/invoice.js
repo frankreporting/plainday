@@ -73,9 +73,10 @@ export default class Invoice {
 
     // ---------------------------------------------------------------- pure
 
+    // A date as Plainday writes one (Dates, OBS-309): "9/14", "14.9."
     /** @param {string} date */
     md(date) {
-        return `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
+        return plainday.Dates.day(date);
     }
 
     // A line item's date: "9/14", or "9/14/26" when the invoice spans two years
@@ -84,13 +85,13 @@ export default class Invoice {
      * @param {boolean} span
      */
     label(date, span) {
-        return span ? `${this.md(date)}/${date.slice(2, 4)}` : this.md(date);
+        return span ? plainday.Dates.year(date) : this.md(date);
     }
 
     // "9/12/2026", as the header prints the invoice date
     /** @param {string} date */
     dateText(date) {
-        return `${this.md(date)}/${date.slice(0, 4)}`;
+        return plainday.Dates.year(date, true);
     }
 
     /** @param {unknown} text */
@@ -331,7 +332,7 @@ export default class Invoice {
             if (!t) { if (out.size || i > at + 2) break; continue; }
             if (!t.startsWith("|")) break;
             const cells = billing.cells(t);
-            const item = cells[0].match(/^(\d{1,2}\/\d{1,2}(?:\/\d{2})?) — (.*)$/);
+            const item = cells[0].match(/^(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2})?\.?) — (.*)$/);
             if (item) out.set(`${item[1]} ${cells[2]}`, item[2].replace(/\|/g, "\\|"));
         }
         return out;

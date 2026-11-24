@@ -218,13 +218,12 @@ export default class Billing {
      */
     billedLines(rows, tr, linkText) {
         const t = (/** @type {unknown} */ s) => this.tableText(tr.defuse(s));
-        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const link = tr.dayLinks();
         const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start || a.end - b.end);
         const /** @type {string[][]} */ out = [];
         for (const date of new Set(sorted.map((r) => r.date))) {
             const day = sorted.filter((r) => r.date === date);
-            out.push([`**[[${link(date)}\\|${tr.dayName(date).slice(0, 3)} ${md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
+            out.push([`**[[${link(date)}\\|${tr.dayName(date).slice(0, 3)} ${tr.md(date)}]]**`, "", "", "", "", "", `**${tr.hours(day.reduce((n, r) => n + r.billed, 0))}**`]);
             for (const r of day) {
                 out.push(["", `${tr.formatTime(r.start)} - ${tr.formatTime(r.end)}`, r.project ? `[[${linkText(r.project)}]]` : "",
                     t(r.task), t(r.note), (r.cents / 100).toFixed(2), tr.hours(r.billed)]);
@@ -279,8 +278,8 @@ export default class Billing {
         const m = String(cell ?? "").match(/\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/);
         const day = m ? read(m[1]) : null;
         if (day?.unit !== "day") return null;
-        const shows = (/** @type {typeof TimeReport} */ (tr.constructor)).labelDay(m[2]);
-        return { date: day.date, shows: shows && shows !== `${+day.date.slice(5, 7)}/${+day.date.slice(8, 10)}` ? shows : null };
+        const TR = /** @type {typeof TimeReport} */ (tr.constructor), shows = TR.labelDay(m[2]);
+        return { date: day.date, shows: shows && !TR.sameDay(shows, day.date) ? shows.shows : null };
     }
 
     // The Billed entries section, from its heading to the end of the note. Each entry takes its date

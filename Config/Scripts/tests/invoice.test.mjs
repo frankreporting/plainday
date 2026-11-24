@@ -9,9 +9,10 @@ import vm from "node:vm";
 import { compactTable, obsidianPadded } from "./tables.mjs";
 import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 import { frontmatter } from "./demo/renderReports.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, withWindow(vm.createContext({})));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, withWindow(vm.createContext({ plainday: withDates({}) })));
 const tr = new (load("timeReport.js", "TimeReport"))();
 const billing = new (load("billing.js", "Billing"))();
 const inv = new (load("invoice.js", "Invoice"))();
@@ -238,7 +239,7 @@ test("Invoice without your name or the invoice folder says so before asking anyt
     let invoices = { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 };
     const app = { vault: { create: async (p) => { made.push(p); }, createFolder: async (p) => { made.push(p); } } };
     const context = withWindow(vm.createContext({ app, setTimeout, Notice: class { constructor(t) { notices.push(t); } },
-        plainday: { Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } } }));
+        plainday: withDates({ Settings: { get: () => ({ invoices }) }, DatePrompt: { open: (title) => { asked.push(title); return null; } } }) }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     await invoice.create(WEB, tr, billing, index);
     assert.deepEqual(notices, ["Add your name and choose an invoice folder in Settings → Plainday → Invoices, then run Invoice again"]);
@@ -350,7 +351,7 @@ test("Invoice on an invoice note reads its properties from its text and offers w
     const notices = [], offered = [];
     const text = inv.noteText(DATA(), tr, billing);
     const context = withWindow(vm.createContext({
-        app: { metadataCache: { getFileCache: () => null } }, setTimeout,
+        plainday: withDates({}), app: { metadataCache: { getFileCache: () => null } }, setTimeout,
         Notice: class { constructor(t) { notices.push(t); } },
         getFrontMatterInfo: (t) => { const m = String(t).match(/^---\n([\s\S]*?)\n---/); return { exists: !!m, frontmatter: m ? m[1] : "" }; },
         parseYaml: (yaml) => frontmatter(`---\n${yaml}\n---\n`),
@@ -442,7 +443,7 @@ test("askDate: a month and day without a year is the closer one, since billing l
             return modal;
         },
     };
-    const context = withWindow(vm.createContext({ setTimeout, plainday: { DatePrompt } }));
+    const context = withWindow(vm.createContext({ setTimeout, plainday: withDates({ DatePrompt }) }));
     const src = classScript("invoice.js");
     const asking = new (vm.runInContext(`${src}\n;Invoice`, context))();
     assert.equal(await asking.askDate("Bill through"), "2026-09-16");
@@ -477,7 +478,7 @@ test("Invoice on a flat project asks when its fee was earned, and sets `earned` 
     const FuzzySuggestModal = class { constructor() {} setPlaceholder() {} open() { if (pick !== null) this.onChooseItem(this.getItems()[pick]); this.onClose(); } };
     const context = withWindow(vm.createContext({ app, setTimeout, clearTimeout, moment: () => ({ format: () => "2026-10-11" }),
         Notice: class { constructor(t) { notices.push(t); events.push("notice"); } },
-        plainday: { DatePrompt }, Platform: { isDesktop: false }, FuzzySuggestModal }));
+        plainday: withDates({ DatePrompt }), Platform: { isDesktop: false }, FuzzySuggestModal }));
     const invoice = new (vm.runInContext(`${classScript("invoice.js")}\n;Invoice`, context))();
     await invoice.create(POSTER, tr, billing, idx);
     assert.deepEqual(written, [POSTER]);
@@ -518,7 +519,7 @@ const withApp = ({ saved = null, view = null } = {}) => {
         workspace: { getLeavesOfType: () => (view ? [{ view }] : []) },
         foldManager: { load: () => saved, save: async (file, info) => { saves.push(info); } },
     };
-    const context = withWindow(vm.createContext({ app, Notice: class { constructor(text) { notices.push(text); } }, setTimeout }));
+    const context = withWindow(vm.createContext({ app, plainday: withDates({}), Notice: class { constructor(text) { notices.push(text); } }, setTimeout }));
     const src = classScript("invoice.js");
     return { invoice: new (vm.runInContext(`${src}\n;Invoice`, context))(), notices, saves };
 };

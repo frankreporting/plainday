@@ -76,7 +76,7 @@ function vault({ paths = [], daily = { folder: "", format: "YYYY-MM-DD" }, navig
         getFrontMatterInfo: (text) => ({ exists: false, frontmatter: "", from: 0, contentStart: 0, text }),
         parseYaml: () => ({}), stringifyYaml: () => "",
     });
-    for (const [key, file] of [["Settings", "settings"], ["Schedule", "schedule"], ["Plan", "plan"], ["DatePrompt", "datePrompt"], ["JumpToDate", "jumpToDate"], ["TimeReport", "timeReport"], ["PeriodicNotes", "periodicNotes"]]) {
+    for (const [key, file] of [["Settings", "settings"], ["Dates", "dates"], ["Schedule", "schedule"], ["Plan", "plan"], ["DatePrompt", "datePrompt"], ["JumpToDate", "jumpToDate"], ["TimeReport", "timeReport"], ["PeriodicNotes", "periodicNotes"]]) {
         plainday[key] = new (loadClass(`${file}.js`, context))();
     }
     return { plainday, app, file: (p) => files.get(p) ?? add(p), made };

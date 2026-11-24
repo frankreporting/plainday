@@ -365,13 +365,13 @@ export default class TimeReport {
     // `[[2026-10-08#^k3x9m2|10/8]]` (TaskIds.FORWARD), its name in group 1; or one written with a ➡️ before
     // its date. Whether the name is a periodic note's is the reader's to say (withoutForwardDates); the
     // Raycast timer's dropdown, which has no reader, drops it by its shape alone (itemLabel).
-    static FORWARD_LINK = /\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
+    static FORWARD_LINK = /\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|\[\[[^\]|]*\|\s*➡[^\]]*\]\]/gu;
     // One of the links that end a line (OBS-90), as TrailingLinks draws them: a due date's 🚩 M/D, a
     // note's ⋯ or ↗, a project's ⭕ or an area's 🗃️, alone in its alias; or a forward date (OBS-181),
     // a periodic note's line with a date for its label (TaskIds.FORWARD), or one with a ➡️ in front of
     // its date. A phone may add or drop the U+FE0F. A date label (group 3) counts only on a link to a
     // periodic note's line, which trailLink checks: read the links with it.
-    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    static TRAIL_LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}[./-]\d{1,2}\.?|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // A link's text when it's a periodic note's line: a name or path, then `#^` and an ID,
     // `2026-09-17#^p7d2qe`; periodicLine reads the name
     static PERIODIC_LINE = /^([^#]+)#\^[A-Za-z0-9-]+$/;
@@ -1325,24 +1325,58 @@ export default class TimeReport {
                 if (old) links.push({ link: "sent", target: old.linkpath, label: old.label });
                 for (const l of links) {
                     const day = read(l.target), shows = TimeReport.labelDay(l.label);
-                    if (day?.unit !== "day" || !shows || shows === `${+day.date.slice(5, 7)}/${+day.date.slice(8)}`) continue;
-                    out.push({ path: note.path, line: i, text: text.trim(), link: l.link, shows, date: day.date });
+                    if (day?.unit !== "day" || !shows || TimeReport.sameDay(shows, day.date)) continue;
+                    out.push({ path: note.path, line: i, text: text.trim(), link: l.link, shows: shows.shows, date: day.date });
                 }
             });
         }
         return out;
     }
 
-    // The month and day a link's label shows, "9/19", or null when it shows none. The labels Plainday writes
-    // a day with: 🚩 M/D, M/D, ddd M/D (Thu 9/17), M/D/YY.
+    // The month and day a link's label shows, read in the date format set now (Dates, OBS-309): { month, day,
+    // shows }, `shows` the date as written ("9/19", "18.9."), or null when it shows none in that format. The labels
+    // Plainday writes a day with, each in the format: 🚩 9/17, 9/17, Thu 9/17, 9/17/26. A label written in another
+    // format isn't read (under D.M., "9/17" isn't), and neither is one whose month or day can't be one: under D/M,
+    // "9/30" reads as nothing, since 30 isn't a month.
     /**
      * @param {unknown} label
-     * @returns {string | null}
+     * @param {string} [format]
+     * @returns {{ month: number, day: number, shows: string } | null}
      */
-    static labelDay(label) {
+    static labelDay(label, format = TimeReport.dateFormat()) {
         const bare = String(label ?? "").split(String.fromCharCode(0xfe0f)).join("").replace(/^\s*(?:🚩|➡)\s*/u, "");
-        const m = bare.match(/^(?:\p{L}{2,9}\.?,?\s+)?(\d{1,2})\/(\d{1,2})(?:\/(?:\d{2}|\d{4}))?\s*$/u);
-        return m ? `${+m[1]}/${+m[2]}` : null;
+        let reader = TimeReport.labelReaders.get(format);
+        if (!reader) {
+            // A dash needs no escape, and in a "u" pattern can't have one
+            const sep = (/[./-]/.exec(format) ?? ["/"])[0], s = sep === "-" ? "-" : `\\${sep}`;
+            reader = { dayFirst: format.indexOf("D") < format.indexOf("M"),
+                re: new RegExp(`^(?:\\p{L}{2,9}\\.?,?\\s+)?((\\d{1,2})${s}(\\d{1,2})(?:${s}(?:\\d{2}|\\d{4}))?${s}?)\\s*$`, "u") };
+            TimeReport.labelReaders.set(format, reader);
+        }
+        const m = reader.re.exec(bare);
+        if (!m) return null;
+        const month = +(reader.dayFirst ? m[3] : m[2]), day = +(reader.dayFirst ? m[2] : m[3]);
+        return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? { month, day, shows: m[1] } : null;
+    }
+
+    // labelDay's reader for each format, made once
+    /** @type {Map<string, { dayFirst: boolean, re: RegExp }>} */
+    static labelReaders = new Map();
+
+    // The date format Plainday writes in (Dates, OBS-309); "M/D" where Plainday isn't loaded (the Raycast timer)
+    /** @returns {string} */
+    static dateFormat() {
+        return plainday?.Dates?.format?.() ?? "M/D";
+    }
+
+    // Whether what a label shows (labelDay) is a date's month and day
+    /**
+     * @param {{ month: number, day: number }} shows
+     * @param {string} date
+     * @returns {boolean}
+     */
+    static sameDay(shows, date) {
+        return shows.month === +date.slice(5, 7) && shows.day === +date.slice(8, 10);
     }
 
     // What a Problem says about a link whose label shows another day (dayLabelProblems): what it shows, the day
@@ -2624,13 +2658,34 @@ export default class TimeReport {
         return cents ? this.money(cents) : "";
     }
 
+    // A date as Plainday writes one (Dates, OBS-309), with its year: "9/17/26", "17.9.26". Where Plainday
+    // isn't loaded (the Raycast timer, which writes no dates), "M/D/YY".
     /**
      * @param {string} date
      * @returns {string}
      */
     shortDate(date) {
         const [y, m, d] = date.split("-");
-        return `${+m}/${+d}/${y.slice(2)}`;
+        return plainday?.Dates?.year(date) ?? `${+m}/${+d}/${y.slice(2)}`;
+    }
+
+    // The same without the year: "9/17", "17.9."
+    /**
+     * @param {string} date
+     * @returns {string}
+     */
+    md(date) {
+        return plainday?.Dates?.day(date) ?? `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
+    }
+
+    // Two days as a range, as a week's row and column are headed: "9/13-9/19", "13.9.-19.9."
+    /**
+     * @param {string} from
+     * @param {string} to
+     * @returns {string}
+     */
+    mdRange(from, to) {
+        return plainday?.Dates?.range(from, to) ?? `${this.md(from)}-${this.md(to)}`;
     }
 
     // The text split around its freeze comments, [text, comment, text, …, text], as a split on
@@ -2977,7 +3032,6 @@ export default class TimeReport {
             const t = target(u, key);
             return t === label ? `[[${t}]]` : `[[${t}\\|${label}]]`;
         };
-        const md = (/** @type {string} */ date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
         // Each row's period: { unit, key (its note's name), start (its first day) }
         const year = entries.reduce((y, e) => (e.date.slice(0, 4) > y ? e.date.slice(0, 4) : y), "");
         const periodOf = (/** @type {string} */ d) => {
@@ -2995,7 +3049,7 @@ export default class TimeReport {
         return [...rows.values()].sort((a, b) => b.start.localeCompare(a.start)).map(({ unit: u, key, start, list }) => {
             if (u === "week") {
                 const [from, to] = this.weekRange(key);
-                return { label: linked("week", key, `${md(from)}-${md(to)}`), list };
+                return { label: linked("week", key, this.mdRange(from, to)), list };
             }
             return { label: u === "year" ? linked("year", key, key) : linked("month", key, this.monthTitle(start.slice(0, 7))), list };
         });
@@ -3175,7 +3229,7 @@ export default class TimeReport {
         const start = Date.UTC(+from.slice(0, 4), +from.slice(5, 7) - 1, +from.slice(8, 10)) / 864e5;
         const days = Array.from({ length: 7 }, (_, i) => new Date((start + i) * 864e5).toISOString().slice(0, 10));
         const day = this.dayLinks();
-        const columns = days.map((d) => ({ head: `[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${+d.slice(5, 7)}/${+d.slice(8, 10)}]]`, match: (/** @type {Entry} */ e) => e.date === d }));
+        const columns = days.map((d) => ({ head: `[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${this.md(d)}]]`, match: (/** @type {Entry} */ e) => e.date === d }));
         return this.hoursGrid(model, entries, columns, "Week", link);
     }
 
@@ -3198,11 +3252,10 @@ export default class TimeReport {
             const key = this.weekKey(new Date(n * 864e5).toISOString().slice(0, 10));
             if (!weeks.includes(key)) weeks.push(key);
         }
-        const md = (/** @type {string} */ date) => `${+date.slice(5, 7)}/${+date.slice(8, 10)}`;
         const columns = weeks.map((key) => {
             const [from, to] = this.weekRange(key);
             const target = scope.linkTarget ? scope.linkTarget("week", key) : key;
-            return { head: `[[${target}\\|${md(from)}-${md(to)}]]`, match: (/** @type {Entry} */ e) => this.weekKey(e.date) === key };
+            return { head: `[[${target}\\|${this.mdRange(from, to)}]]`, match: (/** @type {Entry} */ e) => this.weekKey(e.date) === key };
         });
         return this.hoursGrid(model, entries, columns, "Month", link);
     }
@@ -3322,7 +3375,6 @@ export default class TimeReport {
      * @returns {string}
      */
     invoiceProblem(p, link, day = this.dayLinks()) {
-        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const when = (/** @type {BilledRow} */ r) => `[[${day(r.date)}|${this.shortDate(r.date)}]] ${this.formatTime(r.start)} - ${this.formatTime(r.end)}`;
         if (p.twice) {
             const [a, b] = p.twice.invoices;
@@ -3348,7 +3400,7 @@ export default class TimeReport {
         // missing entry is settled by putting it back as billed.
         const fix = invoice.status === "draft" && c.kind !== "overlap" && !this.isArchived(invoice.project) ? "; rebuild it"
             : c.kind === "gone" ? "; put it back there to settle it" : "";
-        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${md(on)}` : ""}): ${at} was billed, ${now}${fix}`;
+        return `- [[${invoice.name}]] (${invoice.status}${on ? ` ${this.md(on)}` : ""}): ${at} was billed, ${now}${fix}`;
     }
 
     // A missing billed row as its invoice recorded it, so you can tell what to put back (Brian,
@@ -3534,7 +3586,6 @@ export default class TimeReport {
         const billing = entries.some((e) => this.hourlyCents(model, e) !== null);
         const billable = entries.some((e) => e.billable), free = entries.some((e) => !e.billable);
         const marks = billing || free || entries.some((e) => flagged.has(e));
-        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const day = this.dayLinks();
         const standing = this.sheetStanding(model);
         // An entry's { mark, invoice, hourly }: hourly when an hourly invoice can bill it
@@ -3557,7 +3608,7 @@ export default class TimeReport {
             const each = list.map(status);
             const kind = (/** @type {boolean} */ want) => list.filter((e) => e.billable === want);
             const sum = (/** @type {boolean} */ want) => (kind(want).length ? `**${hours(kind(want))}**` : "");
-            rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${md(d)}]]**`, ...(project ? [""] : []),
+            rows.push([...(marks ? [this.dayMark(each)] : []), `**[[${day(d)}\\|${this.dayName(d).slice(0, 3)} ${this.md(d)}]]**`, ...(project ? [""] : []),
                 ...split(sum(true), sum(false)), "", "", ...(billing ? [""] : [])]);
             for (const [k, e] of list.entries()) {
                 const { mark, invoice } = each[k];
@@ -3615,7 +3666,6 @@ export default class TimeReport {
             .sort((x, y) => (y.invoiceDate ?? "").localeCompare(x.invoiceDate ?? "") || y.number.localeCompare(x.number, undefined, { numeric: true }));
         if (!list.length) return [];
         const project = new Set(list.map((i) => i.project)).size > 1;
-        const md = (/** @type {string} */ d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
         const minutes = (/** @type {Invoice} */ i) => (i.hours === null ? null : Math.round(i.hours * 60));
         const cents = (/** @type {Invoice} */ i) => (i.total === null ? null : Math.round(i.total * 100));
         const live = list.filter((i) => i.status !== "canceled");
@@ -3624,7 +3674,7 @@ export default class TimeReport {
             ...list.map((i) => [
                 this.invoiceMark(i), `[[${i.name}]]`, ...(project ? [this.cell(link(i.project))] : []),
                 i.invoiceDate ? this.shortDate(i.invoiceDate) : "",
-                i.periodStart && i.periodEnd ? `${md(i.periodStart)} – ${this.shortDate(i.periodEnd)}` : "",
+                i.periodStart && i.periodEnd ? `${this.md(i.periodStart)} – ${this.shortDate(i.periodEnd)}` : "",
                 minutes(i) === null ? "" : this.hours(minutes(i)), cents(i) === null ? "" : this.money(cents(i)),
             ]),
             ["", "**Total**", ...(project ? [""] : []), "", "", `**${this.hours(live.reduce((s, i) => s + (minutes(i) ?? 0), 0))}**`,

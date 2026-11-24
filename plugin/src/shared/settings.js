@@ -26,6 +26,8 @@ export default class Settings {
     //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221), and whether Plainday draws the task markers
     //     (`taskMarkers`, TaskMarkers, OBS-140).
+    //   - dates (OBS-309): the format Plainday writes dates in (Dates): the region's while `region` is
+    //     on, else `format` ("D.M."), which is only ever one Dates.parse takes, or "" for the region's.
     //   - calendars (OBS-282): how far ahead Sync calendars writes events (`range`), and the calendars
     //     added by their private links, each { id, name, account, address, on }: `address` is your email
     //     address on that calendar, by which the calendar reader leaves out an invitation you declined. A calendar's link is never here: it's in this device's secret storage, under
@@ -156,6 +158,7 @@ export default class Settings {
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
      *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean, taskMarkers: boolean },
+     *   dates: { region: boolean, format: string },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
      *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
      *   templates: { week: string, month: string, year: string, task: string, log: string, project: string, area: string },
@@ -167,6 +170,7 @@ export default class Settings {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
             tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true, taskMarkers: true },
+            dates: { region: true, format: "" },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
             folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
             templates: { week: "", month: "", year: "", task: "", log: "", project: "", area: "" },
@@ -292,6 +296,10 @@ export default class Settings {
         out.tables.freezeColumns = this.frozenOf(tables.freezeColumns).number;
         if (typeof editor.listCursor === "boolean") out.editor.listCursor = editor.listCursor;
         if (typeof editor.taskMarkers === "boolean") out.editor.taskMarkers = editor.taskMarkers;
+        const dates = obj(r.dates), format = this.text(dates.format), parse = plainday?.Dates?.constructor?.parse;
+        if (typeof dates.region === "boolean") out.dates.region = dates.region;
+        // Only a format Dates takes (without Dates loaded, as in a test, Dates.format() checks it again)
+        out.dates.format = format && (!parse || parse(format)) ? format : "";
         const calendars = obj(r.calendars);
         out.calendars.range = this.rangeOf(calendars.range) ?? Settings.DEFAULT_RANGE;
         // Each calendar with an ID that can name its link, once; only the keys a calendar has, so no
@@ -906,6 +914,8 @@ export default class Settings {
         // is checked against this device's archive
         const read = !this.hasFolders(raw) ? this.normalize({ ...raw, folders: this.data.folders, templates: this.data.templates }, billing)
             : this.foldersDropped(raw, settings, billing) ? this.normalize(this.withFolders(raw, this.folders()), billing) : settings;
+        // A copy from before the date format (OBS-309) leaves this device's as it is
+        if (!this.hasDates(raw)) read.dates = { ...this.data.dates };
         return { settings: read, links, withCalendars: this.hasCalendars(raw) };
     }
 
@@ -981,6 +991,15 @@ export default class Settings {
         const r = typeof raw === "object" && raw !== null ? raw : {};
         const f = typeof r.folders === "object" && r.folders !== null ? r.folders : {};
         return { ...r, folders: { ...f, ...three } };
+    }
+
+    // Whether a data file or a copy has a date format (one from before OBS-309 has none)
+    /**
+     * @param {Raw} raw
+     * @returns {boolean}
+     */
+    hasDates(raw) {
+        return typeof raw === "object" && raw !== null && typeof raw.dates === "object" && raw.dates !== null;
     }
 
     // Whether a data file or a copy has folders (one from before OBS-283 has none), or doesn't read
@@ -1088,6 +1107,8 @@ export default class Settings {
         // The same for recurring events' projects, from a device on the release before them (OBS-275)
         const keepRecurring = raw !== null && kept.calendars.recurring === null && this.data.calendars.recurring !== null;
         if (keepRecurring) kept.calendars.recurring = this.data.calendars.recurring;
+        // And the date format, from a device on a release before it (OBS-309), kept in memory until a save
+        if (raw !== null && !this.hasDates(raw)) kept.dates = { ...this.data.dates };
         this.data = kept;
         if (dropped) new Notice(Settings.DROPPED_SYNC, 0);
         // save() sets both flags once the write lands; until then they stay as they were, so a write

@@ -98,7 +98,7 @@ export default class TrailingLinks {
     // date (one written with a ➡️ before its date too). A phone may add or drop the U+FE0F on an emoji.
     // A date label (group 3) counts only on a link to a periodic note's line, which lastLink checks:
     // read the links with it.
-    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}\/\d{1,2}|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
+    static LINK = /\[\[([^\]|]+)\|\s*(🚩️?\s*\d{1,2}[./-]\d{1,2}\.?|➡️?\s*[^\]]+?|⋯|↗️?|⭕️?|🗃️?|(\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4}))\s*\]\]$/u;
     // A link's text when it's a periodic note's line: a name or path, then `#^` and an ID,
     // `2026-09-17#^p7d2qe`; periodicLine reads the name
     static PERIODIC_LINE = /^([^#]+)#\^[A-Za-z0-9-]+$/;

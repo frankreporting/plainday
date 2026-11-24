@@ -8,13 +8,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { loadClass } from "../../../plugin/classShape.mjs";
-import { standIn, NN, PLANNER } from "./standInVault.mjs";
+import { standIn, withDates, NN, PLANNER } from "./standInVault.mjs";
 import { plainName, periodicNames, otherNames } from "./dayNames.mjs";
 import { ROOT, loadTimeReport, readVault, planReports } from "./demo/renderReports.mjs";
 
 const plain = (x) => JSON.parse(JSON.stringify(x));
 // The classes as the Raycast timer's sandbox has them: `plainday` empty, no moment
-const bare = (file) => loadClass(file, vm.createContext({ plainday: {} }));
+const bare = (file) => loadClass(file, vm.createContext({ plainday: withDates({}) }));
 const TaskIds = bare("taskIds.js"), TrailingLinks = bare("trailingLinks.js"), DueDate = bare("setDueDate.js"), AddTaskNote = bare("addTaskNote.js");
 const TimeReport = bare("timeReport.js");
 
@@ -101,7 +101,7 @@ test("Due date: the 🚩 goes ahead of a forward date in the vault's names, and 
     assert.equal(placed("- [ ] Renew registration [[2026-09-30|🚩 9/30]] ^r4n2wq", L), `- [ ] Renew registration ${L} ^r4n2wq`, "a 🚩 from before the format changed");
     assert.equal(placed("- [ ] Recap [[Launch plan|🚩 launch]]", L), `- [ ] Recap [[Launch plan|🚩 launch]] ${L} `, "a 🚩 with words is no deadline");
     assert.equal(placed("- [ ] Recap [[Write brochure copy#^r3v1sn|9/16]] ^r3v1sn", L), `- [ ] Recap [[Write brochure copy#^r3v1sn|9/16]] ${L} ^r3v1sn`, "a date label on a block link to another note is text");
-    assert.equal(DueDate.link({ format: (f) => (f === "M/D" ? "9/25" : "?") }, "25-09-2026"), L);
+    assert.equal(DueDate.link({ format: (f) => (f === "YYYY-MM-DD" ? "2026-09-25" : "?") }, "25-09-2026"), L);
 });
 
 const DD = { ...NN, calendarIntegrationMode: "notebook-navigator", calendarCustomFilePattern: "[days]/DD-MM-YYYY" };
@@ -168,9 +168,19 @@ test("a 🚩 in the vault's names is a deadline the report compares with its tas
 
 // ---------------------------------------------------------------- a label that shows another day
 
-test("labelDay: the month and day a label shows", () => {
-    for (const [label, shows] of [["🚩 9/19", "9/19"], ["🚩" + String.fromCharCode(0xfe0f) + " 9/19", "9/19"], ["9/16", "9/16"], ["Thu 9/17", "9/17"], ["9/17/26", "9/17"], ["09/07", "9/7"]]) assert.equal(TimeReport.labelDay(label), shows, label);
-    for (const label of ["Wk of 9/20", "Sep. 2026", "2027", "brief", "🚩 launch", "2026-09-18"]) assert.equal(TimeReport.labelDay(label), null, label);
+test("labelDay: the month and day a label shows, in the date format set now (OBS-309)", () => {
+    const read = (label, format) => { const r = TimeReport.labelDay(label, format); return r && `${r.month}/${r.day} ${r.shows}`; };
+    // Without Plainday's settings, M/D
+    for (const [label, shows] of [["🚩 9/19", "9/19 9/19"], ["🚩" + String.fromCharCode(0xfe0f) + " 9/19", "9/19 9/19"], ["9/16", "9/16 9/16"], ["Thu 9/17", "9/17 9/17"], ["9/17/26", "9/17 9/17/26"], ["09/07", "9/7 09/07"]]) assert.equal(read(label), shows, label);
+    for (const label of ["Wk of 9/20", "Sep. 2026", "2027", "brief", "🚩 launch", "2026-09-18", "13/1", "18.9."]) assert.equal(read(label), null, label);
+    // Day first, with dots, a trailing dot and a year: the label as written is what a Problem quotes
+    for (const [label, shows] of [["🚩 30.9.", "9/30 30.9."], ["Thu 17.9.", "9/17 17.9."], ["17.9.26", "9/17 17.9.26"], ["17.9", "9/17 17.9"], ["01.10.2026", "10/1 01.10.2026"]]) assert.equal(read(label, "D.M."), shows, label);
+    // A label in another format isn't read, and neither is one whose month can't be one
+    for (const label of ["9/30", "Fri 9/11", "17-9"]) assert.equal(read(label, "D.M."), null, label);
+    assert.equal(read("Fri 9/11", "D/M"), "11/9 9/11", "an old M/D label reads the other way round under D/M");
+    assert.equal(read("9/30", "D/M"), null, "30 isn't a month");
+    assert.equal(read("17-09", "DD-MM"), "9/17 17-09");
+    assert.equal(read("9.17.", "M.D."), "9/17 9.17.");
 });
 
 test("a day link whose label shows another day still reads by its name, and is listed to be fixed", () => {

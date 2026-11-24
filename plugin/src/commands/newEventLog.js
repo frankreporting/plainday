@@ -34,7 +34,7 @@ export default class NewEventLog {
     when(date, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD")) {
         const day = /** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true);
         const words = /** @type {Record<number, string | undefined>} */ ({ 0: "Today", 1: "Tomorrow", "-1": "Yesterday" })[day.diff(/** @type {MomentFn} */ (moment)(today, "YYYY-MM-DD", true), "days")];
-        return words ?? day.locale(plainday.DatePrompt.weekRules().locale).format("ddd M/D/YY");
+        return words ?? `${day.locale(plainday.DatePrompt.weekRules().locale).format("ddd")} ${plainday.Dates.year(day)}`;
     }
 
     // The title typed, trimmed, or null when it's empty or the box is closed

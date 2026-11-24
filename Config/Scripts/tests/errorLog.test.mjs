@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
 const source = (file) => classScript(`${file}`);
@@ -215,7 +216,7 @@ const harness = ({ text = null, path = "Config/Error Log.md" } = {}) => {
     const state = { text, created: [], folders: [], notices: [], opened: [] };
     const file = () => (state.text === null ? null : { path });
     const context = {
-        plainday: { Settings: { errorLogPath: () => path } },
+        plainday: withDates({ Settings: { errorLogPath: () => path } }),
         app: {
             vault: {
                 getFileByPath: (p) => (p === path ? file() : null),
@@ -227,7 +228,7 @@ const harness = ({ text = null, path = "Config/Error Log.md" } = {}) => {
             },
             workspace: { getLeaf: () => ({ openFile: async (f) => state.opened.push(f.path) }) },
         },
-        moment: () => ({ format: (f) => (f === "M/D h:mma" ? "10/29 9:14am" : "2026102909140000") }),
+        moment: () => ({ format: (f) => ({ "YYYY-MM-DD": "2026-10-29", "h:mma": "9:14am" })[f] ?? "2026102909140000" }),
         Notice: class { constructor(m, d) { state.notices.push({ m: typeof m === "string" ? m : m.text, d }); } },
         createFragment: (fn) => { const f = { text: "", appendText: (t) => { f.text += t; }, createEl: (_t, o) => { f.text += o.text; return { addEventListener: () => {} }; } }; fn(f); return f; },
     };

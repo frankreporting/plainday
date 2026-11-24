@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const code = classScript("calendarSync.js");
 const TODAY = "2026-09-15";
@@ -152,7 +153,7 @@ function load(app = {}, state = newState(), extra = {}) {
         window: { setTimeout, clearTimeout },
         Platform: { isMacOS: true },
         performance,
-        plainday: { ...stand(state), PeriodicNotes: periodicNotes(app, state), ...extra },
+        plainday: withDates({ ...stand(state), PeriodicNotes: periodicNotes(app, state), ...extra }),
         console,
     });
     return new (vm.runInContext(code + "\n;CalendarSync", context))();
@@ -1125,7 +1126,7 @@ function makeErrorLog(app, toasts) {
     const context = vm.createContext({
         app, moment, Notice: class { constructor(m) { toasts.push(m); } },
         createFragment: (fn) => { const parts = []; fn({ appendText: (t) => parts.push(t), createEl: (_, o) => { parts.push(o.text); return { addEventListener() {} }; } }); return parts.join(""); },
-        plainday: { Settings: { errorLogPath: () => ERROR_LOG } }, console,
+        plainday: withDates({ Settings: { errorLogPath: () => ERROR_LOG } }), console,
     });
     return new (vm.runInContext(classScript("errorLog.js") + "\n;ErrorLog", context))();
 }

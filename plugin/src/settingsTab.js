@@ -16,7 +16,8 @@
 // leaving it the field goes back to the saved value.
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
-// Folders and Note templates (OBS-283), Invoices, Tables (a switch, then the two freezes while it's on),
+// Folders and Note templates (OBS-283), Dates (OBS-309: the region's format, or one typed while the
+// switch is off, saved only once Dates takes it), Invoices, Tables (a switch, then the two freezes while it's on),
 // Editor, and Calendars (OBS-282): Add calendar, the sync range and the help, then a group for each
 // account with its calendars.
 //
@@ -617,6 +618,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const freezes = [];
         // Folders and Note templates sit near the top; Other, which the same helper builds, goes last
         const [folders, templates, other] = this.folderSections(store, problem);
+        // Whether the date format box shows: while the region's format is off (OBS-309)
+        let ownFormat = !now().dates.region;
+        const Dates = plainday.Dates.constructor;
+        const sample = "2026-09-17";
 
         return [
             {
@@ -643,6 +648,33 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 ],
             },
             folders, templates,
+            {
+                heading: "Dates",
+                rows: [
+                    row("Use my region's format", `Write dates the way this computer's region does: ${plainday.Dates.day(sample, plainday.Dates.region())}.`,
+                        (s) => s.addToggle((t) => t.setValue(!ownFormat).onChange((on) => {
+                            ownFormat = !on;
+                            void store(s, "dates", { region: on });
+                            this.refreshShown();
+                        }))),
+                    {
+                        ...row("Date format", "The day and month as numbers (D or DD, M or MM), in either order, joined by a slash, a dot or a dash: D/M, D.M., DD-MM. Plainday adds the year after them where it writes one.", (s) => {
+                            s.addText((t) => {
+                                t.setPlaceholder(Dates.FALLBACK).setValue(now().dates.format).onChange((v) => {
+                                    const format = v.trim();
+                                    if (format && !Dates.parse(format)) {
+                                        problem(s, `Not used: use numbers for the day and month (D or DD, M or MM), joined by /, . or -. Plainday keeps writing ${plainday.Dates.day(sample)}.`);
+                                        return;
+                                    }
+                                    problem(s, "");
+                                    void store(s, "dates", { format });
+                                });
+                            });
+                        }),
+                        visible: () => ownFormat,
+                    },
+                ],
+            },
             {
                 heading: "Invoices",
                 rows: [

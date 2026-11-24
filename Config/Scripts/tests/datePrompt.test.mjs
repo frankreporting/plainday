@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { classScript, withWindow } from "../../../plugin/classShape.mjs";
 import { RECORD as FIX, recordedReader } from "./recordedReader.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const SUN = "2026-09-27", MON = "2026-09-21", SAT = "2026-09-26";
 
@@ -16,7 +17,7 @@ const SUN = "2026-09-27", MON = "2026-09-21", SAT = "2026-09-26";
 const momentOn = (today) => (date = today) => ({ date, isValid: () => true, format: (f) => { assert.equal(f, "YYYY-MM-DD"); return date; } });
 
 const load = (ctx = {}, today = SUN) => {
-    const context = withWindow(vm.createContext({ moment: momentOn(today), Notice: class { constructor(m) { (ctx.notices ??= []).push(m); } }, console: { error() {} }, ...ctx }));
+    const context = withWindow(vm.createContext({ moment: momentOn(today), Notice: class { constructor(m) { (ctx.notices ??= []).push(m); } }, console: { error() {} }, ...ctx, plainday: withDates(ctx.plainday ?? {}) }));
     const DatePrompt = vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", context);
     return { DatePrompt, dp: new DatePrompt(), context };
 };
@@ -309,10 +310,10 @@ const jumpMoment = (current, locales) => {
 const PLANNER = "Reference/Planner";
 const loadJump = ({ nn, language = "en", current = "en" } = {}) => {
     const moment = jumpMoment(current, { en: 0, "en-gb": 1, "en-au": 1, de: 1, fr: 1 });
-    const plainday = {
+    const plainday = withDates({
         Schedule: { dailyNotePath: (m) => `${PLANNER}/days/${m.format("YYYY-MM-DD")}.md` },
         TimeReport: { periodPlaces: () => ({ week: { folder: `${PLANNER}/weeks`, dateFolders: "" }, month: { folder: `${PLANNER}/months`, dateFolders: "" }, year: { folder: `${PLANNER}/years`, dateFolders: "" } }) },
-    };
+    });
     const ctx = withWindow(vm.createContext({ moment, getLanguage: () => language, app: { plugins: { plugins: nn ? { "notebook-navigator": { settings: nn } } : {} } }, plainday }));
     plainday.DatePrompt = new (vm.runInContext(classScript("datePrompt.js") + "\n;DatePrompt", ctx))();
     const JumpToDate = vm.runInContext(classScript("jumpToDate.js") + "\n;JumpToDate", ctx);
