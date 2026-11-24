@@ -3,7 +3,8 @@
 // What Plainday does for the class files:
 // - one instance of every class, by name, on the host's `plainday` (src/host.js): the classes the
 //   three folders' indexes list, commands/, startup/ and shared/;
-// - a command for each class in the command list, with its icon (src/commands/index.js);
+// - a command for each class in the command list, with its icon (src/commands/index.js); one that
+//   needs the periodic notes says so instead of running while their source isn't chosen or is off;
 // - the startup scripts' invoke(), one after the other, once the layout is ready, in the order
 //   src/startup/index.js gives;
 // - a script that throws shows a notice and logs the error, and never stops the next one;
@@ -60,7 +61,7 @@ export default class Plainday extends Plugin {
         if (plainday.plugin !== this) return;
 
         for (const c of COMMANDS) {
-            this.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: () => this.run(c.script) });
+            this.addCommand({ id: c.id, name: c.name, icon: c.icon, callback: () => this.run(c.script, !!c.periodic) });
         }
 
         this.addSettingTab(new PlaindaySettingTab(this.app, this));
@@ -107,8 +108,12 @@ export default class Plainday extends Plugin {
         }
     }
 
-    /** @param {string} name */
-    async run(name) {
+    /**
+     * Runs a class's invoke(). A command that needs the periodic notes (`periodic`) says what's wrong
+     * with their source instead, while none is chosen or the chosen one is off (OBS-336).
+     * @param {string} name @param {boolean} [periodic]
+     */
+    async run(name, periodic = false) {
         /** @type {Record<string, unknown>} */
         const registry = plainday;
         const script = registry[name];
@@ -117,6 +122,11 @@ export default class Plainday extends Plugin {
             return;
         }
         try {
+            const notice = periodic ? plainday.Settings.periodicNotice() : "";
+            if (notice) {
+                new Notice(notice);
+                return;
+            }
             await script.invoke();
         } catch (e) {
             new Notice(`Plainday: ${name} failed\n${messageOf(e)}\nSee the developer console for details`);

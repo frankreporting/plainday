@@ -231,7 +231,7 @@ scenario("MoveToProject leaves alone what it doesn't work on, and says why, befo
     const SHEET = "Projects/Old/Old timesheet.md", PERSON = "Reference/People/Rafe.md";
     const notes = { ...base, [SHEET]: "---\ntags: [timesheet]\n---\n", [PERSON]: "- [ ] Ask\n", [day("2026-09-18")]: "- [ ] A\n", [INVOICE]: invoice("paid", []) };
     for (const [path, said] of [
-        [PERSON, "Rafe isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed"],
+        [PERSON, "Plainday only acts on periodic notes or notes in the Projects or Inbox folders. If you think you're seeing this message in error, check your periodic note and folder settings."],
         [day("2026-09-18"), "2026-09-18 stays where it is: run AddProjectLink on a line in it"],
         [SHEET, "Old timesheet stays where it is: a timesheet belongs to the time report"],
         [INVOICE, "2001-OLD stays where it is: an invoice belongs to the time report"],

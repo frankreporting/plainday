@@ -52,8 +52,11 @@ export default class Settings {
     //     choice rather than a rule per note type: "daily-notes" (Plainday + the Daily Notes plugin: the
     //     plugin keeps the daily notes, Plainday the weekly, monthly and yearly folders and templates) or
     //     "notebook-navigator" (Notebook Navigator's calendar keeps all four, folders and templates, and
-    //     Plainday asks for none of them). "" means neither has been chosen, and periodicSource() reads
-    //     the one in use, so a vault whose calendar is Notebook Navigator's starts there.
+    //     Plainday asks for none of them). "" means neither has been chosen yet (OBS-336): Plainday never
+    //     picks one itself, since installing Navigator turns its calendar on and would move where the
+    //     daily notes are without a word. Until one is chosen, or while the chosen one is off,
+    //     periodicProblem() says so: the settings show it, and the commands that need periodic notes
+    //     stop (main.js).
     //   - templates (OBS-283): what each kind of note Plainday makes is made from. The weekly, monthly
     //     and yearly ones are used in the "daily-notes" source, and blank means Weekly Note, Monthly Note
     //     or Yearly Note in Templater's template folder. `task` and `log` are the Task and Log templates
@@ -115,8 +118,10 @@ export default class Settings {
     // The weekly, monthly and yearly notes, by their unit
     static PERIODS = ["week", "month", "year"];
     // Who owns the periodic notes (folders.periodic): the Daily notes plugin with Plainday, or Notebook
-    // Navigator's calendar. "" is neither chosen, which periodicSource() reads from the vault.
+    // Navigator's calendar. "" is neither chosen yet (OBS-336).
     static SOURCES = ["daily-notes", "notebook-navigator"];
+    // Where a broken choice is fixed, for the notices that say so
+    static PERIODIC_SETTING = "Settings → Plainday → Folders → Periodic notes";
     static SOURCE_NAMES = { "daily-notes": "Plainday + Daily Notes plugin", "notebook-navigator": "Notebook Navigator" };
     // What each template a command makes a note from is called. Where it sits is the vault's own
     // template folder, which Templater keeps, else the top of the vault — never a folder of this
@@ -321,15 +326,56 @@ export default class Settings {
     // ---------------------------------------------------------------- folders (OBS-283)
 
     /**
-     * Who owns the daily, weekly, monthly and yearly notes: the setting, else the calendar the vault
-     * already uses — Notebook Navigator's when its own calendar makes the notes, otherwise the Daily
-     * notes plugin's. The panel shows what this says, so the choice is never hidden.
-     * @returns {"daily-notes" | "notebook-navigator"}
+     * Who owns the daily, weekly, monthly and yearly notes: the setting, and only the setting (OBS-336).
+     * "" while neither has been chosen; what reads a periodic note then reads the Daily notes plugin's,
+     * as Schedule.dailyOpts does, so nothing throws, but the commands that need them don't run.
+     * @returns {"daily-notes" | "notebook-navigator" | ""}
      */
     periodicSource() {
         const set = this.data.folders.periodic;
-        if (set === "daily-notes" || set === "notebook-navigator") return set;
-        return this.navigatorCalendar() ? "notebook-navigator" : "daily-notes";
+        return set === "daily-notes" || set === "notebook-navigator" ? set : "";
+    }
+
+    /**
+     * What's wrong with the periodic notes' source, or null (OBS-336): nothing chosen ("none"), the Daily
+     * notes plugin chosen and off ("daily-notes"), Notebook Navigator chosen and not on ("navigator-off"),
+     * or on with its calendar set to the Daily notes plugin's ("navigator-calendar")
+     * @returns {"none" | "daily-notes" | "navigator-off" | "navigator-calendar" | null}
+     */
+    periodicCase() {
+        const source = this.periodicSource();
+        if (!source) return "none";
+        if (source === "daily-notes") return app.internalPlugins?.plugins?.["daily-notes"]?.enabled ? null : "daily-notes";
+        if (this.navigatorCalendar()) return null;
+        return app.plugins?.plugins?.["notebook-navigator"] ? "navigator-calendar" : "navigator-off";
+    }
+
+    /**
+     * The orange line under Settings → Plainday → Folders → Periodic notes, and under Define periodic
+     * notes using, or "" when the chosen source works (OBS-336)
+     * @returns {string}
+     */
+    periodicProblem() {
+        const c = this.periodicCase();
+        if (c === "none") return "Choose who keeps your periodic notes. Until then, Plainday finds none.";
+        if (c === "daily-notes") return "The Daily notes plugin is off. Turn it on in Settings → Core plugins.";
+        if (c) return "Notebook Navigator isn't on, or its calendar doesn't make your periodic notes.";
+        return "";
+    }
+
+    /**
+     * What a command that needs periodic notes says instead of acting, or "" when the chosen source works
+     * (OBS-336): the line's words, with where to fix it
+     * @returns {string}
+     */
+    periodicNotice() {
+        const where = Settings.PERIODIC_SETTING;
+        const c = this.periodicCase();
+        if (c === "none") return `Choose who keeps your periodic notes in ${where}. Until then, Plainday finds none.`;
+        if (c === "daily-notes") return `Plainday's periodic notes come from the Daily notes plugin, which is off. Turn it on in Settings → Core plugins, or choose another in ${where}.`;
+        if (c === "navigator-off") return `Plainday's periodic notes come from Notebook Navigator, which isn't on. Turn it on, or choose another in ${where}.`;
+        if (c === "navigator-calendar") return `Plainday's periodic notes come from Notebook Navigator, but its calendar is set to the Daily notes plugin. Set it to Notebook Navigator, or choose another in ${where}.`;
+        return "";
     }
 
     /**

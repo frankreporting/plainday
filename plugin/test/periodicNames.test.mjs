@@ -25,8 +25,9 @@ const LOCALES = ["en", "de", "fr", "en-gb"];
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
 // Settings and Schedule in a context of their own, with the two plugins' settings as `daily` and
-// `navigator` (null: not installed) and the source as `periodic` (blank: Plainday picks)
-function vault({ daily = { format: "YYYY-MM-DD", folder: "Reference/Planner/days" }, navigator = null, periodic = "" } = {}) {
+// `navigator` (null: not installed) and the source as `periodic`: by default the calendar the vault
+// uses, as you'd choose it (OBS-336), and "" for none chosen
+function vault({ daily = { format: "YYYY-MM-DD", folder: "Reference/Planner/days" }, navigator = null, periodic = navigator?.calendarIntegrationMode === "notebook-navigator" ? "notebook-navigator" : "daily-notes" } = {}) {
     const app = {
         internalPlugins: { plugins: { "daily-notes": { instance: { options: daily } } } },
         plugins: { plugins: navigator ? { "notebook-navigator": { settings: navigator } } : {} },
@@ -107,7 +108,7 @@ test("which format is checked with Notebook Navigator: its patterns as typed, fo
 test("the demo's settings warn on no row", () => {
     for (const periodic of ["", "daily-notes"]) {
         const settings = vault({ navigator: NAVIGATOR(), periodic });
-        for (const unit of ["day", "week", "month", "year"]) assert.equal(settings.periodicWarning(unit, "en"), "", `${unit}, ${periodic || "as it starts"}`);
+        for (const unit of ["day", "week", "month", "year"]) assert.equal(settings.periodicWarning(unit, "en"), "", `${unit}, ${periodic || "nothing chosen"}`);
     }
 });
 

@@ -11,6 +11,10 @@
 // shows it, and Commander takes it for a new button (OBS-263). A new command needs one too, and no
 // two commands share one; the bundle test checks both.
 //
+// A command marked `periodic` reads or writes the daily, weekly, monthly or yearly notes, so it doesn't
+// run while Plainday's periodic notes source isn't chosen or is off: it says so instead (OBS-336,
+// Settings.periodicNotice). The others work on Projects, areas and the error log alone.
+//
 // Snapshot and Refold daily notes aren't commands: they're fold machinery, in shared/, which the
 // classes call directly and a tool outside Obsidian calls by eval
 // (`plainday.SnapshotDailyNotes.invoke()`).
@@ -37,20 +41,20 @@ export const CLASSES = {
 };
 
 export const COMMANDS = [
-    { id: "schedule", name: "Schedule", script: "Schedule", icon: "calendar-arrow-up" },
-    { id: "due-date", name: "Due date", script: "DueDate", icon: "flag" },
-    { id: "add-note", name: "Add note", script: "AddTaskNote", icon: "file-plus-corner" },
-    { id: "new-event-log", name: "New event log", script: "NewEventLog", icon: "notebook-pen" },
-    { id: "add-project-link", name: "Add project link", script: "AddProjectLink", icon: "circle" },
+    { id: "schedule", name: "Schedule", script: "Schedule", icon: "calendar-arrow-up", periodic: true },
+    { id: "due-date", name: "Due date", script: "DueDate", icon: "flag", periodic: true },
+    { id: "add-note", name: "Add note", script: "AddTaskNote", icon: "file-plus-corner", periodic: true },
+    { id: "new-event-log", name: "New event log", script: "NewEventLog", icon: "notebook-pen", periodic: true },
+    { id: "add-project-link", name: "Add project link", script: "AddProjectLink", icon: "circle", periodic: true },
     { id: "move-to-project", name: "Move to project", script: "MoveToProject", icon: "folder-input" },
     { id: "new-project", name: "New project", script: "NewProject", icon: "circle-plus" },
     { id: "new-area", name: "New area", script: "NewArea", icon: "package-plus" },
     { id: "convert-to-project", name: "Convert to project", script: "ConvertToProject", icon: "folder-plus" },
-    { id: "toggle-time-entry", name: "Toggle time entry", script: "ToggleTimeEntry", icon: "timer" },
-    { id: "jump-to-date", name: "Jump to date", script: "JumpToDate", icon: "calendar-search" },
-    { id: "plan", name: "Plan", script: "Plan", icon: "columns-3" },
-    { id: "time-report", name: "Time report", script: "TimeReport", icon: "table-2" },
-    { id: "invoice", name: "Invoice", script: "Invoice", icon: "receipt" },
+    { id: "toggle-time-entry", name: "Toggle time entry", script: "ToggleTimeEntry", icon: "timer", periodic: true },
+    { id: "jump-to-date", name: "Jump to date", script: "JumpToDate", icon: "calendar-search", periodic: true },
+    { id: "plan", name: "Plan", script: "Plan", icon: "columns-3", periodic: true },
+    { id: "time-report", name: "Time report", script: "TimeReport", icon: "table-2", periodic: true },
+    { id: "invoice", name: "Invoice", script: "Invoice", icon: "receipt", periodic: true },
     { id: "view-error-logs", name: "View error logs", script: "ViewErrorLogs", icon: "triangle-alert" },
-    { id: "sync-calendars", name: "Sync calendars", script: "CalendarSync", icon: "calendar-sync" },
+    { id: "sync-calendars", name: "Sync calendars", script: "CalendarSync", icon: "calendar-sync", periodic: true },
 ];

@@ -44,7 +44,7 @@ export default class ToggleTimeEntry {
         }
         if (r.pick) {
             const items = await this.choices(report);
-            if (!items.length) { new Notice("No running timers, and nothing open in today's daily note"); return; }
+            if (!items.length) { new Notice(this.nothingToPick()); return; }
             // On a task outside today's daily note, where a timer wouldn't count, say why the dropdown opened
             const choice = await this.pick(items, r.elsewhere ? "Timers start in today's daily note: pick a task or timer" : "Start or stop a timer");
             if (!choice) return;
@@ -71,6 +71,15 @@ export default class ToggleTimeEntry {
             return;
         }
         if (picked) new Notice(r.summary);
+    }
+
+    // What the dropdown says when it has nothing to offer: with no note for today where the periodic
+    // notes' source puts it, that note's path and what to check (OBS-336)
+    /** @returns {string} */
+    nothingToPick() {
+        const today = plainday.Schedule.dailyNotePath(/** @type {MomentFn} */ (moment)());
+        if (app.vault.getFileByPath(today)) return "No running timers, and nothing open in today's daily note";
+        return `No running timers, and no note for today at \`${today}\`. Check your periodic note settings.`;
     }
 
     // How many days before today a daily note's date is; 0 for any other note

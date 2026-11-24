@@ -88,6 +88,8 @@ const scheduleIn = async ({ notes = {}, open, at = 0, pick, today = "2026-09-16"
         AddTaskNote: make("addTaskNote", "AddTaskNote"), Schedule: make("schedule", "Schedule"),
         TaskIds: make("taskIds", "TaskIds"), CalendarSync: make("calendarSync", "CalendarSync"), PeriodicNotes: make("periodicNotes", "PeriodicNotes"),
     });
+    // The calendar the vault uses, chosen as you'd choose it (OBS-336: Plainday never picks one itself)
+    plainday.Settings.get().folders.periodic = nn?.calendarIntegrationMode === "notebook-navigator" ? "notebook-navigator" : "daily-notes";
     // New notes with no properties, as these tests expect (periodicNotes.test.mjs checks the aliases)
     plainday.PeriodicNotes.alias = () => null;
     plainday.TaskIds.freshId = () => "k3x9m2";

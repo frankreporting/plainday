@@ -94,8 +94,9 @@ test("normalize: each value that reads, else its default", () => {
 test("the demo's data file reads as it's written, so loading and saving it changes nothing", () => {
     const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
     const normalized = settings.normalize(JSON.parse(text), billing);
-    // The demo keeps its error log in Config, by naming it (OBS-295)
-    assert.deepEqual(plain(normalized), { ...JUNIPER, folders: { ...FOLDERS, errorLog: "Config/Error Log.md" } }, "the demo's invented details");
+    // The demo keeps its error log in Config, by naming it (OBS-295), and its periodic notes come from
+    // Notebook Navigator's calendar, chosen (OBS-336)
+    assert.deepEqual(plain(normalized), { ...JUNIPER, folders: { ...FOLDERS, periodic: "notebook-navigator", errorLog: "Config/Error Log.md" } }, "the demo's invented details");
     // Obsidian's saveData writes JSON.stringify(data, null, 2)
     assert.equal(JSON.stringify(normalized, null, 2), text);
 });
@@ -156,7 +157,7 @@ test("pasted: the copy's settings, with the higher last invoice number of the tw
 // Settings in a stand-in for Plainday: loadData gives `stored` (null for none, as Obsidian does, and
 // undefined with `unreadable`, as Obsidian gives for a file that doesn't parse), saveData records, the
 // vault holds `notes` as text, and the notices shown are kept
-function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {}, templater = "" } = {}) {
+function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = new Map(), failSave = false, vaultKey = "vault001", plugins = {}, templater = "", dailyNotes = true } = {}) {
     const saves = [], notices = [], reads = [];
     let listCursorRuns = 0, taskMarkerRuns = 0;
     const plugin = {
@@ -174,6 +175,8 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
         // The community plugins Settings asks about: Notebook Navigator for the periodic notes' source,
         // and Templater, which keeps the vault's template folder
         plugins: { plugins, getPlugin: (id) => (id === "templater-obsidian" && templater ? { settings: { templates_folder: templater } } : null) },
+        // The Daily notes core plugin, on unless a test turns it off (OBS-336)
+        internalPlugins: { plugins: { "daily-notes": { enabled: dailyNotes, instance: { options: {} } } } },
         loadLocalStorage: (k) => local.get(k) ?? null,
         saveLocalStorage: (k, v) => { local.set(k, v); },
         // As Obsidian's: names in lowercase letters, digits and dashes, one string each
@@ -767,13 +770,10 @@ const NAVIGATOR = {
     calendarCustomWeekTemplate: "T/Week.md",
 };
 
-test("periodicSource: the setting, else the calendar the vault uses; Navigator integrating with the Daily notes plugin means that plugin", async () => {
-    const plain2 = withPlugin({});
-    assert.equal(plain2.s.periodicSource(), "daily-notes", "no Navigator at all");
-    const nn = withPlugin({ plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
-    assert.equal(nn.s.periodicSource(), "notebook-navigator");
-    const integrated = withPlugin({ plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarIntegrationMode: "daily-notes" } } } });
-    assert.equal(integrated.s.periodicSource(), "daily-notes", "its calendar isn't what makes them");
+test("periodicSource: the setting, and only the setting; Navigator installed with its calendar on moves nothing (OBS-336)", async () => {
+    assert.equal(withPlugin({}).s.periodicSource(), "", "nothing chosen in a new vault");
+    assert.equal(withPlugin({ plugins: { "notebook-navigator": { settings: NAVIGATOR } } }).s.periodicSource(), "",
+        "not even with Navigator's calendar making the notes: installing it moves nothing");
     // The setting wins over what's installed, both ways
     const chosen = withPlugin({ stored: { folders: { periodic: "daily-notes" } }, plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
     await chosen.s.load();
@@ -781,8 +781,44 @@ test("periodicSource: the setting, else the calendar the vault uses; Navigator i
     const other = withPlugin({ stored: { folders: { periodic: "notebook-navigator" } } });
     await other.s.load();
     assert.equal(other.s.periodicSource(), "notebook-navigator");
+    // Loading a vault with nothing chosen chooses nothing, and saves nothing
+    const before = withPlugin({ stored: { folders: { projects: "Projects" } }, plugins: { "notebook-navigator": { settings: NAVIGATOR } } });
+    await before.s.load();
+    assert.equal(before.s.periodicSource(), "");
+    assert.deepEqual(before.saves, []);
     // Anything else isn't a source
     assert.equal(settings.normalize({ folders: { periodic: "periodic-notes" } }, billing).folders.periodic, "");
+});
+
+test("periodicProblem and periodicNotice: nothing chosen, or the chosen one off, says so with where to fix it; a working one says nothing (OBS-336)", async () => {
+    const at = async (periodic, opts = {}) => {
+        const f = withPlugin({ stored: { folders: { periodic } }, ...opts });
+        await f.s.load();
+        return { line: f.s.periodicProblem(), notice: f.s.periodicNotice() };
+    };
+    const where = "Settings → Plainday → Folders → Periodic notes";
+    assert.deepEqual(await at(""), {
+        line: "Choose who keeps your periodic notes. Until then, Plainday finds none.",
+        notice: `Choose who keeps your periodic notes in ${where}. Until then, Plainday finds none.`,
+    });
+    assert.deepEqual(await at("daily-notes"), { line: "", notice: "" }, "the Daily notes plugin on");
+    assert.deepEqual(await at("daily-notes", { dailyNotes: false }), {
+        line: "The Daily notes plugin is off. Turn it on in Settings → Core plugins.",
+        notice: `Plainday's periodic notes come from the Daily notes plugin, which is off. Turn it on in Settings → Core plugins, or choose another in ${where}.`,
+    });
+    assert.deepEqual(await at("daily-notes", { dailyNotes: false, plugins: { "notebook-navigator": { settings: NAVIGATOR } } }).then((r) => r.line),
+        "The Daily notes plugin is off. Turn it on in Settings → Core plugins.", "Navigator on doesn't stand in for it");
+    assert.deepEqual(await at("notebook-navigator", { plugins: { "notebook-navigator": { settings: NAVIGATOR } } }), { line: "", notice: "" }, "Navigator's calendar making them");
+    assert.deepEqual(await at("notebook-navigator", { plugins: { "notebook-navigator": { settings: NAVIGATOR } }, dailyNotes: false }), { line: "", notice: "" }, "whatever the Daily notes plugin is");
+    const navigatorLine = "Notebook Navigator isn't on, or its calendar doesn't make your periodic notes.";
+    assert.deepEqual(await at("notebook-navigator"), {
+        line: navigatorLine,
+        notice: `Plainday's periodic notes come from Notebook Navigator, which isn't on. Turn it on, or choose another in ${where}.`,
+    });
+    assert.deepEqual(await at("notebook-navigator", { plugins: { "notebook-navigator": { settings: { ...NAVIGATOR, calendarIntegrationMode: "daily-notes" } } } }), {
+        line: navigatorLine,
+        notice: `Plainday's periodic notes come from Notebook Navigator, but its calendar is set to the Daily notes plugin. Set it to Notebook Navigator, or choose another in ${where}.`,
+    });
 });
 
 test("navigatorNote: the folder, name and template Notebook Navigator's pattern says, with its [literals] unwrapped", async () => {

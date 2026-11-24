@@ -34,7 +34,9 @@ In Obsidian, open **Settings → Community plugins**, turn community plugins on,
 
 For beta builds, install [BRAT](https://github.com/TfTHacker/obsidian42-brat), run **BRAT: Plugins: Add a beta plugin for testing** from the command palette, enter `frankreporting/plainday`, and choose *Latest version*.
 
-Plainday needs no other plugin. It finds your daily notes where the core Daily notes plugin puts them, or where Notebook Navigator's calendar does if you choose it (*Settings → Plainday → Folders → Periodic notes*). These plugins add to it:
+Then choose who keeps your daily, weekly, monthly and yearly notes, once, in **Settings → Plainday → Folders → Periodic notes**: the core Daily notes plugin with Plainday, or Notebook Navigator's calendar. Until you do, the commands that work in those notes say so instead of acting.
+
+Plainday needs no other plugin. These plugins add to it:
 
 - **[Templater](https://github.com/SilentVoid13/Templater)** runs the Templater code in your own templates for task notes, logs, projects, areas and periodic notes. Without it, a template's `{{title}}`, `{{date}}` and `{{time}}` are filled in.
 - **[Natural Language Dates (Revived)](https://github.com/Amato21/nldates-revived)** reads dates in languages other than English, and suggests dates as you type in a note. Plainday reads English dates itself.
