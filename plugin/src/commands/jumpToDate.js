@@ -40,7 +40,7 @@ export default class JumpToDate {
                 await leaf.openFile(file);
             } catch (err) {
                 console.error("JumpToDate:", err);
-                new Notice(`Couldn't open ${target?.name ?? "that note"}: ${err.message}`);
+                new Notice(`Couldn't open ${target ? this.title(target) : "that note"}: ${err.message}`);
             }
         }, {
             periods: true,
@@ -178,6 +178,14 @@ export default class JumpToDate {
         return { path, name, kind, when, result };
     }
 
+    // The note as a question or a notice names it: a day in the date format Plainday writes ("9/20/26",
+    // "20.9.26"), whatever its file is called (OBS-309); a week, month or year by its note's name, which
+    // follows the user's own pattern ("2026w39")
+    /** @param {JumpTarget} target @returns {string} */
+    title(target) {
+        return target.result.unit === "day" ? plainday.Dates.year(target.result.date) : target.name;
+    }
+
     // The note made, as every periodic note is (PeriodicNotes.ensure): in its folder, with its alias, then
     // its template
     /** @param {JumpTarget} target @returns {Promise<TFile>} */
@@ -222,7 +230,7 @@ export default class JumpToDate {
         return new Promise((resolve) => {
             const modal = new Modal(app);
             let create = false;
-            modal.titleEl.setText(`Create ${target.name}?`);
+            modal.titleEl.setText(`Create ${this.title(target)}?`);
             modal.contentEl.createEl("p", { text: `There's no ${target.kind} note for ${target.when} yet.` });
             const label = modal.contentEl.createEl("label");
             const box = label.createEl("input", { type: "checkbox" });
