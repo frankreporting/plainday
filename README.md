@@ -105,7 +105,7 @@ The Obsidian command-line tool runs them from a terminal too: `obsidian command 
 
 ## Settings
 
-Everything is in **Settings → Plainday**: the folders for projects, the Inbox and the archive, and where the periodic notes go; your templates for each kind of note; your details for invoices and the folder they go in; the tables; the editor; and your calendars. *Copy* and *Paste*, at the top, carry the settings to another device or keep a backup. The copy holds your calendar links, so keep it private. [The manual's *Settings*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#settings) says what each one does.
+Everything is in **Settings → Plainday**: the folders for projects, the Inbox and the archive, and where the periodic notes go; your templates for each kind of note; the date format Plainday writes in (*Dates*, your daily notes' as it comes); your details for invoices and the folder they go in; the tables; the editor; and your calendars. *Copy* and *Paste*, at the top, carry the settings to another device or keep a backup. The copy holds your calendar links, so keep it private. [The manual's *Settings*](https://github.com/frankreporting/plainday/blob/main/Config/Manual.md#settings) says what each one does.
 
 ## Calendars
 

@@ -18,9 +18,13 @@ process.env.TZ = RECORD.timeZone;
 
 // The reader and the date box in one context, with this realm's Date: chrono-node takes a reference
 // date only when it's a Date of its own realm
-const load = ({ revived = null } = {}) => {
+// `format`: the custom date format Plainday writes and reads in (Dates, OBS-309), M/D/YY unless given;
+// null for none, so the daily notes' names (YYYY-MM-DD here) give it
+const load = ({ revived = null, format = "M/D/YY" } = {}) => {
     const plainday = {};
     const context = vm.createContext({ moment, chronoEn, Date, plainday, app: { plugins: { getPlugin: (id) => (id === "nldates-revived" ? revived : null) } }, console });
+    const dates = format === null ? { custom: false, format: "" } : { custom: true, format };
+    plainday.Dates = new (loadClass("dates.js", vm.createContext({ moment, plainday: { Settings: { get: () => ({ dates }) }, Schedule: { dailyOpts: () => ({ format: "YYYY-MM-DD" }) } } })))();
     plainday.DateWords = new (loadClass("dateWords.js", context))();
     plainday.DatePrompt = new (loadClass("datePrompt.js", context))();
     return plainday;
@@ -169,13 +173,27 @@ test("OBS-162's shorthands read as nothing, so they're free to mean something", 
     }
 });
 
-test("English (UK) reads day before month, as Revived does", () => {
+test("a date format with the day first reads day before month, with slashes or its own joiner (OBS-309)", () => {
     const now = tenAm("2026-09-27");
+    assert.equal(local(words.parseDate("3/10", now)), "2027-03-10");
+    for (const format of ["D/M/YY", "DD.MM.YYYY", "DD-MM-YYYY"]) assert.equal(local(load({ format }).DateWords.parseDate("3/10", now)), "2026-10-03", format);
+    const { DatePrompt: dm } = load({ format: "DD.MM.YYYY" });
+    const on = { today: "2026-09-17", now: tenAm("2026-09-17") };
+    for (const typed of ["5/10", "5.10.", "5.10"]) assert.equal(dm.read(typed, on)?.date, "2026-10-05", typed);
+    assert.equal(dm.read("2/10/2027", { ...on, periods: true, nearest: true })?.date, "2027-10-02");
+    assert.equal(dm.read("week of 20/9", on)?.date, "2026-09-20");
+    assert.equal(load({ format: "D-M-YY" }).DatePrompt.read("5-10", on)?.date, "2026-10-05");
+    // A format that starts with the year doesn't say: Obsidian's language does, day first wherever it writes the
+    // day first (English (UK), German), month first in English. A format that says, says.
+    const iso = load({ format: null }).DateWords;
     const before = moment.locale();
     try {
-        assert.equal(local(words.parseDate("3/10", now)), "2027-03-10");
+        for (const [language, want] of [["en-gb", "2026-10-03"], ["de", "2026-10-03"], ["en", "2027-03-10"]]) {
+            moment.locale(language);
+            assert.equal(local(iso.parseDate("3/10", now)), want, language);
+        }
         moment.locale("en-gb");
-        assert.equal(local(words.parseDate("3/10", now)), "2026-10-03");
+        assert.equal(local(words.parseDate("3/10", now)), "2027-03-10", "M/D/YY says month first, even in English (UK)");
     } finally {
         moment.locale(before);
     }

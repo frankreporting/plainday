@@ -85,7 +85,7 @@ export default class PeriodicNotes {
     }
 
     // A periodic note's alias: "9/20/26 Sunday", "Week of 9/13/26" (the week's first day), "September 2026",
-    // and none for a year, in the week settings' language
+    // and none for a year, in the week settings' language, with the date as Plainday writes one (Dates, OBS-309)
     /**
      * @param {Unit} unit
      * @param {string} date
@@ -94,8 +94,8 @@ export default class PeriodicNotes {
      */
     alias(unit, date, rules = plainday.DatePrompt.weekRules()) {
         const day = (/** @type {string} */ d) => /** @type {MomentFn} */ (moment)(d, "YYYY-MM-DD", true).locale(rules.locale);
-        if (unit === "day") return day(date).format("M/D/YY dddd");
-        if (unit === "week") return `Week of ${day(this.start(unit, date, rules)).format("M/D/YY")}`;
+        if (unit === "day") return `${plainday.Dates.year(date)} ${day(date).format("dddd")}`;
+        if (unit === "week") return `Week of ${plainday.Dates.year(this.start(unit, date, rules))}`;
         if (unit === "month") return day(this.start(unit, date, rules)).format("MMMM YYYY");
         return null;
     }

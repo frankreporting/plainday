@@ -119,7 +119,7 @@ export default class ToggleTimeEntry {
                 todays.push(...report.runningChoices(lines).map(at));
                 tasks.push(...report.taskChoices(lines).map(at));
             } else {
-                others.push(...report.runningChoices(lines, /** @type {MomentFn} */ (moment)().subtract(d.daysAgo, "days").format("M/D")).map(at));
+                others.push(...report.runningChoices(lines, plainday.Dates.day(/** @type {MomentFn} */ (moment)().subtract(d.daysAgo, "days"))).map(at));
             }
         });
         // Future notes (negative daysAgo) sort ahead of today; timers there are unlikely, but go last

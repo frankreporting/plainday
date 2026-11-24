@@ -7,9 +7,10 @@ import fs from "node:fs";
 import vm from "node:vm";
 import { obsidianPadded, segments, tablesIn as spans } from "./tables.mjs";
 import { classScript } from "../../../plugin/classShape.mjs";
+import { withDates } from "./standInVault.mjs";
 
 const here = new URL(".", import.meta.url);
-const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({}));
+const load = (file, name) => vm.runInContext(classScript(`${file}`) + `\n;${name}`, vm.createContext({ plainday: withDates({}) }));
 const TimeReport = load("timeReport.js", "TimeReport");
 const tr = new TimeReport();
 const billing = new (load("billing.js", "Billing"))();
@@ -184,7 +185,7 @@ test("tableDefault: the Tables settings as the default freeze, null when both ar
     assert.deepEqual(plain(tr.tableDefault({ freezeRows: 0, freezeColumns: 12 })), { rows: 0, columns: 9 }, "at most 9 columns");
     assert.equal(tr.tableDefault({ freezeRows: -1, freezeColumns: 1.5 }), null, "anything but a whole number is off");
     // In the app, the settings Plainday holds
-    const ctx = vm.createContext({ plainday: { Settings: { get: () => ({ tables: { freezeRows: 1, freezeColumns: 1 } }) } } });
+    const ctx = vm.createContext({ plainday: withDates({ Settings: { get: () => ({ tables: { freezeRows: 1, freezeColumns: 1 } }) } }) });
     const live = new (vm.runInContext(classScript("timeReport.js") + "\n;TimeReport", ctx))();
     assert.deepEqual(plain(live.tableDefault()), ON);
     ctx.plainday.Settings = { get: () => ({ tables: { freezeRows: 0, freezeColumns: 0 } }) };
@@ -453,7 +454,7 @@ function tableSpan(text, match) {
 function withOpenNote(file, editor) {
     const notices = [];
     const context = vm.createContext({
-        app: { workspace: { getLeavesOfType: () => [{ view: { file, editor } }] } },
+        plainday: withDates({}), app: { workspace: { getLeavesOfType: () => [{ view: { file, editor } }] } },
         Notice: class { constructor(message) { notices.push(message); } },
     });
     const make = (file, name) => new (vm.runInContext(classScript(`${file}`) + `\n;${name}`, context))();

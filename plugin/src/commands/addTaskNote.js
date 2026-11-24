@@ -56,7 +56,7 @@ export default class AddTaskNote {
     // `[[2026-10-08#^k3x9m2|10/8]]`, or one written with a ➡️ before its date. Read with trailItem,
     // which adds the spaces before it and checks what's before a mark. A forward date is taken by its shape,
     // its name in group 1, and runItem reads the name (OBS-297): walk a run with runItem.
-    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}\/\d{1,2}|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩\uFE0F?\s*\d{1,2}[./-]\d{1,2}\.?|➡\uFE0F?[^\]]*|⋯|↗\uFE0F?|⭕\uFE0F?|🗃\uFE0F?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)\uFE0F?)$/u;
     // The item of the run that ends `text`, with the spaces before it, or null. An ℹ️ or 🆓 is one only
     // after a space or a tab: stuck to a word, it's part of the text. Both are found here, not in the
     // pattern: older iPhones can't run a lookbehind (OBS-199), and spaces in it would be tried again from

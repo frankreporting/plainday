@@ -330,7 +330,7 @@ export default class Schedule {
         const { unit, m } = result;
         if (unit === "day") {
             const path = this.dailyNotePath(m);
-            const label = m.format("M/D");
+            const label = plainday.Dates.day(m);
             const name = path.split("/").pop().replace(/\.md$/, "");
             // By its path when another note has its name, as for a week or a month
             const linktext = () => plainday.AddTaskNote.linktextFor({ path, basename: name }, app.vault.getMarkdownFiles().map((f) => f.path));
@@ -861,7 +861,7 @@ export default class Schedule {
     // by name, or by path when another note has it; "10/8", "Wk of 10/4", "Oct. 2026" or "2027"
     /** @param {TFile} file @param {string} id @returns {string} */
     forwardTo(file, id) {
-        const label = this.isDailyNote(file) ? /** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true).format("M/D") : this.labelOf(file);
+        const label = this.isDailyNote(file) ? plainday.Dates.day(/** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true)) : this.labelOf(file);
         const linktext = plainday.AddTaskNote.linktextFor(file, app.vault.getMarkdownFiles().map((f) => f.path));
         return plainday.TaskIds.constructor.forwardLink(linktext, label, id);
     }
@@ -869,7 +869,10 @@ export default class Schedule {
     // Where a periodic note puts a task, as a prompt says it: "Thu 10/8", "Wk of 10/4", "Oct. 2026", "2027"
     /** @param {TFile} file @returns {string} */
     labelOf(file) {
-        if (this.isDailyNote(file)) return /** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true).format("ddd M/D");
+        if (this.isDailyNote(file)) {
+            const day = /** @type {MomentFn} */ (moment)(file.basename, this.dailyOpts().format, true);
+            return `${day.format("ddd")} ${plainday.Dates.day(day)}`;
+        }
         const unit = this.periodOf(file);
         if (!unit) return file.basename;
         const rules = plainday.DatePrompt.weekRules();
@@ -878,7 +881,7 @@ export default class Schedule {
         return Schedule.periodLabel({ date, unit }, { weekStart: jump.isoWeeks(rules) ? 1 : rules.weekStart, ...jump.monthNames(rules) });
     }
 
-    // A period's short name, as short as a day's M/D: "Wk of 10/4" (the day the week starts, weeks
+    // A period's short name, as short as a day's M/D: "Wk of 10/4" (the day the week starts, in the date format, weeks
     // starting on `weekStart`, 0 is Sunday), "Oct. 2026" (the locale's short month name, with a period
     // unless it has one or is the whole name: "May 2026"), "2027"
     /**
@@ -895,7 +898,7 @@ export default class Schedule {
         }
         const first = new Date(Date.UTC(y, mo - 1, d));
         first.setUTCDate(d - (first.getUTCDay() - weekStart + 7) % 7);
-        return `Wk of ${first.getUTCMonth() + 1}/${first.getUTCDate()}`;
+        return plainday.Dates.week(first.toISOString().slice(0, 10));
     }
 
     // Where the daily notes are, what names them and what they're made from. With Notebook Navigator's

@@ -279,7 +279,8 @@ export default class ErrorLog {
         const before = file ? await app.vault.read(file) : "";
         const fresh = this.fresh(before, section, groups);
         if (file && this.same(before, section, groups)) return fresh;
-        const body = this.render(section, groups, /** @type {MomentFn} */ (moment)().format("M/D h:mma"));
+        const stamp = /** @type {MomentFn} */ (moment)();
+        const body = this.render(section, groups, `${plainday.Dates.day(stamp)} ${stamp.format("h:mma")}`);
         if (file) {
             await app.vault.process(file, (text) => this.place(text, section, body));
         } else {

@@ -60,6 +60,7 @@ export const TYPED = [
     "plugin/src/shared/billing.js",
     "plugin/src/shared/calendarFeed.js",
     "plugin/src/shared/datePrompt.js",
+    "plugin/src/shared/dates.js",
     "plugin/src/shared/dateWords.js",
     "plugin/src/shared/errorLog.js",
     "plugin/src/shared/eventLog.js",

@@ -411,6 +411,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", undefined, ["Backup and transfer"]],
             ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
             ["group", "Note templates", ["Tasks", "Logs", "Projects", "Areas"]],
+            ["group", "Dates", ["Use custom display format", "Date format"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
             ["group", "Editor", ["Keep the cursor after a list line's bullet or checkbox", "Draw task markers"]],
@@ -418,7 +419,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             ["group", "Other", ["Error log note"]],
         ]);
         assert.ok(!("heading" in defs[0]), "the top group has no heading");
-        assert.equal(defs[3].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
+        assert.equal(defs[4].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
         assert.equal(defs[0].items[0].desc, "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.");
         for (const g of defs) for (const i of g.items) {
             assert.ok(i.name, "every row has a name");
@@ -525,8 +526,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual([saved()?.firstNumber, saved()?.lastNumber], [2001, 2000], "typing a first number numbers from it");
 
         // Tables: the freezes show only while the switch is on, which freezes 1 and 1, and off unfreezes
-        const visible = () => tab.getSettingDefinitions()[4].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
-        const shown = tab.getSettingDefinitions()[4].items;
+        const visible = () => tab.getSettingDefinitions()[5].items.filter((i) => !i.visible || i.visible()).map((i) => i.name);
+        const shown = tab.getSettingDefinitions()[5].items;
         assert.deepEqual(shown.filter((i) => !i.visible || i.visible()).map((i) => i.name), ["Freeze rows and columns"]);
         const sw = standInSetting();
         shown[0].render(sw);
@@ -547,7 +548,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
 
         // Editor: Draw task markers saves, then redraws at once (OBS-140)
         const markers = standInSetting();
-        tab.getSettingDefinitions()[5].items.find((i) => i.name === "Draw task markers").render(markers);
+        tab.getSettingDefinitions()[6].items.find((i) => i.name === "Draw task markers").render(markers);
         assert.equal(markers.control.inputEl.value, true, "on as it comes");
         const drawn = [];
         window.plainday.TaskMarkers.invoke = async () => drawn.push(window.plainday.Settings.get().editor.taskMarkers);
@@ -923,7 +924,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         let redrawn = 0;
         tab.update = () => { redrawn++; };
         const defs = tab.getSettingDefinitions();
-        assert.deepEqual(defs.slice(6).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
+        assert.deepEqual(defs.slice(7).map((g) => [g.heading, g.items.map((i) => [i.type ?? "row", i.name, i.desc])]), [
             ["Calendars", [
                 ["row", "Add calendar", undefined],
                 ["row", "Sync range", "How far ahead to write events into daily notes."],
@@ -933,7 +934,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             ["Other", [["row", "Error log note", undefined]]],
         ]);
         // The calendar list: a page of its own, each account's calendars on it
-        const page = defs[6].items[3];
+        const page = defs[7].items[3];
         assert.deepEqual([page.displayValue, page.visible()], ["3 calendars", true]);
         assert.deepEqual(page.items.map((g) => [g.heading, g.items.map((i) => [i.name, i.desc])]), [
             ["No account", [["Library", "Add link on this device: Edit, then paste it"]]],
@@ -941,7 +942,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         ], "accounts and calendars in alphabetical order, each saying when this device has no link");
         // A link the last Sync calendars found stopped working on this device says so (OBS-275)
         plugin.app.saveLocalStorage("plainday-calendar-cache", { version: 3, dead: { studio0001: true } });
-        const dead = tab.getSettingDefinitions()[6].items[3].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
+        const dead = tab.getSettingDefinitions()[7].items[3].items.find((g) => g.heading === "Work").items.find((i) => i.name === "Studio");
         assert.equal(dead.desc, "Link stopped working on this device: Edit, then paste a new one");
         plugin.app.saveLocalStorage("plainday-calendar-cache", null);
         const item = (group, name) => groupsOf(defs).find((g) => g.heading === group).items.find((i) => i.name === name);
@@ -989,7 +990,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
 
         // With none left: no calendar list
         for (const id of ["home000001", "library001"]) await window.plainday.Settings.removeCalendar(id);
-        assert.equal(tab.getSettingDefinitions()[6].items[3].visible(), false);
+        assert.equal(tab.getSettingDefinitions()[7].items[3].visible(), false);
     } finally {
         plugin.onunload();
     }
@@ -1206,7 +1207,7 @@ test("Edit: a name typed while a new link is checked is the one saved; repeated 
     const p = await calendarPanel(stored);
     try {
         const defs = p.tab.getSettingDefinitions();
-        assert.deepEqual(defs[6].items[3].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
+        assert.deepEqual(defs[7].items[3].items.map((g) => [g.heading, g.items.map((i) => i.name)]), [["iCloud", ["Calendar", "Calendar (2)", "Calendar (2) (2)"]], ["Invoices calendars", ["Billing"]]]);
         await p.click(p.row("iCloud", "Calendar (2)").button("Edit").buttonEl);
         const dialog = fake.modals.at(-1);
         dialog.field("New link").type("https://example.org/new.ics");
@@ -1423,7 +1424,7 @@ test("a worker that doesn't build stops the build, and names its files for npm r
 });
 
 test("every class file passes the checks, and comments about CustomJS are left alone", () => {
-    assert.equal(classFiles.length, 41);
+    assert.equal(classFiles.length, 42);
     for (const f of classFiles) {
         assert.deepEqual(check(f, read(f)), [], f);
         assert.deepEqual(shapeProblems(f, read(f)), [], f);

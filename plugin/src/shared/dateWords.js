@@ -1,5 +1,5 @@
 import { moment } from "obsidian";
-import { chronoEn } from "../host.js";
+import { chronoEn, plainday } from "../host.js";
 
 /** @import { DateReader, MomentFn, ParsedPeriod } from "../host.js" */
 /** @import { Chrono, Parser, ParsedResult, ParsingOption } from "chrono-node" */
@@ -290,7 +290,9 @@ export default class DateWords {
             const make = (/** @type {Chrono} */ base) => { const c = base.clone(); c.parsers.push(day); return c; };
             DateWords.parsers = { casual: make(chronoEn.casual), gb: make(chronoEn.GB) };
         }
-        return moment.locale() === "en-gb" ? DateWords.parsers.gb : DateWords.parsers.casual;
+        // Day first when the date format puts it first, or, for one that starts with the year, when Obsidian's
+        // language writes it first (Dates.dayFirst, OBS-309): "5/10" is 5 October under D/M/YY or DD.MM.YYYY
+        return plainday?.Dates?.dayFirst?.() ? DateWords.parsers.gb : DateWords.parsers.casual;
     }
 
     /** @returns {Patterns} */

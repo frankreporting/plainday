@@ -79,10 +79,14 @@ export default class DatePrompt {
      * @returns {DateResult | null}
      */
     readWith(nld, text, { periods = false, weekStart = 0, name = null, nearest = false, today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD"), now = new Date() } = {}) {
-        const t = String(text ?? "").trim();
+        // A day and month typed with the date format's own joiner ("5.10." under DD.MM.YYYY, OBS-309) is read as
+        // with slashes, which the readers read in the format's order (DateWords.chrono)
+        // A note's own name ("26-09-20" for daily notes named YY-MM-DD) is read as typed, first
+        const typed = String(text ?? "").trim();
+        const t = plainday?.Dates?.slashed?.(typed) ?? typed;
         if (!t || !nld) return null;
 
-        const named = name?.(t);
+        const named = name?.(typed) ?? (t !== typed ? name?.(t) : null);
         if (named) return this.result(named.date, named.unit);
 
         // "week of oct 5", "the week of friday", "week starting oct 4": the week that day is in (its
@@ -226,10 +230,10 @@ export default class DatePrompt {
         if (!result) return "";
         const { date, unit } = result;
         const [y, mo] = date.split("-").map(Number);
-        // M/D, with the year when it isn't this year's
+        // The day and month as Plainday writes them (Dates, OBS-309), with the year when it isn't this year's
         const md = (/** @type {number} */ day) => {
-            const [yy, mm, dd] = DatePrompt.fromDay(day).split("-");
-            return `${Number(mm)}/${Number(dd)}${yy === today.slice(0, 4) ? "" : `/${yy.slice(2)}`}`;
+            const date = DatePrompt.fromDay(day);
+            return date.slice(0, 4) === today.slice(0, 4) ? plainday.Dates.day(date) : plainday.Dates.year(date);
         };
         const day = DatePrompt.toDay(date);
         const dow = new Date(day * 864e5).getUTCDay();
@@ -241,8 +245,8 @@ export default class DatePrompt {
         return `${DatePrompt.DAYS[dow].slice(0, 3)} ${md(day)} · ${when}${result.readAs ? ` · read as "${result.readAs}"` : ""}`;
     }
 
-    // The same, spelled out for a sentence: "Friday, October 2, 2026", "the week starting 10/4/26",
-    // "October 2026", "2027"
+    // The same, spelled out for a sentence: "Friday, October 2, 2026" ("Friday 2 October 2026" when the date
+    // format puts the day first, OBS-309), "the week starting 10/4/26", "October 2026", "2027"
     /**
      * @param {Period} period
      * @param {number} [weekStart]
@@ -255,9 +259,9 @@ export default class DatePrompt {
         if (unit === "year") return String(y);
         if (unit === "month") return `${DatePrompt.MONTHS[mo - 1]} ${y}`;
         if (unit === "week") {
-            const [sy, sm, sd] = DatePrompt.weekFirst(date, weekStart).split("-");
-            return `the week starting ${Number(sm)}/${Number(sd)}/${sy.slice(2)}`;
+            return `the week starting ${plainday.Dates.year(DatePrompt.weekFirst(date, weekStart))}`;
         }
+        if (plainday.Dates.dayFirst()) return `${DatePrompt.DAYS[dow]} ${d} ${DatePrompt.MONTHS[mo - 1]} ${y}`;
         return `${DatePrompt.DAYS[dow]}, ${DatePrompt.MONTHS[mo - 1]} ${d}, ${y}`;
     }
 

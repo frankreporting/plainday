@@ -210,6 +210,6 @@ test("the old callout's rows read by their link's name, and a label that shows a
     assert.deepEqual(keys(billing.readInvoice(invoice(callout("[[01-09-2026\\|9/1/26]]"), props), other, index)), [KEYS[0]]);
     const labeled = billing.readInvoice(invoice(callout("[[2026-09-02\\|9/1/26]]"), props), demo, index);
     assert.deepEqual(keys(labeled), ["2026-09-02 780 870"]);
-    assert.match(labeled.problem, /labeled 9\/1 that links the daily note for 9\/2\/26/);
+    assert.match(labeled.problem, /labeled 9\/1\/26 that links the daily note for 9\/2\/26/);
     assert.match(billing.readInvoice(invoice(callout("[[2026-09-01\\|9/1/26]]"), props), other, index).problem, /a Billed entries row that doesn't read/);
 });

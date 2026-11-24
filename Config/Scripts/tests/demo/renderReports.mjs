@@ -50,12 +50,15 @@ export const NOTE_FOLDERS = ["Inbox/", "Projects/", "Reference/", "Archive/"];
 // The vm contexts timeReport.js was loaded into, so planReports can give each the vault it runs on
 const contexts = new WeakMap();
 
-// TimeReport, with TaskIds loaded beside it for the task checks (OBS-185), and AddTaskNote, which says what a
-// logs folder is called (OBS-233: a note in one is a log)
+// TimeReport, with TaskIds loaded beside it for the task checks (OBS-185), AddTaskNote, which says what a
+// logs folder is called (OBS-233: a note in one is a log), and Dates, which writes dates in the vault's saved
+// format once useSettings gives it the settings (OBS-309: M/D in the demo), and M/D before
 export function loadTimeReport(root = ROOT) {
     const ctx = vm.createContext({});
     const load = (file) => loadClass(`${file}.js`, ctx, path.join(root, "plugin/src"));
     ctx.plainday = { AddTaskNote: new (load("addTaskNote"))() };
+    // A checkout from before Dates (a private test's older clone) has none
+    if (fs.existsSync(path.join(root, "plugin/src/shared/dates.js"))) ctx.plainday.Dates = new (load("dates"))();
     const TimeReport = load("timeReport");
     const tr = new TimeReport();
     contexts.set(tr, { TaskIds: load("taskIds"), plainday: ctx.plainday });
@@ -76,7 +79,8 @@ export function vaultSettings(vault, billing = loadBilling()) {
     const settings = new Settings();
     // A vault made in memory, as the tests make them, has no root and no data file
     const file = vault.root ? path.join(vault.root, SETTINGS_FILE) : null;
-    if (file && fs.existsSync(file)) return settings.normalize(JSON.parse(fs.readFileSync(file, "utf8")), billing);
+    // A data file saved before OBS-309 reads as Settings.load reads it: dates in M/D/YY (upgraded)
+    if (file && fs.existsSync(file)) return settings.normalize(settings.upgraded(JSON.parse(fs.readFileSync(file, "utf8"))), billing);
     return settings.defaults();
 }
 

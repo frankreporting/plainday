@@ -496,7 +496,7 @@ export default class TaskChange {
      */
     dayName(file) {
         const schedule = plainday.Schedule;
-        return schedule.isDailyNote(file) ? /** @type {MomentFn} */ (moment)(file.basename, schedule.dailyOpts().format, true).format("M/D") : schedule.labelOf(file);
+        return schedule.isDailyNote(file) ? plainday.Dates.day(/** @type {MomentFn} */ (moment)(file.basename, schedule.dailyOpts().format, true)) : schedule.labelOf(file);
     }
 
     // The one question (rule 10): at most one per change, before anything is written. It asks when a note
@@ -590,7 +590,7 @@ export default class TaskChange {
      * @returns {string}
      */
     refused({ entry, invoice }) {
-        const short = (/** @type {string} */ date) => `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
+        const short = (/** @type {string} */ date) => plainday.Dates.day(date);
         if (invoice.unread) return `Nothing changed: this task's time on ${short(entry.date)} is on ${invoice.number}, whose status can't be read.`;
         const on = invoice.status === "paid" ? invoice.paid : invoice.status === "sent" ? invoice.invoiceDate : null;
         return `Nothing changed: this task's time on ${short(entry.date)} is on ${invoice.number} (${invoice.status}${on ? ` ${short(on)}` : ""}).`;

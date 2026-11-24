@@ -71,14 +71,14 @@ export default class TaskIds {
     // link of your own to a day's line, with words for its alias, isn't one: it stays in the text. One
     // written with a ➡️ before its date (before OBS-185's first test round) is read too, the ➡️ left
     // out of its label; a phone may drop the U+FE0F.
-    static FORWARD = /^\[\[(?=[^\]|#]+#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
+    static FORWARD = /^\[\[(?=[^\]|#]+#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|[^\]]*\|\s*➡)([^\]|#]+)(?:#\^([A-Za-z0-9-]+))?\|\s*(?:➡️?\s*)?([^\]]*)\]\]$/u;
     // One item of the run of links that ends a line: a 🚩, ⋯, ↗, ⭕ or
     // 🗃️ link, a forward date (or one written with a ➡️), or the ℹ️ or 🆓 mark. The same pattern as
     // AddTaskNote.TRAIL_ITEM, read with trailItem as AddTaskNote's is; TaskIds' statics must load in an
     // empty vm context, so they can't reach AddTaskNote, and these are copies that taskIds.test.mjs
     // checks against it. The pattern takes a forward date by its shape, its name in group 1: runItem reads
     // the name, and a run is only ever walked with runItem.
-    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}\/\d{1,2}|Wk of \d{1,2}\/\d{1,2}|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}[./-]\d{1,2}\.?|➡️?[^\]]*|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|\[\[([^[\]|#]+)#\^[A-Za-z0-9-]+\|\s*(?:\d{1,2}[./-]\d{1,2}\.?|Wk of \d{1,2}[./-]\d{1,2}\.?|[^\s\]|]+ \d{4}|\d{4})\s*\]\]|(?:ℹ|🆓)️?)$/u;
     /** @param {string} text @returns {RegExpMatchArray | null} */
     static trailItem(text) {
         const item = text.match(TaskIds.TRAIL_ITEM);

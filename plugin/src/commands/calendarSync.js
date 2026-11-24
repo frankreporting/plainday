@@ -1966,7 +1966,7 @@ export default class CalendarSync {
         const name = path.split("/").pop().replace(/\.md$/, "");
         const target = app.metadataCache?.getFirstLinkpathDest?.(name, "")?.path;
         const text = !target || target === path ? name : path.replace(/\.md$/, "");
-        return `[[${text}|${/** @type {MomentFn} */ (moment)(date, "YYYY-MM-DD", true).format("M/D")}]]`;
+        return `[[${text}|${plainday.Dates.day(date)}]]`;
     }
 
     /**

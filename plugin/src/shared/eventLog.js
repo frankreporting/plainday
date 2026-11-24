@@ -273,7 +273,7 @@ export default class EventLog {
         }
 
         // Its alias: the day as Plainday writes dates, then the log's name without its day
-        const own = { alias: `${day.isValid() ? day.format("M/D/YY") : date} ${this.dayOf(name)?.title ?? name}`, parent, date, time: times?.time ?? "", endTime: times?.endTime ?? "", who: "" };
+        const own = { alias: `${day.isValid() ? plainday.Dates.year(day) : date} ${this.dayOf(name)?.title ?? name}`, parent, date, time: times?.time ?? "", endTime: times?.endTime ?? "", who: "" };
         return this.write({ name, folder, own, into });
     }
 
@@ -467,7 +467,7 @@ export default class EventLog {
     // A note link
     static NOTE_LINK = /\[\[[^[\]|]+\|\s*(?:⋯|↗️?)\s*\]\]/u;
     // One item of the run that ends a line: a ⋯ or ↗, 🚩, ⭕ or 🗃️ link, or the ℹ️ or 🆓 mark (AddTaskNote.TRAIL_ITEM)
-    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}\/\d{1,2}|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|(?:ℹ|🆓)️?)$/u;
+    static TRAIL_ITEM = /(?:\[\[[^\]|]+\|\s*(?:🚩️?\s*\d{1,2}[./-]\d{1,2}\.?|⋯|↗️?|⭕️?|🗃️?)\s*\]\]|(?:ℹ|🆓)️?)$/u;
     // A block ID ending a line, which stays last
     static BLOCK_ID = /\s+\^[A-Za-z0-9-]+$/;
 
