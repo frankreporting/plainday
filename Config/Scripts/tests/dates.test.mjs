@@ -23,6 +23,8 @@ test("parse: the day and month as numbers, either first, joined by a slash, a do
         assert.deepEqual([p.dayFirst, p.sep, p.trailing], parts, format);
     }
     for (const format of ["D MMM", "D/M/YY", "D", "DD/DD", "D/M.", "D.M/", "dd/mm", "DDD/M", "", null, 7]) assert.equal(Dates.parse(format), null, String(format));
+    // Only a dot may follow, which every pattern that finds a label by its shape takes
+    for (const format of ["D/M/", "M-D-", "DD-MM-"]) assert.equal(Dates.parse(format), null, format);
 });
 
 test("the region's format, from Intl's parts: padded when a part has two digits, the joiner without its spaces", () => {
@@ -59,6 +61,7 @@ test("the forms: a day, with its year, a week and a range, in each format", () =
         assert.deepEqual([d.day("2026-09-07"), d.year("2026-09-07"), d.year("2026-09-07", true), d.week("2026-09-07"), d.range("2026-09-13", "2026-09-19")], want, format);
     }
     assert.equal(at("D.M.").day({ format: (f) => (f === "YYYY-MM-DD" ? "2026-10-01" : "?") }), "1.10.", "a moment");
+    assert.equal(at("D.M.").year({ year: () => 2026, month: () => 9, date: () => 1, format: () => "٢٠٢٦-١٠-٠١" }), "1.10.26", "a moment in its own digits, read as numbers");
 });
 
 test("slashed: a day and month typed with the format's own joiner, as the date readers read them", () => {

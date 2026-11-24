@@ -30,9 +30,10 @@ export default class Dates {
     // label by its shape accept any of the three joiners, so labels written in an earlier format still
     // read.
     static FALLBACK = "M/D";
-    // The format's own rule: one D or DD and one M or MM, either first, with /, . or - between them and
-    // maybe after (lookaheads, not lookbehinds, which older iPhones can't run)
-    static FORMAT = /^(?=[^D]*D{1,2}[^D]*$)(?=[^M]*M{1,2}[^M]*$)(?:D{1,2}|M{1,2})([./-])(?:D{1,2}|M{1,2})\1?$/;
+    // The format's own rule: one D or DD and one M or MM, either first, with /, . or - between them, and
+    // a dot after them when they're joined by one ("D.M."): the patterns that find a label by its shape
+    // take a trailing dot only (lookaheads, not lookbehinds, which older iPhones can't run)
+    static FORMAT = /^(?=[^D]*D{1,2}[^D]*$)(?=[^M]*M{1,2}[^M]*$)(?:D{1,2}|M{1,2})(?:([/-])(?:D{1,2}|M{1,2})|(\.)(?:D{1,2}|M{1,2})\.?)$/;
     // A day whose day and month both have one digit, so a region that pads them shows two
     static PROBE = new Date(2026, 0, 2);
     // The region's format, read once
@@ -50,7 +51,8 @@ export default class Dates {
         const f = typeof format === "string" ? format.trim() : "";
         const m = f.match(Dates.FORMAT);
         if (!m) return null;
-        return { dayFirst: f.indexOf("D") < f.indexOf("M"), sep: m[1], trailing: f.endsWith(m[1]) };
+        const sep = m[1] ?? m[2];
+        return { dayFirst: f.indexOf("D") < f.indexOf("M"), sep, trailing: f.endsWith(sep) };
     }
 
     /**
@@ -73,11 +75,13 @@ export default class Dates {
     }
 
     /**
-     * A date's year, month and day as numbers
+     * A date's year, month and day as numbers: a moment's read as numbers, since a moment in some languages
+     * (Arabic, Hindi) formats with its own digits
      * @param {DateLike} date
      * @returns {[number, number, number]}
      */
     static ymd(date) {
+        if (typeof date !== "string" && typeof date.month === "function" && typeof date.date === "function") return [date.year(), date.month() + 1, date.date()];
         const [y, m, d] = (typeof date === "string" ? date : date.format("YYYY-MM-DD")).split("-").map(Number);
         return [y, m, d];
     }
