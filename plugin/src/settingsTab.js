@@ -188,8 +188,8 @@ class CopyModal extends Modal {
         this.contentEl.createEl("p", {
             cls: "setting-item-description",
             text: this.withLinks
-                ? "Select it and copy it. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private."
-                : "Select it and copy it. It holds your invoice details, so keep it somewhere private.",
+                ? "Copy the text above and paste it using the Paste button in another device. Note: The text includes your calendar links, which work like passwords, and your invoice details, so keep it somewhere private."
+                : "Copy the text above and paste it using the Paste button in another device. Note: The text includes your invoice details, so keep it somewhere private.",
         });
         const row = this.contentEl.createDiv({ cls: "modal-button-container" });
         new ButtonComponent(row).setButtonText("Done").setCta().onClick(() => this.close());

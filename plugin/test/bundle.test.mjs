@@ -487,7 +487,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         const copyBox = copy.contentEl.all().find((e) => e.component).component;
         assert.equal(JSON.parse(copyBox.getValue()).invoices.name, "Juniper Hale");
         assert.equal(copyBox.inputEl.rows, 6);
-        assert.equal(copy.contentEl.all().find((e) => e.tag === "p").text, "Select it and copy it. It holds your invoice details, so keep it somewhere private.");
+        assert.equal(copy.contentEl.all().find((e) => e.tag === "p").text, "Copy the text above and paste it using the Paste button in another device. Note: The text includes your invoice details, so keep it somewhere private.");
         assert.deepEqual(copy.buttons().map((b) => b.text), ["Done"]);
         await new Promise((r) => setTimeout(r, 0));
         assert.deepEqual([fake.focused, fake.selected], [copyBox.inputEl, copyBox.inputEl], "focused, with the text selected");
@@ -1067,7 +1067,7 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
             const copy = fake.modals.at(-1);
             assert.deepEqual(JSON.parse(copy.contentEl.all().find((e) => e.component).component.getValue()).links, { studio0001: STUDIO });
             assert.equal(copy.contentEl.all().find((e) => e.tag === "p").text,
-                "Select it and copy it. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private.");
+                "Copy the text above and paste it using the Paste button in another device. Note: The text includes your calendar links, which work like passwords, and your invoice details, so keep it somewhere private.");
             copy.close();
         }
 
