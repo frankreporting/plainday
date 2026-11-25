@@ -460,7 +460,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         // Periodic notes, with nothing chosen in a new vault (OBS-336): an orange line under the row, which
         // otherwise has no description, and its page holds only the choice, which offers Choose… first
         const periodic = defs[1].items.find((i) => i.name === "Periodic notes");
-        assert.equal(periodic.displayValue, "Not chosen");
+        assert.equal(periodic.displayValue(), "Not chosen");
         assert.deepEqual(periodic.desc.children.map((c) => [[...c.classes], c.text]), [[["plainday-caution"], "Choose who keeps your periodic notes. Until then, Plainday finds none."]]);
         assert.deepEqual(periodic.items.flatMap((g) => g.items.map((i) => i.name)), ["Define periodic notes using"], "nothing else until one is chosen");
         const choose = standInSetting();
@@ -846,7 +846,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         const page = () => tab.getSettingDefinitions()[1].items.find((i) => i.name === "Periodic notes");
         const rowsOf = (groups) => groups.flatMap((g) => (g.items ?? []).map((i) => [g.heading, i.name, i.type ?? "row"]));
         // The Daily notes plugin with Plainday: Plainday asks for the three folders and three templates
-        assert.equal(page().displayValue, "Plainday + Daily Notes plugin");
+        assert.equal(page().displayValue(), "Plainday + Daily Notes plugin");
         assert.deepEqual(rowsOf(page().items), [
             [undefined, "Define periodic notes using", "row"],
             ["Folders", "Daily notes", "row"], ["Folders", "Weekly notes", "row"], ["Folders", "Monthly notes", "row"], ["Folders", "Yearly notes", "row"],
@@ -862,7 +862,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         choice.control.handlers.change("notebook-navigator");
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(plugin.saved.at(-1).folders.periodic, "notebook-navigator");
-        assert.equal(page().displayValue, "Notebook Navigator");
+        assert.equal(page().displayValue(), "Notebook Navigator");
         assert.equal(page().desc, undefined, "no line: Navigator's calendar makes them");
         assert.ok(!("" in draw("Define periodic notes using").control.options), "no Choose… once one is chosen");
         const weekly = draw("Weekly notes");
@@ -914,7 +914,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         for (const plugins of [{}, { "notebook-navigator": { settings: { ...NAVIGATOR, calendarIntegrationMode: "daily-notes" } } }]) {
             plugin.app.plugins = { plugins, getPlugin: () => null };
             assert.deepEqual(line(), [[["plainday-caution"], navigatorLine]]);
-            assert.equal(page().displayValue, "Notebook Navigator");
+            assert.equal(page().displayValue(), "Notebook Navigator");
             const off = draw("Define periodic notes using");
             assert.equal(off.control.inputEl.value, "notebook-navigator");
             assert.equal(off.warning(), navigatorLine);
@@ -925,6 +925,21 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.deepEqual(line(), [[["plainday-caution"], "The Daily notes plugin is off. Turn it on in Settings → Core plugins."]]);
         plugin.app.internalPlugins.plugins["daily-notes"].enabled = true;
         assert.equal(page().desc, undefined, "on again: no line");
+
+        // Obsidian keeps the definitions it was given until update(), and reads the row's value each time
+        // it draws it: a source turned off since then has the definitions made again, so the line shows
+        // (Brian's test round: Navigator turned off in Community plugins, then Plainday's tab opened)
+        let updates = 0;
+        tab.update = () => { updates++; };
+        const kept = page();
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = false;
+        assert.equal(kept.displayValue(), "Plainday + Daily Notes plugin");
+        await Promise.resolve();
+        assert.equal(updates, 1, "made again, before the panel is painted");
+        assert.equal(page().displayValue(), "Plainday + Daily Notes plugin");
+        await Promise.resolve();
+        assert.equal(updates, 1, "the new definitions match: no second update");
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = true;
     } finally {
         plugin.onunload();
     }

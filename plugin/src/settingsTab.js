@@ -42,7 +42,7 @@ import { plainday } from "./host.js";
 /** @typedef {import("obsidian").Setting} Setting */
 /** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean, page?: Page }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
-/** @typedef {{ displayValue: string, desc?: string | DocumentFragment, sections: Section[] }} Page */
+/** @typedef {{ displayValue: string | (() => string), desc?: string | DocumentFragment, sections: Section[] }} Page */
 
 /** @param {unknown} e */
 const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string" ? e : "something went wrong");
@@ -1176,6 +1176,15 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     })
 ;
         const chosen = source();
+        // Obsidian keeps these definitions until update(), so a source turned off or on since they were
+        // made (in Community plugins, with the panel open) would leave the Periodic notes row's line as it
+        // was. Obsidian reads the row's value each time it draws the row: when the problem has changed by
+        // then, the definitions are made again, before the panel is painted.
+        const drawn = sourceProblem();
+        const shownValue = () => {
+            if (sourceProblem() !== drawn) queueMicrotask(() => this.redraw());
+            return chosen ? Settings.SOURCE_NAMES[chosen] : "Not chosen";
+        };
         return [
             {
                 heading: "Folders",
@@ -1185,7 +1194,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     systemField("archive"),
                     {
                         ...row("Periodic notes", "", () => {}),
-                        page: { displayValue: chosen ? Settings.SOURCE_NAMES[chosen] : "Not chosen", desc: sourceProblem() ? cautionLine(sourceProblem()) : "", sections: periodicSections() },
+                        page: { displayValue: shownValue, desc: drawn ? cautionLine(drawn) : "", sections: periodicSections() },
                     },
                 ],
             },
