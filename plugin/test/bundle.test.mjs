@@ -53,8 +53,9 @@ const groupsOf = (defs) => defs.flatMap((g) => [g, ...groupsOf((g.items ?? []).f
 
 // Stand-ins for the elements and components a dialog and the panel's older drawing (display()) use:
 // enough to type into a field, click a button and read what's shown. `fake.focused` is the element
-// last focused; `fake.modals` and `fake.groups` the dialogs opened and the groups drawn.
-const fake = { focused: null, modals: [], groups: [] };
+// last focused, `fake.selected` the field whose text was last selected; `fake.modals` and `fake.groups`
+// the dialogs opened and the groups drawn.
+const fake = { focused: null, selected: null, modals: [], groups: [] };
 class FakeEl {
     constructor(tag = "div") {
         this.tag = tag; this.children = []; this.text = ""; this.classes = new Set(); this.hidden = false;
@@ -84,6 +85,7 @@ class FakeEl {
     addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
     fire(type, ev = {}) { for (const fn of this.listeners[type] ?? []) fn({ preventDefault() {}, ...ev }); }
     focus() { fake.focused = this; }
+    select() { fake.selected = this; }
     // Every element under it, itself first
     all() { return [this, ...this.children.flatMap((c) => c.all())]; }
 }
@@ -175,6 +177,7 @@ class FakeModal {
 function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const notices = [];
     fake.focused = null;
+    fake.selected = null;
     fake.modals = [];
     fake.groups = [];
     class Plugin {
@@ -475,17 +478,31 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         // Copy and Paste: two links at the top, as Style Settings draws Import and Export
         const top = draw("Backup and transfer");
         assert.deepEqual(Object.keys(top.s.links), ["Copy", "span |", "Paste"]);
-        const copied = [];
-        Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
-        try {
-            assert.equal(top.s.links.Copy(), true, "the link doesn't follow its href");
-            await new Promise((r) => setTimeout(r, 0));
-            assert.equal(copied.length, 1);
-            assert.equal(JSON.parse(copied[0]).invoices.name, "Juniper Hale");
-            assert.match(notices.at(-1), /^Copied\. It holds your invoice details/);
-        } finally {
-            delete globalThis.navigator.clipboard;
-        }
+        // Copy (OBS-340): a box like Paste's holding the copy, focused and selected, what it holds, and
+        // Done; never the clipboard, which this run has none of
+        assert.equal(globalThis.navigator.clipboard, undefined);
+        assert.equal(top.s.links.Copy(), true, "the link doesn't follow its href");
+        const copy = fake.modals.at(-1);
+        assert.deepEqual([copy.title, copy.modalEl.hasClass("plainday-copy")], ["Copy settings", true]);
+        const copyBox = copy.contentEl.all().find((e) => e.component).component;
+        assert.equal(JSON.parse(copyBox.getValue()).invoices.name, "Juniper Hale");
+        assert.equal(copyBox.inputEl.rows, 6);
+        assert.equal(copy.contentEl.all().find((e) => e.tag === "p").text, "Select it and copy it. It holds your invoice details, so keep it somewhere private.");
+        assert.deepEqual(copy.buttons().map((b) => b.text), ["Done"]);
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual([fake.focused, fake.selected], [copyBox.inputEl, copyBox.inputEl], "focused, with the text selected");
+        copy.buttons()[0].fire("click");
+        assert.equal(copy.isOpen, false, "Done closes it");
+        assert.ok(!notices.some((n) => /^Copied/.test(n)), "no notice");
+        // Paste reads what the box held: Replace turns on
+        top.s.links.Paste();
+        const paste = fake.modals.at(-1);
+        assert.equal(paste.title, "Paste settings");
+        const replace = () => paste.buttons().find((b) => b.text === "Replace");
+        assert.equal(replace().disabled, true);
+        paste.contentEl.all().find((e) => e.component).component.type(copyBox.getValue());
+        assert.equal(replace().disabled, false);
+        paste.close();
 
         const folder = draw("Invoice folder");
         assert.equal(folder.s.control.inputEl.value, "Reference/Invoices");
@@ -1042,18 +1059,16 @@ test("Settings → Plainday → Calendars: Add calendar, the range, the help, th
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(plugin.saved.at(-1).calendars.list.find((c) => c.id === "studio0001").on, false);
 
-        // Copy: the links beside the settings, and a notice that says so
-        const copied = [];
-        Object.defineProperty(globalThis.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
-        try {
+        // Copy: the links beside the settings, and a note under the box that says so (OBS-340)
+        {
             const top = standInSetting();
             defs[0].items[0].render(top);
             top.links.Copy();
-            await new Promise((r) => setTimeout(r, 0));
-            assert.deepEqual(JSON.parse(copied[0]).links, { studio0001: STUDIO });
-            assert.match(notices.at(-1), /^Copied\. It holds your calendar links, which work like passwords, and your invoice details/);
-        } finally {
-            delete globalThis.navigator.clipboard;
+            const copy = fake.modals.at(-1);
+            assert.deepEqual(JSON.parse(copy.contentEl.all().find((e) => e.component).component.getValue()).links, { studio0001: STUDIO });
+            assert.equal(copy.contentEl.all().find((e) => e.tag === "p").text,
+                "Select it and copy it. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private.");
+            copy.close();
         }
 
         studio.buttons.Remove.click();

@@ -126,7 +126,7 @@ Each link works like a password, so Plainday keeps it in that device's secret st
 
 - **Network:** Plainday goes online only to download the calendar links you add, and sends nothing.
 - **No account, no payment, no ads, no telemetry.**
-- **Only your vault:** Plainday reads and writes files only inside your vault. Its settings are in its own data file there (`.obsidian/plugins/plainday/`), calendar links in each device's secret storage, and what the syncing device remembers about events in Obsidian's storage on that device.
+- **Only your vault:** Plainday reads and writes files only inside your vault. Its settings are in its own data file there (`.obsidian/plugins/plainday/`), calendar links in each device's secret storage, and what the syncing device remembers about events in Obsidian's storage on that device. The time report and task IDs read every note in the vault.
 - **What it changes on its own:**
 	- on a computer, as the vault opens, the time report's blocks in project, area and periodic notes and the timesheets, making a weekly, monthly or yearly note it needs, and its list of Problems in the error log note;
 	- a new daily, weekly, monthly or yearly note's alias and folder;

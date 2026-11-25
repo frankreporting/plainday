@@ -73,7 +73,7 @@ export default class Settings {
     // setting or paste your settings.
     //
     // A backup, or another device: plugin settings don't sync unless Obsidian Sync carries community
-    // plugins, so copyText() is every setting as one block for the clipboard, and readCopy() and
+    // plugins, so copyText() is every setting as one block of text to copy by hand, and readCopy() and
     // replaceWith() take it back, on this device or another. A paste replaces this device's settings
     // but keeps the higher last number given, so no number is given twice. The copy carries each
     // calendar's link from this device's secret storage, beside the settings, and a paste stores them in

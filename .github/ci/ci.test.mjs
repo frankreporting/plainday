@@ -539,6 +539,51 @@ test("a merge publishes only when it raises the version; a run by hand publishes
     }
 });
 
+test("check says publish will publish exactly when it would, and publishes nothing itself (OBS-340)", () => {
+    const { root, out } = releaseRoot({ version: "0.0.2", styles: true });
+    try {
+        const cases = [
+            ["raised", { releases: ["0.0.1"] }, before("0.0.1")],
+            ["unchanged", {}, before("0.0.2")],
+            ["lowered", {}, before("0.0.3")],
+            ["released already", { releases: ["0.0.2"] }, before("0.0.1")],
+            ["unreadable", {}, { sha: "bef0123", readable: false }],
+            ["by hand", {}, undefined],
+            ["by hand, released already", { releases: ["0.0.2"] }, undefined],
+        ];
+        for (const [name, releases, was] of cases) {
+            const c = fakeGh(releases);
+            const checked = release({ mode: "check", root, out, sha: "abc1234", gh: c.gh, before: was });
+            assert.ok(!c.calls.some((x) => x[0] === "release"), `${name}: check publishes nothing`);
+            assert.equal(checked.published, false, name);
+            const p = fakeGh(releases);
+            const published = release({ mode: "publish", root, out, sha: "abc1234", gh: p.gh, before: was });
+            assert.equal(checked.publishes, published.published, name);
+            assert.equal(published.publishes, published.published, name);
+            if (!checked.publishes) assert.equal(checked.message, published.message, `${name}: says why, as publish does`);
+        }
+        assert.equal(release({ mode: "check", root, out, gh: fakeGh().gh, before: before("0.0.1") }).message, "Publishes 0.0.2, with main.js, manifest.json, styles.css.");
+        assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json", "styles.css"], "the files to attest, as publish uploads them");
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("the release workflow attests the files it publishes, only when it publishes, before the upload (OBS-340)", () => {
+    const wf = fs.readFileSync(".github/workflows/release.yml", "utf8");
+    const job = wf.slice(wf.indexOf("\n  release:"));
+    for (const p of ["contents: write", "id-token: write", "attestations: write"]) assert.ok(job.includes(`      ${p}\n`), p);
+    const at = (s) => { const i = job.indexOf(s); assert.ok(i >= 0, s); return i; };
+    const build = at("npm run build");
+    const check = at("release.mjs check --out \"$RUNNER_TEMP/release\"");
+    const attest = at("uses: actions/attest@");
+    const publish = at("release.mjs publish --out \"$RUNNER_TEMP/release\"");
+    assert.ok(build < check && check < attest && attest < publish, "build, check, attest, publish");
+    assert.match(job, /uses: actions\/attest@[0-9a-f]{40} # v\d/, "pinned to a commit");
+    assert.ok(job.includes("if: steps.check.outputs.publishes == 'true'"));
+    assert.ok(job.includes("subject-path: ${{ runner.temp }}/release/*"), "the files publish uploads");
+});
+
 test("manifestAt reads main's manifest.json at a commit, and tells a missing commit from a missing file", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ci-"));
     const git = (...args) => spawnSync("git", ["-C", root, "-c", "user.name=CI", "-c", "user.email=ci@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" });
