@@ -386,3 +386,26 @@ test("folded: no fold, or one that only ends or passes there, leaves the line as
     assert.equal(TrailingLinks.folded(foldsOf([300, 388]), 388), false, "the line above's fold, ending here");
     assert.equal(TrailingLinks.folded(foldsOf([300, 420]), 388), false, "inside a fold");
 });
+
+// A line with a link open for editing (OBS-341): read from where Obsidian drew the link's brackets, and
+// the lines a new reading redraws
+test("openLines: each line where a run shows a link's brackets, once, by where it starts", () => {
+    const LINES = [[0, 40], [41, 90], [91, 130]];
+    const marks = [{ pos: 60 }, { pos: 70 }, { pos: 75 }, { pos: 100 }];
+    let asked = "";
+    const view = {
+        contentDOM: { querySelectorAll: (sel) => { asked = sel; return marks; } },
+        posAtDOM: (el) => el.pos,
+        state: { doc: { lineAt: (p) => { const [from, to] = LINES.find(([f, t]) => p >= f && p <= t); return { from, to }; } } },
+    };
+    assert.deepEqual([...TrailingLinks.openLines(view)], [41, 91]);
+    assert.equal(asked, ".pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)", "only brackets and pipes inside the run");
+    marks.length = 0;
+    assert.deepEqual([...TrailingLinks.openLines(view)], []);
+});
+test("flipped: the lines in one reading and not the other, in order", () => {
+    assert.deepEqual(plain(TrailingLinks.flipped([41], [41])), []);
+    assert.deepEqual(plain(TrailingLinks.flipped([], [91, 41])), [41, 91], "opened");
+    assert.deepEqual(plain(TrailingLinks.flipped(new Set([41]), [])), [41], "closed");
+    assert.deepEqual(plain(TrailingLinks.flipped([41, 200], [91, 200])), [41, 91], "moved to another line");
+});

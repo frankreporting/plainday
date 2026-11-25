@@ -6,7 +6,7 @@ import { app, plainday } from "../host.js";
 
 /** @import { EventRef, Events, TFile, View, WorkspaceLeaf } from "obsidian" */
 /** @import { DecorationSet, ViewUpdate } from "@codemirror/view" */
-/** @import { Extension, Range, Text } from "@codemirror/state" */
+/** @import { Extension, Range, StateEffectType, Text } from "@codemirror/state" */
 /** @import { CmEditor, MomentFn } from "../host.js" */
 /** @import { NameReader } from "../shared/taskIds.js" */
 /**
@@ -81,7 +81,8 @@ export default class TrailingLinks {
     static REDRAW_MS = 250;
 
     // The layout is in styles.css, keyed to the classes the extension puts on a line:
-    //   .pm-trail-line  the line, with --pm-run-w (the links' width); .pm-trail-folded while it's folded
+    //   .pm-trail-line  the line, with --pm-run-w (the links' width); .pm-trail-folded while it's folded,
+    //                   and .pm-trail-open while a link in the run shows its brackets (OBS-341)
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
     //   .pm-trail-run   around the links
     //   .pm-trail       around each link, with .pm-trail-due / -forward / -note / -project / -area,
@@ -288,6 +289,26 @@ export default class TrailingLinks {
         return period?.unit === "day" && period.date < today;
     }
 
+    // The lines where Obsidian shows a link's brackets inside the run, so the link is open for editing, by
+    // where each line starts. Obsidian decides when it shows them, so they're read from what it drew rather
+    // than worked out (OBS-341): the line's class says so, for styles.css, which would otherwise need :has.
+    /** @param {EditorView} v @returns {Set<number>} */
+    static openLines(v) {
+        const out = /** @type {Set<number>} */ (new Set());
+        for (const el of /** @type {Element[]} */ ([...v.contentDOM.querySelectorAll(".pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)")])) {
+            out.add(v.state.doc.lineAt(v.posAtDOM(el)).from);
+        }
+        return out;
+    }
+
+    // The lines in one list of line starts and not the other, each once, in order: the lines a new reading
+    // of the open links redraws (openLines)
+    /** @param {Iterable<number>} before @param {Iterable<number>} after @returns {number[]} */
+    static flipped(before, after) {
+        const a = new Set(before), b = new Set(after);
+        return [...a].filter((p) => !b.has(p)).concat([...b].filter((p) => !a.has(p))).sort((x, y) => x - y);
+    }
+
     // A line's indent, a tab counting as four spaces (as TimeReport counts it)
     /**
      * @param {string} text
@@ -386,6 +407,8 @@ export default class TrailingLinks {
 
         // Redraw every line on screen: a note moved or retagged, or the day changed
         const refresh = StateEffect.define();
+        // The lines where a link in the run shows its brackets now (openLines), by where they start
+        const opened = /** @type {StateEffectType<number[]>} */ (StateEffect.define());
         const redrawAll = () => ws.iterateAllLeaves((/** @type {WorkspaceLeaf & { view: View & { editor?: CmEditor } }} */ leaf) => leaf.view?.editor?.cm?.dispatch?.({ effects: refresh.of(null) }));
 
         const sourceOf = (/** @type {EditorView} */ v) => v.state.field(editorInfoField, false)?.file?.path ?? "";
@@ -394,9 +417,10 @@ export default class TrailingLinks {
             ? T.shortestName(file.basename, app.metadataCache.getFileCache(file)?.frontmatter?.aliases)
             : fallback.split("/").pop();
 
-        // The decorations for the lines in `ranges` (by default, the lines on screen)
-        /** @type {(v: EditorView, ranges?: readonly Span[]) => Drawn} */
-        const build = (v, ranges = v.visibleRanges) => {
+        // The decorations for the lines in `ranges` (by default, the lines on screen); `open`, the lines
+        // where a link shows its brackets, by where they start
+        /** @type {(v: EditorView, open: Set<number>, ranges?: readonly Span[]) => Drawn} */
+        const build = (v, open, ranges = v.visibleRanges) => {
             const none = { outer: Decoration.none, inner: Decoration.none, unmeasured: false };
             if (!v.state.field(editorLivePreviewField, false)) return none;
             const doc = v.state.doc;
@@ -438,7 +462,8 @@ export default class TrailingLinks {
                     const guess = shown.reduce((w, s) => w + T.PILL_PX + T.CHAR_PX * s.text.length, 0) + (idText ? T.PILL_PX + T.CHAR_PX * idText.length : 0);
                     const width = Math.ceil((handles.widths.get(sig) ?? guess) + T.GAP_PX);
 
-                    outer.push(Decoration.line({ class: T.folded(folds, line.to) ? "pm-trail-line pm-trail-folded" : "pm-trail-line", attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
+                    const cls = `pm-trail-line${T.folded(folds, line.to) ? " pm-trail-folded" : ""}${open.has(line.from) ? " pm-trail-open" : ""}`;
+                    outer.push(Decoration.line({ class: cls, attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
                     const word = T.lastWordStart(line.text, t.bodyFrom, t.textEnd);
                     if (word >= 0) {
                         // The space before the links too, so a struck-through line has no stray dash
@@ -492,9 +517,16 @@ export default class TrailingLinks {
         const plugin = ViewPlugin.fromClass(class {
             /** @param {EditorView} v */
             constructor(v) {
-                Object.assign(this, build(v));
+                // The lines where a link shows its brackets, by where they start, as last read (openLines)
+                /** @type {Set<number>} */
+                this.open = new Set();
+                // Whether a reading of them waits to run, and whether the editor has closed since
+                this.checking = false;
+                this.gone = false;
+                Object.assign(this, build(v, this.open));
                 this.span = span(v);
                 if (this.unmeasured) measure(v);
+                this.check(v);
             }
 
             /** @param {ViewUpdate} u */
@@ -507,24 +539,53 @@ export default class TrailingLinks {
                     handles.widths.clear();
                     handles.size = size;
                 }
+                // The lines where a link opened or closed since the last reading redraw, for their class
+                // (.pm-trail-open)
+                if (u.docChanged) this.open = new Set([...this.open].map((p) => u.changes.mapPos(p)));
+                const reading = u.transactions.flatMap((tr) => tr.effects.filter((e) => e.is(opened))).pop();
+                const flips = reading ? T.flipped(this.open, reading.value) : [];
+                if (reading) this.open = new Set(reading.value);
                 // A line folded or unfolded redraws too, for its class (.pm-trail-folded). An edit maps the
                 // folds, so they're compared only when nothing was typed: an edit redraws its lines anyway
                 const full = now !== this.span || u.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)))
                     || u.startState.field(editorLivePreviewField, false) !== u.state.field(editorLivePreviewField, false)
                     || (!u.docChanged && foldedRanges(u.startState) !== foldedRanges(u.state));
                 this.span = now;
-                if (!full && !u.docChanged) {
+                const touched = full ? null : u.docChanged ? this.touched(u)
                     // The cursor moved: redraw the lines it left and reached, when they have a hidden ID
-                    if (!u.selectionSet) return;
-                    const touched = this.idLines(u);
-                    if (!touched.length) return;
-                    this.merge(u, build(u.view, touched), touched);
-                } else {
-                    const touched = full ? null : this.touched(u);
-                    if (!touched) Object.assign(this, build(u.view));
-                    else this.merge(u, build(u.view, touched), touched);
+                    : u.selectionSet ? this.idLines(u) : [];
+                if (!touched) Object.assign(this, build(u.view, this.open));
+                else {
+                    const doc = u.state.doc;
+                    for (const p of flips) {
+                        const line = doc.lineAt(Math.min(p, doc.length));
+                        if (!touched.some((r) => line.from >= r.from && line.from <= r.to)) touched.push({ from: line.from, to: line.to });
+                    }
+                    if (touched.length) this.merge(u, build(u.view, this.open, touched), touched);
                 }
-                if (this.unmeasured) measure(u.view);
+                if ((!touched || touched.length) && this.unmeasured) measure(u.view);
+                this.check(u.view);
+            }
+
+            // Once this update is drawn, and before the screen repaints, reads which lines show a link's
+            // brackets, and when that's changed redraws them (OBS-341). A microtask runs when the code
+            // that changed the editor is done, before the browser lays out and paints: an update can't
+            // start inside another, and a timer would let a frame show the markdown over the text. Not while
+            // an input method composes text, which a redraw would break: its end is an update too.
+            /** @param {EditorView} v */
+            check(v) {
+                if (this.checking || (!this.open.size && !this.outer.size)) return;
+                this.checking = true;
+                queueMicrotask(() => {
+                    this.checking = false;
+                    if (this.gone || v.composing) return;
+                    const now = T.openLines(v);
+                    if (T.flipped(this.open, now).length) v.dispatch({ effects: opened.of([...now]) });
+                });
+            }
+
+            destroy() {
+                this.gone = true;
             }
 
             // Swaps the decorations of the lines in `touched` for `part`, what build drew for them;

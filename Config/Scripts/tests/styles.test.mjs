@@ -123,8 +123,9 @@ test("styles.css: a forwarded or canceled task's text, and the strike, are a don
 });
 
 // The directory's scan (OBS-203): it warns on every !important and every :has, and on text-indent, which
-// its browser check calls partly supported. styles.css has no !important. Two rules CSS can't write
-// without them stay, each saying why in a stylelint comment; the scan lists them anyway (11/23).
+// its browser check calls partly supported, whatever a comment says (11/23). styles.css has none of them
+// since OBS-341: the trailing links clear the indent with an empty block, and TrailingLinks marks a line
+// with a link open for editing, which CSS could only see with :has.
 function unexplained(css) {
     const out = [];
     let off = false, next = false, inComment = false;
@@ -153,16 +154,19 @@ function kept(css) {
     });
 }
 
-test("styles.css: no !important, and each rule that needs :has or text-indent says why (OBS-203)", () => {
+test("styles.css: no !important, :has or text-indent (OBS-203, OBS-341)", () => {
     assert.deepEqual(unexplained(CSS), []);
-    // Only the two the plan keeps: the links' indent reset, and a line with a link open for editing,
-    // whose brackets only Obsidian knows it shows. A folded line has a class of its own (TrailingLinks).
-    assert.deepEqual(kept(CSS), ["text-indent: 0;", "& .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {"]);
+    assert.deepEqual(kept(CSS), []);
+    // What stands in for them: an empty block before each link, which an open line's links drop, since a
+    // block inside the inline markdown would break the line; and the classes TrailingLinks gives a folded
+    // line and a line with a link open for editing
+    assert.match(CSS, /& \.pm-trail-run > \.pm-trail::before \{\s*content: "";\s*display: block;\s*\}/);
+    assert.match(CSS, /& \.cm-line\.pm-trail-line\.pm-trail-open \{[\s\S]*?& \.pm-trail-run \{ float: none;[\s\S]*?& \.pm-trail::before \{ content: none; \}/);
     assert.ok(CSS.includes("& .pm-trail-line.pm-trail-folded {"));
-    assert.ok(read("plugin/src/startup/trailingLinks.js").includes('"pm-trail-line pm-trail-folded"'));
-    assert.deepEqual(kept("/* a :has(.x)\n   text-indent */\n.y:has(.z) {}"), [".y:has(.z) {}"]);
-    assert.ok(/:has\(/.test(CSS) && /text-indent/.test(CSS), "the kept rules are still there");
-    // What the check finds
+    const code = read("plugin/src/startup/trailingLinks.js");
+    assert.ok(code.includes('" pm-trail-folded"') && code.includes('" pm-trail-open"'));
+    // What the checks find
+    assert.deepEqual(kept("/* a :has(.x)\n   text-indent */\n.y:has(.z) {}\n.w { text-indent: 0; }"), [".y:has(.z) {}", ".w { text-indent: 0; }"]);
     assert.deepEqual(unexplained(".a { color: red !important; }\n.b:has(> .c) { color: red; }\n/* x */ .d { text-indent: 0; }"),
         ["1: !important", "2: no reason given", "3: no reason given"]);
     assert.deepEqual(unexplained("/* stylelint-disable-next-line -- why */\n.b:has(> .c) { color: red; }\n/* stylelint-disable -- why */\n.b:has(> .c),\n.e:has(.f) {}\n/* stylelint-enable */\n/* :has and !important in a comment */"), []);

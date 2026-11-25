@@ -90,7 +90,8 @@
 
 /* Trailing links (TrailingLinks): in Live Preview, a task line's ⭕, 🚩 date, forward date, ⋯ and ↗ drawn
    small at the right edge of its last row, keyed to the classes the editor extension puts on a line:
-   - .pm-trail-line: the line, with --pm-run-w, the links' measured width, set on each line by the extension
+   - .pm-trail-line: the line, with --pm-run-w, the links' measured width, set on each line by the extension;
+     .pm-trail-folded while it's folded, and .pm-trail-open while a link in it shows its brackets
    - .pm-trail-glue: the text's last word, which keeps that much room after it
    - .pm-trail-run: around the links
    - .pm-trail: around each link, with .pm-trail-due / -forward / -note / -project / -area, and
@@ -123,8 +124,6 @@
         justify-content: flex-end;
         align-items: center;
         min-height: 1lh;
-        /* stylelint-disable-next-line -- cancels the hanging indent CodeMirror sets on every list line, which would push the links out of place; Obsidian supports it fully */
-        text-indent: 0;
         white-space: nowrap;
     }
     & .pm-trail-run > .pm-trail {
@@ -132,6 +131,14 @@
         font-size: 0.8em;
         margin-inline-start: 4px;
         --pm-trail-name-size: 1em;
+    }
+    /* Each link inherits the hanging indent CodeMirror sets on every list line, which would push it out of
+       place. An indent moves only an element's first line, and an empty block first takes that line, so
+       the link's text is clear of it. The directory's scan warns on any reset of the indent by name
+       (OBS-341). */
+    & .pm-trail-run > .pm-trail::before {
+        content: "";
+        display: block;
     }
 
     /* On screen: the project, the due date, the forward date, then the notes at the edge, the ⋯ and then
@@ -167,13 +174,15 @@
     & .pm-trail-run > .pm-trail-forward :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-faint); }
     & .pm-trail-run > .pm-trail-overdue :is(.cm-hmd-internal-link, .cm-underline) { color: var(--text-error); }
 
-    /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown */
-    /* stylelint-disable-next-line -- :has is how CSS sees that Obsidian shows a link's brackets inside the line */
-    & .cm-line.pm-trail-line:has(.pm-trail-run :is(.cm-formatting-link, .cm-link-alias-pipe)) {
+    /* A link open for editing (Obsidian shows its brackets): the line reads as its markdown. TrailingLinks
+       marks the line .pm-trail-open while Obsidian shows them, before the screen repaints (OBS-341). An
+       empty block inside the inline markdown would break the line, so the links lose theirs. */
+    & .cm-line.pm-trail-line.pm-trail-open {
         & .pm-trail-glue { padding-inline-end: 0; white-space: inherit; }
         & > .cm-foldPlaceholder { margin-inline-start: 0; }
         & .pm-trail-run { float: none; width: auto; display: inline; min-height: 0; }
         & .pm-trail { font-size: inherit; margin: 0; }
+        & .pm-trail::before { content: none; }
         & .pm-project-name { font-size: inherit; }
         & .pm-project-name::before { content: none; }
     }
