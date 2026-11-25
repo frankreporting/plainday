@@ -2,7 +2,9 @@
 # to release, a PR raises the version, and merging it publishes the release. A merge that leaves
 # the version as it was publishes nothing, even when that version has no release, so a release
 # deleted on purpose stays deleted. CLAUDE.md ("Releases") has the steps; .github/ci/release.mjs
-# does the work, the same script as the PR's dry run in ci.yml.
+# does the work, the same script as the PR's dry run in ci.yml. Each file of a release is attested
+# (OBS-340): GitHub keeps a signed record that this workflow built it from the release's commit, which
+# `gh attestation verify <file> --repo frankreporting/plainday` checks.
 name: Release
 
 on:
@@ -26,9 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     # Only from main, even when run by hand on another branch
     if: github.ref == 'refs/heads/main'
-    # The only job in this repository that may write to it: to tag and publish
+    # The only job in this repository that may write to it: to tag and publish. id-token and
+    # attestations sign and keep the files' attestations; nothing else uses them
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,9 +48,24 @@ jobs:
       - run: npm ci
       - name: Build Plainday (main.js)
         run: npm run build
-      - name: Publish, when this merge raised the version (or by hand) and it has no release
+      # Decides as Publish does, and collects the files Publish uploads, so only a release's
+      # files are attested
+      - name: Whether this run publishes
+        id: check
         env:
           GH_TOKEN: ${{ github.token }}
           # The commit before the push, to compare versions with (empty on a run by hand)
+          BEFORE_SHA: ${{ github.event.before }}
+        run: node .github/ci/release.mjs check --out "$RUNNER_TEMP/release"
+      # Before the upload, so no release is out without its attestations; if this fails, nothing
+      # is published, and running the workflow by hand tries both again
+      - name: Attest the release's files
+        if: steps.check.outputs.publishes == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/*
+      - name: Publish, when this merge raised the version (or by hand) and it has no release
+        env:
+          GH_TOKEN: ${{ github.token }}
           BEFORE_SHA: ${{ github.event.before }}
         run: node .github/ci/release.mjs publish --out "$RUNNER_TEMP/release"

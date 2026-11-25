@@ -169,8 +169,44 @@ class NoteSuggest extends FolderSuggest {
     }
 }
 
+// Copy (OBS-340): the copy in a box like Paste's, selected, to copy by hand (⌘C, or Select All and Copy
+// on a phone), then Done. Plainday never touches the clipboard, which the community directory's scan
+// lists against a plugin. The box stays editable, so a phone's Select All works on it.
+class CopyModal extends Modal {
+    /** @param {import("obsidian").App} app @param {string} text @param {boolean} withLinks */
+    constructor(app, text, withLinks) {
+        super(app);
+        this.text = text;
+        this.withLinks = withLinks;
+    }
+
+    onOpen() {
+        this.setTitle("Copy settings");
+        this.modalEl.addClass("plainday-copy");
+        const box = new TextAreaComponent(this.contentEl).setValue(this.text);
+        box.inputEl.rows = 6;
+        this.contentEl.createEl("p", {
+            cls: "setting-item-description",
+            text: this.withLinks
+                ? "Copy the text above and paste it using the Paste button in another device. Note: The text includes your calendar links, which work like passwords, and your invoice details, so keep it somewhere private."
+                : "Copy the text above and paste it using the Paste button in another device. Note: The text includes your invoice details, so keep it somewhere private.",
+        });
+        const row = this.contentEl.createDiv({ cls: "modal-button-container" });
+        new ButtonComponent(row).setButtonText("Done").setCta().onClick(() => this.close());
+        window.setTimeout(() => {
+            box.inputEl.focus();
+            box.inputEl.select();
+        }, 0);
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
 // Paste: a box to paste a copy into, as wide as the window (styles.css), then Cancel or Replace, which
-// stays off until the box holds a copy; text that isn't one says so. A phone doesn't always let a plugin read the clipboard, so the copy is pasted by hand.
+// stays off until the box holds a copy; text that isn't one says so. Plainday never reads the clipboard
+// (OBS-340), so the copy is pasted by hand.
 class PasteModal extends Modal {
     /** @param {import("obsidian").App} app @param {(copy: Values, links: Record<string, string>, withCalendars: boolean) => Promise<void>} onReplace */
     constructor(app, onReplace) {
@@ -632,12 +668,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     row("Backup and transfer", "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.", (s) => {
                         link(s, "Copy", () => {
                             const links = settings.links();
-                            navigator.clipboard.writeText(settings.copyText(settings.get(), links)).then(
-                                () => new Notice(Object.keys(links).length
-                                    ? "Copied. It holds your calendar links, which work like passwords, and your invoice details, so keep it somewhere private. A clipboard manager may keep a copy."
-                                    : "Copied. It holds your invoice details, so keep it somewhere private. A clipboard manager may keep a copy.", 8000),
-                                (e) => new Notice(`Couldn't copy the settings: ${messageOf(e)}`),
-                            );
+                            new CopyModal(this.app, settings.copyText(settings.get(), links), Object.keys(links).length > 0).open();
                         });
                         s.controlEl.createSpan({ text: "|", cls: "plainday-separator" });
                         link(s, "Paste", () => {
