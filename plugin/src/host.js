@@ -80,10 +80,10 @@ export * as chronoEn from "chrono-node/en";
  * Any view, which may be a Markdown view (`app.workspace.activeLeaf?.view`):
  * @typedef {View & Partial<Pick<MarkdownView, "editor" | "file" | "save">>} SomeView
  *
- * The core plugins' options Plainday reads: Daily notes' and Templates':
+ * The core plugins' options Plainday reads: Daily notes' (and whether it's on) and Templates':
  * @typedef {{ format?: string, folder?: string, template?: string }} DailyNotesOptions
  * @typedef {{ folder?: string, dateFormat?: string, timeFormat?: string }} TemplatesOptions
- * @typedef {{ plugins?: { "daily-notes"?: { instance?: { options?: DailyNotesOptions } }, templates?: { instance?: { options?: TemplatesOptions } } } }} InternalPlugins
+ * @typedef {{ plugins?: { "daily-notes"?: { enabled?: boolean, instance?: { options?: DailyNotesOptions } }, templates?: { instance?: { options?: TemplatesOptions } } } }} InternalPlugins
  *
  * Templater's own object: the notes it's still writing, and how it writes a template into a note:
  * @typedef {{ files_with_pending_templates?: Set<string>, write_template_to_file(template: TFile, file: TFile): Promise<void> }} Templater

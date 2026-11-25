@@ -213,6 +213,8 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
         throw new Error(`unexpected require(${id}) while loading`);
     };
     globalThis.window = globalThis;
+    // Obsidian's global for a description made of elements (the Periodic notes row's orange line, OBS-336)
+    globalThis.createFragment = (cb) => { const f = new FakeEl("fragment"); cb?.(f); return f; };
     new Function("module", "exports", "require", fs.readFileSync(file, "utf8"))(module, module.exports, req);
     const layout = [];
     // This vault's local storage holds its key for its calendar links' names: "vault001"
@@ -222,7 +224,7 @@ function load(file = BUNDLE, { stored = null, api13 = true } = {}) {
     const app = { workspace: { onLayoutReady: (cb) => layout.push(cb) },
         vault: { getFileByPath: () => null, getFolderByPath: () => null, getMarkdownFiles: () => [], getAllFolders: () => [] },
         metadataCache: { getFileCache: () => null }, plugins: { plugins: {}, getPlugin: () => null },
-        internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: "Reference/Planner/days", format: "YYYY-MM-DD", template: "Config/Templates/Daily Note" } } } } },
+        internalPlugins: { plugins: { "daily-notes": { enabled: true, instance: { options: { folder: "Reference/Planner/days", format: "YYYY-MM-DD", template: "Config/Templates/Daily Note" } } } } },
         loadLocalStorage: (k) => local.get(k) ?? null, saveLocalStorage: (k, v) => { local.set(k, v); } };
     const plugin = new module.exports.default(app, { id: "plainday" });
     return { plugin, layout, notices, suggests };
@@ -248,7 +250,7 @@ test("every class file is bundled, and made once by name", async () => {
 });
 
 test("each command in the list is added with its id, name and icon, and runs its class", async () => {
-    const { plugin } = load();
+    const { plugin } = load(BUNDLE, { stored: { folders: { periodic: "daily-notes" } } });
     await plugin.onload();
     try {
         const shown = ({ id, name, icon }) => ({ id, name, icon });
@@ -277,6 +279,32 @@ test("each command in the list is added with its id, name and icon, and runs its
         }
     } finally {
         plugin.onunload();
+    }
+});
+
+test("with no periodic notes source chosen, or the chosen one off, a command that needs them says so and doesn't run; the others run (OBS-336)", async () => {
+    const PERIODIC = ["Schedule", "DueDate", "AddTaskNote", "NewEventLog", "AddProjectLink", "ToggleTimeEntry", "JumpToDate", "Plan", "TimeReport", "Invoice", "CalendarSync"];
+    assert.deepEqual(COMMANDS.filter((c) => c.periodic).map((c) => c.script), PERIODIC, "the commands that read or write periodic notes");
+    for (const [stored, said, dailyNotesOff] of [
+        [null, "Choose who keeps your periodic notes in Settings → Plainday → Folders → Periodic notes. Until then, Plainday finds none."],
+        [{ folders: { periodic: "notebook-navigator" } }, "Plainday's periodic notes come from Notebook Navigator, which isn't on. Turn it on, or choose another in Settings → Plainday → Folders → Periodic notes."],
+        [{ folders: { periodic: "daily-notes" } }, "Plainday's periodic notes come from the Daily notes plugin, which is off. Turn it on in Settings → Core plugins, or choose another in Settings → Plainday → Folders → Periodic notes.", true],
+    ]) {
+        const { plugin, notices } = load(BUNDLE, { stored });
+        if (dailyNotesOff) plugin.app.internalPlugins.plugins["daily-notes"].enabled = false;
+        await plugin.onload();
+        try {
+            for (const { id, script, periodic } of COMMANDS) {
+                const ran = [];
+                window.plainday[script].invoke = async () => ran.push(script);
+                notices.length = 0;
+                await plugin.commands.find((c) => c.id === id).callback();
+                assert.deepEqual(ran, periodic ? [] : [script], id);
+                assert.deepEqual(notices, periodic ? [said] : [], id);
+            }
+        } finally {
+            plugin.onunload();
+        }
     }
 });
 
@@ -427,8 +455,19 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
         const descs = defs.flatMap((g) => g.items).filter((i) => !i.desc).map((i) => i.name);
-        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Periodic notes", "Tasks", "Logs", "Projects", "Areas", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
+        assert.deepEqual(descs, ["Projects", "Inbox", "Archive", "Tasks", "Logs", "Projects", "Areas", "Your name or company name", "Address", "Invoice folder", "Freeze rows", "Freeze columns", "Add calendar", "Calendar list", "Error log note"],
             "a row whose name says what it is carries no description (Brian, 11/16 and 11/17)");
+        // Periodic notes, with nothing chosen in a new vault (OBS-336): an orange line under the row, which
+        // otherwise has no description, and its page holds only the choice, which offers Choose… first
+        const periodic = defs[1].items.find((i) => i.name === "Periodic notes");
+        assert.equal(periodic.displayValue(), "Not chosen");
+        assert.deepEqual(periodic.desc.children.map((c) => [[...c.classes], c.text]), [[["plainday-caution"], "Choose who keeps your periodic notes. Until then, Plainday finds none."]]);
+        assert.deepEqual(periodic.items.flatMap((g) => g.items.map((i) => i.name)), ["Define periodic notes using"], "nothing else until one is chosen");
+        const choose = standInSetting();
+        periodic.items[0].items[0].render(choose);
+        assert.deepEqual(Object.entries(choose.control.options), [["", "Choose…"], ["daily-notes", "Plainday + Daily Notes plugin"], ["notebook-navigator", "Notebook Navigator"]]);
+        assert.equal(choose.control.inputEl.value, "");
+        assert.equal(choose.warning(), "Choose who keeps your periodic notes. Until then, Plainday finds none.");
         const item = (name) => defs.flatMap((g) => g.items).find((i) => i.name === name);
         const draw = (name) => { const s = standInSetting(); const cleanup = item(name).render(s); return { s, cleanup }; };
         const saved = () => plugin.saved.at(-1)?.invoices;
@@ -562,7 +601,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
 });
 
 test("Settings → Plainday → Folders and Note templates: the folders as set, checked as you type and saved when you leave them (OBS-283)", async () => {
-    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" } };
+    const stored = { invoices: { name: "Juniper Hale", folder: "Reference/Invoices" }, folders: { periodic: "daily-notes" } };
     const { plugin, suggests } = load(BUNDLE, { stored });
     const folders = new Set(["Projects", "Projects/Waiting room", "Inbox", "Archive", "Reference", "Reference/Invoices", "Reference/Done lists", "Reference/Old lists", "Reference/Planner", "Reference/Planner/weeks", "Clients [2026]", "Config"]);
     plugin.app.vault.getFolderByPath = (p) => (folders.has(p) ? { path: p } : null);
@@ -807,7 +846,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         const page = () => tab.getSettingDefinitions()[1].items.find((i) => i.name === "Periodic notes");
         const rowsOf = (groups) => groups.flatMap((g) => (g.items ?? []).map((i) => [g.heading, i.name, i.type ?? "row"]));
         // The Daily notes plugin with Plainday: Plainday asks for the three folders and three templates
-        assert.equal(page().displayValue, "Plainday + Daily Notes plugin");
+        assert.equal(page().displayValue(), "Plainday + Daily Notes plugin");
         assert.deepEqual(rowsOf(page().items), [
             [undefined, "Define periodic notes using", "row"],
             ["Folders", "Daily notes", "row"], ["Folders", "Weekly notes", "row"], ["Folders", "Monthly notes", "row"], ["Folders", "Yearly notes", "row"],
@@ -823,7 +862,9 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         choice.control.handlers.change("notebook-navigator");
         await new Promise((r) => setTimeout(r, 0));
         assert.equal(plugin.saved.at(-1).folders.periodic, "notebook-navigator");
-        assert.equal(page().displayValue, "Notebook Navigator");
+        assert.equal(page().displayValue(), "Notebook Navigator");
+        assert.equal(page().desc, undefined, "no line: Navigator's calendar makes them");
+        assert.ok(!("" in draw("Define periodic notes using").control.options), "no Choose… once one is chosen");
         const weekly = draw("Weekly notes");
         assert.equal(weekly.control.inputEl.value, "", "no input to type into");
         assert.match(weekly.descEl.text, /^`Planner\/weeks`, named `gggg\[w\]ww`\. Set in Notebook Navigator\.$/, "every folder row says what names its notes (OBS-299)");
@@ -865,6 +906,40 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.equal(window.plainday.Schedule.dailyOpts().folder, "Planner/days");
         assert.equal(window.plainday.Schedule.dailyOpts().format, "YYYY-MM-DD");
         assert.equal(window.plainday.TimeReport.periodFolders().month, "Planner/months");
+
+        // Navigator turned off, or its calendar set to the Daily notes plugin's (OBS-336): an orange line
+        // under the row and the choice, and the choice stays Navigator
+        const navigatorLine = "Notebook Navigator isn't on, or its calendar doesn't make your periodic notes.";
+        const line = () => page().desc?.children.map((c) => [[...c.classes], c.text]);
+        for (const plugins of [{}, { "notebook-navigator": { settings: { ...NAVIGATOR, calendarIntegrationMode: "daily-notes" } } }]) {
+            plugin.app.plugins = { plugins, getPlugin: () => null };
+            assert.deepEqual(line(), [[["plainday-caution"], navigatorLine]]);
+            assert.equal(page().displayValue(), "Notebook Navigator");
+            const off = draw("Define periodic notes using");
+            assert.equal(off.control.inputEl.value, "notebook-navigator");
+            assert.equal(off.warning(), navigatorLine);
+        }
+        // The Daily notes plugin chosen and turned off
+        await window.plainday.Settings.set("folders", { periodic: "daily-notes" });
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = false;
+        assert.deepEqual(line(), [[["plainday-caution"], "The Daily notes plugin is off. Turn it on in Settings → Core plugins."]]);
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = true;
+        assert.equal(page().desc, undefined, "on again: no line");
+
+        // Obsidian keeps the definitions it was given until update(), and reads the row's value each time
+        // it draws it: a source turned off since then has the definitions made again, so the line shows
+        // (Brian's test round: Navigator turned off in Community plugins, then Plainday's tab opened)
+        let updates = 0;
+        tab.update = () => { updates++; };
+        const kept = page();
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = false;
+        assert.equal(kept.displayValue(), "Plainday + Daily Notes plugin");
+        await Promise.resolve();
+        assert.equal(updates, 1, "made again, before the panel is painted");
+        assert.equal(page().displayValue(), "Plainday + Daily Notes plugin");
+        await Promise.resolve();
+        assert.equal(updates, 1, "the new definitions match: no second update");
+        plugin.app.internalPlugins.plugins["daily-notes"].enabled = true;
     } finally {
         plugin.onunload();
     }

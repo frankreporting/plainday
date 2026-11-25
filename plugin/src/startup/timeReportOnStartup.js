@@ -8,7 +8,9 @@ export default class TimeReportOnStartup {
     // loaded and finished indexing the vault, so the project notes and timesheets are current after
     // every launch. To see fresh numbers after logging time, reload Obsidian, or run
     // "Plainday: Time report". The phone doesn't run it: it gets the updated notes through Sync, so
-    // two devices never rewrite the same blocks. Nothing is written when the numbers haven't changed.
+    // two devices never rewrite the same blocks. Nothing is written when the numbers haven't changed,
+    // and nothing at all while the periodic notes' source isn't chosen or is off (OBS-336): the report
+    // would read no daily notes. It catches up at the next start, or with Time report, once it's fixed.
     static INDEX_WAIT_MS = 60000;
     // How long a run gives the classes it needs to be there. Plainday makes every class before the
     // startup scripts run, so one that's missing is one Plainday couldn't start.
@@ -32,6 +34,10 @@ export default class TimeReportOnStartup {
             // A class that failed to start needs fixing, and the console says why
             const names = missing.map((name) => `plainday.${name}`).join(" and ");
             console.warn(`TimeReportOnStartup: ${names} ${missing.length === 1 ? "isn't" : "aren't"} registered (Plainday couldn't start it: see the error above); skipped`);
+            return;
+        }
+        if (plainday.Settings?.periodicProblem?.()) {
+            console.warn("TimeReportOnStartup: Plainday's periodic notes source isn't chosen or is off (Settings → Plainday → Folders → Periodic notes); skipped");
             return;
         }
         await plainday.TimeReport.refresh({ quiet: true });

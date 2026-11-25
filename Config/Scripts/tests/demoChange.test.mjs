@@ -207,11 +207,11 @@ for (const lag of [false, true]) {
         add(RAFE, "- [ ] Ask for the photo release list");
         v.menus.length = 0;
         await v.addProjectLink(KESTREL);
-        assert.match(v.notices.at(-1), /^Rafe Oakes isn't in the Planner, Projects or the Inbox/);
+        assert.match(v.notices.at(-1), /^Plainday only acts on periodic notes or notes in the Projects or Inbox folders\./);
         await v.addTaskNote();
-        assert.match(v.notices.at(-1), /^Rafe Oakes isn't in the Planner, Projects or the Inbox/);
+        assert.match(v.notices.at(-1), /^Plainday only acts on periodic notes or notes in the Projects or Inbox folders\./);
         await v.moveToProject(KESTREL);
-        assert.match(v.notices.at(-1), /^Rafe Oakes isn't in the Planner, Projects or the Inbox/);
+        assert.match(v.notices.at(-1), /^Plainday only acts on periodic notes or notes in the Projects or Inbox folders\./);
         v.open(day("2026-09-18"), 0);
         await v.moveToProject(KESTREL);
         assert.equal(v.notices.at(-1), "2026-09-18 stays where it is: run AddProjectLink on a line in it");

@@ -25,6 +25,8 @@
 // notes' folder and name, shown from the Daily notes plugin, which keeps them; the weekly, monthly and
 // yearly notes' folders, and the error log note, blank for what Plainday did before, which the
 // placeholder shows. A periodic notes row whose names don't give a note's whole date says so (OBS-299).
+// Who keeps the periodic notes is chosen on their page, and nothing is until you choose: until then, or
+// while the chosen plugin is off, an orange line says so there and under the row that opens it (OBS-336).
 // Note templates: the daily note's, shown the same way, and the weekly, monthly and
 // yearly notes', each with a line when the template sets a property Plainday writes itself. Changing a
 // folder moves no notes.
@@ -40,7 +42,7 @@ import { plainday } from "./host.js";
 /** @typedef {import("obsidian").Setting} Setting */
 /** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean, page?: Page }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
-/** @typedef {{ displayValue: string, sections: Section[] }} Page */
+/** @typedef {{ displayValue: string | (() => string), desc?: string | DocumentFragment, sections: Section[] }} Page */
 
 /** @param {unknown} e */
 const messageOf = (e) => (e instanceof Error ? e.message : typeof e === "string" ? e : "something went wrong");
@@ -520,7 +522,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             type: "group",
             ...(heading ? { heading } : {}),
             items: rows.map(({ name, desc, render, visible, page }) => (page
-                ? { type: /** @type {const} */ ("page"), name, ...(desc ? { desc } : {}), displayValue: page.displayValue, items: page.sections.map(group), ...(visible ? { visible } : {}) }
+                ? { type: /** @type {const} */ ("page"), name, ...(page.desc || desc ? { desc: page.desc || desc } : {}), displayValue: page.displayValue, items: page.sections.map(group), ...(visible ? { visible } : {}) }
                 : { name, ...(desc ? { desc } : {}), render, ...(visible ? { visible } : {}) })),
         });
         return this.sections().map(group);
@@ -1100,18 +1102,13 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
         });
 
+        // Nothing chosen yet, or the chosen one is off (OBS-336): an orange line under the choice, and
+        // under the Periodic notes row that opens its page
+        const sourceProblem = () => settings.periodicProblem();
+        /** @param {string} text */
+        const cautionLine = (text) => createFragment((f) => { f.createDiv({ cls: "plainday-caution", text }); });
         /** @returns {Section[]} */
-        const periodicSections = () => [
-            {
-                heading: null,
-                rows: [
-                    row("Define periodic notes using", "",
-                        (s) => s.addDropdown((d) => d.addOptions(Object.fromEntries(Settings.SOURCES.map((v) => [v, Settings.SOURCE_NAMES[v]])))
-                            .setValue(source()).onChange((v) => {
-                                void store(s, "folders", { periodic: v }).then(() => this.redraw());
-                            }))),
-                ],
-            },
+        const periodicRows = () => [
             {
                 heading: "Folders",
                 rows: [
@@ -1130,6 +1127,26 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         : [templateField("week"), templateField("month"), templateField("year")]),
                 ],
             },
+        ];
+        /** @returns {Section[]} */
+        const periodicSections = () => [
+            {
+                heading: null,
+                rows: [
+                    row("Define periodic notes using", "", (s) => {
+                        // "Choose…" only while nothing is chosen: once one is, there's no going back to none
+                        const options = Object.fromEntries(Settings.SOURCES.map((v) => [v, Settings.SOURCE_NAMES[v]]));
+                        s.addDropdown((d) => d.addOptions(source() ? options : { "": "Choose…", ...options })
+                            .setValue(source()).onChange((v) => {
+                                void store(s, "folders", { periodic: v }).then(() => this.redraw());
+                            }));
+                        if (sourceProblem()) problem(s, sourceProblem(), false);
+                    }),
+                ],
+            },
+            // With nothing chosen, the page shows only the choice: the rows below would describe a source
+            // Plainday doesn't use
+            ...(!source() ? [] : periodicRows()),
         ];
 
         // The error log note: a note Plainday writes rather than a folder it files into, so it sits in
@@ -1158,6 +1175,16 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         was: (value) => `The error log stays ${code(value || settings.defaultErrorLogPath())}.`,
                     })
 ;
+        const chosen = source();
+        // Obsidian keeps these definitions until update(), so a source turned off or on since they were
+        // made (in Community plugins, with the panel open) would leave the Periodic notes row's line as it
+        // was. Obsidian reads the row's value each time it draws the row: when the problem has changed by
+        // then, the definitions are made again, before the panel is painted.
+        const drawn = sourceProblem();
+        const shownValue = () => {
+            if (sourceProblem() !== drawn) queueMicrotask(() => this.redraw());
+            return chosen ? Settings.SOURCE_NAMES[chosen] : "Not chosen";
+        };
         return [
             {
                 heading: "Folders",
@@ -1167,7 +1194,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                     systemField("archive"),
                     {
                         ...row("Periodic notes", "", () => {}),
-                        page: { displayValue: Settings.SOURCE_NAMES[source()], sections: periodicSections() },
+                        page: { displayValue: shownValue, desc: drawn ? cautionLine(drawn) : "", sections: periodicSections() },
                     },
                 ],
             },

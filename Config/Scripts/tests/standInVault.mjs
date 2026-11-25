@@ -355,8 +355,10 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
         RefoldDailyNotes: { onLeave: async (f) => { left.push(f.path); } },
     });
     if (!aliases) plainday.PeriodicNotes.alias = () => null;
-    // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's
-    Object.assign(plainday.Settings.get().folders, setFolders);
+    // Settings → Plainday → Folders as a test sets them (OBS-283), over a new vault's. Periodic notes
+    // from the calendar the vault uses, as you'd choose it (OBS-336: Plainday never picks one itself).
+    const periodic = nn?.calendarIntegrationMode === "notebook-navigator" ? "notebook-navigator" : "daily-notes";
+    Object.assign(plainday.Settings.get().folders, { periodic }, setFolders);
     // Dates written M/D/YY, whatever the daily notes' names (OBS-309), as the demo vault saves it
     Object.assign(plainday.Settings.get().dates, { custom: true, format: "M/D/YY" });
     const ask = plainday.TaskChange.ask.bind(plainday.TaskChange);

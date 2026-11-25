@@ -27,6 +27,8 @@ export default class FinishPeriodicNotes {
     // had on the other device, and a restored or copied-in note keeps its own, so they aren't finished. But an
     // empty one is still held from Templater's trigger: Get Template has no route for a periodic note, so its
     // catch-all would give it `id` and `tags`.
+    // Nothing is finished while the periodic notes' source isn't chosen or is off (OBS-336): which notes are
+    // periodic notes, and where they go, is the source's to say.
     static MADE_WITHIN_MS = 5000;
     static HOLD_AFTER_MS = 50;
 
@@ -63,7 +65,7 @@ export default class FinishPeriodicNotes {
         // A listener left over from an earlier load of Plainday stops here: its `plainday.plugin` is gone
         if (!plainday.plugin || file?.extension !== "md") return null;
         const notes = plainday.PeriodicNotes;
-        if (!notes || notes.making.has(file.path)) return null;
+        if (!notes || notes.making.has(file.path) || plainday.Settings?.periodicProblem?.()) return null;
         try {
             if (!notes.periodOfName(file.basename)) return null;
         } catch {

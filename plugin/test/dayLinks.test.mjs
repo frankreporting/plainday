@@ -40,6 +40,8 @@ function vault({ patterns = null, daily = { format: "YYYY-MM-DD", folder: "Refer
     for (const [key, file, cls] of [["Settings", "settings"], ["Schedule", "schedule"], ["DatePrompt", "datePrompt"], ["JumpToDate", "jumpToDate"], ["TimeReport", "timeReport"], ["PeriodicNotes", "periodicNotes"], ["AddTaskNote", "addTaskNote"], ["EventLog", "eventLog"]]) {
         plainday[key] = new (loadClass(`${file}.js`, context))();
     }
+    // The calendar the vault uses, chosen as you'd choose it (OBS-336: Plainday never picks one itself)
+    plainday.Settings.get().folders.periodic = navigator ? "notebook-navigator" : "daily-notes";
     return { plainday, navigator, app };
 }
 

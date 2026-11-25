@@ -288,7 +288,7 @@ test("move: a note inside a moving project goes along, and what can't move says 
     ]);
     assert.equal(t.asked.picker[0].options.placeholder, 'Move "2 items" to which project or area? (Esc: cancel)');
     assert.deepEqual(t.done.renamed, [["Projects/Freelance/Kestrel/Catalog", "Projects/Household/Catalog"]]);
-    assert.deepEqual(notices, ["Moved Catalog with everything in it to Projects/Household", "Manual isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed"]);
+    assert.deepEqual(notices, ["Moved Catalog with everything in it to Projects/Household", "Plainday only acts on periodic notes or notes in the Projects or Inbox folders. If you think you're seeing this message in error, check your periodic note and folder settings."]);
 });
 
 test("move: Esc in the menu changes nothing, and nothing movable means no menu at all", async () => {

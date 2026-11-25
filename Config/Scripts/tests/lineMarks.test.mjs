@@ -35,7 +35,7 @@ test("a line outside the system: Schedule, DueDate, AddTaskNote and AddProjectLi
         if (name === "Schedule") assert.equal(await v.schedule("2026-09-19"), null, "no date is asked");
         else await v.plainday[name].invoke();
         assert.equal(v.notes()[RAFE], text, name);
-        assert.equal(v.notices.at(-1), "Rafe Oakes isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed", name);
+        assert.equal(v.notices.at(-1), "Plainday only acts on periodic notes or notes in the Projects or Inbox folders. If you think you're seeing this message in error, check your periodic note and folder settings.", name);
         assert.equal(Object.keys(v.notes()).length, 2, `${name}: no note made`);
     }
 });

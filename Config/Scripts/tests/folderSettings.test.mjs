@@ -25,13 +25,13 @@ test("the system is where the folders are set: a note in Work or Waiting is in i
     assert.equal(AddTaskNote.isLiveHome(file(KES)), true, "Move to project and Add project link list it");
     assert.equal(AddTaskNote.isLiveHome(file("Projects/Kestrel/Kestrel.md")), false);
     assert.equal(AddTaskNote.stagingFolder(), "Waiting");
-    assert.equal(TaskIds.outside(file("Projects/Kestrel/Kestrel.md")), "Kestrel isn't in the Planner, Work or Waiting, where the system works, so nothing changed");
+    assert.equal(TaskIds.outside(file("Projects/Kestrel/Kestrel.md")), "Plainday only acts on periodic notes or notes in the Work or Waiting folders. If you think you're seeing this message in error, check your periodic note and folder settings.");
     assert.equal(TaskIds.outside(file("Old/Marlowe/Marlowe.md")), "Marlowe is in Old, where no command works, so nothing changed", "a note in the archive, by its name");
 });
 
 test("the folders as a new vault has them: the messages say Projects, the Inbox and Archive, as before", () => {
     const v = standIn({ notes: { "Reference/Loose.md": "" } });
-    assert.equal(v.plainday.TaskIds.outside(v.app.vault.getFileByPath("Reference/Loose.md")), "Loose isn't in the Planner, Projects or the Inbox, where the system works, so nothing changed");
+    assert.equal(v.plainday.TaskIds.outside(v.app.vault.getFileByPath("Reference/Loose.md")), "Plainday only acts on periodic notes or notes in the Projects or Inbox folders. If you think you're seeing this message in error, check your periodic note and folder settings.");
     assert.equal(v.plainday.TimeReport.inboxWords(), "the Inbox");
     assert.equal(v.plainday.TimeReport.archiveWords(), "Archive");
 });

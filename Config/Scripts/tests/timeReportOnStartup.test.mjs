@@ -47,6 +47,20 @@ test("refreshes at once when TimeReport and Schedule are registered", async () =
     assert.deepEqual(warnings, []);
 });
 
+test("OBS-336: writes nothing while the periodic notes' source isn't chosen or is off, and says so in the console", async () => {
+    const calls = [];
+    const settings = { problem: "Choose who keeps your periodic notes. Until then, Plainday finds none.", periodicProblem() { return this.problem; } };
+    const { TimeReportOnStartup, warnings } = load({ ...bare(), Schedule: {}, Billing: {}, TaskIds: {}, TimeReport: timeReport(calls), Settings: settings });
+    await new TimeReportOnStartup().invoke();
+    assert.deepEqual(calls, []);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /periodic notes source isn't chosen or is off .*; skipped$/);
+    // Once chosen, the next start catches up
+    settings.problem = "";
+    await new TimeReportOnStartup().invoke();
+    assert.deepEqual(plain(calls), [{ quiet: true }]);
+});
+
 test("OBS-41: a run that wakes up to find its classes gone waits a moment for them to come back", async () => {
     const oldCalls = [], newCalls = [];
     const hold = {};

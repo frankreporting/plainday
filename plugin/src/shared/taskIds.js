@@ -347,12 +347,14 @@ export default class TaskIds {
     }
 
     // What a command that works on a line says when its note is outside the system, and does nothing
-    // (rule 12), naming the folders as they're set: a note in the archive is in it (OBS-283)
+    // (rule 12), naming the folders as they're set: a note in the archive is in it (OBS-283). Anywhere
+    // else, where Plainday works, and what to check when the note should count (OBS-336): a daily note
+    // the periodic notes' source doesn't find is a note outside the system too.
     /** @param {TFile} file @returns {string} */
     outside(file) {
-        const { projects, archive } = this.folders();
+        const { projects, inbox, archive } = this.folders();
         if (this.inArchive(file.path)) return `${file.basename} is in ${archive}, where no command works, so nothing changed`;
-        return `${file.basename} isn't in the Planner, ${projects} or ${plainday.TimeReport.inboxWords()}, where the system works, so nothing changed`;
+        return `Plainday only acts on periodic notes or notes in the ${projects} or ${inbox} folders. If you think you're seeing this message in error, check your periodic note and folder settings.`;
     }
 
     // Whether a command may work on a line of `file`; when not, it says so (rule 12, OBS-208)

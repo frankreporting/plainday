@@ -250,6 +250,15 @@ test("finish: an empty note made elsewhere (a click on a link to a missing day) 
     assert.ok(pending.has("2026-09-13.md") && pending.has(`${DAYS}/2026-09-13.md`), "the trigger looks by the path the note is at when it looks");
 });
 
+test("finish: nothing is finished while the periodic notes' source isn't chosen, or the chosen one is off (OBS-336)", async () => {
+    for (const set of [(v) => { v.plainday.Settings.get().folders.periodic = ""; }, (v) => { v.app.plugins.plugins = {}; }]) {
+        const v = vault({ nn: NAVIGATOR, notes: { ...EMPTY_TEMPLATES, "Inbox/Note.md": "[[2026-09-13]]\n" } });
+        set(v);
+        assert.equal(await finisher(v).onCreate(madeBy(v, "2026-09-13.md", "")), null);
+        assert.equal(v.notes()["2026-09-13.md"], "", "left where it was made, as it was");
+    }
+});
+
 test("finish: a new note titled like a week, in the Inbox, is filed in the weeks folder", async () => {
     const v = vault({ nn: NAVIGATOR, notes: EMPTY_TEMPLATES });
     await finisher(v).onCreate(madeBy(v, "Inbox/2026w41.md", ""));
