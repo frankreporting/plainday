@@ -1049,7 +1049,7 @@ The periodic notes aren't among them: Plainday makes and finishes those, and kee
 
 ## Plugins
 
-**Required:** Plainday, the plugin this repository builds from the class files in `plugin/src/`, installed through BRAT from the repository's releases until the community directory lists it (see the README); and the core Daily notes and Bases plugins.
+**Required:** Plainday, the plugin this repository builds from the class files in `plugin/src/`, installed from the community directory, or through BRAT for beta builds (see the README); and the core Daily notes and Bases plugins.
 
 **Recommended:**
 
