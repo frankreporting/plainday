@@ -299,6 +299,32 @@ test("keepIdAtEnd: every other edit is left as it is (OBS-185)", () => {
     assert.equal(kept("- Book it ^k3x9m2", typed(17, "s")), null, "not a task line");
 });
 
+// ---------------------------------------------------------------- shownWord, wordWidth (OBS-347)
+
+test("shownWord: the last word as Live Preview shows it, links by alias or name, marks left out", () => {
+    assert.deepEqual(plain(TrailingLinks.shownWord("standup ")), { text: "standup ", links: 0, styled: false });
+    assert.deepEqual(plain(TrailingLinks.shownWord("[[People/Rafe Oakes]] ")), { text: "Rafe Oakes ", links: 1, styled: false });
+    assert.deepEqual(plain(TrailingLinks.shownWord("[[Some note|the brief]] ")), { text: "the brief ", links: 1, styled: false });
+    assert.deepEqual(plain(TrailingLinks.shownWord("[[Brief#Budget]] ")), { text: "Brief > Budget ", links: 1, styled: false });
+    assert.deepEqual(plain(TrailingLinks.shownWord("**now** ")), { text: "now ", links: 0, styled: true });
+    assert.deepEqual(plain(TrailingLinks.shownWord("`npm` ~~old~~ ==hi== ")), { text: "npm old hi ", links: 0, styled: false });
+});
+
+test("wordWidth: the measured width, rounded up, with room for a link's padding and for bold or italic", () => {
+    const measure = (text) => text.length * 8;
+    const pad = TrailingLinks.LINK_PAD_PX;
+    assert.equal(TrailingLinks.wordWidth("standup ", measure), 64);
+    assert.equal(TrailingLinks.wordWidth("[[Rafe Oakes]] ", measure), 88 + pad);
+    assert.equal(TrailingLinks.wordWidth("**now** ", measure), Math.ceil(32 * 1.1));
+    assert.equal(TrailingLinks.wordWidth("a", () => 7.2), 8);
+});
+
+test("CSS: the last word keeps room for the links only when the two fit on one row (OBS-347)", () => {
+    assert.match(CSS, /--pm-room: clamp\(0px, \(100% \+ 1px - var\(--pm-word-w, 0px\) - var\(--pm-need\)\) \* 10000, var\(--pm-need\)\);/);
+    assert.match(CSS, /\.pm-trail-glue \{\s*white-space: nowrap;\s*padding-inline-end: var\(--pm-room\);/);
+    assert.doesNotMatch(CSS, /container-type/, "no container: it made every keystroke about 2 ms slower");
+});
+
 // ---------------------------------------------------------------- lastWordStart
 
 test("lastWordStart: the text's last word, which wraps with the run", () => {

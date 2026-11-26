@@ -37,8 +37,9 @@ import { app, plainday } from "../host.js";
  *
  * What a run keeps on the window, so the next run reuses its slot and undoes the rest: the editor
  * extension's slot, the listeners, the measured widths by what the links show, the character size
- * they were measured at, and the two timers.
- * @typedef {{ slot: Extension[], refs: EventRef[], widths: Map<string, number>, size: string | null, timer: number | null, midnight: number | null }} Handles
+ * they were measured at, and the two timers. And for the last words' widths (OBS-347): a canvas to
+ * measure them on, the editor's font, and the widths by the word's text.
+ * @typedef {{ slot: Extension[], refs: EventRef[], widths: Map<string, number>, size: string | null, timer: number | null, midnight: number | null, ctx: CanvasRenderingContext2D | null, font: string | null, words: Map<string, number> }} Handles
  * @typedef {Window & { pmTrailingLinks?: Handles }} HandleWindow
  */
 export default class TrailingLinks {
@@ -58,7 +59,9 @@ export default class TrailingLinks {
     //     the end of the text, ahead of the links (spec default 11). Enter is Obsidian's own, from the
     //     end of the line when the cursor is at the end of the text: End, then Enter, starts a new
     //     task below, and the links and the ID stay on their line (OBS-221).
-    //   - Only the text's last word wraps with the links; the other rows keep their full width.
+    //   - Only the text's last word wraps with the links; the other rows keep their full width. When the
+    //     word and the links are wider than the line, the word stays with the text and the links take a
+    //     row of their own (OBS-347).
     //   - Live Preview only. While a link shows its brackets, the line reads as its markdown.
     //   - In Live Preview, End and Cmd-→ stop at the end of the text, and a second press goes to the
     //     end of the line, after the note link and the ID (OBS-221). By default they'd stop at the far
@@ -76,12 +79,16 @@ export default class TrailingLinks {
     static GAP_PX = 8;
     // The margin before each pill (the CSS's margin-inline-start)
     static PILL_MARGIN_PX = 4;
+    // Added to the last word's measured width for each link in it (OBS-347): its padding, as a theme or
+    // snippet may draw it as a pill
+    static LINK_PAD_PX = 8;
     // Edits bigger than this many lines redraw every line on screen
     static MAX_PIECEMEAL = 40;
     static REDRAW_MS = 250;
 
     // The layout is in styles.css, keyed to the classes the extension puts on a line:
-    //   .pm-trail-line  the line, with --pm-run-w (the links' width); .pm-trail-folded while it's folded,
+    //   .pm-trail-line  the line, with --pm-run-w (the links' width) and --pm-word-w (the last word's,
+    //                   OBS-347); .pm-trail-folded while it's folded,
     //                   and .pm-trail-open while a link in the run shows its brackets (OBS-341)
     //   .pm-trail-glue  the text's last word, which keeps that much room after it
     //   .pm-trail-run   around the links
@@ -245,6 +252,36 @@ export default class TrailingLinks {
         return found;
     }
 
+    // The last word as Live Preview shows it (OBS-347): a link as its alias or its note's name, without
+    // the marks around bold, italic, struck, highlighted or code text. How many links it holds, and
+    // whether it had bold or italic marks, which make it wider than the plain text.
+    /**
+     * @param {string} raw
+     * @returns {{ text: string, links: number, styled: boolean }}
+     */
+    static shownWord(raw) {
+        let links = 0;
+        const text = raw.replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (/** @type {string} */ _, /** @type {string} */ target, /** @type {string | undefined} */ alias) => {
+            links++;
+            return alias ?? (target.split("/").pop() ?? "").replace(/#\^?/, " > ");
+        });
+        const styled = /\*|_/.test(text);
+        return { text: text.replace(/\*\*|__|~~|==|[*_`]/g, ""), links, styled };
+    }
+
+    // The width CSS reads for the last word (--pm-word-w), from what a canvas measures of its shown
+    // text in the editor's font: rounded up, with room for a link's padding, and more for bold or italic
+    // text, which the canvas measures in the plain font
+    /**
+     * @param {string} raw
+     * @param {(text: string) => number} measure
+     * @returns {number}
+     */
+    static wordWidth(raw, measure) {
+        const { text, links, styled } = TrailingLinks.shownWord(raw);
+        return Math.ceil(measure(text) * (styled ? 1.1 : 1) + links * TrailingLinks.LINK_PAD_PX);
+    }
+
     /**
      * @param {string} text
      * @param {number} bodyFrom
@@ -401,7 +438,7 @@ export default class TrailingLinks {
         const kept = /** @type {HandleWindow} */ (window).pmTrailingLinks;
         const slot = kept?.slot && ws.editorExtensions?.includes?.(kept.slot) ? kept.slot : null;
         /** @type {Handles} */
-        const handles = { slot: slot ?? [], refs: [], widths: new Map(), size: null, timer: null, midnight: null };
+        const handles = { slot: slot ?? [], refs: [], widths: new Map(), size: null, timer: null, midnight: null, ctx: null, font: null, words: new Map() };
         /** @type {HandleWindow} */ (window).pmTrailingLinks = handles;
         if (!slot) plainday.plugin.registerEditorExtension(handles.slot);
 
@@ -431,6 +468,30 @@ export default class TrailingLinks {
             const folds = foldedRanges(v.state);
             const outer = /** @type {Range<Decoration>[]} */ ([]), inner = /** @type {Range<Decoration>[]} */ ([]);
             let unmeasured = false;
+            // The last words' widths (OBS-347), measured on a canvas in the editor's font, the first time
+            // one is needed, and kept by the word's text
+            let measureText = /** @type {((text: string) => number) | null} */ (null);
+            const wordPx = (/** @type {string} */ raw) => {
+                const known = handles.words.get(raw);
+                if (known !== undefined) return known;
+                if (!measureText) {
+                    const doc = v.dom.ownerDocument;
+                    handles.ctx ??= doc.createElement("canvas").getContext("2d");
+                    if (handles.font === null) {
+                        const cs = doc.defaultView?.getComputedStyle(v.contentDOM);
+                        handles.font = cs ? `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}` : "";
+                    }
+                    const ctx = handles.ctx;
+                    if (ctx && handles.font) {
+                        ctx.font = handles.font;
+                        measureText = (text) => ctx.measureText(text).width;
+                    } else measureText = () => 0;
+                }
+                const px = T.wordWidth(raw, measureText);
+                if (handles.words.size > 2000) handles.words.clear();
+                handles.words.set(raw, px);
+                return px;
+            };
             for (const { from, to } of ranges) {
                 for (let pos = from; pos <= to;) {
                     const line = doc.lineAt(pos);
@@ -463,8 +524,11 @@ export default class TrailingLinks {
                     const width = Math.ceil((handles.widths.get(sig) ?? guess) + T.GAP_PX);
 
                     const cls = `pm-trail-line${T.folded(folds, line.to) ? " pm-trail-folded" : ""}${open.has(line.from) ? " pm-trail-open" : ""}`;
-                    outer.push(Decoration.line({ class: cls, attributes: { style: `--pm-run-w: ${width}px` } }).range(line.from));
                     const word = T.lastWordStart(line.text, t.bodyFrom, t.textEnd);
+                    // The last word's width too, for the CSS to tell whether it and the links can ever
+                    // share a row (OBS-347)
+                    const wordW = word >= 0 ? `; --pm-word-w: ${wordPx(line.text.slice(word, t.runFrom))}px` : "";
+                    outer.push(Decoration.line({ class: cls, attributes: { style: `--pm-run-w: ${width}px${wordW}` } }).range(line.from));
                     if (word >= 0) {
                         // The space before the links too, so a struck-through line has no stray dash
                         outer.push(Decoration.mark({ class: "pm-trail-glue" }).range(at(word), at(t.runFrom)));
@@ -537,6 +601,8 @@ export default class TrailingLinks {
                 const size = `${u.view.defaultCharacterWidth}/${u.view.defaultLineHeight}`;
                 if (size !== handles.size) {
                     handles.widths.clear();
+                    handles.words.clear();
+                    handles.font = null;
                     handles.size = size;
                 }
                 // The lines where a link opened or closed since the last reading redraw, for their class

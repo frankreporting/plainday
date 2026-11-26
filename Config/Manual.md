@@ -414,7 +414,7 @@ In daily notes, links to other notes go at the **end** of the line, each with a 
 	- A ⭕ or 🗃️ shows as the project's shortest name, its file name or a plain alias (never a `⭕.Area.Project` one), in faint text.
 	- The due date is faint, and turns red once its day has passed. The forward date is faint too, and shows just its date.
 	- A task's ID isn't drawn: it's hidden until the cursor reaches the end of the line. Shown on a line with links, it's drawn last, faint, after them at the right edge.
-- **Wrapping:** when the links don't fit after the text, the text's last word wraps with them. The other rows keep their full width.
+- **Wrapping:** when the links don't fit after the text, the text's last word wraps with them. The other rows keep their full width. In a pane too narrow for the last word and the links on one row, the word stays with the text and the links take a row of their own below it, at the right edge; the next line starts below them. There, ↓ from the last row of text goes into the links first, opening them as → does, and the next ↓ goes on to the next line.
 - **Keys and clicks:**
 	- A click opens the link, and ⌘-click or a middle click opens it in a new tab.
 	- End and ⌘→ stop at the end of the text, ahead of the links and the ID, and a second press goes to the end of the line, after the note links. On a line with an ID, that press goes past it, and the ID shows while the cursor is there: after the links, at the right edge, so ← from there moves back into the links. On a long task that wraps, only the row where the text ends has the extra stop. Shift-End and Shift-⌘→ select the same way. In Source mode, one press goes to the end of the line.
