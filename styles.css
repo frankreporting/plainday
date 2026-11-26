@@ -126,6 +126,10 @@
         min-height: 1lh;
         white-space: nowrap;
     }
+    /* When the last word and the links are wider than the pane, the float drops to a row below the
+       text. The line holds that row, so the links get a row of their own and the next line starts below
+       them instead of being drawn over (OBS-347). CodeMirror reads the line's height from its box. */
+    & .pm-trail-line { display: flow-root; }
     & .pm-trail-run > .pm-trail {
         flex: none;
         font-size: 0.8em;
