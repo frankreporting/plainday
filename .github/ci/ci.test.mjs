@@ -450,8 +450,9 @@ test("the repository's lint commands name the baseline, and none is at the root 
 
 // ------------------------------------------------------------------ the release script (OBS-230)
 
-// A stand-in for the gh CLI: `releases` are the tags that have a release
-function fakeGh({ releases = [], fail = false } = {}) {
+// A stand-in for the gh CLI: `releases` are the tags that have a published release, `drafts` the
+// tags of draft releases, which GitHub's lookup by tag doesn't find (OBS-345)
+function fakeGh({ releases = [], drafts = [], fail = false, failList = false } = {}) {
     const calls = [];
     const gh = (args) => {
         calls.push(args);
@@ -460,8 +461,11 @@ function fakeGh({ releases = [], fail = false } = {}) {
         if (args[0] === "api" && tag) {
             return releases.includes(tag) ? { status: 0, stdout: `${tag}\n`, stderr: "" } : { status: 1, stdout: "", stderr: "gh: Not Found (HTTP 404)" };
         }
-        if (args[0] === "api") return { status: 0, stdout: `${Math.min(releases.length, 1)}\n`, stderr: "" };
-        if (args[0] === "release" && args[1] === "create") return { status: 0, stdout: `https://github.com/owner/repo/releases/tag/${args[2]}\n`, stderr: "" };
+        if (args[0] === "api" && args[1] === "--paginate" && /\/releases\?per_page=100$/.test(args[2]) && args.at(-1) === ".[] | select(.draft) | .tag_name") {
+            if (failList) return { status: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
+            return { status: 0, stdout: drafts.map((t) => `${t}\n`).join(""), stderr: "" };
+        }
+        if (args[0] === "release" && args[1] === "create") return { status: 0, stdout: `https://github.com/owner/repo/releases/tag/untagged-${args[2]}\n`, stderr: "" };
         throw new Error(`unexpected gh ${args.join(" ")}`);
     };
     return { gh, calls };
@@ -478,29 +482,31 @@ function releaseRoot({ version = "0.0.1", styles = false, main = "// main.js\n" 
 // The version before the merge (or on the PR's base), as manifestAt reads it
 const before = (v) => ({ sha: "bef0123", readable: true, manifest: v === undefined ? undefined : JSON.stringify({ id: "plainday", version: v }) });
 
-test("the dry run says merging publishes only when the PR raises the version, and collects the release's files", () => {
+test("the dry run says merging makes a draft release only when the PR raises the version, and collects the release's files", () => {
     const { root, out } = releaseRoot({ version: "0.0.2" });
     try {
         const { gh, calls } = fakeGh({ releases: ["0.0.1"] });
         const r = release({ mode: "dry-run", root, out, gh, before: before("0.0.1") });
-        assert.equal(r.message, "Merging publishes 0.0.2, with main.js, manifest.json.");
+        assert.equal(r.message, 'Merging makes a draft release of 0.0.2, with main.js, manifest.json and no notes. It goes out when it\'s published with its notes from Linear (CLAUDE.md, "Releases").');
         assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json"]);
         assert.ok(!calls.some((c) => c[0] === "release"), "a dry run publishes nothing");
         // The same version as main's publishes nothing, even when it has no release (OBS-266)
         const same = release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: before("0.0.2") });
         assert.equal(same.published, false);
-        assert.match(same.message, /^This PR leaves the version at 0\.0\.2, so merging publishes nothing\./);
+        assert.match(same.message, /^This PR leaves the version at 0\.0\.2, so merging makes no release\./);
         assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json"], "the files are kept either way");
         const done = release({ mode: "dry-run", root, out, gh: fakeGh({ releases: ["0.0.2"] }).gh, before: before("0.0.1") });
-        assert.match(done.message, /^0\.0\.2 is already released, so merging publishes nothing\./);
-        assert.match(release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: before(undefined) }).message, /^Merging publishes 0\.0\.2/, "main without a manifest");
+        assert.match(done.message, /^0\.0\.2 is already released, so merging makes no release\./);
+        const drafted = release({ mode: "dry-run", root, out, gh: fakeGh({ drafts: ["0.0.2"] }).gh, before: before("0.0.1") });
+        assert.match(drafted.message, /^0\.0\.2 has a draft release already, so merging makes no other\./);
+        assert.match(release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: before(undefined) }).message, /^Merging makes a draft release of 0\.0\.2/, "main without a manifest");
         assert.throws(() => release({ mode: "dry-run", root, out, gh: fakeGh().gh, before: { sha: "bef0123", readable: false } }), /couldn't read main's commit bef0123/);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
 
-test("a merge publishes only when it raises the version; a run by hand publishes any version without a release (OBS-266)", () => {
+test("a merge makes the draft only when it raises the version; a run by hand makes one for any version without a release or a draft (OBS-266, OBS-345)", () => {
     const { root, out } = releaseRoot();
     try {
         // Unchanged, and released: nothing
@@ -512,12 +518,12 @@ test("a merge publishes only when it raises the version; a run by hand publishes
         const b = fakeGh();
         const gone = release({ mode: "publish", root, out, sha: "abc1234", gh: b.gh, before: before("0.0.1") });
         assert.equal(gone.published, false);
-        assert.equal(gone.message, 'This merge left the version at 0.0.1, so it publishes nothing. To release, a PR raises the version (CLAUDE.md, "Releases").');
+        assert.equal(gone.message, 'This merge left the version at 0.0.1, so it makes no release. To release, a PR raises the version (CLAUDE.md, "Releases").');
         assert.ok(!b.calls.some((c) => c[0] === "release"));
         // Lowered (only a push straight to main could): nothing
         const lower = release({ mode: "publish", root, out, sha: "abc1234", gh: fakeGh().gh, before: before("0.0.2") });
         assert.equal(lower.published, false);
-        assert.match(lower.message, /^This merge lowered the version from 0\.0\.2 to 0\.0\.1, so it publishes nothing\./);
+        assert.match(lower.message, /^This merge lowered the version from 0\.0\.2 to 0\.0\.1, so it makes no release\./);
         // Raised: publishes
         const c = fakeGh();
         const raised = release({ mode: "publish", root, out, sha: "abc1234", gh: c.gh, before: before("0.0.0") });
@@ -528,12 +534,18 @@ test("a merge publishes only when it raises the version; a run by hand publishes
         const unread = release({ mode: "publish", root, out, sha: "abc1234", gh: d.gh, before: { sha: "bef0123", readable: false } });
         assert.equal(unread.published, false);
         assert.equal(unread.warning, true);
-        assert.match(unread.message, /^Couldn't read the commit before this push \(bef0123\), .* publishes nothing\. If it did, run the Release workflow by hand\./);
+        assert.match(unread.message, /^Couldn't read the commit before this push \(bef0123\), .* makes no release\. If it did, run the Release workflow by hand\./);
         assert.ok(!d.calls.some((x) => x[0] === "release"));
-        // By hand (no `before`): publishes the manifest's version when it has no release, as before
+        // By hand (no `before`): makes the manifest's version's draft when it has no release, as before
         const e = fakeGh();
         assert.equal(release({ mode: "publish", root, out, sha: "abc1234", gh: e.gh }).published, true);
         assert.equal(release({ mode: "publish", root, out, sha: "abc1234", gh: fakeGh({ releases: ["0.0.1"] }).gh }).published, false);
+        // ... and not a second draft when a draft is waiting for its notes (OBS-345)
+        const f = fakeGh({ drafts: ["0.0.1"] });
+        const again = release({ mode: "publish", root, out, sha: "abc1234", gh: f.gh });
+        assert.equal(again.published, false);
+        assert.equal(again.message, '0.0.1 has a draft release already, so there\'s nothing to make. It goes out when it\'s published with its notes from Linear (CLAUDE.md, "Releases").');
+        assert.ok(!f.calls.some((x) => x[0] === "release"));
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }
@@ -550,6 +562,8 @@ test("check says publish will publish exactly when it would, and publishes nothi
             ["unreadable", {}, { sha: "bef0123", readable: false }],
             ["by hand", {}, undefined],
             ["by hand, released already", { releases: ["0.0.2"] }, undefined],
+            ["raised, a draft already", { releases: ["0.0.1"], drafts: ["0.0.2"] }, before("0.0.1")],
+            ["by hand, a draft already", { drafts: ["0.0.2"] }, undefined],
         ];
         for (const [name, releases, was] of cases) {
             const c = fakeGh(releases);
@@ -562,7 +576,7 @@ test("check says publish will publish exactly when it would, and publishes nothi
             assert.equal(published.publishes, published.published, name);
             if (!checked.publishes) assert.equal(checked.message, published.message, `${name}: says why, as publish does`);
         }
-        assert.equal(release({ mode: "check", root, out, gh: fakeGh().gh, before: before("0.0.1") }).message, "Publishes 0.0.2, with main.js, manifest.json, styles.css.");
+        assert.equal(release({ mode: "check", root, out, gh: fakeGh().gh, before: before("0.0.1") }).message, "Makes a draft release of 0.0.2, with main.js, manifest.json, styles.css.");
         assert.deepEqual(fs.readdirSync(out).sort(), ["main.js", "manifest.json", "styles.css"], "the files to attest, as publish uploads them");
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
@@ -582,6 +596,23 @@ test("the release workflow attests the files it publishes, only when it publishe
     assert.match(job, /uses: actions\/attest@[0-9a-f]{40} # v\d/, "pinned to a commit");
     assert.ok(job.includes("if: steps.check.outputs.publishes == 'true'"));
     assert.ok(job.includes("subject-path: ${{ runner.temp }}/release/*"), "the files publish uploads");
+});
+
+test("only the Linear workflow gets the pipeline's key, it runs no job on a PR, and its plugin paths are there (OBS-345)", () => {
+    const dir = ".github/workflows";
+    for (const f of fs.readdirSync(dir)) {
+        assert.equal(fs.readFileSync(path.join(dir, f), "utf8").includes("LINEAR_ACCESS_KEY"), f === "linear-release.yml", f);
+    }
+    const wf = fs.readFileSync(path.join(dir, "linear-release.yml"), "utf8");
+    assert.ok(!/^\s*pull_request/m.test(wf), "no job on a pull request");
+    assert.match(wf, /^permissions:\n  contents: read\n/m);
+    const uses = wf.match(/uses: linear\/\S+/g) ?? [];
+    assert.equal(uses.length, 3, "sync, then name and complete");
+    for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, `${u}: pinned to a commit`);
+    // A path renamed away would quietly leave its merges out of every release
+    const paths = (/^  PLUGIN_PATHS: (.+)$/m.exec(wf)?.[1] ?? "").split(",");
+    assert.ok(paths.includes("plugin/**"), paths.join(","));
+    for (const p of paths) assert.ok(fs.existsSync(p.replace(/\/\*\*$/, "")), `${p} is in the repository`);
 });
 
 test("manifestAt reads main's manifest.json at a commit, and tells a missing commit from a missing file", () => {
@@ -607,21 +638,23 @@ test("manifestAt reads main's manifest.json at a commit, and tells a missing com
     }
 });
 
-test("publish makes the first release with its own notes, a later one with GitHub's, and styles.css once there is one", () => {
+test("publish makes a draft release with no notes, the first or a later one, and with styles.css once there is one (OBS-345)", () => {
     const first = releaseRoot();
     const later = releaseRoot({ version: "0.0.2", styles: true });
     try {
         const a = fakeGh();
         const r = release({ mode: "publish", ...first, sha: "abc1234def", gh: a.gh });
         assert.equal(r.published, true);
+        assert.match(r.message, /^Made a draft release of 0\.0\.1 at abc1234, with main\.js, manifest\.json: https:\/\/github\.com\/owner\/repo\/releases\/tag\/untagged-0\.0\.1\. It goes out when it's published with its notes from Linear/);
         const create = a.calls.find((c) => c[0] === "release");
         assert.deepEqual(create, ["release", "create", "0.0.1", path.join(first.out, "main.js"), path.join(first.out, "manifest.json"),
-            "--target", "abc1234def", "--title", "0.0.1", "--notes", "First release."]);
+            "--target", "abc1234def", "--title", "0.0.1", "--draft", "--notes", ""]);
         const b = fakeGh({ releases: ["0.0.1"] });
         release({ mode: "publish", ...later, sha: "abc1234def", gh: b.gh });
         const create2 = b.calls.find((c) => c[0] === "release");
         assert.ok(create2.includes(path.join(later.out, "styles.css")), create2.join(" "));
-        assert.equal(create2.at(-1), "--generate-notes");
+        assert.deepEqual(create2.slice(-3), ["--draft", "--notes", ""]);
+        assert.ok(!create2.includes("--generate-notes"), create2.join(" "));
         assert.deepEqual(RELEASE_FILES, ["main.js", "manifest.json", "styles.css"]);
     } finally {
         fs.rmSync(first.root, { recursive: true, force: true });
@@ -637,9 +670,10 @@ test("publish does nothing for a released version, and stops when GitHub can't s
         const a = fakeGh({ releases: ["0.0.1"] });
         const r = release({ mode: "publish", ...ok, sha: "abc1234", gh: a.gh });
         assert.equal(r.published, false);
-        assert.equal(r.message, "0.0.1 is already released, so there's nothing to publish.");
+        assert.equal(r.message, "0.0.1 is already released, so there's nothing to make.");
         assert.ok(!a.calls.some((c) => c[0] === "release"));
         assert.throws(() => release({ mode: "publish", ...ok, sha: "abc1234", gh: fakeGh({ fail: true }).gh }), /couldn't ask GitHub whether 0\.0\.1 is released: HTTP 502/);
+        assert.throws(() => release({ mode: "publish", ...ok, sha: "abc1234", gh: fakeGh({ failList: true }).gh }), /couldn't list the releases, to look for a draft of 0\.0\.1: HTTP 502/);
         assert.throws(() => release({ mode: "dry-run", ...noMain, gh: fakeGh().gh }), /main\.js is missing: run `npm run build` first/);
         assert.throws(() => release({ mode: "dry-run", ...badVersion, gh: fakeGh().gh }), /three numbers/);
         assert.throws(() => release({ mode: "publish", ...ok, sha: "", gh: fakeGh().gh }), /GITHUB_SHA/);

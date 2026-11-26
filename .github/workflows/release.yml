@@ -1,17 +1,19 @@
-# Publishes a release of Plainday when a merge to main raises its version (OBS-230, OBS-266). So
-# to release, a PR raises the version, and merging it publishes the release. A merge that leaves
-# the version as it was publishes nothing, even when that version has no release, so a release
+# Makes a draft release of Plainday when a merge to main raises its version (OBS-230, OBS-266). So
+# to release, a PR raises the version, and merging it makes the draft, with the files and no notes
+# (OBS-345). Claude publishes the draft with the notes the maintainer approved on the Linear
+# release, in one command, and publishing tags the commit and runs linear-release.yml. A merge that
+# leaves the version as it was makes nothing, even when that version has no release, so a release
 # deleted on purpose stays deleted. CLAUDE.md ("Releases") has the steps; .github/ci/release.mjs
 # does the work, the same script as the PR's dry run in ci.yml. Each file of a release is attested
-# (OBS-340): GitHub keeps a signed record that this workflow built it from the release's commit, which
-# `gh attestation verify <file> --repo frankreporting/plainday` checks.
+# (OBS-340): GitHub keeps a signed record that this workflow built it from the release's commit,
+# which `gh attestation verify <file> --repo frankreporting/plainday` checks.
 name: Release
 
 on:
   push:
     branches: [main]
-  # Run by hand to retry a publish that failed: it publishes main's version when that has no
-  # release, whatever the last merge did
+  # Run by hand to retry a run that failed: it makes the draft of main's version when that has no
+  # release and no draft, whatever the last merge did
   workflow_dispatch:
 
 permissions:
@@ -28,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only from main, even when run by hand on another branch
     if: github.ref == 'refs/heads/main'
-    # The only job in this repository that may write to it: to tag and publish. id-token and
+    # The only job in this repository that may write to it: to make the draft release. id-token and
     # attestations sign and keep the files' attestations; nothing else uses them
     permissions:
       contents: write
@@ -48,23 +50,23 @@ jobs:
       - run: npm ci
       - name: Build Plainday (main.js)
         run: npm run build
-      # Decides as Publish does, and collects the files Publish uploads, so only a release's
+      # Decides as the draft step does, and collects the files it uploads, so only a release's
       # files are attested
-      - name: Whether this run publishes
+      - name: Whether this run makes the draft release
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
           # The commit before the push, to compare versions with (empty on a run by hand)
           BEFORE_SHA: ${{ github.event.before }}
         run: node .github/ci/release.mjs check --out "$RUNNER_TEMP/release"
-      # Before the upload, so no release is out without its attestations; if this fails, nothing
-      # is published, and running the workflow by hand tries both again
+      # Before the upload, so no release is out without its attestations; if this fails, no draft
+      # is made, and running the workflow by hand tries both again
       - name: Attest the release's files
         if: steps.check.outputs.publishes == 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/release/*
-      - name: Publish, when this merge raised the version (or by hand) and it has no release
+      - name: Make the draft release, when this merge raised the version (or by hand) and it has none
         env:
           GH_TOKEN: ${{ github.token }}
           BEFORE_SHA: ${{ github.event.before }}

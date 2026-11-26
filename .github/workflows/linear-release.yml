@@ -1,0 +1,93 @@
+# Keeps Plainday's release in Linear up to date, through the Plainday release pipeline (OBS-345,
+# copied from Better Markdown Tables). Each push to main that changes what ships in the plugin adds
+# its issues to the open release, and publishing a release on GitHub names the Linear release by its
+# version, links it and marks it complete. The pipeline's access key is the LINEAR_ACCESS_KEY
+# secret, which no other workflow gets; no job runs on a pull request. CLAUDE.md ("Releases") has
+# the steps.
+#
+# Each sync scans everything since the last version's tag, not only the new commits, so the open
+# release always holds the plugin's issues merged since the last release, and a run that failed is
+# made up by the next. Run it by hand (Actions › Linear release › Run workflow) to see what a sync
+# would add, or to sync from another tag or commit; it's a dry run unless that box is unticked.
+name: Linear release
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Sync the commits after this tag or commit, instead of those since the last version's tag
+        required: false
+      dry_run:
+        description: Only log what would change in Linear
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# One at a time, so two syncs never race for the same release
+concurrency:
+  group: linear-release
+  cancel-in-progress: false
+
+env:
+  # What ships in the plugin, or shapes main.js. The vault's files, the manual, the README and the
+  # CI scripts stay out.
+  PLUGIN_PATHS: plugin/**,styles.css,manifest.json,package.json,package-lock.json
+
+jobs:
+  sync:
+    if: github.event_name != 'release' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history and its tags, to find the last version's tag
+          fetch-depth: 0
+      # The last version's tag (customjs-final doesn't count), unless a run by hand names another
+      - name: Where the open release starts
+        id: base
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          ref="${BASE_REF:-$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' HEAD)}"
+          echo "Syncing the commits after $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Add the merged issues to the open release
+        uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          include_paths: ${{ env.PLUGIN_PATHS }}
+          base_ref: ${{ steps.base.outputs.ref }}
+          dry_run: ${{ inputs.dry_run && 'true' || 'false' }}
+
+  # Claude publishes a release with gh, a person's token, so this runs: a release published by a
+  # workflow's own token starts no workflow. If it fails, Claude completes the Linear release by hand
+  complete:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Only sync can set a release's version, so name the open release first. HEAD as the base
+      # scans no commits
+      - name: Give the open release its version
+        uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          base_ref: HEAD
+          version: ${{ github.event.release.tag_name }}
+          name: ${{ github.event.release.tag_name }}
+      - name: Mark it complete, with a link to the GitHub release
+        uses: linear/linear-release-action@cfd42077dccdc0c26a38589934e2aa11046f57b7 # v0.18.3
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: complete
+          version: ${{ github.event.release.tag_name }}
+          links: |
+            GitHub release=${{ github.event.release.html_url }}
