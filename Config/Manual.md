@@ -940,7 +940,7 @@ One choice decides who owns the daily, weekly, monthly and yearly notes, rather 
 
 What each kind of note Plainday makes is made from. The periodic notes' templates are under *Folders → Periodic notes*, beside their folders. The section opens with a line on how they're used:
 
-> Bring your own templates. Plainday adds its properties to yours. Templater code runs when Templater is on; otherwise {{title}}, {{date}} and {{time}} are filled in.
+> Plainday adds its properties to yours. Templater code runs when Templater is on; otherwise Plainday fills in {{title}}, {{date}} and {{time}} in the template's text.
 
 - **No plugin is needed** for a template: without Templater, Plainday fills in those three itself, and the core Templates plugin needn't be on.
 - **A blank field** means the template's name in `Templates`, at the top of the vault: `Templates/Task.md`, `Log.md`, `Project.md` and `Area.md` here, and `Templates/Weekly Note.md`, `Monthly Note.md` and `Yearly Note.md` under *Periodic notes*. That holds with or without Templater, whose own template folder Plainday doesn't follow. The field's faint text shows it. A blank field whose template isn't there means no template, and says nothing. The demo names its own seven, in `Config/Templates`.
