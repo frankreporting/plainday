@@ -12,7 +12,7 @@ import { plainName } from "./dayNames.mjs";
 const day = (d) => `${PLANNER}/days/${d}.md`;
 const KES = "Projects/Freelance/Kestrel/Kestrel.md";
 const LOGS = "Projects/Freelance/Kestrel/›logs";
-const TPL = "Config/Templates/Log.md";
+const TPL = "Templates/Log.md";
 const NOTES = {
     [KES]: "---\ntags: [project]\naliases:\n  - Kestrel Outfitters\n---\n",
     [day("2026-09-17")]: [
@@ -95,8 +95,7 @@ test("the Log template, when there is one: without Templater a plain one is fill
 test("the Log template through Templater: its properties added, then Plainday's values and alias first again, and log among the tags (OBS-122)", async () => {
     const v = standIn({ notes: { ...NOTES, [TPL]: "---\ndate: 2020-01-01\ntopic: Planning\n---\n## Agenda\n" }, open: day("2026-09-17"), at: 0 });
     const ran = [];
-    const settings = v.app.plugins.getPlugin("templater-obsidian").settings;
-    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { settings, templater: {
+    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { templater: {
         // Templater 2 adds a template's properties to the note's and its text after them
         write_template_to_file: async (t, f) => {
             ran.push(`${t.path} on ${f.path}`);
@@ -117,8 +116,7 @@ test("a Log template's id goes first, before the log's alias: through Templater,
     const first = (text) => text.split("\n").slice(0, 4).join("\n");
     // Through Templater, as the template adds it: after Plainday's properties; nothing of Plainday's to put back
     const v = standIn({ notes: { ...NOTES, [TPL]: "(the template)" }, open: day("2026-09-17"), at: 0 });
-    const settings = v.app.plugins.getPlugin("templater-obsidian").settings;
-    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { settings, templater: {
+    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { templater: {
         write_template_to_file: async (t, f) => v.app.vault.process(f, (text) => text.replace("who:\n", "who:\nid: 2026091712000000\n")),
     } } : null);
     await v.addTaskNote();

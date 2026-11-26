@@ -87,7 +87,7 @@ export * as chronoEn from "chrono-node/en";
  *
  * Templater's own object: the notes it's still writing, and how it writes a template into a note:
  * @typedef {{ files_with_pending_templates?: Set<string>, write_template_to_file(template: TFile, file: TFile): Promise<void> }} Templater
- * @typedef {{ templater?: Templater, settings?: { templates_folder?: string } }} TemplaterPlugin
+ * @typedef {{ templater?: Templater }} TemplaterPlugin
  *
  * Notebook Navigator's API: its folder and tag looks and pins, its menus, and what's selected in it:
  * @typedef {{

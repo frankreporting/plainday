@@ -196,18 +196,19 @@ test("new notes are staged in the Inbox as it's set, outside Projects, so a note
     const staged = (folders) => new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday: withFolders({}, folders) }))))().stagingFolder();
     assert.equal(staged({}), "Inbox");
     assert.equal(staged({ projects: "Work", inbox: "Waiting" }), "Waiting");
-    // The Task and Log templates are settings now (OBS-283), with the paths the command used to hold
-    // written in as their defaults, and a blank setting meaning that default
+    // The Task and Log templates are settings now (OBS-283): a blank setting means Templates/Task.md and
+    // Templates/Log.md (OBS-316), and the demo names its own
     const withTemplates = (templates) => {
         const plainday = withFolders({});
         Object.assign(plainday.Settings.get().templates, templates);
         return new (vm.runInContext(classScript("addTaskNote.js") + "\n;AddTaskNote", withWindow(vm.createContext({ plainday }))))();
     };
-    assert.equal(withTemplates({}).templatePath("task"), "Config/Templates/Task.md");
-    assert.equal(withTemplates({}).templatePath("log"), "Config/Templates/Log.md");
+    assert.equal(withTemplates({}).templatePath("task"), "Templates/Task.md");
+    assert.equal(withTemplates({}).templatePath("log"), "Templates/Log.md");
     assert.equal(withTemplates({ task: "Templates/My task.md" }).templatePath("task"), "Templates/My task.md");
-    assert.ok(fs.existsSync(new URL("../../Templates/Task.md", here)), "the Task template is where the command looks");
-    assert.ok(fs.existsSync(new URL("../../Templates/Log.md", here)), "and the Log template");
+    // The demo names its own, so its notes come from its Task and Log templates (settings.test.mjs checks all seven)
+    const demo = JSON.parse(fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", here), "utf8")).templates;
+    assert.deepEqual([demo.task, demo.log], ["Config/Templates/Task.md", "Config/Templates/Log.md"]);
 });
 
 test("projectLinks: the ⭕ links on a line, with their link paths", () => {
@@ -685,7 +686,7 @@ test("createTaskNote cleans the name for any caller and leaves its dates off; a 
 });
 
 test("the Task template, when there is one: through Templater it adds its properties, Plainday's parent and due stay, and its id goes first; without Templater a plain one is filled in, one with Templater code is skipped (OBS-121, OBS-317)", async () => {
-    const TPL = "Config/Templates/Task.md", home = { "Projects/Home/Home.md": "" };
+    const TPL = "Templates/Task.md", home = { "Projects/Home/Home.md": "" };
     // Templater on: the repository's template adds its `id`, last; it goes first, and Plainday's properties are as
     // it wrote them
     const repo = fs.readFileSync(new URL("../../Templates/Task.md", here), "utf8");

@@ -18,6 +18,8 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 // The folders a new vault starts with (OBS-283): the system's three as they always were, the rest blank
 const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", periodic: "", week: "", month: "", year: "", errorLog: "" };
 const TEMPLATES = { week: "", month: "", year: "", task: "", log: "", project: "", area: "" };
+// The templates the demo names (OBS-316): its own, in Config/Templates
+const DEMO_TEMPLATES = Object.fromEntries(Object.entries(Settings.TEMPLATE_NAMES).map(([kind, name]) => [kind, `Config/Templates/${name}.md`]));
 const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
     tables: { freezeRows: 0, freezeColumns: 0 },
@@ -94,9 +96,13 @@ test("normalize: each value that reads, else its default", () => {
 test("the demo's data file reads as it's written, so loading and saving it changes nothing", () => {
     const text = fs.readFileSync(new URL("../../../.obsidian/plugins/plainday/data.json", import.meta.url), "utf8");
     const normalized = settings.normalize(JSON.parse(text), billing);
-    // The demo keeps its error log in Config, by naming it (OBS-295), and its periodic notes come from
-    // Notebook Navigator's calendar, chosen (OBS-336)
-    assert.deepEqual(plain(normalized), { ...JUNIPER, folders: { ...FOLDERS, periodic: "notebook-navigator", errorLog: "Config/Error Log.md" } }, "the demo's invented details");
+    // The demo keeps its error log in Config, by naming it (OBS-295), its periodic notes come from
+    // Notebook Navigator's calendar, chosen (OBS-336), and it names its own seven templates, since a blank
+    // field means Templates (OBS-316)
+    assert.deepEqual(plain(normalized), { ...JUNIPER, folders: { ...FOLDERS, periodic: "notebook-navigator", errorLog: "Config/Error Log.md" }, templates: DEMO_TEMPLATES }, "the demo's invented details");
+    for (const [kind, path] of Object.entries(DEMO_TEMPLATES)) {
+        assert.ok(fs.existsSync(new URL(`../../../${path}`, import.meta.url)), `the demo's ${kind} template is in the vault`);
+    }
     // Obsidian's saveData writes JSON.stringify(data, null, 2)
     assert.equal(JSON.stringify(normalized, null, 2), text);
 });
@@ -172,8 +178,8 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
     // This vault's local storage, where its key for its secrets' names is kept: "vault001" unless given
     const local = new Map(vaultKey ? [["plainday-calendar-key", vaultKey]] : []);
     const app = {
-        // The community plugins Settings asks about: Notebook Navigator for the periodic notes' source,
-        // and Templater, which keeps the vault's template folder
+        // The community plugins Settings asks about: Notebook Navigator for the periodic notes' source. Templater
+        // with a template folder set shows that a blank template field doesn't follow it (OBS-316).
         plugins: { plugins, getPlugin: (id) => (id === "templater-obsidian" && templater ? { settings: { templates_folder: templater } } : null) },
         // The Daily notes core plugin, on unless a test turns it off (OBS-336)
         internalPlugins: { plugins: { "daily-notes": { enabled: dailyNotes, instance: { options: {} } } } },
@@ -844,23 +850,15 @@ test("navigatorNote: the folder, name and template Notebook Navigator's pattern 
     assert.equal(withPlugin({}).s.navigatorCalendar(), null, "no Navigator installed");
 });
 
-test("templates: blank means the template's own name in the vault's template folder, never a folder of this repository's (OBS-283)", () => {
+test("templates: blank means the template's own name in Templates, in every vault, never a folder of this repository's (OBS-283, OBS-316)", () => {
     const d = settings.defaults().templates;
     assert.deepEqual(plain([d.task, d.log, d.project, d.area]), ["", "", "", ""], "blank as it comes");
     assert.deepEqual(plain(Settings.TEMPLATE_NAMES), { task: "Task", log: "Log", project: "Project", area: "Area", week: "Weekly Note", month: "Monthly Note", year: "Yearly Note" });
-    // Templater keeps the folder; without it a template sits at the top of the vault
-    const withTemplater = withPlugin({ templater: "Config/Templates" });
-    assert.equal(withTemplater.s.defaultTemplatePath("task"), "Config/Templates/Task.md");
-    assert.equal(withTemplater.s.defaultTemplatePath("week"), "Config/Templates/Weekly Note.md");
-    const bare = withPlugin({});
-    assert.equal(bare.s.defaultTemplatePath("task"), "Task.md");
-    assert.equal(bare.s.defaultTemplatePath("log"), "Log.md");
-    assert.equal(bare.s.defaultTemplatePath("year"), "Yearly Note.md");
-    // The Project and Area templates the same way (OBS-123)
-    assert.equal(withTemplater.s.defaultTemplatePath("project"), "Config/Templates/Project.md");
-    assert.equal(bare.s.defaultTemplatePath("area"), "Area.md");
-    const slashes = withPlugin({ templater: "/Templates/" });
-    assert.equal(slashes.s.defaultTemplatePath("log"), "Templates/Log.md");
+    // The same with Templater's own template folder set, and without Templater (OBS-316)
+    for (const vault of [withPlugin({ templater: "Config/Templates" }), withPlugin({})]) {
+        assert.deepEqual(Object.keys(Settings.TEMPLATE_NAMES).map((kind) => vault.s.defaultTemplatePath(kind)),
+            ["Templates/Task.md", "Templates/Log.md", "Templates/Project.md", "Templates/Area.md", "Templates/Weekly Note.md", "Templates/Monthly Note.md", "Templates/Yearly Note.md"]);
+    }
     // Nothing writes this repository's own folder in as a default
     assert.doesNotMatch(fs.readFileSync(new URL("../../../plugin/src/shared/settings.js", import.meta.url), "utf8"), /Config\/Templates/);
     const n = settings.normalize({ templates: { task: "Templates/My task", log: "a|b" } }, billing);
