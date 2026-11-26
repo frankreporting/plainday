@@ -1027,6 +1027,35 @@ test("Settings → Plainday → Note templates: the line, then the Task, Log, Pr
     }
 });
 
+test("the demo names its own seven templates, shown as typed with no line under any; blank, the faint text is Templates/… and there's still no line (OBS-316, OBS-335)", async () => {
+    const demo = JSON.parse(fs.readFileSync(path.join(ROOT, ".obsidian/plugins/plainday/data.json"), "utf8"));
+    // The demo's own templates, and no Templates folder
+    const files = new Map(fs.readdirSync(path.join(ROOT, "Config/Templates")).map((n) => [`Config/Templates/${n}`, { path: `Config/Templates/${n}` }]));
+    const rows = [["Note templates", "Tasks"], ["Note templates", "Logs"], ["Note templates", "Projects"], ["Note templates", "Areas"],
+        ["Templates", "Weekly note"], ["Templates", "Monthly note"], ["Templates", "Yearly note"]];
+    for (const blank of [false, true]) {
+        // The weekly, monthly and yearly fields show in the Daily notes source; the demo's own is Navigator's
+        const stored = { ...demo, folders: { ...demo.folders, periodic: "daily-notes" }, ...(blank ? { templates: {} } : {}) };
+        const { plugin } = load(BUNDLE, { stored });
+        plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+        plugin.app.vault.getMarkdownFiles = () => [...files.values()];
+        await plugin.onload();
+        try {
+            const groups = groupsOf(plugin.tabs[0].getSettingDefinitions());
+            const shown = rows.map(([heading, name]) => {
+                const s = standInSetting();
+                groups.find((g) => g.heading === heading).items.find((i) => i.name === name).render(s);
+                return [name, blank ? s.control.inputEl.placeholder : s.control.inputEl.value, s.warning()];
+            });
+            const names = ["Task", "Log", "Project", "Area", "Weekly Note", "Monthly Note", "Yearly Note"];
+            assert.deepEqual(shown, rows.map(([, name], i) => [name, `${blank ? "Templates" : "Config/Templates"}/${names[i]}.md`, ""]),
+                blank ? "blank: Templates, which the demo hasn't, and no line" : "as the demo has them: typed, and no line");
+        } finally {
+            plugin.onunload();
+        }
+    }
+});
+
 test("Settings → Plainday → Calendars: Add calendar, the range, the help, then each account's calendars; Copy carries their links (OBS-282)", async () => {
     // Every link here is invented
     const STUDIO = "https://calendar.google.com/calendar/ical/studio-owner%40example.com/private-0000invented/basic.ics";

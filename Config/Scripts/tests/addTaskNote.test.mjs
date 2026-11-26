@@ -727,8 +727,9 @@ test("the Task template, when there is one: through Templater it adds its proper
     await f.add.createTaskNote("Order toner", f.home);
     assert.equal(f.text("Projects/Home/Order toner.md"), '---\ntags:\n  - task\nparent: "[[Home]]"\ndue:\n---\n');
     assert.deepEqual(f.notices, ["Task holds Templater code and Templater is off, so the new task note was made without it."]);
-    // No template, or an empty one: Plainday's properties only, and no notice, Templater on or off
-    for (const templates of [{}, { [TPL]: "" }]) {
+    // No template, an empty one, or one only in another folder (the demo's, while the field is blank, OBS-316):
+    // Plainday's properties only, and no notice, Templater on or off
+    for (const templates of [{}, { [TPL]: "" }, { "Config/Templates/Task.md": repo }]) {
         for (const templater of [false, (t) => t]) {
             f = taskNoteApp({ notes: home, templates, templater });
             await f.add.createTaskNote("Order toner", f.home);
