@@ -45,12 +45,16 @@ test("each prompt focuses its control from onOpen, a frame later", () => {
 });
 
 // A Modal the way Obsidian's behaves for this: open() calls onOpen synchronously.
-const harness = () => {
+const harness = ({ isMobile = false } = {}) => {
     const log = [];
     const frames = [];
     const el = (name) => ({ addClass() {}, focus: () => log.push(`focus ${name}`) });
     class Modal {
-        constructor() { this.titleEl = { setText() {} }; this.contentEl = {}; this.scope = { register() {} }; }
+        constructor() {
+            this.titleEl = { setText() {} };
+            this.contentEl = { createDiv: () => ({}) };
+            this.scope = { register() {} };
+        }
         onOpen() {}
         open() { log.push("open"); this.onOpen(); }
         close() {}
@@ -61,11 +65,17 @@ const harness = () => {
         setValue(v) { this.value = v; return this; }
         getValue() { return this.value; }
     }
+    class ButtonComponent {
+        setButtonText() { return this; }
+        setCta() { return this; }
+        onClick() { return this; }
+    }
     const ctx = withWindow(vm.createContext({
         app: {},
         Notice: class {},
+        Platform: { isMobile },
         requestAnimationFrame: (fn) => frames.push(fn),
-        Modal, DropdownComponent,
+        Modal, DropdownComponent, ButtonComponent,
     }));
     return { log, frames, ctx };
 };
@@ -79,5 +89,14 @@ for (const [f, name] of [["plan.js", "Plan"]]) {
         assert.equal(frames.length, 1);
         frames[0]();
         assert.deepEqual(log, ["open", "focus dropdown"]);
+    });
+
+    // A phone sends no keys, and a dropdown focused by script didn't open on a tap there (OBS-259)
+    test(`${name}: on a phone or tablet, nothing is focused`, async () => {
+        const { log, frames, ctx } = harness({ isMobile: true });
+        const Cls = vm.runInContext(`${read(f)}\n;${name}`, ctx);
+        await new Cls().invoke();
+        assert.equal(frames.length, 0);
+        assert.deepEqual(log, ["open"]);
     });
 }

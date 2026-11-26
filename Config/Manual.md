@@ -524,7 +524,7 @@ who:
 
 - **Today's daily note:** Daily notes' *Open today's daily note*, on a hotkey of your choice.
 - **Previous and next daily note:** Daily notes' commands, or Notebook Navigator's calendar.
-- ***Plan*** ("Plainday: Plan"): opens the next 2–5 days side by side, starting from the day you're on, or from today.
+- ***Plan*** ("Plainday: Plan"): opens the next 2–5 days side by side (as tabs on a phone), starting from the day you're on, or from today.
 - ***Jump to date*** ("Plainday: Jump to date"): type a date in words and open its daily note, or its weekly or monthly note for `next week` or `last month`.
 - **On a list line:** in Live Preview the cursor rests after the bullet, number or checkbox, never in front of them, so a checkbox stays drawn. ⌘←, Home and a click land at the start of the text, and ← from there goes to the very end of the line above, folded or not. → from the very end of a folded line goes straight to the line below it. Shift-arrows can still select the bullet or checkbox, and Source mode stays raw. End and ⌘→ stop at the end of the text first (see *Links at the end of a line*). The *ListCursor* startup script does this (*Settings → Plainday → Editor* turns it off); the idea comes from the *Stick the cursor to the content* setting in [Outliner](https://github.com/vslinko/obsidian-outliner).
 
@@ -833,6 +833,9 @@ Moves the note you're on into a project or area picked from the same menu as *Ad
 ### Plan
 
 Asks how many days (2–5) and opens that many consecutive daily notes side by side, from the daily note you're on, or from today. A missing note is made as every periodic note is (see *The periodic notes*).
+
+- **Choosing:** pick a number and press **Plan**, or press `2` to `5` to open that many at once. Enter takes the number shown, and **Cancel** or Escape opens nothing.
+- **On a phone,** which can't show notes side by side, the days open as tabs after the one you're on, in order, and you stay where you started.
 
 ### Jump to date (`⌘J`)
 

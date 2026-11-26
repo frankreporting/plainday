@@ -1,4 +1,4 @@
-import { DropdownComponent, MarkdownView, Modal, moment, Notice } from "obsidian";
+import { ButtonComponent, DropdownComponent, MarkdownView, Modal, moment, Notice, Platform } from "obsidian";
 import { app, plainday } from "../host.js";
 
 /** @import { TFile, WorkspaceLeaf } from "obsidian" */
@@ -20,7 +20,7 @@ export default class Plan {
         const { MIN_DAYS: min, MAX_DAYS: max } = Plan;
 
         const modal = new Modal(app);
-        modal.titleEl.setText("Display how many days?");
+        modal.titleEl.setText("How many days?");
 
         const dropdown = new DropdownComponent(modal.contentEl);
         for (let i = min; i <= max; i++) dropdown.addOption(String(i), `${i} days`);
@@ -29,6 +29,11 @@ export default class Plan {
 
         const run = (/** @type {number} */ days) => { modal.close(); this.openDays(days); };
 
+        // The buttons show how to run it, and are the only way on a phone, which sends no keys (OBS-259)
+        const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
+        new ButtonComponent(row).setButtonText("Cancel").onClick(() => modal.close());
+        new ButtonComponent(row).setButtonText("Plan").setCta().onClick(() => run(Number(dropdown.getValue())));
+
         // Number keys act in a single keystroke; Enter takes whatever the dropdown shows
         for (let i = min; i <= max; i++) {
             modal.scope.register([], String(i), () => { run(i); return false; });
@@ -36,8 +41,10 @@ export default class Plan {
         modal.scope.register([], "Enter", () => { run(Number(dropdown.getValue())); return false; });
 
         // Focus once the modal is open and the hotkey's keydown is over; focusing straight after
-        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50)
-        modal.onOpen = () => window.requestAnimationFrame(() => dropdown.selectEl.focus());
+        // open() fights the editor for focus, and the first key typed can land in the note (OBS-50).
+        // The focus is for a keyboard only: a phone or tablet leaves the dropdown to a tap, since one
+        // focused by script didn't open on a tap on a phone (OBS-259)
+        if (!Platform.isMobile) modal.onOpen = () => window.requestAnimationFrame(() => dropdown.selectEl.focus());
         modal.open();
     }
 
