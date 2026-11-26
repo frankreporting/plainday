@@ -1,8 +1,8 @@
 // Tests for OBS-200: Plainday's look lives in styles.css, where a theme or a snippet can restyle it, and
 // the code sets no style itself. The directory's scan rejects a style set from code, but its rule
 // (no-static-styles-assignment) sees only some of the forms; this test reads them all. The one
-// exception is a value only code can know: the trailing links' measured width, --pm-run-w, set on each
-// line. Run from the vault root:
+// exception is a value only code can know: the trailing links' measured width, --pm-run-w, and their
+// line's last word's, --pm-word-w (OBS-347), set on each line. Run from the vault root:
 //   node --test "Config/Scripts/tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +25,7 @@ function scripts(dir) {
 
 // What sets a style from code: an element's style property or attribute, a style element, Obsidian's
 // setCssStyles and setCssProps. A style attribute passed to Decoration.line or createEl counts too,
-// unless all it sets is a measured width.
+// unless all it sets is a measured width: the links', and the last word's, which build adds as wordW.
 const FORMS = [
     [/\.style\s*(?:\.\s*[A-Za-z]+|\[)[^=\n]*=(?!=)/, "a style property set"],
     [/\.style\.(?:setProperty|cssText)/, "a style property set"],
@@ -34,7 +34,7 @@ const FORMS = [
     [/\bcreateEl\(\s*["'`]style["'`]/, "a style element"],
     [/\bsetCss(?:Styles|Props)\(/, "setCssStyles or setCssProps"],
 ];
-const MEASURED = /\bstyle:\s*`--pm-run-w: \$\{width\}px`/;
+const MEASURED = /\bstyle:\s*`--pm-run-w: \$\{width\}px(?:\$\{wordW\})?`/;
 
 function found(text, path) {
     const out = [];

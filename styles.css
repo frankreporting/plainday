@@ -100,10 +100,21 @@
 @property --pm-trail-name-size { syntax: "<length>"; inherits: true; initial-value: 0px; }
 
 .markdown-source-view.is-live-preview {
-    /* The last word keeps room for the links after it, so when they don't fit it wraps with them */
+    /* The last word keeps room for the links after it, so when they don't fit it wraps with them.
+       When the word and the links are wider than the line, they can never share a row (OBS-347): then the
+       word keeps no room and stays with the text, and the links take a row of their own below it.
+       TrailingLinks sets --pm-word-w, the last word's width. 100% is the line's width wherever the room is
+       used (a padding, a width and a margin, of elements inside the line). The room is all or nothing,
+       with a pixel to spare, as the word's width is rounded up. The line holds a row the links drop to,
+       so the next line starts below them. */
+    & .pm-trail-line {
+        display: flow-root;
+        --pm-need: var(--pm-run-w);
+        --pm-room: clamp(0px, (100% + 1px - var(--pm-word-w, 0px) - var(--pm-need)) * 10000, var(--pm-need));
+    }
     & .pm-trail-glue {
         white-space: nowrap;
-        padding-inline-end: var(--pm-run-w);
+        padding-inline-end: var(--pm-room);
     }
 
     /* A folded line: Obsidian draws its "…" at the very end, after the room the last word kept.
@@ -111,25 +122,22 @@
        line .pm-trail-folded while it's folded. */
     & .pm-trail-line.pm-trail-folded {
         --pm-fold-w: 1.75em;
-        & .pm-trail-glue { padding-inline-end: calc(var(--pm-run-w) + var(--pm-fold-w)); }
-        & > .cm-foldPlaceholder { margin-inline-start: calc(-1 * (var(--pm-run-w) + var(--pm-fold-w))); }
+        --pm-need: calc(var(--pm-run-w) + var(--pm-fold-w));
+        & > .cm-foldPlaceholder { margin-inline-start: calc(-1 * var(--pm-room)); }
     }
 
-    /* The links: a float with no width, so it always fits on the row it's on, the last one. Its
-       pills hang left from the row's right edge, into the room the last word kept. */
+    /* The links: a float as wide as the room the last word didn't keep. With the room kept it has no
+       width, so it always fits on the row it's on, the last one, and its pills hang left from the row's
+       right edge into that room. Without it, it's too wide to share the word's row, so it drops below. */
     & .pm-trail-run {
         float: right;
-        width: 0;
+        width: calc(var(--pm-need) - var(--pm-room));
         display: flex;
         justify-content: flex-end;
         align-items: center;
         min-height: 1lh;
         white-space: nowrap;
     }
-    /* When the last word and the links are wider than the pane, the float drops to a row below the
-       text. The line holds that row, so the links get a row of their own and the next line starts below
-       them instead of being drawn over (OBS-347). CodeMirror reads the line's height from its box. */
-    & .pm-trail-line { display: flow-root; }
     & .pm-trail-run > .pm-trail {
         flex: none;
         font-size: 0.8em;
