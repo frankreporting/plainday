@@ -17,7 +17,7 @@
 //   - periodsWithEntries plus every periodic note that already has a block (writePeriodNotes), and
 //     a missing periodic note is created the way createPeriodNote makes one;
 //   - writeBlock's plan (blockEdits): the old "## Time tracking" heading renamed "## Time Report", a
-//     blank line above it, the tables frozen as Plainday's settings say (OBS-238, OBS-281), then placeBlock
+//     blank line above it, the tables keeping the freezes you set (OBS-238, OBS-351), then placeBlock
 //     unless sameBlock;
 //   - the project `link` and the weekly/monthly `linkTarget` (a name, or a path when names clash).
 // What it can't reproduce exactly (see the report in demoVault.test.mjs for the checks that stand in):
@@ -233,9 +233,9 @@ export function linkers(tr, vault, settings = vaultSettings(vault)) {
 const apply = (content, edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
 
 // writeBlock's plan with onlyIfChanged (blockEdits): the note as it would be afterwards, or { error }.
-// `heading` false for a timesheet, as writeTimesheet passes it; `tables` the default freeze (OBS-238).
-export function planBlock(tr, content, block, { heading = true, tables = null } = {}) {
-    const edits = tr.blockEdits(content, block, { onlyIfChanged: true, heading, tables });
+// `heading` false for a timesheet, as writeTimesheet passes it.
+export function planBlock(tr, content, block, { heading = true } = {}) {
+    const edits = tr.blockEdits(content, block, { onlyIfChanged: true, heading });
     if (edits.error) return { error: edits.error };
     return { content: edits.reduce(apply, content) };
 }
@@ -278,8 +278,6 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
     const checked = checkedNotes(tr, vault, settings);
     const model = tr.attachBilling(tr.build(dailyNotes(vault), index, { checked }), invoiceNotes(vault, billing, settings), index, billing);
     addDemoTaskProblems(tr, vault, model, index, checked);
-    // The default freeze, as currentModel reads it from Settings → Plainday → Tables (OBS-238)
-    model.tables = tr.tableDefault(settings.tables);
     const { link, linkTarget } = linkers(tr, vault, settings);
     const hasBlock = (p) => vault.notes.has(p) && tr.hasBlock(vault.notes.get(p).text);
     const changes = [], errors = [], blocks = new Map();
@@ -289,7 +287,7 @@ export function planReports(tr, vault, { stamp = STAMP, billing = loadBilling(va
         blocks.set(p, block);
         const before = vault.notes.get(p)?.text ?? null;
         const base = before ?? created;
-        const r = planBlock(tr, base, block, { heading, tables: model.tables });
+        const r = planBlock(tr, base, block, { heading });
         if (r.error) { errors.push({ path: p, error: r.error }); return; }
         if (r.content !== before) changes.push({ path: p, before, after: r.content });
     };

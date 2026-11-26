@@ -212,10 +212,9 @@ test("the time report's period notes: one with a report in its year's folder is 
     // The report's own parts stand in: entries in November and December, and every block rewritten
     report.periodsWithEntries = () => ({ week: [], month: ["202611", "202612"], year: [] });
     report.render = (model, scope) => `%% time:start %%\n${scope.key}\n%% time:end %%`;
-    report.freezeBlock = (block) => block;
     const wrote = [];
     report.writeBlock = async (f) => { wrote.push(f.path); return { wrote: true }; };
-    const out = await report.writePeriodNotes({ tables: {} }, "stamp", null, { create: true });
+    const out = await report.writePeriodNotes({}, "stamp", null, { create: true });
     assert.deepEqual(JSON.parse(JSON.stringify(out.created)), ["202611", "202612"]);
     assert.deepEqual(wrote.sort(), ["2026/202610.md", "2026/202611.md", "2026/202612.md"], "October's in its year's folder counts; the one at the top doesn't");
     assert.deepEqual(made.filter((p) => p.endsWith(".md")), ["2026/202611.md", "2026/202612.md"]);

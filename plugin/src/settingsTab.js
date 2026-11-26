@@ -17,9 +17,8 @@
 //
 // The sections, in order: Copy and Paste at the top, as links (for a backup, or another device), then
 // Folders and Note templates (OBS-283), Dates (OBS-309: the daily notes' names' format, or one typed while the
-// switch is on, saved only once Dates takes it), Invoices, Tables (a switch, then the two freezes while it's on),
-// Editor, and Calendars (OBS-282): Add calendar, the sync range and the help, then a group for each
-// account with its calendars.
+// switch is on, saved only once Dates takes it), Invoices, Editor, and Calendars (OBS-282): Add calendar,
+// the sync range and the help, then a group for each account with its calendars.
 //
 // Folders: Projects, the Inbox and the archive, each a real folder, none inside another; the daily
 // notes' folder and name, shown from the Daily notes plugin, which keeps them; the weekly, monthly and
@@ -538,24 +537,10 @@ class CalendarModal extends Modal {
 }
 
 export default class PlaindaySettingTab extends PluginSettingTab {
-    // The plugin a frozen table needs: without it the marks Plainday writes do nothing (OBS-283)
-    static TABLES_PLUGIN = "selectable-tables";
-    static TABLES_PLUGIN_NAME = "Selectable Tables";
     // The line at the top of Note templates (Brian, 11/24; his wording from the test round, 11/25, OBS-335). True of all four kinds: Plainday writes
     // its own properties, then adds the template, through Templater when it's on, else with these three
     // filled in by Plainday (a template with Templater code is then left out, with a notice).
     static TEMPLATES_LINE = "Use templates to customize your notes. Plainday adds its own properties in addition to yours. Works with the Templater plugin, or Plainday can fill in {{title}}, {{date}} and {{time}}.";
-
-    /**
-     * Whether a community plugin is installed and on. `app.plugins` isn't in Obsidian's public types,
-     * so it's read through one cast here rather than at each use.
-     * @param {import("obsidian").App} app @param {string} id
-     * @returns {boolean}
-     */
-    static hasPlugin(app, id) {
-        const plugins = /** @type {{ plugins?: { getPlugin?: (id: string) => unknown } }} */ (/** @type {unknown} */ (app)).plugins;
-        return !!plugins?.getPlugin?.(id);
-    }
 
     // Obsidian 1.13 and later: the sections as setting definitions, drawn and searched by Obsidian
     getSettingDefinitions() {
@@ -655,11 +640,6 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             () => { if (failed.delete(setting)) problem(setting, ""); },
             (e) => { failed.add(setting); problem(setting, `Couldn't save: ${messageOf(e)}`); },
         );
-        const counts = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [String(i), String(i)]));
-        // Whether the two freezes show: the switch above them, on while either is more than 0
-        let freezing = now().tables.freezeRows > 0 || now().tables.freezeColumns > 0;
-        /** @type {import("obsidian").DropdownComponent[]} */
-        const freezes = [];
         // Folders and Note templates sit near the top; Other, which the same helper builds, goes last
         const [folders, templates, other] = this.folderSections(store, problem);
         // Whether the date format box shows: while a custom display format is on (OBS-309)
@@ -807,41 +787,6 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                         });
                         return save;
                     }),
-                ],
-            },
-            {
-                heading: "Tables",
-                rows: [
-                    // Without Selectable Tables a freeze does nothing, so the switch can't be turned on:
-                    // it's disabled and says what's missing (Brian, 2026-11-17)
-                    row("Freeze rows and columns", "Applies only to tables created by Plainday.", (s) => {
-                        const installed = !!PlaindaySettingTab.hasPlugin(this.app, PlaindaySettingTab.TABLES_PLUGIN);
-                        s.addToggle((t) => {
-                            t.setValue(freezing).setDisabled(!installed).onChange((on) => {
-                                // On freezes the header row and the first column, off unfreezes both
-                                freezing = on;
-                                const n = on ? 1 : 0;
-                                for (const d of freezes) d.setValue(String(n));
-                                void store(s, "tables", { freezeRows: n, freezeColumns: n });
-                                this.refreshShown();
-                            });
-                        });
-                        if (!installed) problem(s, `The ${PlaindaySettingTab.TABLES_PLUGIN_NAME} plugin isn't installed, so a freeze would do nothing.`, false);
-                    }),
-                    {
-                        ...row("Freeze rows", "", (s) => s.addDropdown((d) => {
-                            freezes.push(d);
-                            d.addOptions(counts).setValue(String(now().tables.freezeRows)).onChange((v) => { void store(s, "tables", { freezeRows: Number(v) }); });
-                        })),
-                        visible: () => freezing,
-                    },
-                    {
-                        ...row("Freeze columns", "", (s) => s.addDropdown((d) => {
-                            freezes.push(d);
-                            d.addOptions(counts).setValue(String(now().tables.freezeColumns)).onChange((v) => { void store(s, "tables", { freezeColumns: Number(v) }); });
-                        })),
-                        visible: () => freezing,
-                    },
                 ],
             },
             {
@@ -1279,7 +1224,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         // "Calendar (2)", and an account named like one of the panel's own sections is "… calendars".
         /** @type {Map<string, Calendar[]>} */
         const accounts = new Map();
-        const taken = new Set(["", "folders", "note templates", "invoices", "tables", "editor", "calendars"]);
+        const taken = new Set(["", "folders", "note templates", "invoices", "editor", "calendars"]);
         for (const c of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
             const name = c.account || "No account";
             const account = taken.has(name.toLowerCase()) ? `${name} calendars` : name;
