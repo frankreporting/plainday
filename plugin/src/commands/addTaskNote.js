@@ -467,7 +467,7 @@ export default class AddTaskNote {
     }
 
     // The template a task note or a log is made from, as Settings → Plainday → Note templates has it
-    // (OBS-283); blank means Task.md or Log.md in the vault's template folder
+    // (OBS-283); blank means Templates/Task.md or Templates/Log.md (OBS-316)
     /**
      * @param {"task" | "log"} kind
      * @returns {string}

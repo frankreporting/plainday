@@ -142,7 +142,7 @@ export default class ProjectNotes {
     }
 
     // The template a project or an area is made with, as Settings → Plainday → Note templates has it; blank means
-    // Project.md or Area.md in the vault's template folder (Templater's), else at the top of the vault
+    // Templates/Project.md or Templates/Area.md (OBS-316)
     /**
      * @param {Kind} kind
      * @returns {string}

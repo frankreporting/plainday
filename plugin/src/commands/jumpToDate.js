@@ -194,10 +194,10 @@ export default class JumpToDate {
         return plainday.PeriodicNotes.ensure(unit, date);
     }
 
-    // A weekly, monthly or yearly note's template: the one Settings → Plainday → Note templates names
-    // (OBS-283), else Notebook Navigator's for that calendar, else Weekly Note, Monthly Note or Yearly
-    // Note in Templater's template folder; null when none is there. `asBefore` leaves the setting out,
-    // for the panel to show what blank means.
+    // A weekly, monthly or yearly note's template: Notebook Navigator's for that calendar when it's the
+    // source, else the one Settings → Plainday → Folders → Periodic notes names (OBS-283), else Weekly
+    // Note, Monthly Note or Yearly Note in Templates (OBS-316); null when none is there. `asBefore` leaves
+    // the setting out, for the panel to show what blank means.
     /**
      * @param {"week" | "month" | "year"} unit
      * @param {{ asBefore?: boolean }} [options]
@@ -206,7 +206,7 @@ export default class JumpToDate {
     templateFor(unit, { asBefore = false } = {}) {
         const settings = plainday.Settings;
         // Notebook Navigator's calendar as the source: its own template for that calendar, and nothing
-        // else, since it makes the note (OBS-283). Otherwise the setting, else Templater's folder.
+        // else, since it makes the note (OBS-283). Otherwise the setting, else Templates.
         const navigator = !asBefore && settings?.periodicSource?.() === "notebook-navigator";
         const set = asBefore || navigator ? "" : settings?.get().templates[unit] ?? "";
         const candidates = navigator ? [settings.navigatorNote(unit)?.template]

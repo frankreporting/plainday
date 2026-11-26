@@ -51,6 +51,9 @@ const copySrc = () => {
 // Every group in a panel's definitions, a page's own groups included (the calendar list)
 const groupsOf = (defs) => defs.flatMap((g) => [g, ...groupsOf((g.items ?? []).filter((i) => i.type === "page").flatMap((i) => i.items))]);
 
+// The line at the top of Note templates (Brian, 11/24, OBS-335)
+const TEMPLATES_LINE = "Use templates to customize your notes. Plainday adds its own properties in addition to yours. Works with the Templater plugin, or Plainday can fill in {{title}}, {{date}} and {{time}}.";
+
 // Stand-ins for the elements and components a dialog and the panel's older drawing (display()) use:
 // enough to type into a field, click a button and read what's shown. `fake.focused` is the element
 // last focused, `fake.selected` the field whose text was last selected; `fake.modals` and `fake.groups`
@@ -441,7 +444,7 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.deepEqual(defs.map((g) => [g.type, g.heading, g.items.map((i) => i.name)]), [
             ["group", undefined, ["Backup and transfer"]],
             ["group", "Folders", ["Projects", "Inbox", "Archive", "Periodic notes"]],
-            ["group", "Note templates", ["Tasks", "Logs", "Projects", "Areas"]],
+            ["group", "Note templates", ["", "Tasks", "Logs", "Projects", "Areas"]],
             ["group", "Dates", ["Use custom display format", "Date format"]],
             ["group", "Invoices", ["Your name or company name", "Address", "Terms", "Note", "Invoice folder", "First invoice number"]],
             ["group", "Tables", ["Freeze rows and columns", "Freeze rows", "Freeze columns"]],
@@ -453,7 +456,8 @@ test("Settings → Plainday: its sections and rows, and the two checked fields s
         assert.equal(defs[4].items.find((i) => i.name === "Note").desc, "An optional message to include at the end of each invoice.");
         assert.equal(defs[0].items[0].desc, "Copy and paste settings between devices. Use this option when you're not syncing installed plugins. Pasting will overwrite existing settings.");
         for (const g of defs) for (const i of g.items) {
-            assert.ok(i.name, "every row has a name");
+            // but the line at the top of Note templates, which says what the section's rows are for (OBS-335)
+            assert.ok(i.name || (g.heading === "Note templates" && i === g.items[0] && i.desc === TEMPLATES_LINE), "every row has a name");
             assert.ok(!("desc" in i) || i.desc, `${i.name}: a description, or none at all`);
             assert.equal(typeof (i.type === "page" ? i.items : i.render), i.type === "page" ? "object" : "function");
         }
@@ -653,7 +657,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         // doesn't move the notes" any more
         assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Default: `weeks` in same folder as daily notes. Named `gggg[w]ww`.", "and what names them (OBS-299)");
         assert.equal(items.find((i) => i.name === "Weekly note").desc, undefined, "the placeholder says the default, so no description");
-        assert.equal(draw("Weekly note").s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md");
+        assert.equal(draw("Weekly note").s.control.inputEl.placeholder, "Templates/Weekly Note.md", "Templates, not Templater's folder (OBS-316)");
         for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
 
         // Projects, the Inbox and the archive: as a new vault has them
@@ -797,7 +801,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         // A template: none in this vault until one is chosen; one that sets a property Plainday writes
         // itself says so (a stand-in list: the real one has only aliases, a list, which never warns)
         const tpl = draw("Weekly note");
-        assert.equal(tpl.s.control.inputEl.placeholder, "Config/Templates/Weekly Note.md", "the default is always a path, so the field always suggests one");
+        assert.equal(tpl.s.control.inputEl.placeholder, "Templates/Weekly Note.md", "the default is always a path, so the field always suggests one");
         tpl.s.type("Templates/Missing");
         assert.equal(tpl.s.warning(), "“Templates/Missing.md” isn't in the vault, so the template Plainday used before is used until it is.");
         const writes = window.plainday.Settings.constructor.WRITES;
@@ -962,40 +966,93 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
     }
 });
 
-test("Settings → Plainday → Note templates: the Task note, Log, Project note and Area note templates, blank meaning the template's name in the vault's template folder (OBS-283)", async () => {
-    const { plugin } = load(BUNDLE);
-    const task = { path: "Templates/Task.md" }, mine = { path: "Templates/My task.md" };
-    const files = new Map([[task.path, task], [mine.path, mine]]);
-    plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
-    plugin.app.vault.getMarkdownFiles = () => [...files.values()];
-    plugin.app.vault.getAllFolders = () => [];
-    plugin.app.plugins = { plugins: {}, getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Templates" } } : null) };
-    await plugin.onload();
-    try {
-        const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
-        assert.deepEqual(items.map((i) => i.name), ["Tasks", "Logs", "Projects", "Areas"]);
-        const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
-        const t = draw("Tasks");
-        assert.equal(t.control.inputEl.value, "", "blank as it comes");
-        assert.equal(t.control.inputEl.placeholder, "Templates/Task.md", "Templater's folder, not this repository's");
-        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
-        // The Log's default isn't in this vault, and a log is made without one too (OBS-122)
-        assert.equal(draw("Logs").warning(), "“Templates/Log.md” isn't in the vault, so logs are made without a template.");
-        // So are projects and areas (OBS-123), whose templates may set any property Plainday writes
-        assert.equal(draw("Projects").warning(), "“Templates/Project.md” isn't in the vault, so projects are made without a template.");
-        assert.equal(draw("Areas").warning(), "“Templates/Area.md” isn't in the vault, so areas are made without a template.");
-        assert.equal(draw("Projects").control.inputEl.placeholder, "Templates/Project.md");
-        // A task note is made without one (OBS-121), so a missing Task template only says so
-        files.delete(task.path);
-        assert.equal(draw("Tasks").warning(), "“Templates/Task.md” isn't in the vault, so task notes are made without a template.");
-        files.set(task.path, task);
-        t.type("Templates/My task");
-        t.leave();
-        await new Promise((r) => setTimeout(r, 0));
-        assert.equal(plugin.saved.at(-1).templates.task, "Templates/My task.md");
-        assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/My task.md");
-    } finally {
-        plugin.onunload();
+test("Settings → Plainday → Note templates: the line, then the Task, Log, Project and Area templates, blank meaning the template's name in Templates; only a template you named that isn't there warns (OBS-283, OBS-316, OBS-335)", async () => {
+    for (const api13 of [true, false]) {
+        const { plugin } = load(BUNDLE, { api13 });
+        const task = { path: "Templates/Task.md" }, mine = { path: "Templates/My task.md" };
+        const files = new Map([[mine.path, mine]]);
+        plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+        plugin.app.vault.getMarkdownFiles = () => [...files.values()];
+        plugin.app.vault.getAllFolders = () => [{ path: "Templates" }];
+        plugin.app.vault.getRoot = () => ({ children: [{ name: "Templates", children: [] }] });
+        plugin.app.metadataCache.getFileCache = (f) => (f === task ? { frontmatter: { status: "Draft", due: "2026-09-30" } } : null);
+        // Templater with a template folder of its own, which a blank field doesn't follow (OBS-316)
+        plugin.app.plugins = { plugins: {}, getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) };
+        await plugin.onload();
+        try {
+            if (!api13) {
+                // An Obsidian before 1.13 draws the same rows itself: the line first, with no name
+                plugin.tabs[0].display();
+                const rows = fake.groups.find((g) => g.heading === "Note templates").rows;
+                assert.deepEqual(rows.map((r) => r.name), ["", "Tasks", "Logs", "Projects", "Areas"]);
+                assert.equal(rows[0].descEl.text, TEMPLATES_LINE);
+                assert.deepEqual(rows[0].components, [], "and no control");
+                assert.deepEqual(rows.slice(1).map((r) => r.components[0].inputEl.placeholder), ["Templates/Task.md", "Templates/Log.md", "Templates/Project.md", "Templates/Area.md"]);
+                continue;
+            }
+            const items = plugin.tabs[0].getSettingDefinitions().find((g) => g.heading === "Note templates").items;
+            assert.deepEqual(items.map((i) => i.name), ["", "Tasks", "Logs", "Projects", "Areas"]);
+            assert.equal(items[0].desc, TEMPLATES_LINE, "first in the section, as a row with no name");
+            const draw = (name) => { const s = standInSetting(); items.find((i) => i.name === name).render(s); return s; };
+            const line = draw("");
+            assert.deepEqual([line.control.inputEl.placeholder, line.warning(), line.buttons], [undefined, "", {}], "and no control");
+            // Blank: Templates/<name>.md, not Templater's folder, and no line while it isn't there either (OBS-335)
+            const t = draw("Tasks");
+            assert.equal(t.control.inputEl.value, "", "blank as it comes");
+            assert.equal(t.control.inputEl.placeholder, "Templates/Task.md");
+            assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/Task.md");
+            assert.equal(t.warning(), "", "no template, and nothing to say");
+            for (const [name, path] of [["Logs", "Templates/Log.md"], ["Projects", "Templates/Project.md"], ["Areas", "Templates/Area.md"]]) {
+                const s = draw(name);
+                assert.deepEqual([s.control.inputEl.placeholder, s.warning()], [path, ""], name);
+            }
+            // A template you named that isn't there says so, by the name you typed; cleared, the line goes
+            t.type("Templates/Missing task");
+            assert.equal(t.warning(), "“Templates/Missing task.md” isn't in the vault, so task notes are made without a template.");
+            t.type("");
+            assert.equal(t.warning(), "");
+            // A blank field's template that sets a property Plainday writes still says so
+            files.set(task.path, task);
+            assert.equal(draw("Tasks").warning(), "Your template also sets `due`; Plainday writes its own.");
+            // A template you named that's there is saved, and every command reads it
+            t.type("Templates/My task");
+            t.leave();
+            await new Promise((r) => setTimeout(r, 0));
+            assert.equal(plugin.saved.at(-1).templates.task, "Templates/My task.md");
+            assert.equal(window.plainday.AddTaskNote.templatePath("task"), "Templates/My task.md");
+            assert.equal(t.warning(), "");
+        } finally {
+            plugin.onunload();
+        }
+    }
+});
+
+test("the demo names its own seven templates, shown as typed with no line under any; blank, the faint text is Templates/… and there's still no line (OBS-316, OBS-335)", async () => {
+    const demo = JSON.parse(fs.readFileSync(path.join(ROOT, ".obsidian/plugins/plainday/data.json"), "utf8"));
+    // The demo's own templates, and no Templates folder
+    const files = new Map(fs.readdirSync(path.join(ROOT, "Config/Templates")).map((n) => [`Config/Templates/${n}`, { path: `Config/Templates/${n}` }]));
+    const rows = [["Note templates", "Tasks"], ["Note templates", "Logs"], ["Note templates", "Projects"], ["Note templates", "Areas"],
+        ["Templates", "Weekly note"], ["Templates", "Monthly note"], ["Templates", "Yearly note"]];
+    for (const blank of [false, true]) {
+        // The weekly, monthly and yearly fields show in the Daily notes source; the demo's own is Navigator's
+        const stored = { ...demo, folders: { ...demo.folders, periodic: "daily-notes" }, ...(blank ? { templates: {} } : {}) };
+        const { plugin } = load(BUNDLE, { stored });
+        plugin.app.vault.getFileByPath = (p) => files.get(p) ?? null;
+        plugin.app.vault.getMarkdownFiles = () => [...files.values()];
+        await plugin.onload();
+        try {
+            const groups = groupsOf(plugin.tabs[0].getSettingDefinitions());
+            const shown = rows.map(([heading, name]) => {
+                const s = standInSetting();
+                groups.find((g) => g.heading === heading).items.find((i) => i.name === name).render(s);
+                return [name, blank ? s.control.inputEl.placeholder : s.control.inputEl.value, s.warning()];
+            });
+            const names = ["Task", "Log", "Project", "Area", "Weekly Note", "Monthly Note", "Yearly Note"];
+            assert.deepEqual(shown, rows.map(([, name], i) => [name, `${blank ? "Templates" : "Config/Templates"}/${names[i]}.md`, ""]),
+                blank ? "blank: Templates, which the demo hasn't, and no line" : "as the demo has them: typed, and no line");
+        } finally {
+            plugin.onunload();
+        }
     }
 });
 

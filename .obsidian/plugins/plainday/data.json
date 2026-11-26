@@ -39,12 +39,12 @@
     "errorLog": "Config/Error Log.md"
   },
   "templates": {
-    "week": "",
-    "month": "",
-    "year": "",
-    "task": "",
-    "log": "",
-    "project": "",
-    "area": ""
+    "week": "Config/Templates/Weekly Note.md",
+    "month": "Config/Templates/Monthly Note.md",
+    "year": "Config/Templates/Yearly Note.md",
+    "task": "Config/Templates/Task.md",
+    "log": "Config/Templates/Log.md",
+    "project": "Config/Templates/Project.md",
+    "area": "Config/Templates/Area.md"
   }
 }

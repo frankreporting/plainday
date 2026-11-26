@@ -23,11 +23,9 @@ export const weekKey = (date) => new (vm.runInContext(src("timeReport") + "\n;Ti
 export function withFolders(plainday, folders = {}) {
     const context = vm.createContext({
         plainday,
-        // Enough of the app for Settings: the vault, and Templater's template folder, which every
-        // template default sits in (OBS-283)
+        // Enough of the app for Settings: the vault
         app: {
             vault: { getFileByPath: () => null, getFolderByPath: () => null },
-            plugins: { getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null) },
         },
         URL,
     });
@@ -252,10 +250,9 @@ export function standIn({ notes = {}, open = null, at = 0, today = "2026-09-16",
     };
     const app = {
         internalPlugins: { plugins: { "daily-notes": { instance: { options: { folder: `${PLANNER}/days`, format: "YYYY-MM-DD" } } } } },
-        // Templater keeps the vault's template folder, which every template default sits in (OBS-283)
         plugins: {
             plugins: nn ? { "notebook-navigator": { settings: nn } } : {},
-            getPlugin: (id) => (id === "templater-obsidian" ? { settings: { templates_folder: "Config/Templates" } } : null),
+            getPlugin: () => null,
         },
         workspace: { getActiveViewOfType: () => view, getActiveFile: () => view.file, getLeavesOfType: (t) => (t === "markdown" && view.file ? [{ view }] : []), activeLeaf: { view } },
         foldManager: { load: () => null, save: async () => {} },

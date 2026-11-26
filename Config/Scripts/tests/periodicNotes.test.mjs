@@ -65,7 +65,7 @@ function templaterOn(v, run = (text) => text) {
             pending.delete(file.path);
         },
     };
-    const plugin = { settings: { templates_folder: TPL }, templater };
+    const plugin = { templater };
     v.app.plugins.plugins["templater-obsidian"] = plugin;
     v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? plugin : null);
     return { pending, written };

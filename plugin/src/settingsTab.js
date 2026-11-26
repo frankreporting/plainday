@@ -27,9 +27,11 @@
 // placeholder shows. A periodic notes row whose names don't give a note's whole date says so (OBS-299).
 // Who keeps the periodic notes is chosen on their page, and nothing is until you choose: until then, or
 // while the chosen plugin is off, an orange line says so there and under the row that opens it (OBS-336).
-// Note templates: the daily note's, shown the same way, and the weekly, monthly and
-// yearly notes', each with a line when the template sets a property Plainday writes itself. Changing a
-// folder moves no notes.
+// The periodic notes' templates: the daily note's, shown the same way, and the weekly, monthly and
+// yearly notes', each with a line when the template sets a property Plainday writes itself. Note
+// templates: a line saying what Plainday does with a template (OBS-335), then the Task, Log, Project and
+// Area templates. A blank template field means Templates/<its name>.md (OBS-316), and only a template
+// you named that isn't there says so. Changing a folder moves no notes.
 //
 // A calendar's link is typed into a masked field, checked by downloading it once (CalendarFeed.check),
 // and kept only in this device's secret storage (Settings.storeLink): never in a setting, a notice or
@@ -539,6 +541,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     // The plugin a frozen table needs: without it the marks Plainday writes do nothing (OBS-283)
     static TABLES_PLUGIN = "selectable-tables";
     static TABLES_PLUGIN_NAME = "Selectable Tables";
+    // The line at the top of Note templates (Brian, 11/24; his wording from the test round, 11/25, OBS-335). True of all four kinds: Plainday writes
+    // its own properties, then adds the template, through Templater when it's on, else with these three
+    // filled in by Plainday (a template with Templater code is then left out, with a notice).
+    static TEMPLATES_LINE = "Use templates to customize your notes. Plainday adds its own properties in addition to yours. Works with the Templater plugin, or Plainday can fill in {{title}}, {{date}} and {{time}}.";
 
     /**
      * Whether a community plugin is installed and on. `app.plugins` isn't in Obsidian's public types,
@@ -1069,8 +1075,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         };
 
         // The Task, Log, Project and Area templates a task note, a log, a project and an area are made with (OBS-283,
-        // OBS-123). Their names are what they make, and their default is the template's name in the vault's template
-        // folder. All four are optional (OBS-121, OBS-122, OBS-123).
+        // OBS-123). Their names are what they make, and their default is the template's name in Templates (OBS-316).
+        // All four are optional (OBS-121, OBS-122, OBS-123).
         /** @type {Record<"task" | "log" | "project" | "area", string>} */
         // Named for what they make, without "note": the section says Note templates (Brian, 11/22)
         const made = { task: "Tasks", log: "Logs", project: "Projects", area: "Areas" };
@@ -1087,9 +1093,11 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             save: (s, value) => store(s, "templates", { [kind]: value }),
             placeholder: () => settings.defaultTemplatePath(kind),
             note: (value) => {
+                // A template you named that isn't there: a task note, a log, a project or an area is made without
+                // one (OBS-121, OBS-122, OBS-123). A blank field whose template isn't there means none, and says
+                // nothing (OBS-335).
+                if (missingNote(value)) return `“${value}” isn't in the vault, so ${madeWhat[kind]} are made without a template.`;
                 const path = value || settings.defaultTemplatePath(kind);
-                // A task note, a log, a project or an area is made without one (OBS-121, OBS-122, OBS-123)
-                if (missingNote(path)) return `“${path}” isn't in the vault, so ${madeWhat[kind]} are made without a template.`;
                 const file = this.app.vault.getFileByPath(path);
                 const props = Object.keys(file ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {});
                 return settings.templateWarning(props, Settings.WRITES[kind] ?? []);
@@ -1231,7 +1239,9 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             },
             {
                 heading: "Note templates",
-                rows: [madeField("task"), madeField("log"), madeField("project"), madeField("area")],
+                // What Plainday does with a template, first in the section: a row with no name and no control,
+                // since a section has no description of its own (OBS-335)
+                rows: [row("", PlaindaySettingTab.TEMPLATES_LINE, () => {}), madeField("task"), madeField("log"), madeField("project"), madeField("area")],
             },
             {
                 heading: "Other",

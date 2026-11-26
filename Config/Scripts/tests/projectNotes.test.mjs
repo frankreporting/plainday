@@ -142,7 +142,7 @@ const NOTES = {
     [KESTREL]: "---\ntags: [project]\naliases:\n  - ⭕.Kestrel Outfitters 2026\n---\n",
     [DAY]: "- [ ] Sketch ideas for the Holiday Window Display\n",
 };
-const TPL = "Config/Templates/Project.md";
+const TPL = "Templates/Project.md";
 // A new project as Plainday writes it: the old Project template's properties, in its order, without `id`
 const projectText = ({ name, body = "" }) => [
     "---", "aliases:", `  - "⭕.${name}"`, "tags:", "  - project", "status: To Do", "parent:", "start:", "due:",
@@ -152,9 +152,8 @@ const props = (text) => YAML.parseYaml(YAML.getFrontMatterInfo(text).frontmatter
 // Templater as far as write_template_to_file goes: `run(text)` is the note after the template, as Templater 2 leaves
 // it (the template's properties added to the note's, its text after them)
 const withTemplater = (v, run) => {
-    const settings = v.app.plugins.getPlugin("templater-obsidian").settings;
     const ran = [];
-    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { settings, templater: {
+    v.app.plugins.getPlugin = (id) => (id === "templater-obsidian" ? { templater: {
         write_template_to_file: async (t, f) => { ran.push(`${t.path} on ${f.path}`); await v.app.vault.process(f, run); },
     } } : null);
     return ran;
