@@ -52,7 +52,7 @@ const copySrc = () => {
 const groupsOf = (defs) => defs.flatMap((g) => [g, ...groupsOf((g.items ?? []).filter((i) => i.type === "page").flatMap((i) => i.items))]);
 
 // The line at the top of Note templates (Brian, 11/24, OBS-335)
-const TEMPLATES_LINE = "Plainday adds its properties to yours. Templater code runs when Templater is on; otherwise Plainday fills in {{title}}, {{date}} and {{time}} in the template's text.";
+const TEMPLATES_LINE = "Use templates to customize your notes. Plainday adds its own properties in addition to yours. Works with the Templater plugin, or Plainday can fill in {{title}}, {{date}} and {{time}}.";
 
 // Stand-ins for the elements and components a dialog and the panel's older drawing (display()) use:
 // enough to type into a field, click a button and read what's shown. `fake.focused` is the element

@@ -541,10 +541,10 @@ export default class PlaindaySettingTab extends PluginSettingTab {
     // The plugin a frozen table needs: without it the marks Plainday writes do nothing (OBS-283)
     static TABLES_PLUGIN = "selectable-tables";
     static TABLES_PLUGIN_NAME = "Selectable Tables";
-    // The line at the top of Note templates (Brian, 11/24; reworded in his test round, 11/25, OBS-335). True of all four kinds: Plainday writes
+    // The line at the top of Note templates (Brian, 11/24; his wording from the test round, 11/25, OBS-335). True of all four kinds: Plainday writes
     // its own properties, then adds the template, through Templater when it's on, else with these three
     // filled in by Plainday (a template with Templater code is then left out, with a notice).
-    static TEMPLATES_LINE = "Plainday adds its properties to yours. Templater code runs when Templater is on; otherwise Plainday fills in {{title}}, {{date}} and {{time}} in the template's text.";
+    static TEMPLATES_LINE = "Use templates to customize your notes. Plainday adds its own properties in addition to yours. Works with the Templater plugin, or Plainday can fill in {{title}}, {{date}} and {{time}}.";
 
     /**
      * Whether a community plugin is installed and on. `app.plugins` isn't in Obsidian's public types,
