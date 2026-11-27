@@ -16,7 +16,7 @@ const Settings = load("settings.js", "Settings");
 const settings = new Settings();
 const plain = (x) => JSON.parse(JSON.stringify(x));
 // The folders a new vault starts with (OBS-283): the system's three as they always were, the rest blank
-const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", periodic: "", week: "", month: "", year: "", errorLog: "" };
+const FOLDERS = { projects: "Projects", inbox: "Inbox", archive: "Archive", periodic: "", week: "", month: "", year: "", errorLog: "", patterns: true };
 const TEMPLATES = { week: "", month: "", year: "", task: "", log: "", project: "", area: "" };
 // The templates the demo names (OBS-316): its own, in Config/Templates
 const DEMO_TEMPLATES = Object.fromEntries(Object.entries(Settings.TEMPLATE_NAMES).map(([kind, name]) => [kind, `Config/Templates/${name}.md`]));
@@ -584,7 +584,7 @@ test("normalize: each folder that reads, a note's path with .md, blank for what 
         folders: { projects: " Work/ ", inbox: "Waiting", archive: "Old", week: "/Planner//Weeks/", month: "../x", year: 7, errorLog: "Logs/Problems" },
         templates: { week: "Templates/Plain week", month: "Templates/Month.md", year: "a|b" },
     }, billing);
-    assert.deepEqual(plain(n.folders), { projects: "Work", inbox: "Waiting", archive: "Old", periodic: "", week: "Planner/Weeks", month: "", year: "", errorLog: "Logs/Problems.md" });
+    assert.deepEqual(plain(n.folders), { projects: "Work", inbox: "Waiting", archive: "Old", periodic: "", week: "[Planner/Weeks]/gggg[w]ww", month: "", year: "", errorLog: "Logs/Problems.md", patterns: true });
     assert.deepEqual(plain(n.templates), { ...TEMPLATES, week: "Templates/Plain week.md", month: "Templates/Month.md", year: "" });
     // One that doesn't read keeps its default; the others stay
     assert.deepEqual(plain(settings.normalize({ folders: { projects: "../x", inbox: "Waiting" } }, billing).folders).inbox, "Waiting");
@@ -688,11 +688,15 @@ test("folders: the Inbox is Plainday's own, whatever Obsidian's Default location
 test("normalize: a weekly, monthly or yearly folder in Projects, the Inbox or the archive, or holding one, is as before", () => {
     const n = (folders) => plain(settings.normalize({ folders }, billing).folders);
     assert.equal(n({ week: "Archive/Weeks" }).week, "");
-    assert.equal(n({ month: "Config/Months" }).month, "Config/Months", "a folder named Config is like any other (OBS-295)");
+    assert.equal(n({ month: "Config/Months" }).month, "[Config/Months]/YYYY-MM", "a folder named Config is like any other (OBS-295)");
     assert.equal(n({ year: "Projects" }).year, "");
     assert.equal(n({ week: "Planner", projects: "Planner/Projects" }).week, "", "one that holds Projects");
     assert.equal(n({ week: "Old/Weeks", archive: "Old" }).week, "", "the archive as it's set");
-    assert.equal(n({ week: "Archive/Weeks", archive: "Old" }).week, "Archive/Weeks", "Archive is only a folder once the archive is elsewhere");
+    assert.equal(n({ week: "Archive/Weeks", archive: "Old" }).week, "[Archive/Weeks]/gggg[w]ww", "Archive is only a folder once the archive is elsewhere");
+    // The same for a pattern's fixed folder (OBS-349); its folders by date are no folder to meet
+    assert.equal(n({ patterns: true, week: "[Projects/weeks]/gggg[w]ww" }).week, "");
+    assert.equal(n({ patterns: true, week: "[Planner]/gggg/gggg[w]ww", projects: "Planner/Projects" }).week, "");
+    assert.equal(n({ patterns: true, week: "[Journal]/gggg/gggg[w]ww" }).week, "[Journal]/gggg/gggg[w]ww");
     assert.deepEqual(plain(settings.overlap("Reference/Planner/weeks")), null);
     assert.deepEqual(plain(settings.overlap("Config/Weeks")), null);
     assert.deepEqual(plain(settings.overlap("Inbox/Weeks")), { name: "Inbox", folder: "Inbox", how: "in" });
@@ -908,4 +912,43 @@ test("syncHere (OBS-275): off until turned on, on for the device a first calenda
     f.s.setSyncHere(true);
     assert.doesNotMatch(f.s.copyText(), /sync-here|syncHere/, "a copy never carries it");
     assert.ok(!JSON.stringify(f.saves).includes("syncHere"), "nor the settings file");
+});
+
+// ------------------------------------------------------------------ periodic note patterns (OBS-349)
+
+test("patternOf: folders and name in one, read as Notebook Navigator reads its own", () => {
+    const read = (v) => plain(settings.patternOf(v));
+    assert.deepEqual(read("[Reference/Planner/weeks]/gggg[w]ww"), { pattern: "[Reference/Planner/weeks]/gggg[w]ww", folder: "Reference/Planner/weeks", dateFolders: "", format: "gggg[w]ww", error: null });
+    assert.deepEqual(read(" /[Journal]//gggg/gggg[w]ww/ "), { pattern: "[Journal]/gggg/gggg[w]ww", folder: "Journal", dateFolders: "gggg", format: "gggg[w]ww", error: null }, "outer and doubled slashes go");
+    assert.deepEqual(read("[Journal]/YYYY/[W]ww"), { pattern: "[Journal]/YYYY/[W]ww", folder: "Journal", dateFolders: "YYYY", format: "[W]ww", error: null });
+    assert.deepEqual(read("YYYY-MM"), { pattern: "YYYY-MM", folder: "", dateFolders: "", format: "YYYY-MM", error: null }, "a name alone is the top of the vault");
+    // Folder names without brackets are date codes, as in Navigator: nothing is fixed
+    assert.deepEqual(read("Reference/Planner/weeks/gggg[w]ww"), { pattern: "Reference/Planner/weeks/gggg[w]ww", folder: "", dateFolders: "Reference/Planner/weeks", format: "gggg[w]ww", error: null });
+    for (const blank of ["", "  ", "/", null, undefined]) assert.deepEqual(read(blank), { pattern: "", folder: "", dateFolders: "", format: "", error: null });
+    assert.match(read("[Journal/#weeks]/gggg[w]ww").error, /^holds a character Plainday can't link to, # or \^/);
+    assert.match(read("[Journal]/gggg[w").error, /^has a bracket that doesn't close/);
+    assert.match(read("[Journal]]/gggg").error, /^has a bracket that doesn't close/);
+    assert.match(read("[[Journal]]/gggg").error, /^has a bracket that doesn't close/);
+    for (const bad of ["[Journal]/gg:gg", "[.hidden]/YYYY", "[Journal ]/YYYY", "[Journal]/ YYYY", "[/Journal]/YYYY", 7, "a\nb"]) assert.match(read(bad).error, /^isn't a folder and a name Plainday can use/, String(bad));
+});
+
+test("normalize: a folder saved before patterns becomes the pattern for the same place and names, once", () => {
+    const n = (folders) => plain(settings.normalize({ folders }, billing).folders);
+    const old = n({ week: "Reference/Planner/weeks", month: "Journal/Months/", year: "" });
+    assert.deepEqual([old.week, old.month, old.year, old.patterns], ["[Reference/Planner/weeks]/gggg[w]ww", "[Journal/Months]/YYYY-MM", "", true], "blank stays blank");
+    // Read again, as a save and the next load do, it stays as it is
+    assert.deepEqual(n(old), old);
+    // A pattern without brackets isn't taken for an old folder
+    assert.equal(n({ patterns: true, month: "YYYY/YYYY-MM" }).month, "YYYY/YYYY-MM");
+    assert.equal(n({ patterns: true, week: "[Journal]/gggg[w" }).week, "", "one that doesn't read is as before");
+    assert.equal(Settings.patternFor("year", ""), "YYYY");
+});
+
+test("periodicFormat and ownNote: Plainday's own pattern, with Plainday + Daily Notes plugin", () => {
+    const s = new Settings();
+    s.data = s.normalize({ folders: { patterns: true, periodic: "daily-notes", week: "[Journal]/YYYY/[W]ww", month: "[Journal]/YYYY/YYYY-MM" } }, billing);
+    assert.deepEqual(plain(s.periodicFormat("week")), { format: "[Journal]/YYYY/[W]ww", navigator: false });
+    assert.equal(s.periodicFormat("year"), null, "a blank field is Plainday's own name, which works");
+    assert.deepEqual(plain(s.ownNote("month")), { folder: "Journal", dateFolders: "YYYY", format: "YYYY-MM" });
+    assert.equal(s.ownNote("year"), null);
 });

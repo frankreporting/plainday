@@ -42,9 +42,12 @@ export default class Settings {
     //   - folders (OBS-283): where projects and areas live (`projects`), where Plainday puts a note it
     //     makes before the note has a project (`inbox`, Plainday's own: Obsidian's Default location for
     //     new notes decides where notes you make go), where finished projects go (`archive`), the
-    //     weekly, monthly and yearly notes' folders (`week`, `month`, `year`: blank is as before,
-    //     TimeReport.periodFolders' rule), and the error log note (`errorLog`: blank is errorLogPath's
-    //     rule). Every command reads them from here (folders(), errorLogPath()), so no folder is written
+    //     weekly, monthly and yearly notes' patterns (`week`, `month`, `year`, OBS-349: folders and name
+    //     in one, read as Notebook Navigator reads its own, such as "[Journal]/gggg/gggg[w]ww"; blank is
+    //     as before, TimeReport.periodFolders' rule and Plainday's own names), and the error log note
+    //     (`errorLog`: blank is errorLogPath's rule). `patterns` says the three are patterns: a file or a
+    //     copy without it is from before OBS-349, when each was a plain folder, and normalize() turns each
+    //     into the pattern for the same place and names ("Planner/weeks" → "[Planner/weeks]/gggg[w]ww"). Every command reads them from here (folders(), errorLogPath()), so no folder is written
     //     into a command. Changing one moves no notes. The daily notes' folder, name and template are
     //     the Daily notes plugin's, never asked again here.
     //   - folders.periodic (OBS-283): who owns the daily, weekly, monthly and yearly notes, which is one
@@ -113,6 +116,11 @@ export default class Settings {
     static FOLDER_NAMES = { projects: "Projects", inbox: "Inbox", archive: "Archive" };
     // The weekly, monthly and yearly notes, by their unit
     static PERIODS = ["week", "month", "year"];
+    // What Plainday names each when its field is blank, and the folder beside the daily notes it goes in
+    /** @type {Record<"week" | "month" | "year", string>} */
+    static PERIOD_NAMES = { week: "gggg[w]ww", month: "YYYY-MM", year: "YYYY" };
+    /** @type {Record<"week" | "month" | "year", string>} */
+    static PERIOD_FOLDERS = { week: "weeks", month: "months", year: "years" };
     // Who owns the periodic notes (folders.periodic): the Daily notes plugin with Plainday, or Notebook
     // Navigator's calendar. "" is neither chosen yet (OBS-336).
     static SOURCES = ["daily-notes", "notebook-navigator"];
@@ -163,7 +171,7 @@ export default class Settings {
      *   editor: { listCursor: boolean, taskMarkers: boolean },
      *   dates: { custom: boolean, format: string },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
-     *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string },
+     *   folders: { projects: string, inbox: string, archive: string, periodic: string, week: string, month: string, year: string, errorLog: string, patterns: boolean },
      *   templates: { week: string, month: string, year: string, task: string, log: string, project: string, area: string },
      * }}
      * @typedef {{ id: string, name: string, account: string, address: string, on: boolean }} Calendar
@@ -174,7 +182,7 @@ export default class Settings {
             editor: { listCursor: true, taskMarkers: true },
             dates: { custom: false, format: "" },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
-            folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "" },
+            folders: { ...Settings.FOLDERS, periodic: "", week: "", month: "", year: "", errorLog: "", patterns: true },
             templates: { week: "", month: "", year: "", task: "", log: "", project: "", area: "" },
         };
     }
@@ -265,11 +273,17 @@ export default class Settings {
         }
         if (this.foldersProblem(out.folders, billing)) Object.assign(out.folders, Settings.FOLDERS);
         for (const key of /** @type {const} */ (["task", "log", "project", "area"])) out.templates[key] = this.notePathOf(templates[key], billing).path;
-        for (const unit of Settings.PERIODS) {
-            const folder = billing.pathOf(typeof folders[unit] === "string" ? folders[unit] : null).folder;
-            // A weekly, monthly or yearly folder in Projects, the Inbox or the archive, or holding one, is
-            // as before
-            out.folders[unit] = folder && this.overlap(folder, out.folders) ? "" : folder;
+        for (const unit of /** @type {("week" | "month" | "year")[]} */ (Settings.PERIODS)) {
+            let typed = typeof folders[unit] === "string" ? folders[unit] : null;
+            // From before OBS-349, a plain folder: the pattern for the same place and names
+            if (folders.patterns !== true && typed !== null) {
+                const old = billing.pathOf(typed);
+                typed = old.folder && !old.error ? Settings.patternFor(unit, old.folder) : null;
+            }
+            const read = this.patternOf(typed);
+            // A pattern that doesn't read, or whose folder is in Projects, the Inbox or the archive, or
+            // holds one, is as before
+            out.folders[unit] = read.error || (read.folder && this.overlap(read.folder, out.folders)) ? "" : read.pattern;
             out.templates[unit] = this.notePathOf(templates[unit], billing).path;
         }
         out.folders.periodic = Settings.SOURCES.includes(folders.periodic) ? folders.periodic : "";
@@ -418,12 +432,68 @@ export default class Settings {
         return { folder: fixed.filter(Boolean).join("/"), dateFolders: parts.slice(at).join("/"), format };
     }
 
+    // The pattern for notes in `folder` with Plainday's own names: "[Reference/Planner/weeks]/gggg[w]ww"
+    /**
+     * @param {"week" | "month" | "year"} unit
+     * @param {string} folder
+     * @returns {string}
+     */
+    static patternFor(unit, folder) {
+        return `${folder ? `[${folder}]/` : ""}${Settings.PERIOD_NAMES[unit]}`;
+    }
+
+    /**
+     * A weekly, monthly or yearly notes' pattern as typed (OBS-349), read as Notebook Navigator reads its
+     * own: { pattern, folder, dateFolders, format, error }, split as splitPattern splits it, with "" for
+     * none. Folder names go in [brackets], and every letter outside them is a date code. Outer and
+     * doubled slashes go. Refused: `#` or `^`, which a link can't hold; a bracket that doesn't close; a
+     * part that's blank, starts with a dot or has spaces around it; a character no file name holds; and
+     * anything that isn't one line of text.
+     * @param {unknown} raw
+     * @returns {{ pattern: string, folder: string, dateFolders: string, format: string, error: string | null }}
+     */
+    patternOf(raw) {
+        const none = { pattern: "", folder: "", dateFolders: "", format: "" };
+        if (raw === undefined || raw === null) return { ...none, error: null };
+        const shown = typeof raw === "string" ? raw.trim() : JSON.stringify(raw);
+        const bad = { ...none, error: `isn't a folder and a name Plainday can use (${shown})` };
+        if (typeof raw !== "string" || [...raw].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)) return bad;
+        const pattern = raw.trim().replace(/\/{2,}/g, "/").replace(/^\/+|\/+$/g, "");
+        if (!pattern) return { ...none, error: null };
+        if (/[#^]/.test(pattern)) return { ...none, error: `holds a character Plainday can't link to, # or ^ (${shown})` };
+        let open = false;
+        for (const ch of pattern) {
+            if ((ch === "[") === open && (ch === "[" || ch === "]")) return { ...none, error: `has a bracket that doesn't close (${shown})` };
+            if (ch === "[" || ch === "]") open = !open;
+        }
+        if (open) return { ...none, error: `has a bracket that doesn't close (${shown})` };
+        if (/[\\:*?"<>|]/.test(pattern)) return bad;
+        const split = Settings.splitPattern(pattern);
+        const parts = [...split.folder.split("/"), ...split.dateFolders.split("/"), split.format.replace(/\[([^\]]*)\]/g, "$1")];
+        if (!split.format || parts.some((p) => p !== p.trim() || p.startsWith("."))) return bad;
+        // A blank part between slashes inside the fixed folder's brackets: "[a//b]"
+        if (/\/\/|^\/|\/$/.test(split.folder)) return bad;
+        return { pattern, ...split, error: null };
+    }
+
+    /**
+     * Where Plainday's own pattern puts a note of `unit` and what names it (OBS-349), split as
+     * splitPattern splits it; null while its field is blank, which is as before
+     * @param {"week" | "month" | "year"} unit
+     * @returns {{ folder: string, dateFolders: string, format: string } | null}
+     */
+    ownNote(unit) {
+        const pattern = this.data.folders[unit];
+        return pattern ? Settings.splitPattern(pattern) : null;
+    }
+
     // ---------------------------------------------------------------- periodic note names (OBS-299)
 
     /**
      * The format that names `unit`'s notes, as it's set, and whether Notebook Navigator's calendar sets
      * it: its pattern as typed, folders included, when it owns them and has one; otherwise, for the
-     * daily notes, the Daily notes plugin's format. Null for the weekly, monthly and yearly notes
+     * daily notes, the Daily notes plugin's format; for the weekly, monthly and yearly notes, Plainday's
+     * own pattern when that source isn't Navigator and the field has one (OBS-349). Null for those
      * Plainday names itself, which work.
      * @param {"day" | "week" | "month" | "year"} unit
      * @returns {{ format: string, navigator: boolean } | null}
@@ -433,6 +503,8 @@ export default class Settings {
         const key = { day: "File", week: "Week", month: "Month", year: "Year" }[unit];
         const pattern = typeof nn?.[`calendarCustom${key}Pattern`] === "string" ? String(nn[`calendarCustom${key}Pattern`]).trim() : "";
         if (pattern) return { format: pattern, navigator: true };
+        const own = unit !== "day" && this.periodicSource() !== "notebook-navigator" ? this.data.folders[unit] : "";
+        if (own) return { format: own, navigator: false };
         return unit === "day" ? { format: String(app.internalPlugins?.plugins?.["daily-notes"]?.instance?.options?.format || "YYYY-MM-DD"), navigator: false } : null;
     }
 
@@ -482,8 +554,20 @@ export default class Settings {
      */
     periodicWarning(unit, locale = unit === "day" ? moment.locale() : plainday.DatePrompt.weekRules().locale) {
         const set = this.periodicFormat(unit);
-        if (!set || this.namesWholeDate(unit, set.format, locale)) return "";
-        const iso = Settings.isoName(set.format.slice(set.format.lastIndexOf("/") + 1));
+        return set ? this.nameWarning(unit, set.format, locale) : "";
+    }
+
+    /**
+     * The same line for any format of `unit`, or "" when its names give the whole date: the panel checks
+     * a pattern with it as it's typed (OBS-349)
+     * @param {"day" | "week" | "month" | "year"} unit
+     * @param {string} format the name, or a pattern whose last part is the name
+     * @param {string} locale
+     * @returns {string}
+     */
+    nameWarning(unit, format, locale) {
+        if (this.namesWholeDate(unit, format, locale)) return "";
+        const iso = Settings.isoName(format.slice(format.lastIndexOf("/") + 1));
         const needs = {
             day: "the year, month, and day, such as `YYYY-MM-DD`",
             week: `the week's year and number, such as \`${iso ? "GGGG-[W]WW" : "gggg[w]ww"}\``,

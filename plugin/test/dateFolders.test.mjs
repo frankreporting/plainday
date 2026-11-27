@@ -219,3 +219,46 @@ test("the time report's period notes: one with a report in its year's folder is 
     assert.deepEqual(wrote.sort(), ["2026/202610.md", "2026/202611.md", "2026/202612.md"], "October's in its year's folder counts; the one at the top doesn't");
     assert.deepEqual(made.filter((p) => p.endsWith(".md")), ["2026/202611.md", "2026/202612.md"]);
 });
+
+// Plainday's own patterns (OBS-349), with Plainday + Daily Notes plugin: the same reading, from
+// Settings → Plainday → Folders → Periodic notes
+test("Plainday's own pattern: blank is beside the daily notes with Plainday's names; a pattern is found and made where it says", () => {
+    const { plainday, file } = vault({
+        daily: { folder: "Reference/Planner/days", format: "YYYY-MM-DD" },
+        paths: ["Reference/Planner/weeks/2026w47.md", "Journal/2026/2026w47.md", "Journal/2025/2026w47.md", "Journal/2026/2026-11.md"],
+    });
+    const { Schedule, PeriodicNotes, DatePrompt, TimeReport, Settings } = plainday;
+    const set = (folders) => { Object.assign(Settings.get().folders, { week: "", month: "", year: "" }, folders); };
+    // Blank, as it comes
+    assert.equal(PeriodicNotes.where("week", "2026-11-25").path, "Reference/Planner/weeks/2026w48.md");
+    assert.equal(Schedule.periodOf(file("Reference/Planner/weeks/2026w47.md")), "week");
+    // The same place and names, written as a pattern
+    set({ week: "[Reference/Planner/weeks]/gggg[w]ww" });
+    assert.equal(PeriodicNotes.where("week", "2026-11-25").path, "Reference/Planner/weeks/2026w48.md");
+    assert.equal(Schedule.periodOf(file("Reference/Planner/weeks/2026w47.md")), "week");
+    // Folders by date
+    set({ week: "[Journal]/gggg/gggg[w]ww", month: "[Journal]/YYYY/YYYY-MM", year: "[Journal]/YYYY" });
+    assert.equal(DatePrompt.weekRules().format.week, "gggg[w]ww");
+    assert.deepEqual({ ...TimeReport.periodPlaces().week }, { folder: "Journal", dateFolders: "gggg" });
+    assert.equal(PeriodicNotes.where("week", "2026-11-25").path, "Journal/2026/2026w48.md");
+    assert.equal(PeriodicNotes.where("month", "2026-12-09").path, "Journal/2026/2026-12.md");
+    assert.equal(PeriodicNotes.where("year", "2026-12-09").path, "Journal/2026.md");
+    assert.equal(Schedule.periodOf(file("Journal/2026/2026w47.md")), "week");
+    assert.equal(Schedule.periodOf(file("Journal/2025/2026w47.md")), null, "in another year's folder");
+    assert.equal(Schedule.periodOf(file("Reference/Planner/weeks/2026w47.md")), null, "a note under the old pattern isn't found");
+    assert.equal(Schedule.periodOf(file("Journal/2026/2026-11.md")), "month");
+    // A name that leaves out the year is made as the pattern says, and warned about in the panel
+    set({ week: "[Journal]/YYYY/[W]ww" });
+    assert.equal(PeriodicNotes.where("week", "2026-11-25").path, "Journal/2026/W48.md");
+    // Folder names without brackets are date codes, as in Navigator
+    set({ week: "Reference/Planner/weeks/gggg[w]ww" });
+    assert.equal(TimeReport.periodPlaces().week.folder, "");
+    assert.notEqual(PeriodicNotes.where("week", "2026-11-25").path, "Reference/Planner/weeks/2026w48.md");
+});
+
+test("Plainday's own pattern is left out while Notebook Navigator is the source", () => {
+    const { plainday } = vault({ navigator: NAVIGATOR_DEFAULTS });
+    plainday.Settings.get().folders.week = "[Journal]/gggg[w]ww";
+    assert.equal(plainday.DatePrompt.weekRules().format.week, "[W]ww");
+    assert.deepEqual({ ...plainday.TimeReport.periodPlaces().week }, { folder: "", dateFolders: "gggg" });
+});

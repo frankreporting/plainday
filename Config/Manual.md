@@ -113,12 +113,12 @@ This section is the spec for how daily notes are written, for you and for any ag
 
 | | Daily note | Weekly note | Monthly note | Yearly note |
 | --- | --- | --- | --- | --- |
-| Filename | `YYYY-MM-DD`, or your daily notes' format | `gggg[w]ww`, e.g. `2026w38`, or Navigator's pattern | `YYYY-MM`, or Navigator's | `YYYY`, or Navigator's |
+| Filename | `YYYY-MM-DD`, or your daily notes' format | `gggg[w]ww`, e.g. `2026w38`, or your pattern's or Navigator's | `YYYY-MM`, or your pattern's or Navigator's | `YYYY`, or your pattern's or Navigator's |
 | Folder | `Reference/Planner/days` | `…/weeks` | `…/months` | `…/years` |
 | Frontmatter | `aliases: M/D/YY dddd` (`9/16/26 Wednesday`, in the date format: see *Settings → Dates*) | `aliases: Week of M/D/YY` | `aliases:` with one entry, e.g. `September 2026` | none |
 | Holds | That day's events, then its tasks | Tasks for the week with no day yet; its time report | Tasks for the month with no day yet; its time report | Tasks for the year with no day yet; its time report |
 
-- Where they go and what they're called follow *Settings → Plainday → Folders → Periodic notes*: Notebook Navigator's calendar patterns (`[days]/YYYY-MM-DD`, `[weeks]/gggg[w]ww`, `[months]/YYYY-MM`, `[years]/YYYY` in the demo) when it's the source, else the Daily notes plugin for a day and Plainday's own folders for the rest. Attachments stay at the `Planner` root. A note named like a periodic note anywhere else isn't one.
+- Where they go and what they're called follow *Settings → Plainday → Folders → Periodic notes*: Notebook Navigator's calendar patterns (`[days]/YYYY-MM-DD`, `[weeks]/gggg[w]ww`, `[months]/YYYY-MM`, `[years]/YYYY` in the demo) when it's the source, else the Daily notes plugin for a day and Plainday's own patterns for the rest. Attachments stay at the `Planner` root. A note named like a periodic note anywhere else isn't one.
 - **Folders by date work.** A folder and a format with folders in it are read as one path, from either source:
 
 | Setting | 11/21/2026's daily note |
@@ -837,7 +837,7 @@ Asks how many days (2–5) and opens that many consecutive daily notes side by s
 
 Asks for a date (see *Typing a date*) and opens its note in the pane you're in; `⌘↵` opens it in a split to the right.
 
-- **A day** opens its daily note. **`this`, `next` or `last` with `week`, `month` or `year`** opens the weekly, monthly or yearly note, named and filed by Notebook Navigator's week, month and year patterns (else `weeks/gggg[w]ww`, `months/YYYY-MM` and `years/YYYY` beside the daily notes).
+- **A day** opens its daily note. **`this`, `next` or `last` with `week`, `month` or `year`** opens the weekly, monthly or yearly note, named and filed by the week, month and year patterns in *Settings → Plainday → Folders → Periodic notes*, Notebook Navigator's or Plainday's own (blank: `weeks/gggg[w]ww`, `months/YYYY-MM` and `years/YYYY` beside the daily notes).
 - **Weeks** start on the day your settings say (see *Typing a date*), so `next week` is always the week after this one's note, counted from today. A week written with its year (`2026-W41`) is the one holding that ISO week's Monday.
 - **A week or a month in words:** `week of oct 5` (or of any date: `week of friday`, or `week starting oct 4`) opens the weekly note holding that day, and the preview says when it starts and names it (`Week starting 10/4 · 2026w41`). `w38`, `wk 38` or `week 38` is week 38, counted the way the weekly notes count, and `sep`, `sept`, `september` or `9/2026` is that month. They mean this year unless a year comes before or after: `w1 2027`, `2027 w1`, `Sep 2027`. (*Schedule* takes the next one instead.)
 - **A periodic note's own name** opens it too, spelled the way the patterns spell it: `2026w41`, `2026-10`, `2027`.
@@ -924,7 +924,16 @@ Where Plainday finds and files notes. Every command reads them from here. **Chan
 
 One choice decides who owns the daily, weekly, monthly and yearly notes, rather than a rule per note type. *Define periodic notes using*:
 
-- **Plainday + Daily Notes plugin:** the Daily notes plugin keeps the daily notes — their folder, name and template, shown here and set there. Plainday keeps the weekly, monthly and yearly notes: a folder each, which blank leaves in `weeks`, `months` and `years` in the same folder as the daily notes (`Reference/Planner/weeks` in the demo), and a template each, which blank leaves as `Templates/Weekly Note.md`, `Templates/Monthly Note.md` or `Templates/Yearly Note.md` (see *Note templates*). Each field says its default. A folder can't be Projects, the Inbox or the archive, hold one, or sit inside one, and a template you named that isn't in the vault says so.
+- **Plainday + Daily Notes plugin:** the Daily notes plugin keeps the daily notes — their folder, name and template, shown here and set there. Plainday keeps the weekly, monthly and yearly notes: a pattern each (below), and a template each, which blank leaves as `Templates/Weekly Note.md`, `Templates/Monthly Note.md` or `Templates/Yearly Note.md` (see *Note templates*). A template you named that isn't in the vault says so.
+- **A pattern is the folders and the name in one,** from the top of the vault, such as `[Journal]/gggg/gggg[w]ww`, which makes `Journal/2026/2026w48`:
+	- **Folder names go in `[brackets]`.** Everything outside them is a date code, so `Journal/gggg[w]ww` without brackets makes folders out of dates.
+	- **A folder made of date codes** (`gggg`, `YYYY/MM`) files each note by its own date.
+	- **Blank is the default:** `[weeks]/gggg[w]ww`, `[months]/YYYY-MM` and `[years]/YYYY` in the same folder as the daily notes (`Reference/Planner/weeks` in the demo).
+	- **The line under the field shows the note it makes now,** as you type: "This week's note: `Journal/2026/2026w48`". The *Daily notes* row shows "Today's note" the same way.
+	- **A name that doesn't give the whole date,** such as `[W]ww`, gets a red line (see *The periodic notes*).
+	- **Notes under the old pattern stay where they are,** and Plainday no longer finds them. While you change a pattern, a line says how many, naming one, until you move or rename them to match.
+	- **Refused:** `#` or `^`, a bracket that doesn't close, and a folder that is Projects, the Inbox or the archive, holds one, or sits inside one.
+	- **A folder set before patterns** became the pattern for the same place and names: `Reference/Planner/weeks` is now `[Reference/Planner/weeks]/gggg[w]ww`.
 - **Notebook Navigator:** its calendar keeps all four, folders and templates alike — its patterns under *Calendar*, and its own template per calendar (`calendarCustomWeekTemplate` and the rest, under a template folder of its own). Plainday reads them from it and asks for nothing: each row says where the notes are, what names them, and that they're set in Notebook Navigator. Plainday still needs the template, because it makes a missing periodic note itself when *Jump to date*, *Schedule* or the time report reaches one. A template only adds content: the folder and the alias are Plainday's. A pattern with folders by date files each note in the folders its date gives, and no periodic notes folder means the top of the vault, so Navigator's own defaults work as they come (see *The periodic notes*). A note type with no pattern is Plainday's own, named and filed as with the Daily notes plugin.
 - **Notes from before folders by date:** until Plainday followed them, it kept the notes of a Navigator pattern with folders by date, or with no periodic notes folder, beside the daily notes. Those stay where they are and no longer count: move each into the folder its date gives.
 - **Nothing is chosen until you choose.** Plainday never picks one itself, so installing Notebook Navigator, whose calendar is on as it comes, never moves where Plainday looks for your daily notes. A vault from before this setting has nothing chosen either: choose once.

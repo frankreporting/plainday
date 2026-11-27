@@ -173,8 +173,8 @@ export default class DatePrompt {
     // Navigator as the periodic notes' source (Settings → Plainday → Folders, OBS-283), the way it names
     // them: its periodic notes locale, which is its calendar Locale ("System default" is Obsidian's
     // language) unless set to follow Obsidian's, and its patterns. Otherwise Obsidian's language, which is
-    // moment's, and Plainday's own names (gggg[w]ww, YYYY-MM, YYYY), even with Navigator installed
-    // (OBS-120). "en" weeks start on Sunday. Where Settings isn't loaded (tests), Navigator when it's there.
+    // moment's, and the names in Plainday's own patterns (Settings → Plainday → Folders → Periodic notes,
+    // OBS-349), which blank leaves as gggg[w]ww, YYYY-MM and YYYY, even with Navigator installed (OBS-120). "en" weeks start on Sunday. Where Settings isn't loaded (tests), Navigator when it's there.
     // Returns { locale, weekStart (0 is Sunday), format: { week, month, year } }.
     /** @returns {WeekRules} */
     weekRules() {
@@ -188,9 +188,10 @@ export default class DatePrompt {
                 : nn.calendarLocale;
             locale = this.knownLocale(chosen) ?? current;
         }
+        const own = source !== undefined && source !== "notebook-navigator" ? plainday.Settings.get?.()?.folders : null;
         const format = {};
         for (const [unit, key, fallback] of [["week", "calendarCustomWeekPattern", "gggg[w]ww"], ["month", "calendarCustomMonthPattern", "YYYY-MM"], ["year", "calendarCustomYearPattern", "YYYY"]]) {
-            const pattern = String(nn?.[key] ?? "").trim();
+            const pattern = String(nn?.[key] ?? own?.[unit] ?? "").trim();
             format[unit] = pattern ? pattern.slice(pattern.lastIndexOf("/") + 1) : fallback;
         }
         return { locale, weekStart: moment.localeData(locale).firstDayOfWeek(), format };
