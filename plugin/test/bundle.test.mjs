@@ -638,9 +638,9 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         }
         // The periodic folders say their default in Brian's form (11/16), and nothing says "changing it
         // doesn't move the notes" any more
-        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Folder names in [brackets]. Default: `[weeks]/gggg[w]ww` in same folder as daily notes.", "how a pattern is written, and what blank means (OBS-349)");
-        assert.equal(items.find((i) => i.name === "Monthly notes").desc, "Folder names in [brackets]. Default: `[months]/YYYY-MM` in same folder as daily notes.");
-        assert.equal(items.find((i) => i.name === "Yearly notes").desc, "Folder names in [brackets]. Default: `[years]/YYYY` in same folder as daily notes.");
+        assert.equal(items.find((i) => i.name === "Weekly notes").desc, "Folder names in [brackets]. Leave blank to keep them in a `weeks` folder next to your daily notes folder.", "how a pattern is written, and what blank means (OBS-349)");
+        assert.equal(items.find((i) => i.name === "Monthly notes").desc, "Folder names in [brackets]. Leave blank to keep them in a `months` folder next to your daily notes folder.");
+        assert.equal(items.find((i) => i.name === "Yearly notes").desc, "Folder names in [brackets]. Leave blank to keep them in a `years` folder next to your daily notes folder.");
         assert.equal(items.find((i) => i.name === "Weekly note").desc, undefined, "the placeholder says the default, so no description");
         assert.equal(draw("Weekly note").s.control.inputEl.placeholder, "Templates/Weekly Note.md", "Templates, not Templater's folder (OBS-316)");
         for (const i of items) assert.doesNotMatch(i.desc ?? "", /doesn't move the notes/, i.name);
@@ -727,7 +727,7 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         assert.ok(!inboxList.getSuggestions("wait").includes("Projects/Waiting room"), "nor one inside Projects for the Inbox");
 
         // The daily notes: shown from the Daily notes plugin, not asked
-        assert.equal(draw("Daily notes").s.descEl.text, "`Reference/Planner/days`, named `YYYY-MM-DD`. Set in Settings → Daily notes.");
+        assert.equal(draw("Daily notes").s.descEl.text, "Set in Settings → Daily notes.", "only where they're set: the line under it shows the folder and the name (Brian, 11/27)");
         assert.equal(draw("Daily note").s.descEl.text, "`Config/Templates/Daily Note.md`. Set in Settings → Daily notes.");
 
         // The daily notes' row shows today's note, as the fields under it show theirs (OBS-349)
@@ -741,9 +741,9 @@ test("Settings → Plainday → Folders and Note templates: the folders as set, 
         // The field's lines: [cls, text] for each, the sample first
         const lines = (f) => f.s.descEl.lines[0].lines.map((l) => [l.cls, l.text]);
         assert.equal(week.s.control.inputEl.value, "");
-        assert.equal(week.s.control.inputEl.placeholder, "[weeks]/gggg[w]ww");
+        assert.equal(week.s.control.inputEl.placeholder, "[Reference/Planner/weeks]/gggg[w]ww", "what blank means, in full");
         assert.deepEqual(lines(week), [["", `This week's note: \`Reference/Planner/weeks/${weekName}\``]]);
-        assert.equal(draw("Monthly notes").s.control.inputEl.placeholder, "[months]/YYYY-MM");
+        assert.equal(draw("Monthly notes").s.control.inputEl.placeholder, "[Reference/Planner/months]/YYYY-MM");
         assert.deepEqual(lines(draw("Monthly notes")), [["", `This month's note: \`Reference/Planner/months/${moment().format("YYYY-MM")}\``]]);
         assert.deepEqual(lines(draw("Yearly notes")), [["", `This year's note: \`Reference/Planner/years/${moment().format("YYYY")}\``]]);
         // Folders by date: the sample follows what's typed, and a folder that isn't there yet says so
@@ -948,7 +948,7 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
             ["Templates", "Daily note", "row"], ["Templates", "Weekly note", "row"], ["Templates", "Monthly note", "row"], ["Templates", "Yearly note", "row"],
         ]);
         const draw = (name) => { const s = standInSetting(); page().items.flatMap((g) => g.items).find((i) => i.name === name).render(s); return s; };
-        assert.equal(draw("Weekly notes").control.inputEl.placeholder, "[weeks]/gggg[w]ww");
+        assert.equal(draw("Weekly notes").control.inputEl.placeholder, "[Reference/Planner/weeks]/gggg[w]ww");
         assert.match(draw("Weekly notes").descEl.lines[0].lines[0].text, /^This week's note: `Reference\/Planner\/weeks\//, "beside the daily notes, not Navigator's");
         assert.equal(window.plainday.TimeReport.periodFolders().week, "Reference/Planner/weeks");
         assert.equal(window.plainday.Schedule.dailyOpts().folder, "Reference/Planner/days", "the Daily notes plugin's");

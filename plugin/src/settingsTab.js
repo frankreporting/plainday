@@ -1041,13 +1041,14 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             const what = lost.length === 1 ? `the ${kind} note it finds now, ${one},` : `the ${lost.length} ${kind} notes it finds now, such as ${one},`;
             box.createDiv({ cls: "plainday-caution", text: `Plainday won't find ${what} until you move or rename ${lost.length === 1 ? "it" : "them"} to match.` });
         };
-        // Each says how a pattern is written and what blank means, which its placeholder shows (Brian, 11/25)
+        // Each says how a pattern is written and what blank means; its placeholder shows that as a pattern (Brian, 11/25, 11/27)
         /** @param {"week" | "month" | "year"} unit */
-        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Folder names in [brackets]. Default: ${code(Settings.patternFor(unit, Settings.PERIOD_FOLDERS[unit]))} in same folder as daily notes.`, {
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Folder names in [brackets]. Leave blank to keep them in a ${code(Settings.PERIOD_FOLDERS[unit])} folder next to your daily notes folder.`, {
             saved: () => now().folders[unit],
             read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
-            placeholder: () => Settings.patternFor(unit, Settings.PERIOD_FOLDERS[unit]),
+            // What blank means, as a pattern that would do the same if typed: the folder beside the daily notes' in full
+            placeholder: () => Settings.patternFor(unit, asBefore()[unit]),
             note: () => "",
             // A folder chosen from the list goes in as the pattern for it, with Plainday's own names
             list: (input) => new FolderSuggest(this.app, input, "", (f) => periodRead(Settings.patternFor(unit, f)).error === undefined),
@@ -1141,13 +1142,16 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             const named = part === "folder" ? `, named ${code(names)}` : "";
             const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
             s.descEl.empty();
-            s.descEl.appendText(`${shownValue}${named}${where}`);
+            // Beside Plainday's own fields, the daily notes' row says only where they're set: its line for
+            // today's note shows the folder and the name (Brian, 11/27)
+            const own = unit === "day" && part === "folder" && !navigator();
+            s.descEl.appendText(own ? "Set in Settings → Daily notes." : `${shownValue}${named}${where}`);
             // A folder row whose notes' names don't give their whole date says so in a line of its own
             // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
             const warning = part === "folder" ? settings.periodicWarning(unit) : "";
             if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
             // The daily notes' row beside Plainday's own fields shows today's note, as they show theirs (OBS-349)
-            if (unit === "day" && part === "folder" && !navigator()) {
+            if (own) {
                 const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
                 s.descEl.createDiv({ text: `Today's note: ${code(String(plainday.PeriodicNotes.where("day", today).path).replace(/\.md$/, ""))}` });
             }
