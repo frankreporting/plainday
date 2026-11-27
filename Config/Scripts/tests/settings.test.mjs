@@ -22,7 +22,6 @@ const TEMPLATES = { week: "", month: "", year: "", task: "", log: "", project: "
 const DEMO_TEMPLATES = Object.fromEntries(Object.entries(Settings.TEMPLATE_NAMES).map(([kind, name]) => [kind, `Config/Templates/${name}.md`]));
 const DEFAULTS = {
     invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: 1001, lastNumber: 1000 },
-    tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
     dates: { custom: false, format: "" },
     calendars: { range: "2 months", list: [], recurring: null },
@@ -32,7 +31,6 @@ const DEFAULTS = {
 const JUNIPER = {
     invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "Net 30",
         paymentNote: "Please pay by bank transfer within 30 days.", folder: "Reference/Invoices", firstNumber: 1001, lastNumber: 1001 },
-    tables: { freezeRows: 0, freezeColumns: 0 },
     editor: { listCursor: true, taskMarkers: true },
     // The demo's: dates written M/D/YY, whatever the daily notes' names (OBS-309)
     dates: { custom: true, format: "M/D/YY" },
@@ -57,13 +55,13 @@ test("normalize: each value that reads, else its default", () => {
     const n = settings.normalize({
         invoices: { name: "  Juniper Hale ", address: "418 Larkspur Lane\n\n Maple Falls, ST 00000 ", terms: 30, paymentNote: "\nLine one  \nLine two\n",
             folder: " /Business//Invoices/ ", firstNumber: "1020", lastNumber: "1033" },
-        tables: { freezeRows: "2", freezeColumns: 12 },
+        // A file from before OBS-351 has Tables, which is no longer read
+        tables: { freezeRows: "2", freezeColumns: 1 },
         editor: { listCursor: false, taskMarkers: false },
     }, billing);
     assert.deepEqual(plain(n), {
         invoices: { name: "Juniper Hale", address: ["418 Larkspur Lane", "Maple Falls, ST 00000"], terms: "30", paymentNote: "Line one\nLine two",
             folder: "Business/Invoices", firstNumber: 1020, lastNumber: 1033 },
-        tables: { freezeRows: 2, freezeColumns: 9 },
         editor: { listCursor: false, taskMarkers: false },
         dates: { custom: false, format: "" },
         calendars: { range: "2 months", list: [], recurring: null },
@@ -86,7 +84,6 @@ test("normalize: each value that reads, else its default", () => {
     assert.equal(settings.normalize({ invoices: { firstNumber: "1" } }, billing).invoices.firstNumber, 1);
     assert.deepEqual(plain(settings.firstNumberOf("0")), { number: null, error: "isn't a whole number from 1 to 999999" });
     assert.deepEqual(plain(settings.firstNumberOf("")), { number: null, error: null }, "blank isn't a number, and isn't an error either");
-    for (const v of [-1, 1.5, "a lot", true]) assert.equal(settings.normalize({ tables: { freezeRows: v } }, billing).tables.freezeRows, 0, String(v));
     for (const v of ["no", 0, null]) assert.equal(settings.normalize({ editor: { listCursor: v } }, billing).editor.listCursor, true, String(v));
     // Draw task markers (OBS-140): on unless the file says false, so a file from before it turns it on
     for (const v of ["no", 0, null, undefined]) assert.equal(settings.normalize({ editor: { taskMarkers: v } }, billing).editor.taskMarkers, true, String(v));
@@ -122,6 +119,10 @@ test("copyText and readCopy: one block, read back whole; anything else isn't a c
     // a copy is read as any settings are: a bad value becomes its default
     const odd = settings.readCopy(JSON.stringify({ "plainday-settings": 1, invoices: { name: "J", folder: "../x" } }), billing);
     assert.deepEqual(plain([odd.settings.invoices.name, odd.settings.invoices.folder]), ["J", ""]);
+    // A copy made before OBS-351 has a Tables part: it pastes, without it, and a copy made now has none
+    const before = settings.readCopy(JSON.stringify({ "plainday-settings": 1, ...JUNIPER, tables: { freezeRows: 1, freezeColumns: 1 } }), billing);
+    assert.deepEqual(plain(before.settings), JUNIPER);
+    assert.equal("tables" in JSON.parse(text), false);
 });
 
 test("the date format (OBS-309): the daily notes' names' until a custom one is switched on, and only a format Dates takes", () => {
@@ -208,7 +209,7 @@ function withPlugin({ stored = null, notes = {}, unreadable = false, secrets = n
     return { s, plugin, saves, notices, reads, secrets, runs: () => listCursorRuns, markerRuns: () => taskMarkerRuns };
 }
 // What a device saved before OBS-282: no calendars
-const JUNIPER_BEFORE = { invoices: JUNIPER.invoices, tables: JUNIPER.tables, editor: JUNIPER.editor };
+const JUNIPER_BEFORE = { invoices: JUNIPER.invoices, tables: { freezeRows: 0, freezeColumns: 0 }, editor: JUNIPER.editor };
 
 test("load: the saved settings, normalized; the defaults on a device with none saved", async () => {
     const none = withPlugin();
@@ -274,8 +275,8 @@ test("raiseLastNumber never lowers the number; set saves one section; replaceWit
     await f.s.raiseLastNumber(1002);
     assert.equal(f.s.get().invoices.lastNumber, 1002);
     assert.equal(f.saves.at(-1).invoices.lastNumber, 1002);
-    await f.s.set("tables", { freezeRows: 1 });
-    assert.deepEqual(f.saves.at(-1).tables, { freezeRows: 1, freezeColumns: 0 });
+    await f.s.set("invoices", { terms: "Net 15" });
+    assert.deepEqual([f.saves.at(-1).invoices.terms, f.saves.at(-1).invoices.lastNumber], ["Net 15", 1002], "the rest of the section stays");
     await f.s.replaceWith({ ...DEFAULTS, invoices: { ...DEFAULTS.invoices, name: "From the phone", lastNumber: 1001 }, editor: { listCursor: false, taskMarkers: false } });
     assert.deepEqual(plain([f.s.get().invoices.name, f.s.get().invoices.lastNumber, f.s.get().editor]), ["From the phone", 1002, { listCursor: false, taskMarkers: false }]);
     assert.deepEqual(f.saves.at(-1), plain(f.s.get()));

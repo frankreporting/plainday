@@ -116,13 +116,11 @@ import { app, plainday } from "../host.js";
  * values non-billable time, a flat fee and the day it was earned.
  * @typedef {{ rate: number | null, type: string | null, label: string, capMinutes: number | null, invest: number | null, fee: number | null, earned: string | null }} Money
  *
- * The report's model (build), with the invoice notes attached (attachBilling) and the tables'
- * default freeze (currentModel).
+ * The report's model (build), with the invoice notes attached (attachBilling).
  * @typedef {{
  *   entries: Entry[], billingEntries: Entry[], disputed: Entry[], problems: Problem[], parent: Map<string, string | null>,
  *   projectProblems: ProjectProblem[], money: Map<string, Money>, events: ReportEvent[], areas: Set<string>,
  *   billing?: { billing: Billing, invoices: Invoice[], ledger: Ledger, index: ReportIndex, byInvoice: Map<Invoice, BilledChange[]> },
- *   tables?: TableFreeze,
  * }} Model
  *
  * What a report covers (inScope): everything, a month (YYYY-MM), a project and those below it, or a
@@ -168,13 +166,11 @@ import { app, plainday } from "../host.js";
  * A timesheet entry's status (sheet): its mark, its invoice's link, and whether an hourly invoice can bill it.
  * @typedef {{ mark: string, invoice: string, hourly: boolean }} SheetStatus
  *
- * A table's freeze, in rows and columns; what a header row's freeze comments hold (freezeOf); the
- * default (tableDefault): a freeze, null when off, or KEEP_FREEZES while it isn't known; and where
+ * A table's freeze, in rows and columns; what a header row's freeze comments hold (freezeOf); and where
  * a table is in some lines, under its heading (tablesIn).
  * @typedef {{ rows: number, columns: number }} Freeze
  * @typedef {{ kind: "default", rows: number, columns: number } | { kind: "custom", rows?: undefined, columns?: undefined }} FreezeLabel
  * @typedef {{ mark: Freeze | null, label: FreezeLabel | null }} HeaderFreeze
- * @typedef {{ rows?: number, columns?: number, keep?: boolean } | null} TableFreeze
  * @typedef {{ at: number, end: number, heading: string }} TableAt
  *
  * An edit to a note's text, by character offsets (renameHeading, placeBlock, blockEdits), or why
@@ -304,21 +300,18 @@ export default class TimeReport {
     static SHEET_HEADINGS = /^### (?:Billable time: # hrs(?: · 🆓 time: # hrs)?|🆓 time: # hrs)$/u;
     // An invoice's status as the mark in its links, in the timesheets and on the project's note (OBS-117)
     static INVOICE_MARK = { draft: "✏️", sent: "🕒", paid: "✅", canceled: "❌" };
-    // Freezing tables for the Selectable Tables plugin (OBS-238). The default is set in Settings → Plainday
-    // → Tables (tableDefault, OBS-281). A
-    // freeze is that plugin's mark in a table's header row, `%%freeze 2 1%%` for 2 rows and 1 column, read
-    // as its src/editor/freeze-mark.ts reads it: the first one counts, spaces inside are fine, and one in a
-    // code span is text. Beside it the report writes a label saying whose freeze it is: `%%default 2 1%%`,
-    // its own default, or `%%custom%%`, yours. FREEZE_COMMENT is a comment as the report writes it, which
-    // defuse leaves whole: never next to another `%`, or after a `<` (Templater's `<%`), which
-    // splitFreeze checks.
+    // Freezing tables for the Better Markdown Tables plugin, once Selectable Tables (OBS-238). A freeze is
+    // that plugin's mark in a table's header row, `%%freeze 2 1%%` for 2 rows and 1 column, read as its
+    // src/editor/freeze-mark.ts reads it: the first one counts, spaces inside are fine, and one in a code
+    // span is text. A table with none takes that plugin's own default (OBS-351). Until OBS-351 the report
+    // wrote a default of its own, from Settings → Plainday → Tables, and a label beside each freeze saying
+    // whose it was: `%%default 2 1%%`, its default, or `%%custom%%`, yours. It still reads both labels, so
+    // its old default comes out. FREEZE_COMMENT is a comment as the report wrote it, which defuse leaves
+    // whole: never next to another `%`, or after a `<` (Templater's `<%`), which splitFreeze checks.
     static FREEZE_MARK = /%%\s*freeze\s+(\d+)\s+(\d+)\s*%%/;
     static FREEZE_LABEL = /%%\s*(?:default\s+(\d+)\s+(\d+)|custom)\s*%%/;
     static FREEZE_COMMENT = /%%(?:freeze \d+ \d+|default \d+ \d+|custom)%%(?!%)/;
     static FREEZE_COMMENTS = new RegExp(TimeReport.FREEZE_COMMENT.source, "g");
-    static MAX_FROZEN_COLUMNS = 9;
-    // The default freeze while it isn't known (tableDefault): each table keeps what it has
-    static KEEP_FREEZES = Object.freeze({ keep: true });
     static ROUND_TO = 15;
     static LONG_MINUTES = 12 * 60;
     // Time under a sub-task isn't counted, only listed (Brian, 2026-10-30): counting it too would leave
@@ -3748,27 +3741,11 @@ export default class TimeReport {
         return lines.length ? [TimeReport.PROBLEMS, ...lines.map((l) => `> ${l}`), ""] : [];
     }
 
-    // ---------------------------------------------------------------- freezing tables (OBS-238)
-    // Every table the system writes can come out frozen for the Selectable Tables plugin: a default from
-    // Settings → Plainday → Tables, and a freeze you set on one table yourself is kept through every rewrite. Before a
-    // block or an invoice is written, each new table's header gets what its old one held (freezeHeader),
-    // matched by the heading above it. A table of yours outside the block is never touched.
-
-    // The default from Settings → Plainday → Tables (`tables`, as Settings keeps it): { rows, columns },
-    // or null when both are 0. Selectable Tables freezes at most 9 columns, a status column that comes
-    // along included. While Plainday's settings file doesn't read (`unreadable`), the default isn't
-    // known: KEEP_FREEZES, so every table keeps the freeze it has rather than lose a default it had.
-    /**
-     * @param {{ freezeRows: number, freezeColumns: number }} [tables]
-     * @param {boolean} [unreadable]
-     * @returns {TableFreeze}
-     */
-    tableDefault(tables = plainday?.Settings?.get().tables, unreadable = plainday?.Settings?.unreadable) {
-        if (unreadable) return TimeReport.KEEP_FREEZES;
-        const whole = (/** @type {number} */ v) => (Number.isInteger(v) && v > 0 ? v : 0);
-        const rows = whole(tables?.freezeRows), columns = Math.min(whole(tables?.freezeColumns), TimeReport.MAX_FROZEN_COLUMNS);
-        return rows || columns ? { rows, columns } : null;
-    }
+    // ---------------------------------------------------------------- freezing tables (OBS-238, OBS-351)
+    // A table the system writes gets no freeze of its own, so Better Markdown Tables' default freezes it,
+    // and a freeze you set on one table yourself is kept through every rewrite. Before a block or an
+    // invoice is written, each new table's header gets what its old one held (freezeHeader), matched by
+    // the heading above it. A table of yours outside the block is never touched.
 
     // What a header row holds: { mark: { rows, columns } or null, label: { kind: "default", rows, columns },
     // { kind: "custom" } or null }. The first mark counts, as in Selectable Tables, and code shows its text.
@@ -3785,46 +3762,22 @@ export default class TimeReport {
         };
     }
 
-    // The default for a table headed `head` (its header cells): `columns` counts from the first named
-    // column, so an unnamed status column at the left comes along without counting (Brian, 11/03). Null when off.
-    /**
-     * @param {TableFreeze} settings
-     * @param {string[]} [head]
-     * @returns {Freeze | null}
-     */
-    freezeDefault(settings, head = []) {
-        if (!settings) return null;
-        const named = head.findIndex((h) => String(h ?? "").trim() !== "");
-        const lead = settings.columns && named > 0 ? named : 0;
-        return { rows: settings.rows, columns: Math.min(settings.columns + lead, TimeReport.MAX_FROZEN_COLUMNS) };
-    }
-
-    // The freeze comments a table's new header gets, from what its old header held (`old`, as freezeOf
-    // reads it, or null for a new table), or "" for none:
-    //   - nothing, or a freeze that still matches its default label: the default and its label, or nothing
-    //     when the default is off, so it follows the setting;
-    //   - a freeze that differs from its default label (changed with a command), one with no label (typed),
-    //     or one labeled custom: that freeze, labeled custom;
-    //   - a label with no freeze (Unfreeze table): `%%freeze 0 0%%`, labeled custom, so it stays unfrozen.
-    // With KEEP_FREEZES, a default freeze stays as it is, and a new table gets none.
+    // The freeze mark a table's new header gets, from what its old header held (`old`, as freezeOf reads
+    // it, or null for a new table), or "" for none:
+    //   - nothing, or a freeze that still matches its default label (the default Plainday wrote before
+    //     OBS-351): none, so the table takes Better Markdown Tables' default;
+    //   - any other freeze (set with a command, typed, or labeled custom): that freeze;
+    //   - a label with no freeze (Unfreeze table on one of those): `%%freeze 0 0%%`, so it stays unfrozen.
+    // Labels aren't written any more: a freeze in a table Plainday writes is always yours.
     /**
      * @param {HeaderFreeze | null} old
-     * @param {TableFreeze} settings
-     * @param {string[]} [head]
      * @returns {string}
      */
-    freezeHeader(old, settings, head = []) {
-        /** @type {(freeze: Freeze) => string} */
-        const mark = ({ rows, columns }) => `%%freeze ${rows} ${columns}%%`;
-        const custom = (/** @type {Freeze} */ freeze) => `${mark(freeze)} %%custom%%`;
-        const { mark: now = null, label = null } = old ?? /** @type {Partial<HeaderFreeze>} */ ({});
-        const keep = !!settings?.keep;
-        const def = keep ? (label?.kind === "default" ? { rows: label.rows, columns: label.columns } : null) : this.freezeDefault(settings, head);
-        const byDefault = def ? `${mark(def)} %%default ${def.rows} ${def.columns}%%` : "";
-        if (!now && !label) return byDefault;
-        if (!now) return custom({ rows: 0, columns: 0 });
-        if (label?.kind === "default" && now.rows === label.rows && now.columns === label.columns) return byDefault;
-        return custom(now);
+    freezeHeader(old) {
+        const { mark = null, label = null } = old ?? /** @type {Partial<HeaderFreeze>} */ ({});
+        if (!mark) return label ? "%%freeze 0 0%%" : "";
+        if (label?.kind === "default" && mark.rows === label.rows && mark.columns === label.columns) return "";
+        return `%%freeze ${mark.rows} ${mark.columns}%%`;
     }
 
     // A header cell without its freeze comments, each with the spaces after it
@@ -3934,15 +3887,14 @@ export default class TimeReport {
     }
 
     // `lines` with each table's header frozen as freezeHeader says, from `old` (freezesIn of what's there
-    // now) and `settings` (tableDefault). A table matches the old one under the same heading, the first
-    // with the first. A table whose header changes is written again through `table`, so it stays padded.
+    // now). A table matches the old one under the same heading, the first with the first. A table whose
+    // header changes is written again through `table`, so it stays padded.
     /**
      * @param {string[]} lines
      * @param {Map<string, HeaderFreeze[]>} old
-     * @param {TableFreeze} settings
      * @returns {string[]}
      */
-    withFreezes(lines, old, settings) {
+    withFreezes(lines, old) {
         const out = lines.slice();
         /** @type {Map<string, number>} */
         const seen = new Map();
@@ -3954,7 +3906,7 @@ export default class TimeReport {
             // A row with more cells than the table has columns (a `\\|` typed in a description) is left as written
             if (rows.some((r) => r.length > rows[1].length)) continue;
             const head = rows[0].map((c) => this.withoutFreeze(c));
-            const freeze = this.freezeHeader(old.get(heading)?.[n] ?? null, settings, head);
+            const freeze = this.freezeHeader(old.get(heading)?.[n] ?? null);
             if (!freeze && head.every((c, k) => c === rows[0][k])) continue;
             const align = rows[1].map((c) => (c.startsWith(":") ? (c.endsWith(":") ? "center" : "left") : c.endsWith(":") ? "right" : null));
             out.splice(at, end - at + 1, ...this.table(head, align, rows.slice(2), { freeze }));
@@ -3962,21 +3914,20 @@ export default class TimeReport {
         return out;
     }
 
-    // `block` with its tables frozen, from the block in `content` (the note as it is now) and `settings`.
-    // With the default off and no freeze in the note, it's `block` as it is.
+    // `block` with its tables frozen, from the block in `content` (the note as it is now). With no freeze
+    // in the note, it's `block` as it is.
     /**
      * @param {string} block
      * @param {string} content
-     * @param {TableFreeze} settings
      * @returns {string}
      */
-    freezeBlock(block, content, settings) {
+    freezeBlock(block, content) {
         const text = String(content ?? "");
-        if (!settings && !/%%\s*(?:freeze|default|custom)\b/.test(text)) return block;
+        if (!/%%\s*(?:freeze|default|custom)\b/.test(text)) return block;
         const lines = this.lines(text);
         const { blocks, starts, ends } = this.scan(lines);
         const now = starts.length === 1 && ends.length === 1 && blocks.length === 1 ? lines.slice(blocks[0].start, blocks[0].end + 1) : [];
-        return this.withFreezes(this.lines(block), this.freezesIn(now), settings).join("\n");
+        return this.withFreezes(this.lines(block), this.freezesIn(now)).join("\n");
     }
 
     // ---------------------------------------------------------------- writing the block
@@ -4059,15 +4010,15 @@ export default class TimeReport {
     // the block placed (unless `onlyIfChanged` and it's the same apart from its Updated line). [] when
     // there's nothing to do, or { error }. writeBlock applies them; tests/demo/renderReports.mjs too.
     // With `heading` false (a timesheet), the heading above the block goes instead (dropHeading), a new
-    // block gets none, and the note gets its class if it hasn't (sheetClass). `tables` is the default freeze (tableDefault): the block's tables are
-    // frozen from it and from the block that's there now (freezeBlock), before they're compared.
+    // block gets none, and the note gets its class if it hasn't (sheetClass). The block's tables keep the
+    // freezes the block that's there now holds (freezeBlock), before they're compared.
     /**
      * @param {string} content
      * @param {string} block
-     * @param {{ onlyIfChanged?: boolean, heading?: boolean, tables?: TableFreeze }} [options]
+     * @param {{ onlyIfChanged?: boolean, heading?: boolean }} [options]
      * @returns {TextEdit[] | EditError}
      */
-    blockEdits(content, block, { onlyIfChanged = true, heading = true, tables = null } = {}) {
+    blockEdits(content, block, { onlyIfChanged = true, heading = true } = {}) {
         const apply = (/** @type {string} */ c, /** @type {TextEdit} */ edit) => c.slice(0, edit.start) + edit.text + c.slice(edit.end);
         /** @type {TextEdit[]} */
         const edits = [];
@@ -4078,7 +4029,7 @@ export default class TimeReport {
             const edit = step(current);
             if (edit) { edits.push(edit); current = apply(current, edit); }
         }
-        block = this.freezeBlock(block, current, tables);
+        block = this.freezeBlock(block, current);
         if (!(onlyIfChanged && this.sameBlock(current, block))) {
             const place = this.placeBlock(current, block, { heading: heading ? TimeReport.HEADING : null });
             if (place.error) return place;
@@ -4968,8 +4919,6 @@ export default class TimeReport {
             const model = this.build(daily, index, { now: { date: clock.format("YYYY-MM-DD"), minutes: clock.hours() * 60 + clock.minutes() }, checked });
             this.attachBilling(model, await this.readInvoices(billing), index, billing);
             this.addTaskProblems(model, index, checked);
-            // The default freeze for the tables written from it (OBS-238)
-            model.tables = this.tableDefault();
             return { model, index };
         } finally {
             if (own) {
@@ -5144,7 +5093,7 @@ export default class TimeReport {
                 try {
                     if (!file) {
                         if (!canCreate || remembered.has(path)) continue;
-                        const made = await this.createPeriodNote(path, unit, key, this.freezeBlock(this.render(model, scopeOf(unit, key), stamp, link), "", model.tables));
+                        const made = await this.createPeriodNote(path, unit, key, this.render(model, scopeOf(unit, key), stamp, link));
                         if (made.error) {
                             trouble.push(made.error);
                             canCreate = false;      // whatever went wrong would go wrong for the rest too
@@ -5157,7 +5106,7 @@ export default class TimeReport {
                         app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                     }
                     const block = this.render(model, scopeOf(unit, key), stamp, link);
-                    const r = await this.writeBlock(file, block, { onlyIfChanged: true, tables: model.tables });
+                    const r = await this.writeBlock(file, block, { onlyIfChanged: true });
                     if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
                     else if (r.wrote && !isNew) updated++;
                 } catch (e) {
@@ -5371,7 +5320,7 @@ export default class TimeReport {
             const sheet = this.takesTimesheet(path, index, model) ? await this.writeTimesheet(model, path, sheets, remembered, stamp, link, broken, created) : null;
             try {
                 const block = this.render(model, { kind: "project", path, linkTarget, sheet, area: this.isAreaOnly(path, index) }, stamp, link);
-                const r = await this.writeBlock(file, block, { onlyIfChanged: true, tables: model.tables });
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true });
                 if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
                 else if (r.wrote) updated++;
             } catch (e) {
@@ -5431,12 +5380,12 @@ export default class TimeReport {
                 if (!Platform.isDesktop || remembered.has(path) || !this.sheetHasEntries(model, project)) return null;
                 const projectFile = app.vault.getFileByPath(project);
                 const alias = /** @type {string[]} */ ([]).concat(/** @type {string | string[]} */ (app.metadataCache.getFileCache(projectFile)?.frontmatter?.aliases) ?? [])[0] || projectFile.basename;
-                file = await app.vault.create(path, this.sheetNote(/** @type {MomentFn} */ (moment)().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, this.freezeBlock(block, "", model.tables)));
+                file = await app.vault.create(path, this.sheetNote(/** @type {MomentFn} */ (moment)().format("YYYYMMDDHHmmssSS"), `[[${projectFile.basename}|${alias}]]`, block));
                 remembered.add(path);
                 app.saveLocalStorage(TimeReport.CREATED_KEY, [...remembered]);
                 created.push(file.basename);
             } else {
-                const r = await this.writeBlock(file, block, { onlyIfChanged: true, heading: false, tables: model.tables });
+                const r = await this.writeBlock(file, block, { onlyIfChanged: true, heading: false });
                 if (r.error) broken.push(r.heldBack ? { heldBack: file.basename } : file.basename);
             }
             return app.metadataCache.fileToLinktext(file, project, true);
@@ -5468,20 +5417,20 @@ export default class TimeReport {
     }
 
     // Writes through an open editor when there is one (the editor keeps its own folds), else
-    // through the vault in one read-modify-write, moving the saved folds to match. `heading` and
-    // `tables` as in blockEdits. { error, heldBack } when the open note didn't take the change.
+    // through the vault in one read-modify-write, moving the saved folds to match. `heading` as in
+    // blockEdits. { error, heldBack } when the open note didn't take the change.
     /**
      * @param {TFile} file
      * @param {string} block
-     * @param {{ onlyIfChanged: boolean, heading?: boolean, tables?: TableFreeze }} options
+     * @param {{ onlyIfChanged: boolean, heading?: boolean }} options
      * @returns {Promise<WriteResult>}
      */
-    async writeBlock(file, block, { onlyIfChanged, heading = true, tables = null }) {
+    async writeBlock(file, block, { onlyIfChanged, heading = true }) {
         const apply = (/** @type {string} */ content, /** @type {TextEdit} */ edit) => content.slice(0, edit.start) + edit.text + content.slice(edit.end);
         // What to do to `content`: [edits in order], or { error }. Nothing when it's already right.
         /** @type {(content: string) => { edits?: TextEdit[], error?: string }} */
         const plan = (content) => {
-            const edits = this.blockEdits(content, block, { onlyIfChanged, heading, tables });
+            const edits = this.blockEdits(content, block, { onlyIfChanged, heading });
             return edits.error ? edits : { edits };
         };
 

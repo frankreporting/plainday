@@ -23,7 +23,6 @@ export default class Settings {
     //     folder new invoices go in (blank until you choose one); the first invoice number, which the
     //     panel shows; and the last number given, which it doesn't: Invoice raises it, so a deleted
     //     invoice's number is never given again, and typing a first number sets it to one less.
-    //   - tables: the default freeze for every table the system writes (TimeReport, OBS-238).
     //   - editor: whether ListCursor runs (OBS-221), and whether Plainday draws the task markers
     //     (`taskMarkers`, TaskMarkers, OBS-140).
     //   - dates (OBS-309): the format Plainday writes dates in (Dates): `format` ("DD.MM.YYYY", only ever
@@ -82,8 +81,6 @@ export default class Settings {
     // A new vault's first invoice is 1001, and none has been given yet
     static FIRST_NUMBER = 1001;
     static FIRST_LAST_NUMBER = 1000;
-    // Selectable Tables freezes at most 9 columns; more than 9 frozen rows would fill the screen
-    static MAX_FROZEN = 9;
     // What a copy is marked with, and its format's version
     static COPY_MARK = "plainday-settings";
     static COPY_VERSION = 1;
@@ -163,7 +160,6 @@ export default class Settings {
      * Every setting at its default: what a new vault starts with
      * @returns {{
      *   invoices: { name: string, address: string[], terms: string, paymentNote: string, folder: string, firstNumber: number, lastNumber: number },
-     *   tables: { freezeRows: number, freezeColumns: number },
      *   editor: { listCursor: boolean, taskMarkers: boolean },
      *   dates: { custom: boolean, format: string },
      *   calendars: { range: string, list: Calendar[], recurring: Recurring[] | null },
@@ -175,7 +171,6 @@ export default class Settings {
     defaults() {
         return {
             invoices: { name: "", address: [], terms: "", paymentNote: "", folder: "", firstNumber: Settings.FIRST_NUMBER, lastNumber: Settings.FIRST_LAST_NUMBER },
-            tables: { freezeRows: 0, freezeColumns: 0 },
             editor: { listCursor: true, taskMarkers: true },
             dates: { custom: false, format: "" },
             calendars: { range: Settings.DEFAULT_RANGE, list: [], recurring: null },
@@ -246,19 +241,6 @@ export default class Settings {
     }
 
     /**
-     * How many rows or columns to freeze: a whole number from 0 to 9, as a number or as digits. { number,
-     * error, capped }, with 0 when blank; more than 9 is 9, and `capped` says so.
-     * @param {unknown} raw
-     * @returns {{ number: number, error: string | null, capped: boolean }}
-     */
-    frozenOf(raw) {
-        if (raw === undefined || raw === null || (typeof raw === "string" && !raw.trim())) return { number: 0, error: null, capped: false };
-        const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
-        if (Number.isInteger(n) && n >= 0) return { number: Math.min(n, Settings.MAX_FROZEN), error: null, capped: n > Settings.MAX_FROZEN };
-        return { number: 0, error: "isn't a whole number", capped: false };
-    }
-
-    /**
      * Settings from whatever was stored or pasted: each value that reads, else its default. The invoice
      * folder follows Billing.folderOf's rules, so it's always a folder in the vault, or "".
      * @param {unknown} raw
@@ -272,7 +254,7 @@ export default class Settings {
          * @returns {Record<string, unknown>}
          */
         const obj = (v) => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {});
-        const r = obj(raw), inv = obj(r.invoices), tables = obj(r.tables), editor = obj(r.editor);
+        const r = obj(raw), inv = obj(r.invoices), editor = obj(r.editor);
         // The folders first (OBS-283): the invoice folder can't be inside the archive. The three
         // system folders each read as a folder, or keep their default; three that don't hold together
         // (one inside another) are the defaults, which do.
@@ -299,8 +281,6 @@ export default class Settings {
         out.invoices.folder = billing.folderOf(typeof inv.folder === "string" ? inv.folder : null, out.folders.archive).folder;
         out.invoices.firstNumber = this.firstNumberOf(inv.firstNumber).number ?? Settings.FIRST_NUMBER;
         out.invoices.lastNumber = this.lastNumberOf(inv.lastNumber).number ?? Settings.FIRST_LAST_NUMBER;
-        out.tables.freezeRows = this.frozenOf(tables.freezeRows).number;
-        out.tables.freezeColumns = this.frozenOf(tables.freezeColumns).number;
         if (typeof editor.listCursor === "boolean") out.editor.listCursor = editor.listCursor;
         if (typeof editor.taskMarkers === "boolean") out.editor.taskMarkers = editor.taskMarkers;
         const dates = obj(r.dates), format = this.text(dates.format), parse = plainday?.Dates?.constructor?.parse;

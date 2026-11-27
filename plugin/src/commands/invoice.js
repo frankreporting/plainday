@@ -4,7 +4,7 @@ import { app, plainday } from "../host.js";
 /** @import { TFile } from "obsidian" */
 /** @import { Fold, FoldInfo, FoldView, MomentFn } from "../host.js" */
 /** @import TimeReport from "./timeReport.js" */
-/** @import { Entry, HeaderFreeze, Model, Money, ReportIndex, TableFreeze } from "./timeReport.js" */
+/** @import { Entry, HeaderFreeze, Model, Money, ReportIndex } from "./timeReport.js" */
 /** @import Billing from "../shared/billing.js" */
 /** @import { BilledChange, BilledRow, BillingEntry, HeldBack, InvoiceChange, InvoiceLine, Selection } from "../shared/billing.js" */
 /** @import Settings from "../shared/settings.js" */
@@ -29,13 +29,13 @@ import { app, plainday } from "../host.js";
  *
  * What an invoice note is written from (noteText): its properties, who it's from and who it bills,
  * the facts it prints, its Billed entries with the link text for a project, the descriptions you
- * typed, the check block's lines, and its tables' freezes (the default, and what a rebuilt draft held).
+ * typed, the check block's lines, and the freezes a rebuilt draft's tables held.
  * @typedef {{
  *   id?: string, name: string, status?: string, parent?: string, clientLink?: string, billToLink?: string,
  *   invoiceDate: string, periodStart?: string, periodEnd?: string, minutes: number, cents: number, paid?: string | null,
  *   from: Party, billTo: Party, projectId: string, requestedBy: string, terms: string, paymentNote: string,
  *   billed: BilledRow[], linkText: (path: string) => string, descriptions?: Map<string, string>,
- *   check: string[] | null, tables?: TableFreeze, freezes?: Map<string, HeaderFreeze[]>,
+ *   check: string[] | null, freezes?: Map<string, HeaderFreeze[]>,
  * }} Draft
  */
 export default class Invoice {
@@ -269,10 +269,10 @@ export default class Invoice {
         const lines = (/** @type {string[]} */ list) => list.map(e).join("<br>");
         const fact = (/** @type {string} */ label, /** @type {string} */ value, strong = false) => `<p><span class="pm-invoice-label">${label}</span><br>${strong ? `<strong>${e(value)}</strong>` : e(value)}</p>`;
         const items = this.lines(d.billed, billing, tr, d.descriptions);
-        // The two tables, each under its heading, frozen for Selectable Tables (OBS-238): `d.tables` is the
-        // default, and `d.freezes` what a rebuilt draft's tables held (TimeReport.freezesIn), so a freeze
-        // you set stays. A table of yours in the payment note is left alone.
-        const frozen = (/** @type {string[]} */ lines) => tr.withFreezes(lines, d.freezes ?? /** @type {Map<string, HeaderFreeze[]>} */ (new Map()), d.tables ?? null);
+        // The two tables, each under its heading, keep the freezes a rebuilt draft's tables held
+        // (`d.freezes`, TimeReport.freezesIn, OBS-238), so a freeze you set stays, and one Plainday set as
+        // its default before OBS-351 comes out. A table of yours in the payment note is left alone.
+        const frozen = (/** @type {string[]} */ lines) => tr.withFreezes(lines, d.freezes ?? /** @type {Map<string, HeaderFreeze[]>} */ (new Map()));
         const facts = [
             ...(d.requestedBy ? [fact("Requested by", d.requestedBy)] : []),
             ...(d.projectId ? [fact("Project ID", d.projectId)] : []),
@@ -725,7 +725,7 @@ export default class Invoice {
             projectId: String(tr.prop(props, "client_project_id") ?? "").trim(), requestedBy: String(tr.prop(props, "requested_by") ?? "").trim(),
             terms: String(tr.prop(props, "terms") ?? "").trim() || settings.terms, paymentNote: settings.paymentNote,
             billed: billing.snapshot(sel.entries, model, tr), linkText,
-            check: this.beforeSending(sel, tr), tables: model.tables,
+            check: this.beforeSending(sel, tr),
         }, tr, billing);
         await this.makeFolders(folder);
         const file = await app.vault.create(path, text);
@@ -1366,7 +1366,7 @@ export default class Invoice {
             billed: entries, linkText, descriptions: this.keepDescriptions(text, invoice.rows.map((r) => ({ ...r })), billing, tr),
             check: this.beforeSending(sel, tr),
             // The freezes its tables hold now, so one you set or took off stays (OBS-238)
-            tables: model.tables, freezes: tr.freezesIn(this.split(text).body.split(/\r?\n/)),
+            freezes: tr.freezesIn(this.split(text).body.split(/\r?\n/)),
         };
         // Who it bills too, so a draft from before OBS-109 moves to its project's `bill_to`; its name stays
         const front = this.rebuiltFront(this.split(text).front, billed, linkText, { period_start: sel.entries[0].date, hours: tr.hours(minutes), total: (cents / 100).toFixed(2) });

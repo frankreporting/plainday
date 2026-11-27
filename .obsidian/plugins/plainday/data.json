@@ -11,10 +11,6 @@
     "firstNumber": 1001,
     "lastNumber": 1001
   },
-  "tables": {
-    "freezeRows": 0,
-    "freezeColumns": 0
-  },
   "editor": {
     "listCursor": true,
     "taskMarkers": true
