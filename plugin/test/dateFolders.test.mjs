@@ -247,6 +247,8 @@ test("Plainday's own pattern: blank is beside the daily notes with Plainday's na
     assert.equal(Schedule.periodOf(file("Journal/2025/2026w47.md")), null, "in another year's folder");
     assert.equal(Schedule.periodOf(file("Reference/Planner/weeks/2026w47.md")), null, "a note under the old pattern isn't found");
     assert.equal(Schedule.periodOf(file("Journal/2026/2026-11.md")), "month");
+    // Schedule and Jump to date send a week there: both ask PeriodicNotes.where through JumpToDate.target
+    assert.equal(plainday.JumpToDate.target({ unit: "week", date: "2026-09-23" }, DatePrompt.weekRules()).path, "Journal/2026/2026w39.md");
     // A name that leaves out the year is made as the pattern says, and warned about in the panel
     set({ week: "[Journal]/YYYY/[W]ww" });
     assert.equal(PeriodicNotes.where("week", "2026-11-25").path, "Journal/2026/W48.md");
