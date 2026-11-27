@@ -470,7 +470,10 @@ export default class Settings {
         if (/[\\:*?"<>|]/.test(pattern)) return bad;
         const split = Settings.splitPattern(pattern);
         const parts = [...split.folder.split("/"), ...split.dateFolders.split("/"), split.format.replace(/\[([^\]]*)\]/g, "$1")];
-        if (!split.format || parts.some((p) => p !== p.trim() || p.startsWith("."))) return bad;
+        if (!split.format.replace(/\[\]/g, "") || parts.some((p) => p !== p.trim() || p.startsWith("."))) return bad;
+        // A `/` in [brackets] is a folder only in the fixed folder: in a folder by date or the name it
+        // would file notes where nothing checks, and the name's readers cut at the last `/`
+        if (/\[[^\]]*\/[^\]]*\]/.test(`${split.dateFolders}/${split.format}`)) return bad;
         // A blank part between slashes inside the fixed folder's brackets: "[a//b]"
         if (/\/\/|^\/|\/$/.test(split.folder)) return bad;
         return { pattern, ...split, error: null };

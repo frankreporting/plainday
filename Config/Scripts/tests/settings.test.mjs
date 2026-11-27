@@ -929,7 +929,7 @@ test("patternOf: folders and name in one, read as Notebook Navigator reads its o
     assert.match(read("[Journal]/gggg[w").error, /^has a bracket that doesn't close/);
     assert.match(read("[Journal]]/gggg").error, /^has a bracket that doesn't close/);
     assert.match(read("[[Journal]]/gggg").error, /^has a bracket that doesn't close/);
-    for (const bad of ["[Journal]/gg:gg", "[.hidden]/YYYY", "[Journal ]/YYYY", "[Journal]/ YYYY", "[/Journal]/YYYY", 7, "a\nb"]) assert.match(read(bad).error, /^isn't a folder and a name Plainday can use/, String(bad));
+    for (const bad of ["[Journal]/gg:gg", "[.hidden]/YYYY", "[Journal ]/YYYY", "[Journal]/ YYYY", "[/Journal]/YYYY", "[Journal]/gg[x/y]ww", "[Projects/]YYYY/gggg[w]ww", "[Journal]/[]", "[]", 7, "a\nb"]) assert.match(read(bad).error, /^isn't a folder and a name Plainday can use/, String(bad));
 });
 
 test("normalize: a folder saved before patterns becomes the pattern for the same place and names, once", () => {
