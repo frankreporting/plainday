@@ -32,7 +32,8 @@
     "week": "",
     "month": "",
     "year": "",
-    "errorLog": "Config/Error Log.md"
+    "errorLog": "Config/Error Log.md",
+    "patterns": true
   },
   "templates": {
     "week": "Config/Templates/Weekly Note.md",

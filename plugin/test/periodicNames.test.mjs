@@ -105,6 +105,15 @@ test("which format is checked with Notebook Navigator: its patterns as typed, fo
     assert.equal(plugin.periodicFormat("week"), null);
 });
 
+test("Plainday's own pattern is checked as Navigator's is (OBS-349): a week's name without its year warns", () => {
+    const settings = vault({ periodic: "daily-notes" });
+    Object.assign(settings.get().folders, { week: "[Journal]/YYYY/[W]ww", month: "[Journal]/YYYY/YYYY-MM" });
+    assert.deepEqual(plain(settings.periodicFormat("week")), { format: "[Journal]/YYYY/[W]ww", navigator: false });
+    assert.equal(settings.periodicWarning("week", "en"), "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.");
+    assert.equal(settings.periodicWarning("month", "en"), "", "the folders before the name don't count");
+    assert.equal(settings.periodicWarning("year", "en"), "", "blank is Plainday's own name");
+});
+
 test("the demo's settings warn on no row", () => {
     for (const periodic of ["", "daily-notes"]) {
         const settings = vault({ navigator: NAVIGATOR(), periodic });

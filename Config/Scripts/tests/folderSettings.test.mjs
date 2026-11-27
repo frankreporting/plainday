@@ -47,7 +47,7 @@ test("Due date names the folders as they're set when a task note's due stays as 
 });
 
 test("Schedule sends a line to a week into the weekly notes' folder as set, and makes the note there", async () => {
-    const v = standIn({ notes: { [day("2026-09-16")]: "- [ ] Order the paper stock\n" }, open: day("2026-09-16"), at: 0, folders: { week: "Planner/Weeks" } });
+    const v = standIn({ notes: { [day("2026-09-16")]: "- [ ] Order the paper stock\n" }, open: day("2026-09-16"), at: 0, folders: { week: "[Planner/Weeks]/gggg[w]ww" } });
     await v.schedule("2026-09-23", "week");
     assert.equal(v.notes()["Planner/Weeks/2026w39.md"], "- [ ] Order the paper stock\n");
     assert.equal(v.notes()[`${PLANNER}/weeks/2026w39.md`], undefined, "not where Notebook Navigator's pattern would put it");

@@ -4986,7 +4986,8 @@ export default class TimeReport {
     // the fixed folder and the folders by date under it ("" for none, OBS-310), as Schedule.folderFor
     // joins them. With Notebook Navigator's calendar as the source, its periodic notes folder and the
     // folder part of its pattern ("[weeks]/gggg[w]ww" → "Reference/Planner/weeks"; "gggg/[W]ww" → the
-    // folders "gggg"); otherwise a folder set in Settings → Plainday → Folders (OBS-283), else weeks,
+    // folders "gggg"); otherwise the same from a pattern set in Settings → Plainday → Folders (OBS-283,
+    // OBS-349: "[Journal]/gggg/gggg[w]ww" → "Journal" and the folders "gggg"), else weeks,
     // months and years beside the daily notes folder, which blank means (`asBefore`, which the panel
     // shows). JumpToDate calls it outside a report run too, before `this.schedule` is set.
     /**
@@ -5006,7 +5007,9 @@ export default class TimeReport {
         const placeOf = (unit, fallback) => {
             const nn = navigator ? settings.navigatorNote(unit) : null;
             if (nn) return { folder: nn.folder, dateFolders: nn.dateFolders };
-            return { folder: set?.[unit] || beside(fallback), dateFolders: "" };
+            const own = set?.[unit] ? settings.constructor?.splitPattern?.(set[unit]) ?? { folder: set[unit], dateFolders: "" } : null;
+            if (own) return { folder: own.folder, dateFolders: own.dateFolders };
+            return { folder: beside(fallback), dateFolders: "" };
         };
         return { week: placeOf("week", "weeks"), month: placeOf("month", "months"), year: placeOf("year", "years") };
     }

@@ -22,7 +22,8 @@
 //
 // Folders: Projects, the Inbox and the archive, each a real folder, none inside another; the daily
 // notes' folder and name, shown from the Daily notes plugin, which keeps them; the weekly, monthly and
-// yearly notes' folders, and the error log note, blank for what Plainday did before, which the
+// yearly notes' patterns (OBS-349: folders and name in one, each with a sample of the note it makes now,
+// as the daily notes' row has), and the error log note, blank for what Plainday did before, which the
 // placeholder shows. A periodic notes row whose names don't give a note's whole date says so (OBS-299).
 // Who keeps the periodic notes is chosen on their page, and nothing is until you choose: until then, or
 // while the chosen plugin is off, an orange line says so there and under the row that opens it (OBS-336).
@@ -35,12 +36,14 @@
 // A calendar's link is typed into a masked field, checked by downloading it once (CalendarFeed.check),
 // and kept only in this device's secret storage (Settings.storeLink): never in a setting, a notice or
 // the console. A link that fails isn't added, and the dialog says why, by the problem alone.
-import { AbstractInputSuggest, ButtonComponent, Modal, Notice, PluginSettingTab, requireApiVersion, setIcon, Setting, SettingGroup, TextAreaComponent, TextComponent } from "obsidian";
+import { AbstractInputSuggest, ButtonComponent, Modal, moment, Notice, PluginSettingTab, requireApiVersion, setIcon, Setting, SettingGroup, TextAreaComponent, TextComponent } from "obsidian";
 import { plainday } from "./host.js";
 
 /** @typedef {ReturnType<import("./shared/settings.js").default["defaults"]>} Values */
 /** @typedef {Values["calendars"]["list"][number]} Calendar */
 /** @typedef {import("obsidian").Setting} Setting */
+/** @typedef {import("obsidian").TFile} TFile */
+/** @typedef {import("./host.js").MomentFn} MomentFn */
 /** @typedef {{ name: string, desc: string, render: (setting: Setting) => void | (() => void), visible?: () => boolean, page?: Page }} Row */
 /** @typedef {{ heading: string | null, rows: Row[] }} Section */
 /** @typedef {{ displayValue: string | (() => string), desc?: string | DocumentFragment, sections: Section[] }} Page */
@@ -837,9 +840,11 @@ export default class PlaindaySettingTab extends PluginSettingTab {
          * `note(value)` the orange line for a value that reads ("" for none); `list(input)` the list to
          * choose from, which offers only what `read` takes (none for the error log). Leaving the field
          * with the list open takes the row it highlights only when you chose it (FolderSuggest.chosen),
-         * so a folder you didn't choose never replaces what you typed.
+         * so a folder you didn't choose never replaces what you typed. `more(box, typed)`, when given, draws
+         * the field's other lines for what's typed, above that line (the periodic notes' sample, OBS-349),
+         * and `picked(row)` is what a row chosen from the list puts in the field.
          * @param {string} name @param {string} desc
-         * @param {{ saved: () => string, read: (v: string) => { value: string, error?: undefined } | { error: string, value?: undefined }, save: (s: Setting, value: string) => Promise<void>, placeholder: () => string, note: (value: string) => string, list: ((input: HTMLInputElement) => FolderSuggest) | null, was: (value: string) => string }} how
+         * @param {{ saved: () => string, read: (v: string) => { value: string, error?: undefined } | { error: string, value?: undefined }, save: (s: Setting, value: string) => Promise<void>, placeholder: () => string, note: (value: string) => string, list: ((input: HTMLInputElement) => FolderSuggest) | null, was: (value: string) => string, more?: (box: HTMLElement, typed: string) => void, picked?: (row: string) => string }} how
          * @returns {Row}
          */
         const pathField = (name, desc, how) => field(name, desc, (s) => {
@@ -849,18 +854,25 @@ export default class PlaindaySettingTab extends PluginSettingTab {
             let input = null;
             /** @type {FolderSuggest | null} */
             let suggest = null;
+            const box = how.more ? s.descEl.createDiv() : null;
+            /** @param {string} v */
+            const more = (v) => { if (box) how.more?.(box, v); };
+            /** @param {string} row */
+            const picked = (row) => how.picked?.(row) ?? row;
             /** @param {string} v */
             const check = (v) => {
                 const got = how.read(v);
                 waiting = got.error === undefined ? got.value : null;
                 if (got.error !== undefined) problem(s, `Not used: ${got.error}. ${how.was(how.saved())}`);
                 else problem(s, how.note(got.value), false);
+                more(v);
             };
             // Leaving the field: with something typed and the list open, what it highlights; else what's
             // typed when it reads, and the saved value at once when it doesn't, its line still saying why
             const leave = () => {
                 const typed = input !== null ? input.getValue().trim() : "";
-                const pick = suggest !== null ? suggest.chosen(typed) : null;
+                const row = suggest !== null ? suggest.chosen(typed) : null;
+                const pick = row ? picked(row) : null;
                 if (pick && input !== null) {
                     input.setValue(pick);
                     check(pick);
@@ -870,6 +882,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 if (value !== null && value !== how.saved()) void how.save(s, value);
                 if (value !== null) problem(s, how.note(value), false);
                 input?.setValue(value ?? how.saved());
+                more(value ?? how.saved());
             };
             s.addText((t) => {
                 input = t;
@@ -879,7 +892,8 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 if (!how.list) return;
                 const list = how.list(t.inputEl);
                 suggest = list;
-                list.onSelect((v) => {
+                list.onSelect((row) => {
+                    const v = picked(row);
                     t.setValue(v);
                     check(v);
                     leave();
@@ -887,6 +901,7 @@ export default class PlaindaySettingTab extends PluginSettingTab {
                 });
             });
             problem(s, how.note(how.saved()), false);
+            more(how.saved());
             return leave;
         });
 
@@ -964,34 +979,82 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         });
         /** @type {Record<"week" | "month" | "year", string>} */
         const periods = { week: "Weekly", month: "Monthly", year: "Yearly" };
-        // The folder each one sits in when its field is blank, beside the daily notes
-        /** @type {Record<"week" | "month" | "year", string>} */
-        const beside = { week: "weeks", month: "months", year: "years" };
         const asBefore = () => plainday.TimeReport.periodFolders({ asBefore: true });
-        // What a weekly, monthly or yearly folder takes: blank (as before), or a folder as the vault spells
-        // it that isn't Projects, the Inbox or the archive, holds one, or sits inside one
-        /** @param {string} v @param {boolean} [own] a folder from the vault, already spelled as it is there @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
-        const periodRead = (v, own = false) => {
-            const got = billing.pathOf(v);
+        // What a weekly, monthly or yearly notes' field takes (OBS-349): blank (as before), or a pattern,
+        // folders and name in one, read as Notebook Navigator reads its own (Settings.patternOf), whose
+        // fixed folder, spelled as the vault spells it, isn't Projects, the Inbox or the archive, doesn't
+        // hold one and doesn't sit inside one
+        /** @param {string} v @returns {{ value: string, error?: undefined } | { error: string, value?: undefined }} */
+        const periodRead = (v) => {
+            const got = settings.patternOf(v);
             if (got.error) return { error: `it ${got.error}` };
-            const folder = got.folder && !own ? spelled(got.folder) : got.folder;
+            const folder = got.folder ? spelled(got.folder) : "";
             const meets = folder ? settings.overlap(folder) : null;
             if (meets) {
                 const named = meets.name === meets.folder ? meets.name : `${meets.name} (${meets.folder})`;
                 return { error: meets.how === "is" ? `it's the ${meets.name} folder` : meets.how === "in" ? `it's inside ${named}` : `${named} is inside it` };
             }
-            return { value: folder };
+            return { value: folder === got.folder ? got.pattern : [`[${folder}]`, got.dateFolders, got.format].filter(Boolean).join("/") };
         };
+        // The weekly, monthly and yearly notes Plainday finds as the page opens, read once: what a
+        // pattern being typed is checked against, so its line can say which it would no longer find
+        /** @type {Record<"week" | "month" | "year", TFile[]> | null} */
+        let found = null;
+        const foundNow = () => {
+            if (found) return found;
+            const rules = plainday.DatePrompt.weekRules(), places = plainday.TimeReport.periodPlaces();
+            /** @type {Record<"week" | "month" | "year", TFile[]>} */
+            const all = { week: [], month: [], year: [] };
+            for (const f of this.app.vault.getMarkdownFiles()) {
+                const unit = plainday.Schedule.periodOf(f, rules, places);
+                if (unit) all[unit].push(f);
+            }
+            found = all;
+            return all;
+        };
+        /** @type {Record<"week" | "month" | "year", string>} */
+        const sampleWords = { week: "This week's note", month: "This month's note", year: "This year's note" };
+        // The lines under a weekly, monthly or yearly notes' field, for what's typed: the note it makes
+        // for this week, month or year, as PeriodicNotes.where would place it; then what's wrong with its
+        // name, a folder that isn't there yet, and the notes it would leave behind. None for a value
+        // that's refused, whose own line says why.
+        /** @param {"week" | "month" | "year"} unit @param {HTMLElement} box @param {string} typed */
+        const periodLines = (unit, box, typed) => {
+            box.empty();
+            const read = periodRead(typed);
+            if (read.error !== undefined) return;
+            const place = read.value ? Settings.splitPattern(read.value) : { folder: asBefore()[unit], dateFolders: "", format: Settings.PERIOD_NAMES[unit] };
+            const now = /** @type {{ locale: string, weekStart: number, format: Record<string, string> }} */ (plainday.DatePrompt.weekRules());
+            const rules = { ...now, format: { ...now.format, [unit]: place.format } };
+            const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
+            const start = /** @type {MomentFn} */ (moment)(String(plainday.PeriodicNotes.start(unit, today, rules)), "YYYY-MM-DD", true).locale(rules.locale);
+            const name = String(plainday.JumpToDate.periodName({ date: today, unit }, rules));
+            const path = [place.folder, place.dateFolders ? start.format(place.dateFolders) : "", name].filter(Boolean).join("/");
+            box.createDiv({ text: `${sampleWords[unit]}: ${code(path)}` });
+            const warning = settings.nameWarning(unit, place.format, rules.locale);
+            if (warning) box.createDiv({ cls: "mod-warning", text: warning });
+            if (read.value && missingFolder(place.folder)) box.createDiv({ cls: "plainday-caution", text: `“${place.folder}” doesn't exist yet. Plainday will create it with the first ${periods[unit].toLowerCase()} note.` });
+            const places = { ...plainday.TimeReport.periodPlaces(), [unit]: { folder: place.folder, dateFolders: place.dateFolders } };
+            const lost = foundNow()[unit].filter((f) => plainday.Schedule.periodOf(f, rules, places) !== unit).map((f) => f.path.replace(/\.md$/, "")).sort();
+            if (!lost.length) return;
+            const kind = periods[unit].toLowerCase(), one = code(lost[lost.length - 1]);
+            const what = lost.length === 1 ? `the ${kind} note it finds now, ${one},` : `the ${lost.length} ${kind} notes it finds now, such as ${one},`;
+            box.createDiv({ cls: "plainday-caution", text: `Plainday won't find ${what} until you move or rename ${lost.length === 1 ? "it" : "them"} to match.` });
+        };
+        // Each says how a pattern is written and what blank means; its placeholder shows that as a pattern (Brian, 11/25, 11/27)
         /** @param {"week" | "month" | "year"} unit */
-        // Each says what names its notes, as the daily notes' row does (OBS-299): Plainday's own names here
-        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Default: \`${beside[unit]}\` in same folder as daily notes. Named ${code(/** @type {{ format: Record<string, string> }} */ (plainday.DatePrompt.weekRules()).format[unit])}.`, {
+        const periodField = (unit) => pathField(`${periods[unit]} notes`, `Folder names in [brackets]. Leave blank to keep them in a ${code(Settings.PERIOD_FOLDERS[unit])} folder next to your daily notes folder.`, {
             saved: () => now().folders[unit],
             read: (v) => periodRead(v),
             save: (s, value) => store(s, "folders", { [unit]: value }),
-            placeholder: () => asBefore()[unit],
-            note: (value) => (missingFolder(value) ? `“${value}” doesn't exist yet. Plainday will create it with the first ${periods[unit].toLowerCase()} note.` : ""),
-            list: (input) => new FolderSuggest(this.app, input, "", (f) => periodRead(f, true).error === undefined),
+            // What blank means, as a pattern that would do the same if typed: the folder beside the daily notes' in full
+            placeholder: () => Settings.patternFor(unit, asBefore()[unit]),
+            note: () => "",
+            // A folder chosen from the list goes in as the pattern for it, with Plainday's own names
+            list: (input) => new FolderSuggest(this.app, input, "", (f) => periodRead(Settings.patternFor(unit, f)).error === undefined),
+            picked: (folder) => Settings.patternFor(unit, folder),
             was: (value) => `${periods[unit]} notes stay ${value ? code(value) : "as before"}.`,
+            more: (box, typed) => periodLines(unit, box, typed),
         });
         /** @param {"week" | "month" | "year"} unit */
         const templateField = (unit) => {
@@ -1057,32 +1120,29 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const navigator = () => source() === "notebook-navigator";
         // A row that only says where a note goes and who decides: used for the daily notes, and for every
         // periodic note in the Notebook Navigator source. When Navigator has no pattern for a unit, the row
-        // says what decides instead, rather than crediting Navigator (OBS-283). A folder row says what
-        // names its notes, folders by date included (OBS-310), and warns when their names don't give their
+        // says what decides instead, rather than crediting Navigator (OBS-283). A folder row shows the
+        // note it makes now, folders by date included, and warns when the notes' names don't give their
         // whole date (Settings.periodicWarning, OBS-299).
         /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
         const shown = (name, unit, part) => row(name, "", (s) => {
             const nn = navigator() ? settings.navigatorNote(unit) : null;
-            const value = part === "folder"
-                ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
-                : (unit === "day" ? daily().template : nn?.template ?? "");
-            const where = nn ? ". Set in Notebook Navigator."
-                : unit === "day" || !navigator() ? ". Set in Settings → Daily notes."
-                    : ". Notebook Navigator has no pattern for these, so they're Plainday's own.";
-            // A folder row also says what names its notes, which is the other half of finding them: the
-            // folders by date and the name, under the folder the row shows (Schedule.dailyOpts for a day,
-            // Navigator's pattern or DatePrompt.weekRules for the rest), so all four rows read alike
-            // (Brian, 11/20, OBS-299)
-            const day = daily();
-            const names = unit === "day" ? [day.dateFolders, day.format].filter(Boolean).join("/")
-                : [nn?.dateFolders, /** @type {{ format: Record<string, string> }} */ (plainday.DatePrompt.weekRules()).format[unit]].filter(Boolean).join("/");
-            const named = part === "folder" ? `, named ${code(names)}` : "";
-            const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
+            const value = unit === "day" ? daily().template : nn?.template ?? "";
+            const where = nn ? "Set in Notebook Navigator."
+                : unit === "day" || !navigator() ? "Set in Settings → Daily notes."
+                    : "Notebook Navigator has no pattern for these, so they're Plainday's own.";
             s.descEl.empty();
-            s.descEl.appendText(`${shownValue}${named}${where}`);
-            // A folder row whose notes' names don't give their whole date says so in a line of its own
+            if (part === "template") {
+                s.descEl.appendText(`${value ? code(value.endsWith(".md") ? value : `${value}.md`) : "None"}. ${where}`);
+                return;
+            }
+            // A folder row says only who sets it; the line under it shows the note it makes now, folder
+            // and name together, as the lines under Plainday's own fields do (Brian, 11/27, OBS-349)
+            s.descEl.appendText(where);
+            const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
+            s.descEl.createDiv({ text: `${unit === "day" ? "Today's note" : sampleWords[unit]}: ${code(String(plainday.PeriodicNotes.where(unit, today).path).replace(/\.md$/, ""))}` });
+            // A row whose notes' names don't give their whole date says so in a line of its own
             // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
-            const warning = part === "folder" ? settings.periodicWarning(unit) : "";
+            const warning = settings.periodicWarning(unit);
             if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
         });
 
