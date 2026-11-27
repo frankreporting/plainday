@@ -963,8 +963,10 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         assert.ok(!("" in draw("Define periodic notes using").control.options), "no Choose… once one is chosen");
         const weekly = draw("Weekly notes");
         assert.equal(weekly.control.inputEl.value, "", "no input to type into");
-        assert.match(weekly.descEl.text, /^`Planner\/weeks`, named `gggg\[w\]ww`\. Set in Notebook Navigator\.$/, "every folder row says what names its notes (OBS-299)");
-        assert.match(draw("Daily notes").descEl.text, /^`Planner\/days`, named `YYYY-MM-DD`\. Set in Notebook Navigator\.$/);
+        assert.equal(weekly.descEl.text, "Set in Notebook Navigator.", "only who sets it (Brian, 11/27)");
+        assert.equal(weekly.descEl.lines[0].text, `This week's note: \`Planner/weeks/${moment().locale("en").format("gggg[w]ww")}\``, "and the note it makes now, folder and name together");
+        assert.equal(draw("Daily notes").descEl.text, "Set in Notebook Navigator.");
+        assert.equal(draw("Daily notes").descEl.lines[0].text, `Today's note: \`Planner/days/${moment().format("YYYY-MM-DD")}\``);
         assert.match(draw("Weekly note").descEl.text, /^`T\/Week\.md`\. Set in Notebook Navigator\.$/);
         assert.match(draw("Monthly note").descEl.text, /^None\. Set in Notebook Navigator\.$/, "a calendar with no template of its own");
         // A folder row whose notes' names don't give their whole date says so, in a line under its text
@@ -974,7 +976,8 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
         NAVIGATOR.calendarCustomWeekPattern = "gggg/[W]ww";
         try {
             const bad = draw("Weekly notes");
-            assert.equal(bad.descEl.text, "`Planner`, named `gggg/[W]ww`. Set in Notebook Navigator.", "its folder, then its folders by date and its name (OBS-310); the red line says why");
+            assert.equal(bad.descEl.text, "Set in Notebook Navigator.");
+            assert.match(bad.descEl.lines[0].text, /^This week's note: `Planner\/\d{4}\/W\d\d`$/, "its folder, its folders by date and its name (OBS-310); the red line says why");
             assert.equal(warnings(bad).length, 1);
             assert.equal(warnings(bad)[0], "Plainday reads a note's date from its name alone, so it needs the week's year and number, such as `gggg[w]ww`.", "folders by date need no line, the name does");
             assert.equal(warnings(draw("Weekly notes")).length, 1, "a redraw keeps one line");
@@ -983,7 +986,8 @@ test("Settings → Plainday → Folders → Periodic notes: the source decides w
             assert.equal(template.descEl.text, "`T/Week.md`. Set in Notebook Navigator.", "Navigator's own template, as for any pattern");
             NAVIGATOR.calendarCustomMonthPattern = "YYYY/YYYYMM";
             const monthly = draw("Monthly notes");
-            assert.equal(monthly.descEl.text, "`Planner`, named `YYYY/YYYYMM`. Set in Notebook Navigator.");
+            assert.equal(monthly.descEl.text, "Set in Notebook Navigator.");
+            assert.equal(monthly.descEl.lines[0].text, `This month's note: \`Planner/${moment().format("YYYY/YYYYMM")}\``);
             assert.deepEqual(warnings(monthly), [], "a month named by its whole date, in folders by year");
         } finally {
             NAVIGATOR.calendarCustomWeekPattern = "[weeks]/gggg[w]ww";

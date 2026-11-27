@@ -1120,41 +1120,30 @@ export default class PlaindaySettingTab extends PluginSettingTab {
         const navigator = () => source() === "notebook-navigator";
         // A row that only says where a note goes and who decides: used for the daily notes, and for every
         // periodic note in the Notebook Navigator source. When Navigator has no pattern for a unit, the row
-        // says what decides instead, rather than crediting Navigator (OBS-283). A folder row says what
-        // names its notes, folders by date included (OBS-310), and warns when their names don't give their
+        // says what decides instead, rather than crediting Navigator (OBS-283). A folder row shows the
+        // note it makes now, folders by date included, and warns when the notes' names don't give their
         // whole date (Settings.periodicWarning, OBS-299).
         /** @param {string} name @param {"day" | "week" | "month" | "year"} unit @param {"folder" | "template"} part */
         const shown = (name, unit, part) => row(name, "", (s) => {
             const nn = navigator() ? settings.navigatorNote(unit) : null;
-            const value = part === "folder"
-                ? (unit === "day" ? daily().folder : plainday.TimeReport.periodFolders()[unit])
-                : (unit === "day" ? daily().template : nn?.template ?? "");
-            const where = nn ? ". Set in Notebook Navigator."
-                : unit === "day" || !navigator() ? ". Set in Settings → Daily notes."
-                    : ". Notebook Navigator has no pattern for these, so they're Plainday's own.";
-            // A folder row also says what names its notes, which is the other half of finding them: the
-            // folders by date and the name, under the folder the row shows (Schedule.dailyOpts for a day,
-            // Navigator's pattern or DatePrompt.weekRules for the rest), so all four rows read alike
-            // (Brian, 11/20, OBS-299)
-            const day = daily();
-            const names = unit === "day" ? [day.dateFolders, day.format].filter(Boolean).join("/")
-                : [nn?.dateFolders, /** @type {{ format: Record<string, string> }} */ (plainday.DatePrompt.weekRules()).format[unit]].filter(Boolean).join("/");
-            const named = part === "folder" ? `, named ${code(names)}` : "";
-            const shownValue = value ? code(part === "template" && !value.endsWith(".md") ? `${value}.md` : value) : part === "folder" ? "The top of the vault" : "None";
+            const value = unit === "day" ? daily().template : nn?.template ?? "";
+            const where = nn ? "Set in Notebook Navigator."
+                : unit === "day" || !navigator() ? "Set in Settings → Daily notes."
+                    : "Notebook Navigator has no pattern for these, so they're Plainday's own.";
             s.descEl.empty();
-            // Beside Plainday's own fields, the daily notes' row says only where they're set: its line for
-            // today's note shows the folder and the name (Brian, 11/27)
-            const own = unit === "day" && part === "folder" && !navigator();
-            s.descEl.appendText(own ? "Set in Settings → Daily notes." : `${shownValue}${named}${where}`);
-            // A folder row whose notes' names don't give their whole date says so in a line of its own
-            // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
-            const warning = part === "folder" ? settings.periodicWarning(unit) : "";
-            if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
-            // The daily notes' row beside Plainday's own fields shows today's note, as they show theirs (OBS-349)
-            if (own) {
-                const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
-                s.descEl.createDiv({ text: `Today's note: ${code(String(plainday.PeriodicNotes.where("day", today).path).replace(/\.md$/, ""))}` });
+            if (part === "template") {
+                s.descEl.appendText(`${value ? code(value.endsWith(".md") ? value : `${value}.md`) : "None"}. ${where}`);
+                return;
             }
+            // A folder row says only who sets it; the line under it shows the note it makes now, folder
+            // and name together, as the lines under Plainday's own fields do (Brian, 11/27, OBS-349)
+            s.descEl.appendText(where);
+            const today = /** @type {MomentFn} */ (moment)().format("YYYY-MM-DD");
+            s.descEl.createDiv({ text: `${unit === "day" ? "Today's note" : sampleWords[unit]}: ${code(String(plainday.PeriodicNotes.where(unit, today).path).replace(/\.md$/, ""))}` });
+            // A row whose notes' names don't give their whole date says so in a line of its own
+            // (OBS-299). Made here, after empty(), so a redraw never keeps an old one.
+            const warning = settings.periodicWarning(unit);
+            if (warning) s.descEl.createDiv({ cls: "mod-warning", text: warning });
         });
 
         // Nothing chosen yet, or the chosen one is off (OBS-336): an orange line under the choice, and
