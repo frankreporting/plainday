@@ -1,6 +1,6 @@
 {
   "name": "plainday",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Turn your daily notes into a robust planner. Sync your calendars, schedule tasks, set deadlines, organize tasks into areas and projects, add task notes, track your time and generate invoices. All with Markdown.",
   "license": "MIT",
