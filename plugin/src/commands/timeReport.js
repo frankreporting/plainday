@@ -1275,8 +1275,9 @@ export default class TimeReport {
                 if (top === i || this.indentWidth(lines[top]) > 0) return;
                 const { marks, notes: own, from, due } = this.lineLinks(this.classify(text).body);
                 const id = T.idOf(text);
-                // A day's [>] line (OBS-254) is one of its subtask's lines: its ID, 🚩 and ⋯ are the subtask's
-                const sub = note.kind === "day" && T.isDayLine(lines, i, read);
+                // A nested task Schedule sent on its own (OBS-254) is one of its subtask's lines, on a day or in a note:
+                // its ID, 🚩 and ⋯ are the subtask's
+                const sub = note.kind === "day" ? T.isDayLine(lines, i, read) : note.kind === "other" && T.isNestedSent(lines, i, read);
                 const home = (/** @type {string} */ symbol) => marks.some((l) => l.alias.startsWith(symbol));
                 const found = [...(home("⭕") ? ["⭕"] : []), ...(home("🗃") ? ["🗃️"] : []), ...(due.length && !sub ? ["🚩"] : []), ...(own.length && !sub ? ["⋯"] : []), ...(from.length ? ["↗"] : []),
                     ...(id && !sub && tasks.has(id.toLowerCase()) ? ["task ID"] : [])];

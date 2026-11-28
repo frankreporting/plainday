@@ -269,16 +269,26 @@ export default class TaskIds {
     // forward date follows the subtask, and nothing else on it counts (it never carries a ⭕, 🗃️ or ↗).
     /** @param {string[]} lines @param {number} i @param {NameReader} [read] @returns {boolean} */
     static isDayLine(lines, i, read) {
+        return (lines[i] ?? "").match(TaskIds.CHECKBOX)?.[1] === ">" && TaskIds.isNestedSent(lines, i, read);
+    }
+
+    // A nested task Schedule sent on its own (OBS-254): a nested checklist line ending in a forward date and an ID,
+    // `[>]`, or done or canceled once its subtask is. In a note that isn't a periodic note it stays where it was,
+    // under its task, and is the subtask's sent line there, as a sent line at the left edge is; on a day it's the
+    // day's [>] line (isDayLine). The caller knows which kind of note it's in.
+    /** @param {string[]} lines @param {number} i @param {NameReader} [read] @returns {boolean} */
+    static isNestedSent(lines, i, read) {
         const text = (lines[i] ?? "").replace(/\r$/, "");
         // The cheap tests first: the walk up the nest (isTop) runs only on a line that could be one
-        if (!/^\s/.test(text) || text.match(TaskIds.CHECKBOX)?.[1] !== ">" || !TaskIds.idOf(text) || TaskIds.isEvent(text)) return false;
+        if (!/^\s/.test(text) || !">xX-".includes(text.match(TaskIds.CHECKBOX)?.[1] ?? "?") || !TaskIds.idOf(text) || TaskIds.isEvent(text)) return false;
         return !!TaskIds.forwardOf(text, read) && !TaskIds.isTop(lines, i);
     }
 
     // `text` (a note) with the forward date on each top-level checklist line ending in `id` set to `link`,
     // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
     // too, since the task is open elsewhere now (rule 13); with `mark` ("x" or "-"), each one is finished
-    // instead, since the task was (CheckOff, OBS-232). With `sub`, in a daily note, only its day's [>] lines
+    // instead, since the task was (CheckOff, OBS-232). A nested task sent on its own from the note (isNestedSent) is
+    // one of these lines too (OBS-254). With `sub`, in a daily note, only its day's [>] lines
     // (isDayLine), whose forward date follows and which are never finished or reopened. { text, changed }.
     // Line endings are kept.
     /**
@@ -303,7 +313,7 @@ export default class TaskIds {
             }
             // Only a sent line ([>], or [x] or [-] once finished): an open line with the same ID is a copy
             const box = bare.match(TaskIds.CHECKBOX);
-            if (!box || !">xX-".includes(box[1]) || TaskIds.isEvent(bare) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
+            if (!box || !">xX-".includes(box[1]) || TaskIds.isEvent(bare) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !(TaskIds.isTop(all, i) || TaskIds.isNestedSent(all, i, read))) return l;
             let next = TaskIds.withForward(TaskIds.oldForward(bare, read)?.line ?? bare, link, read);
             if (mark) next = next.replace(/^(\s*[-*+]\s+)\[.\]/, `$1[${mark}]`);
             else if (reopen) next = next.replace(/^(\s*[-*+]\s+)\[[xX-]\]/, "$1[>]");
@@ -477,16 +487,16 @@ export default class TaskIds {
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
             const ls = (await this.readNow(file)).split("\n");
-            const day = this.kindOf(file) === "day";
+            const kind = this.kindOf(file), day = kind === "day", other = kind === "other";
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
                 const id = box && !TaskIds.isEvent(text) ? TaskIds.idOf(text)?.toLowerCase() : null;
                 if (!id || !want.has(id)) return;
-                const sub = !TaskIds.isTop(ls, line);
-                if (sub && !(day && TaskIds.isDayLine(ls, line))) return;
+                const nested = !TaskIds.isTop(ls, line);
+                if (nested && !(day ? TaskIds.isDayLine(ls, line) : other && TaskIds.isNestedSent(ls, line))) return;
                 if (!out.has(id)) out.set(id, []);
-                out.get(id).push({ file, line, task: box[1], text, ...(sub ? { sub } : {}) });
+                out.get(id).push({ file, line, task: box[1], text, ...(nested && day ? { sub: true } : {}) });
             });
         }
         for (const [id, lines] of out) if (!TaskIds.isTask(lines)) out.delete(id);
@@ -513,8 +523,8 @@ export default class TaskIds {
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
-    // A task's checklist lines as they are now, top-level lines only (rule 5), and its day's [>] lines (isDayLine,
-    // marked `sub`, OBS-254): [{ file, line, task, text }].
+    // A task's checklist lines as they are now, top-level lines only (rule 5), its nested sent lines in notes
+    // (isNestedSent, OBS-254), and its day's [>] lines (isDayLine, marked `sub`): [{ file, line, task, text }].
     // The notes the cache names for `id`, every note open in an editor, and `also` (files a caller knows of,
     // such as the note a forward date points at), each read through readNow, so a line written a moment
     // ago isn't missed.
@@ -535,13 +545,13 @@ export default class TaskIds {
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
             const ls = (await this.readNow(file)).split("\n");
-            const day = this.kindOf(file) === "day";
+            const kind = this.kindOf(file);
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
                 if (!box || TaskIds.isEvent(text) || TaskIds.idOf(text)?.toLowerCase() !== want) return;
-                if (TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
-                else if (day && TaskIds.isDayLine(ls, line)) out.push({ file, line, task: box[1], text, sub: true });
+                if (TaskIds.isTop(ls, line) || (kind === "other" && TaskIds.isNestedSent(ls, line))) out.push({ file, line, task: box[1], text });
+                else if (kind === "day" && TaskIds.isDayLine(ls, line)) out.push({ file, line, task: box[1], text, sub: true });
             });
         }
         return out;
@@ -586,9 +596,9 @@ export default class TaskIds {
     //   resolve(linkpath, fromPath): the path a link points at, or null;
     //   ownNote(text, path): the notes a line's ⋯ links, in the system (a ↗ is read by nobody).
     // Only top-level lines are a task's: at the left edge, since a line nested under a checklist line is
-    // a sub-task (rule 5) and one under nothing but plain bullets isn't defined in the system. A day's [>]
-    // line (isDayLine, OBS-254) is the one nested line that is: its forward date is checked as a sent line's,
-    // and its project isn't compared.
+    // a sub-task (rule 5) and one under nothing but plain bullets isn't defined in the system. A nested task sent
+    // on its own (OBS-254) is the one nested line that is, in a note (isNestedSent) or on a day (isDayLine): its
+    // forward date is checked as a sent line's, and its project isn't compared.
     // Returns [{ rule, id, lines: [{ path, line, text }], detail }], in the spec's order: "project" (two
     // projects), "open" (open twice), "finished" (done while open, or done on two days), "forward" (a
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
@@ -615,7 +625,7 @@ export default class TaskIds {
             const seen = new Map();
             lines.forEach((text, line) => {
                 // A day's [>] line is one of its subtask's lines (OBS-254): its forward date is checked, its project isn't
-                const sub = !topLevel(text) && note.kind === "day" && TaskIds.isDayLine(lines, line, read);
+                const sub = !topLevel(text) && (note.kind === "day" ? TaskIds.isDayLine(lines, line, read) : note.kind === "other" && TaskIds.isNestedSent(lines, line, read));
                 const box = (topLevel(text) || sub) && !TaskIds.isEvent(text) ? text.match(TaskIds.CHECKBOX) : null;
                 const raw = box ? TaskIds.idOf(text) : null;
                 if (!raw) return;

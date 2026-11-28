@@ -314,7 +314,7 @@ test("Schedule: a worked-on task is forwarded to a week, its time entries stayin
     const r = await scheduleIn({ notes: { [DAY]: DAY_TEXT, [WEEK]: WEEK_TEXT }, open: DAY, at: 6, pick: (dp) => dp.result("2026-09-23", "week") });
     assert.equal(r.editor, DAY_TEXT.replace("- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]]", "- [>] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]] ^k3x9m2"));
     assert.equal(r.notes[WEEK], WEEK_TEXT.replace("\t- 2:00pm - 3:00pm\n", "\t- 2:00pm - 3:00pm\n- [/] Draft the brochure [[Brochure|⭕]] [[Draft the brochure|⋯]] ^k3x9m2\n"));
-    assert.deepEqual(r.notices, ["Forwarded to Wk of 9/20"]);
+    assert.deepEqual(r.notices, []);
 });
 
 test("Schedule: onto a day with notes and no task list, the task starts one under the properties, and the notes keep their folds (OBS-280)", async () => {
@@ -337,7 +337,7 @@ test("Schedule: a sent task's open line moved onto a day with notes and no task 
     const id = v.notes()[KES].match(/\^([a-z0-9]{6})$/m)[1];
     v.open(KES, 5);
     assert.equal(await v.schedule("2026-09-22"), "Scheduled for Thu 9/17. Move it to");
-    assert.equal(v.notes()[day("2026-09-22")], `---\naliases: 9/22/26 Tuesday\n---\n- [ ] Book the photographer [[Kestrel|⭕]] ^${id}\n\n## Notes\n- Call back about the quote\n`);
+    assert.equal(v.notes()[day("2026-09-22")], `---\naliases: 9/22/26 Tuesday\n---\n- [ ] Book the photographer [[Kestrel#^${id}|⭕]] ^${id}\n\n## Notes\n- Call back about the quote\n`);
     assert.equal(v.notes()[day("2026-09-17")].trim(), "");
     assert.equal(v.notes()[KES].split("\n")[5], `- [>] Book the photographer [[2026-09-22#^${id}|9/22]] ^${id}`);
     assert.deepEqual(v.check(), []);
@@ -346,12 +346,12 @@ test("Schedule: a sent task's open line moved onto a day with notes and no task 
 test("Schedule: from a project note, the line stays as [>] with a forward date at the end and the task's ID; the new line has the ID too (OBS-181)", async () => {
     const month = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, "Reference/Journal/2026-10.md": "" }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-10-01", "month") });
     assert.equal(month.editor.split("\n")[3], `- [>] Plan the spring sale [[${PLANNER}/months/2026-10#^k3x9m2|Oct. 2026]] ^k3x9m2`, "by path: another note is named 2026-10");
-    assert.equal(month.notes[`${PLANNER}/months/2026-10.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
-    assert.deepEqual(month.notices, ["Forwarded to Oct. 2026"]);
+    assert.equal(month.notes[`${PLANNER}/months/2026-10.md`], "- [ ] Plan the spring sale [[Kestrel#^k3x9m2|⭕]] ^k3x9m2\n");
+    assert.deepEqual(month.notices, []);
 
     const year = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT }, open: PROJECT, at: 4, pick: (dp) => dp.result("2027-01-01", "year") });
     assert.equal(year.editor.split("\n")[4], "- [>] Book the photographer [[2027#^k3x9m2|2027]] ^k3x9m2");
-    assert.equal(year.notes[`${PLANNER}/years/2027.md`], "- [ ] Book the photographer [[Kestrel|⭕]] ^k3x9m2\n");
+    assert.equal(year.notes[`${PLANNER}/years/2027.md`], "- [ ] Book the photographer [[Kestrel#^k3x9m2|⭕]] ^k3x9m2\n");
 
     const week = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT, [WEEK]: WEEK_TEXT }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-20", "week") });
     assert.equal(week.editor.split("\n")[3], "- [>] Plan the spring sale [[2026w39#^k3x9m2|Wk of 9/20]] ^k3x9m2");
@@ -359,12 +359,12 @@ test("Schedule: from a project note, the line stays as [>] with a forward date a
     const own = PROJECT_TEXT.replace("Plan the spring sale", "Plan the spring sale [[2026-10-01|🚩 10/1]] ^Ab3-x9");
     const day = await scheduleIn({ notes: { [PROJECT]: own }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-18", "day") });
     assert.equal(day.editor.split("\n")[3], "- [>] Plan the spring sale [[2026-10-01|🚩 10/1]] [[2026-09-18#^Ab3-x9|9/18]] ^Ab3-x9", "its own block ID is the task's");
-    assert.equal(day.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] Plan the spring sale [[2026-10-01|🚩 10/1]] [[Kestrel|⭕]] ^Ab3-x9\n");
+    assert.equal(day.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] Plan the spring sale [[2026-10-01|🚩 10/1]] [[Kestrel#^Ab3-x9|⭕]] ^Ab3-x9\n");
 
     const dated = PROJECT_TEXT.replace("- [ ] Plan the spring sale", "- [ ] [[2026-09-17|9/17]] Plan the spring sale");
     const open = await scheduleIn({ notes: { [PROJECT]: dated }, open: PROJECT, at: 3, pick: (dp) => dp.result("2026-09-18", "day") });
     assert.equal(open.editor.split("\n")[3], "- [>] [[2026-09-17|9/17]] Plan the spring sale [[2026-09-18#^k3x9m2|9/18]] ^k3x9m2", "an open line's date link is its title's");
-    assert.equal(open.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] [[2026-09-17|9/17]] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
+    assert.equal(open.notes[`${PLANNER}/days/2026-09-18.md`].trim() + "\n", "- [ ] [[2026-09-17|9/17]] Plan the spring sale [[Kestrel#^k3x9m2|⭕]] ^k3x9m2\n");
 });
 
 test("Schedule: a day's forward date uses the note's path when another note has its name (OBS-181)", async () => {
@@ -507,7 +507,7 @@ test("Schedule: ISO weekly notes (GGGG-[W]WW): a week's name is that week, label
     assert.deepEqual({ ...opts.name("2026-W41") }, { date: "2026-10-05", unit: "week" }, "not the Sunday before, in week 40");
     const r = await scheduleIn({ notes: { [PROJECT]: PROJECT_TEXT }, open: PROJECT, at: 3, nn: ISO, pick: (dp) => dp.result("2026-10-07", "week") });
     assert.equal(r.editor.split("\n")[3], "- [>] Plan the spring sale [[2026-W41#^k3x9m2|Wk of 10/5]] ^k3x9m2");
-    assert.equal(r.notes[`${PLANNER}/weeks/2026-W41.md`], "- [ ] Plan the spring sale [[Kestrel|⭕]] ^k3x9m2\n");
+    assert.equal(r.notes[`${PLANNER}/weeks/2026-W41.md`], "- [ ] Plan the spring sale [[Kestrel#^k3x9m2|⭕]] ^k3x9m2\n");
 });
 
 test("Schedule: when the note it goes to can't be made, the line stays where it was", async () => {

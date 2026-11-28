@@ -51,7 +51,7 @@ const scenario = (name, fn) => {
 scenario("a nested task is sent through its task's new note, and its day [>] line follows it, asks when clicked, and stays [>] when it's done (test plan 1 to 5)", async ({ lag }) => {
     const v = standIn({ notes: NOTES, open: day("2026-09-17"), at: 4, lag });
     assert.equal(await v.schedule("2026-09-19"), "Schedule for");
-    assert.deepEqual(v.notices, ["Forwarded to 9/19, by way of Homepage build - category pages"]);
+    assert.deepEqual(v.notices, [], "no notice: the line stays, and shows where it went (Brian, 11/28)");
     let d17 = lines(v, day("2026-09-17"));
     assert.equal(d17[3], "- [ ] Homepage build: category pages [[Kestrel Outfitters 2026|⭕]] [[Homepage build - category pages|⋯]]", "the task keeps its colon and gets its note's ⋯");
     const id = idOf(d17[4]);
@@ -66,7 +66,7 @@ scenario("a nested task is sent through its task's new note, and its day [>] lin
     // Schedule on the day's [>] line moves the subtask's open line, and both its sent lines follow
     v.open(day("2026-09-17"), 4);
     assert.equal(await v.schedule("2026-09-22"), "Scheduled for Sat 9/19. Move it to");
-    assert.equal(v.notices.at(-1), "Moved to 9/22");
+    assert.deepEqual(v.notices, [], "its forward date shows the move");
     assert.equal(v.notes()[day("2026-09-19")].trim(), "");
     assert.equal(v.notes()[day("2026-09-22")].trim(), `- [ ] Pick a hero image for each category [[Kestrel Outfitters 2026|⭕]] [[Homepage build - category pages#^${id}|↗]] ^${id}`);
     assert.equal(lines(v, day("2026-09-17"))[4], `\t- [>] Pick a hero image for each category [[2026-09-22#^${id}|9/22]] ^${id}`);
@@ -93,7 +93,7 @@ scenario("from a bullet under a nested task, that task is sent through its task'
     const first = idOf(lines(v, day("2026-09-17"))[4]);
     v.open(day("2026-09-17"), 6);
     await v.schedule("2026-09-18");
-    assert.equal(v.notices.at(-1), 'Forwarded "Write the category blurbs" to 9/18, by way of Homepage build - category pages');
+    assert.deepEqual(v.notices, []);
     let d17 = lines(v, day("2026-09-17"));
     const id = idOf(d17[5]);
     assert.deepEqual(d17.slice(5, 7), [`\t- [>] Write the category blurbs [[2026-09-18#^${id}|9/18]] ^${id}`, "\t\t- Imogen sent the tone guide"], "the bullet stays under it");
@@ -103,7 +103,7 @@ scenario("from a bullet under a nested task, that task is sent through its task'
     // The task itself: forwarded, not moved, since its day [>] lines keep it on its day
     v.open(day("2026-09-17"), 3);
     await v.schedule("2026-09-18");
-    assert.equal(v.notices.at(-1), "Forwarded to 9/18");
+    assert.deepEqual(v.notices, []);
     d17 = lines(v, day("2026-09-17"));
     const task = idOf(d17[3]);
     assert.equal(d17[3], `- [>] Homepage build: category pages [[Kestrel Outfitters 2026|⭕]] [[Homepage build - category pages|⋯]] ^${task}`);
@@ -189,23 +189,38 @@ scenario("under an event, through its log, made with a Follow-ups section; a tim
     assert.deepEqual(v.notes(), before);
 });
 
-scenario("from a project note, a task note and a weekly note, the line comes out and goes through its task's new note (test plan 13 to 15)", async ({ lag }) => {
+scenario("from a project note or a task note, the line stays under its task as [>] and the day links back to it; from a weekly note it comes out and goes through its task's new note (test plan 13 to 15; Brian, 11/28)", async ({ lag }) => {
     let v = standIn({ notes: NOTES, open: CAT, at: 7, lag });
     await v.schedule("2026-09-23");
-    const shoot = "Projects/Freelance/Kestrel Outfitters 2026/Kestrel Fall Catalog/Shoot day on the 24th.md";
-    let id = idOf(lines(v, shoot).find((l) => l.includes("Book two store staff")));
-    assert.equal(v.notes()[CAT], "---\ntags: [project]\n---\n## To Do\n\n- [x] Book the studio space\n- [ ] Shoot day on the 24th [[Shoot day on the 24th|⋯]]\n- [ ] Deliver edited selects\n");
-    assert.ok(v.notes()[shoot].endsWith(`---\n- [>] Book two store staff to model the jackets [[2026-09-23#^${id}|9/23]] ^${id}\n`));
-    assert.equal(v.notes()[day("2026-09-23")].trim(), `- [ ] Book two store staff to model the jackets [[Kestrel Fall Catalog|⭕]] [[Shoot day on the 24th#^${id}|↗]] ^${id}`);
-    assert.equal(v.notices.at(-1), "Moved to 9/23, by way of Shoot day on the 24th");
+    let line = lines(v, CAT)[7], id = idOf(line);
+    assert.equal(line, `\t- [>] Book two store staff to model the jackets [[2026-09-23#^${id}|9/23]] ^${id}`, "stays under its task");
+    assert.equal(lines(v, CAT)[6], "- [ ] Shoot day on the 24th", "no note for its task");
+    assert.ok(!Object.keys(v.notes()).some((p) => p.endsWith("Shoot day on the 24th.md")));
+    assert.equal(v.notes()[day("2026-09-23")].trim(), `- [ ] Book two store staff to model the jackets [[Kestrel Fall Catalog#^${id}|⭕]] ^${id}`, "its ⭕ links its line in the project note");
+    assert.deepEqual(v.notices, []);
+    assert.deepEqual(v.check(), []);
+    assert.deepEqual(nestedMarks(v), []);
+    // Moved again from its day, its line in the project note follows; ticked there, the project note's line is done too
+    v.open(day("2026-09-23"), 0);
+    await v.schedule("2026-09-25");
+    assert.equal(lines(v, CAT)[7], `\t- [>] Book two store staff to model the jackets [[2026-09-25#^${id}|9/25]] ^${id}`);
+    v.open(day("2026-09-25"), 0);
+    await v.box("x");
+    assert.equal(lines(v, CAT)[7], `\t- [x] Book two store staff to model the jackets [[2026-09-25#^${id}|9/25]] ^${id}`);
     assert.deepEqual(v.check(), []);
 
     v = standIn({ notes: NOTES, open: WIRES, at: 8, lag });
     await v.schedule("2026-09-22");
-    const pdfs = "Projects/Freelance/Kestrel Outfitters 2026/Export PDFs for the sign-off call.md";
-    id = idOf(lines(v, pdfs).find((l) => l.includes("Check the mobile PDF")));
-    assert.ok(v.notes()[WIRES].includes("- [ ] Export PDFs for the sign-off call [[Export PDFs for the sign-off call|⋯]]\n\n## Notes"), v.notes()[WIRES]);
-    assert.equal(v.notes()[day("2026-09-22")].trim(), `- [ ] Check the mobile PDF on a phone [[Kestrel Outfitters 2026|⭕]] [[Export PDFs for the sign-off call#^${id}|↗]] ^${id}`);
+    line = lines(v, WIRES)[8]; id = idOf(line);
+    assert.equal(line, `\t- [>] Check the mobile PDF on a phone [[2026-09-22#^${id}|9/22]] ^${id}`);
+    assert.ok(!Object.keys(v.notes()).some((p) => p.endsWith("Export PDFs for the sign-off call.md")), "no note for its task");
+    assert.equal(v.notes()[day("2026-09-22")].trim(), `- [ ] Check the mobile PDF on a phone [[Kestrel Outfitters 2026|⭕]] [[Draft homepage wireframes#^${id}|↗]] ^${id}`);
+    assert.deepEqual(v.check(), []);
+    // Schedule on its [>] line there moves the open line
+    v.open(WIRES, 8);
+    assert.equal(await v.schedule("2026-09-24"), "Scheduled for Tue 9/22. Move it to");
+    assert.equal(lines(v, WIRES)[8], `\t- [>] Check the mobile PDF on a phone [[2026-09-24#^${id}|9/24]] ^${id}`);
+    assert.ok(v.notes()[day("2026-09-24")].includes(`^${id}`) && !v.notes()[day("2026-09-22")].includes(`^${id}`));
     assert.deepEqual(v.check(), []);
 
     v = standIn({ notes: NOTES, open: W38, at: 2, lag });
@@ -214,6 +229,7 @@ scenario("from a project note, a task note and a weekly note, the line comes out
     id = idOf(lines(v, list).find((l) => l.includes("Ask Imogen")));
     assert.ok(v.notes()[W38].startsWith("- [x] Wireframes to Imogen before Friday's sign-off\n- [ ] Product list for the catalog shoot [[Product list for the catalog shoot|⋯]]\n- [ ] September invoices\n"), v.notes()[W38]);
     assert.equal(v.notes()[day("2026-09-24")].trim(), `- [ ] Ask Imogen which jackets are in [[Product list for the catalog shoot#^${id}|↗]] ^${id}`);
+    assert.equal(v.notices.at(-1), "Moved to 9/24, by way of Product list for the catalog shoot", "the line left the week");
     assert.deepEqual(v.check(), []);
 });
 

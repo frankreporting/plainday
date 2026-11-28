@@ -248,7 +248,7 @@ test("sentLine: a source tagged with a subtag names itself; a ⭕ in the title s
         await v.schedule("2026-09-19");
         return v.notes()[day("2026-09-19")].trim().replace(/ \^\w+$/, "");
     };
-    assert.equal(await sent({ [SUBTAG]: "---\ntags: [project/retainer]\n---\n" }, SUBTAG, "- [ ] Send the report"), "- [ ] Send the report [[Retainer|⭕]]");
+    assert.equal(await sent({ [SUBTAG]: "---\ntags: [project/retainer]\n---\n" }, SUBTAG, "- [ ] Send the report"), "- [ ] Send the report [[Retainer#^hzt03c|⭕]]");
     assert.equal(await sent({ [NOTE]: "---\ntags: [task]\n---\n" }, NOTE, "- [ ] Ask [[Pinecrest|⭕]] about it [[Pinecrest|⭕]]"), "- [ ] Ask [[Pinecrest|⭕]] about it [[Kestrel|⭕]] [[Draft#^hzt03c|↗]]");
     assert.equal(await sent({ [NOTE]: "---\ntags: [task]\n---\n" }, NOTE, "- [ ] Pick fonts [[Pick fonts|⋯]] 🆓 [[Old source|↗]]"), "- [ ] Pick fonts [[Kestrel|⭕]] [[Pick fonts|⋯]] [[Draft#^hzt03c|↗]] 🆓");
     assert.equal(await sent({ [NOTE]: "---\ntags: [task]\n---\n", "Projects/Freelance/Pinecrest/Draft.md": "" }, NOTE, "- [ ] Mobile layout"), "- [ ] Mobile layout [[Kestrel|⭕]] [[Projects/Freelance/Kestrel/Draft#^hzt03c|↗]]");
