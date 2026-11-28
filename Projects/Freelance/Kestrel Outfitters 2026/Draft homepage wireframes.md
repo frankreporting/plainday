@@ -11,6 +11,7 @@ Homepage wireframes, desktop and mobile, for Imogen to sign off on Friday. Worke
 - [x] Mobile layout
 - [x] Store locator above the fold on mobile
 - [ ] Export PDFs for the sign-off call
+	- [ ] Check the mobile PDF on a phone
 
 ## Notes
 

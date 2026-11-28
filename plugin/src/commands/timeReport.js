@@ -1275,9 +1275,11 @@ export default class TimeReport {
                 if (top === i || this.indentWidth(lines[top]) > 0) return;
                 const { marks, notes: own, from, due } = this.lineLinks(this.classify(text).body);
                 const id = T.idOf(text);
+                // A day's [>] line (OBS-254) is one of its subtask's lines: its ID, 🚩 and ⋯ are the subtask's
+                const sub = note.kind === "day" && T.isDayLine(lines, i, read);
                 const home = (/** @type {string} */ symbol) => marks.some((l) => l.alias.startsWith(symbol));
-                const found = [...(home("⭕") ? ["⭕"] : []), ...(home("🗃") ? ["🗃️"] : []), ...(due.length ? ["🚩"] : []), ...(own.length ? ["⋯"] : []), ...(from.length ? ["↗"] : []),
-                    ...(id && tasks.has(id.toLowerCase()) ? ["task ID"] : [])];
+                const found = [...(home("⭕") ? ["⭕"] : []), ...(home("🗃") ? ["🗃️"] : []), ...(due.length && !sub ? ["🚩"] : []), ...(own.length && !sub ? ["⋯"] : []), ...(from.length ? ["↗"] : []),
+                    ...(id && !sub && tasks.has(id.toLowerCase()) ? ["task ID"] : [])];
                 if (!found.length) return;
                 const list = found.length > 1 ? `${found.slice(0, -1).join(", ")} and ${found.at(-1)}` : found[0];
                 out.push({ path: note.path, line: i, text: text.trim(), message: `is nested, so its ${list} count${found.length > 1 ? "" : "s"} for nothing: only a task at the left edge can carry ${found.length > 1 ? "them" : "it"}; outdent it, or take ${found.length > 1 ? "them" : "it"} off` });
@@ -4203,6 +4205,41 @@ export default class TimeReport {
                 if (this.classify(l).kind === "event") top = j;
                 break;
             }
+        }
+        return top;
+    }
+
+    // The task line a command acts on from line `i` (Brian, 11/9, OBS-254): `i` itself when it's a checklist line,
+    // else the nearest checklist line it's nested under, else `i`. Plain bullets and indented text between are
+    // skipped, as nestTop skips them. topOf stays the top, for the timer and for where time counts. Pure.
+    /**
+     * @param {(n: number) => string | undefined} lineAt
+     * @param {number} i
+     * @returns {number}
+     */
+    taskAt(lineAt, i) {
+        return /^\s*[-*+]\s+\[.\]/.test(lineAt(i) ?? "") ? i : this.parentAt(lineAt, i) ?? i;
+    }
+
+    // The checklist line that line `i` is nested under most closely, an event included, or null for a line
+    // nested under none. Walked as nestTop walks. Pure.
+    /**
+     * @param {(n: number) => string | undefined} lineAt
+     * @param {number} i
+     * @returns {number | null}
+     */
+    parentAt(lineAt, i) {
+        const top = this.nestTop(lineAt, i);
+        if (top === i) return null;
+        let width = this.indentWidth(lineAt(i) ?? "");
+        for (let j = i - 1; j > top; j--) {
+            const l = lineAt(j);
+            if (l === undefined) break;
+            if (!l.trim() || this.commentOnly(l)) continue;
+            const w = this.indentWidth(l);
+            if (w >= width) continue;
+            width = w;
+            if (/^\s*[-*+]\s+\[.\]/.test(l)) return j;
         }
         return top;
     }

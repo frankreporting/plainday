@@ -7,8 +7,8 @@ import { app, plainday } from "../host.js";
 /** @import { MomentFn, SomeView } from "../host.js" */
 /**
  * A task's checklist line as a command reads it now (gather): its note, its line from 0, its
- * checkbox's status (" ", "x", ">", …) and its text.
- * @typedef {{ file: TFile, line: number, task: string, text: string }} TaskLine
+ * checkbox's status (" ", "x", ">", …) and its text; `sub` for a day's [>] line (isDayLine, OBS-254).
+ * @typedef {{ file: TFile, line: number, task: string, text: string, sub?: boolean }} TaskLine
  *
  * A list item with a block ID as Obsidian's cache has it (map, linesOf): `task` is undefined for one
  * that isn't a checklist line, and null for a block that isn't a list item (lineIn).
@@ -47,9 +47,10 @@ import { app, plainday } from "../host.js";
  */
 /**
  * A task's line as the check finds it (check), in a note of the caller's (`N`): its ID, lowercased,
- * its note's path and kind, its line from 0, its box and its text, the note, and the note's lines.
+ * its note's path and kind, its line from 0, its box and its text, the note, the note's lines, and whether
+ * it's a day's [>] line (isDayLine).
  * @template {CheckedNote} [N=CheckedNote]
- * @typedef {{ id: string, path: string, kind: string, line: number, task: string, text: string, note: N, lines: string[] }} TaskHit
+ * @typedef {{ id: string, path: string, kind: string, line: number, task: string, text: string, note: N, lines: string[], sub: boolean }} TaskHit
  */
 
 export default class TaskIds {
@@ -262,23 +263,43 @@ export default class TaskIds {
         return tr ? tr.nestTop((n) => lines[n], i) === i : !/^\s/.test(lines[i]);
     }
 
+    // A day's [>] line (OBS-254): the line Schedule leaves on a day, under its parent, in place of a nested task
+    // it sent through the parent's note. A nested [>] checklist line ending in a forward date and an ID; the
+    // caller knows the note is a daily note. It's one of its subtask's lines: the search by ID finds it, its
+    // forward date follows the subtask, and nothing else on it counts (it never carries a ⭕, 🗃️ or ↗).
+    /** @param {string[]} lines @param {number} i @param {NameReader} [read] @returns {boolean} */
+    static isDayLine(lines, i, read) {
+        const text = (lines[i] ?? "").replace(/\r$/, "");
+        if (!/^\s/.test(text) || TaskIds.isTop(lines, i) || TaskIds.isEvent(text)) return false;
+        return text.match(TaskIds.CHECKBOX)?.[1] === ">" && !!TaskIds.idOf(text) && !!TaskIds.forwardOf(text, read);
+    }
+
     // `text` (a note) with the forward date on each top-level checklist line ending in `id` set to `link`,
     // and an older breadcrumb in front of it taken off; with `reopen`, a done or canceled one becomes [>]
     // too, since the task is open elsewhere now (rule 13); with `mark` ("x" or "-"), each one is finished
-    // instead, since the task was (CheckOff, OBS-232). { text, changed }. Line endings are kept.
+    // instead, since the task was (CheckOff, OBS-232). With `sub`, in a daily note, only its day's [>] lines
+    // (isDayLine), whose forward date follows and which are never finished or reopened. { text, changed }.
+    // Line endings are kept.
     /**
      * @param {string} text
      * @param {string} id
      * @param {string | null} link
-     * @param {{ reopen?: boolean, mark?: string | null, read?: NameReader }} [options]
+     * @param {{ reopen?: boolean, mark?: string | null, sub?: boolean, read?: NameReader }} [options]
      * @returns {{ text: string, changed: boolean }}
      */
-    static setForwardIn(text, id, link, { reopen = false, mark = null, read } = {}) {
+    static setForwardIn(text, id, link, { reopen = false, mark = null, sub = false, read } = {}) {
         let changed = false;
         const all = text.split("\n");
         const lines = all.map((l, i) => {
             const cr = l.endsWith("\r") ? "\r" : "";
             const bare = cr ? l.slice(0, -1) : l;
+            if (sub) {
+                if (!TaskIds.isDayLine(all, i, read) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase()) return l;
+                const next = TaskIds.withForward(bare, link, read);
+                if (next === bare) return l;
+                changed = true;
+                return next + cr;
+            }
             // Only a sent line ([>], or [x] or [-] once finished): an open line with the same ID is a copy
             const box = bare.match(TaskIds.CHECKBOX);
             if (!box || !">xX-".includes(box[1]) || TaskIds.isEvent(bare) || TaskIds.idOf(bare)?.toLowerCase() !== id.toLowerCase() || !TaskIds.isTop(all, i)) return l;
@@ -436,7 +457,7 @@ export default class TaskIds {
         return [...files.values()];
     }
 
-    // Several tasks' checklist lines as they are now, top-level lines only: Map from each of `ids` that is a
+    // Several tasks' checklist lines as they are now, top-level lines and day's [>] lines: Map from each of `ids` that is a
     // task's (isTask) to its lines, as gather gives them. `map` is the command's (map()). A block ID of your
     // own on lines that were never sent joins nothing.
     /**
@@ -455,13 +476,16 @@ export default class TaskIds {
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
             const ls = (await this.readNow(file)).split("\n");
+            const day = this.kindOf(file) === "day";
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
                 const id = box && !TaskIds.isEvent(text) ? TaskIds.idOf(text)?.toLowerCase() : null;
-                if (!id || !want.has(id) || !TaskIds.isTop(ls, line)) return;
+                if (!id || !want.has(id)) return;
+                const sub = !TaskIds.isTop(ls, line);
+                if (sub && !(day && TaskIds.isDayLine(ls, line))) return;
                 if (!out.has(id)) out.set(id, []);
-                out.get(id).push({ file, line, task: box[1], text });
+                out.get(id).push({ file, line, task: box[1], text, ...(sub ? { sub } : {}) });
             });
         }
         for (const [id, lines] of out) if (!TaskIds.isTask(lines)) out.delete(id);
@@ -488,7 +512,8 @@ export default class TaskIds {
         return view ? view.editor.getValue() : app.vault.cachedRead(file);
     }
 
-    // A task's checklist lines as they are now, top-level lines only (rule 5): [{ file, line, task, text }].
+    // A task's checklist lines as they are now, top-level lines only (rule 5), and its day's [>] lines (isDayLine,
+    // marked `sub`, OBS-254): [{ file, line, task, text }].
     // The notes the cache names for `id`, every note open in an editor, and `also` (files a caller knows of,
     // such as the note a forward date points at), each read through readNow, so a line written a moment
     // ago isn't missed.
@@ -509,10 +534,13 @@ export default class TaskIds {
         for (const file of files.values()) {
             if (this.ignored(file) || !app.vault.getFileByPath(file.path)) continue;
             const ls = (await this.readNow(file)).split("\n");
+            const day = this.kindOf(file) === "day";
             ls.forEach((raw, line) => {
                 const text = raw.replace(/\r$/, "");
                 const box = text.match(TaskIds.CHECKBOX);
-                if (box && !TaskIds.isEvent(text) && TaskIds.idOf(text)?.toLowerCase() === want && TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
+                if (!box || TaskIds.isEvent(text) || TaskIds.idOf(text)?.toLowerCase() !== want) return;
+                if (TaskIds.isTop(ls, line)) out.push({ file, line, task: box[1], text });
+                else if (day && TaskIds.isDayLine(ls, line)) out.push({ file, line, task: box[1], text, sub: true });
             });
         }
         return out;
@@ -557,7 +585,9 @@ export default class TaskIds {
     //   resolve(linkpath, fromPath): the path a link points at, or null;
     //   ownNote(text, path): the notes a line's ⋯ links, in the system (a ↗ is read by nobody).
     // Only top-level lines are a task's: at the left edge, since a line nested under a checklist line is
-    // a sub-task (rule 5) and one under nothing but plain bullets isn't defined in the system.
+    // a sub-task (rule 5) and one under nothing but plain bullets isn't defined in the system. A day's [>]
+    // line (isDayLine, OBS-254) is the one nested line that is: its forward date is checked as a sent line's,
+    // and its project isn't compared.
     // Returns [{ rule, id, lines: [{ path, line, text }], detail }], in the spec's order: "project" (two
     // projects), "open" (open twice), "finished" (done while open, or done on two days), "forward" (a
     // source's forward date points where the task isn't), "notes" (lines in two notes outside the periodic
@@ -583,10 +613,12 @@ export default class TaskIds {
             /** @type {Map<string, TaskHit<N>>} */
             const seen = new Map();
             lines.forEach((text, line) => {
-                const box = topLevel(text) && !TaskIds.isEvent(text) ? text.match(TaskIds.CHECKBOX) : null;
+                // A day's [>] line is one of its subtask's lines (OBS-254): its forward date is checked, its project isn't
+                const sub = !topLevel(text) && note.kind === "day" && TaskIds.isDayLine(lines, line, read);
+                const box = (topLevel(text) || sub) && !TaskIds.isEvent(text) ? text.match(TaskIds.CHECKBOX) : null;
                 const raw = box ? TaskIds.idOf(text) : null;
                 if (!raw) return;
-                const hit = { id: raw.toLowerCase(), path: note.path, kind: note.kind, line, task: box[1], text: text.trim(), note, lines };
+                const hit = { id: raw.toLowerCase(), path: note.path, kind: note.kind, line, task: box[1], text: text.trim(), note, lines, sub };
                 found.push(hit);
                 if (seen.has(hit.id)) twice.push({ rule: "twice", id: hit.id, lines: [seen.get(hit.id), hit].map(TaskIds.where), detail: {} });
                 else seen.set(hit.id, hit);
@@ -608,7 +640,7 @@ export default class TaskIds {
             // No line is let off (OBS-233): a project change writes every line of the task and refuses to move
             // billed time, so two projects are always something to fix. A line with a ⋯ and no project is
             // Unassigned and isn't listed (rule 4)
-            const named = hits.filter((h) => compared(h.note)).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text, read));
+            const named = hits.filter((h) => compared(h.note) && !h.sub).map((h) => ({ h, project: projectOf(h.note, h.line, h.lines) ?? null })).filter((n) => n.project !== null || !TaskIds.hasOwnNote(n.h.text, read));
             if (new Set(named.map((n) => n.project)).size > 1) out.push({ rule: "project", id, lines: named.map((n) => TaskIds.where(n.h)), detail: { projects: named.map((n) => n.project) } });
             // `clicked`: which of them, if any, is a sent line a click turned from [>] into [ ] (a line outside
             // the periodic notes with a forward date), so the Problem can say to set it back rather than take off its ID
@@ -621,7 +653,7 @@ export default class TaskIds {
             const at = open.filter((h) => h.kind !== "other");
             if (!at.length && !open.length) at.push(...finished.filter((h) => h.kind !== "other").slice(0, 1));
             const current = at[0] ?? null;
-            for (const s of hits.filter((h) => h.kind === "other" && !isOpen(h))) {
+            for (const s of hits.filter((h) => (h.kind === "other" || h.sub) && !isOpen(h))) {
                 const fwd = TaskIds.forwardOf(s.text, read);
                 // A [>] line with its date in front is in the old shape: the backfill gives it its forward date
                 if (!fwd && (s.task !== ">" || TaskIds.oldForward(s.text, read))) continue;

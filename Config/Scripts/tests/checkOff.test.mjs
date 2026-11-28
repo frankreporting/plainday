@@ -333,7 +333,8 @@ scenario("Task Status's picker setting done on an earlier day's [>] line of a fi
 scenario("a click on a [>] box behaves as it does today on a line with no ID, a nested line, a line outside the system, an event, and a task whose open line was deleted", async ({ lag }) => {
     const cases = [
         { name: "no ID", notes: { [day("2026-09-15")]: "- [>] Call the printer\n" }, open: day("2026-09-15"), at: 0 },
-        { name: "nested", notes: { [day("2026-09-15")]: "- [ ] Brochure\n\t- [>] Book the studio [[2026-09-18#^b5st0d|9/18]] ^b5st0d\n", [day("2026-09-18")]: "- [ ] Book the studio ^b5st0d\n" }, open: day("2026-09-15"), at: 1 },
+        // A nested [>] line with no forward date: not a day's [>] line (OBS-254), so a sub-task's, and nothing counts on it
+        { name: "nested", notes: { [day("2026-09-15")]: "- [ ] Brochure\n\t- [>] Book the studio ^b5st0d\n", [day("2026-09-18")]: "- [ ] Book the studio ^b5st0d\n" }, open: day("2026-09-15"), at: 1 },
         { name: "outside", notes: { "Reference/Ideas.md": "- [>] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe\n" }, open: "Reference/Ideas.md", at: 0 },
         // An event the calendar sync forwarded, in the form it writes, with a block ID of its own
         { name: "event", notes: { [day("2026-09-15")]: "- [>] [[2026-09-18|9/18]] 1:00pm\tCall with Rafe ^c1rafe\n", [day("2026-09-18")]: "- [<] 1:00pm\tCall with Rafe ^c1rafe\n" }, open: day("2026-09-15"), at: 0 },
@@ -658,7 +659,8 @@ scenario("reading view: an earlier day's [>] line of a finished task asks Do not
 scenario("reading view: a click CheckOff leaves alone is Obsidian's, changing only its line: no ID, nested, outside the system, an event, a callout, an embed, a dialog up", async ({ lag }) => {
     const cases = [
         { name: "no ID", notes: { [day("2026-09-15")]: "- [>] Call the printer\n" }, open: day("2026-09-15"), at: 0 },
-        { name: "nested", notes: { [day("2026-09-15")]: "- [ ] Brochure\n\t- [>] Book the studio [[2026-09-18#^b5st0d|9/18]] ^b5st0d\n", [day("2026-09-18")]: "- [ ] Book the studio ^b5st0d\n" }, open: day("2026-09-15"), at: 1 },
+        // A nested [>] line with no forward date: not a day's [>] line (OBS-254), so a sub-task's, and nothing counts on it
+        { name: "nested", notes: { [day("2026-09-15")]: "- [ ] Brochure\n\t- [>] Book the studio ^b5st0d\n", [day("2026-09-18")]: "- [ ] Book the studio ^b5st0d\n" }, open: day("2026-09-15"), at: 1 },
         { name: "outside", notes: { "Reference/Ideas.md": "- [>] Send final copy to Rafe [[2026-09-17#^p7d2qe|9/17]] ^p7d2qe\n" }, open: "Reference/Ideas.md", at: 0 },
         { name: "event", notes: { [day("2026-09-15")]: "- [>] [[2026-09-18|9/18]] 1:00pm\tCall with Rafe ^c1rafe\n", [day("2026-09-18")]: "- [<] 1:00pm\tCall with Rafe ^c1rafe\n" }, open: day("2026-09-15"), at: 0 },
         { name: "callout", open: COPY, at: 7, where: { inside: [".callout"] } },

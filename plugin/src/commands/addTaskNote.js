@@ -408,6 +408,41 @@ export default class AddTaskNote {
         else if (!result.wrote && !result.moved.length && !result.toDo.length) new Notice(`Every line of this task already links ${note.basename}`);
     }
 
+    // The note a nested task goes into when Schedule sends it on its own (OBS-254): the note line `at` of `source`,
+    // open in `editor`, links with its ⋯, made first when it has none, the way Add note makes one: a task's note
+    // filed in its project (or the Inbox), asking what Add note asks; an event's log. The cursor stays where it was.
+    // Null, having said why, when Add note stops or is cancelled, or the ⋯ links no note.
+    /**
+     * @param {Editor} editor
+     * @param {TFile} source
+     * @param {number} at
+     * @returns {Promise<TFile | null>}
+     */
+    async noteFor(editor, source, at) {
+        const lineText = editor.getLine(at);
+        const own = () => plainday.TaskChange.linked(editor.getLine(at), source.path)[0] ?? null;
+        // Its ⋯, or for a meeting line in the form used before August 2025, the log its title is wrapped in
+        if (AddTaskNote.OWN_NOTE_LINK.test(lineText) || AddTaskNote.LOG_TITLE.test(lineText)) {
+            const note = own();
+            if (!note) new Notice("This task's note doesn't exist yet: click its link to make it, then schedule again");
+            return note;
+        }
+        // An event the calendar moved to another day keeps its log on its line there
+        if (plainday.TimeReport.eventKind(lineText) === "forwarded") {
+            new Notice("This event moved to another day: link its log from its line there");
+            return null;
+        }
+        const line = { editor, source, at, lineText, cursor: editor.getCursor("from") };
+        const target = this.target(lineText, this.afterCheckbox(lineText));
+        if (target.error || target.mode !== "text") {
+            new Notice(target.error ?? "No task text to name the note");
+            return null;
+        }
+        if (target.kind === "event") await this.linkEvent(line, target.name);
+        else await this.linkTask(line, target.name, { from: target.from, to: target.to });
+        return AddTaskNote.OWN_NOTE_LINK.test(editor.getLine(at)) ? own() : null;
+    }
+
     // The note `name` resolves to, preferring one outside Archive when notes there share the name
     /**
      * @param {string} name
