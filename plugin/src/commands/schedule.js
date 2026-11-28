@@ -67,7 +67,7 @@ export default class Schedule {
         // deep, it acts on the top until OBS-264.
         const top = tr.topOf(lineAt, cursor);
         const at = tr.taskAt(lineAt, cursor);
-        if (at !== top.at && !tr.eventKind(lineAt(at)) && tr.parentAt(lineAt, at) === top.at) {
+        if (at !== top.at && tr.indentWidth(top.line) === 0 && !tr.eventKind(lineAt(at)) && tr.parentAt(lineAt, at) === top.at) {
             return this.sendNested({ editor, srcFile, at, parent: top.at, named: at !== cursor ? this.nameOf(lineAt(at)) : null });
         }
         // Rule 5 (OBS-193): on any other line under a task or event, Schedule acts on the line at the top of the
@@ -152,7 +152,8 @@ export default class Schedule {
             // (rule 13). Read with the notes its line links (its source among them) and the destination,
             // which the cache may not have caught up with.
             const found = id && periodic ? await tasks.gather(id, [...this.linkedNotes(lineText, srcFile.path), destFile]) : [];
-            const others = found.filter((l) => l.file.path !== srcFile.path);
+            // A day [>] line of the task in this same note follows too (OBS-254): it's sent back onto its own day
+            const others = found.filter((l) => l.file.path !== srcFile.path || l.sub);
             // The task's nest as the note is now: from a day, time logged under it keeps it there, and so does a
             // nested task's day [>] line (OBS-254)
             const now = Schedule.editorLines(editor);

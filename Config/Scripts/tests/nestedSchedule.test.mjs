@@ -153,6 +153,21 @@ scenario("into a task note that has one, after its first checklist; and back ont
     assert.equal(d17[8], `\t- [>] Find the insurance card [[2026-09-17#^${id}|9/17]] ^${id}`);
     assert.equal(d17.filter((l) => l.endsWith(`^${id}`)).length, 2);
     assert.deepEqual(v.check().map((x) => x.rule), ["twice"]);
+    // And on again from there: the day [>] line in the same note follows too (review)
+    v.open(day("2026-09-17"), v.lineOf(day("2026-09-17"), "- [ ] Find the insurance card"));
+    await v.schedule("2026-09-22");
+    assert.equal(lines(v, day("2026-09-17"))[8], `\t- [>] Find the insurance card [[2026-09-22#^${id}|9/22]] ^${id}`);
+    assert.ok(v.notes()[RENEW].includes(`- [>] Find the insurance card [[2026-09-22#^${id}|9/22]] ^${id}`));
+    assert.deepEqual(v.check(), []);
+});
+
+scenario("a task nested under a task that isn't at the left edge isn't sent on its own: the task it's under moves, as before (review)", async ({ lag }) => {
+    const D = day("2026-09-15");
+    const v = standIn({ notes: { ...NOTES, [D]: "- Errands\n\t- [ ] Groceries\n\t\t- [ ] Milk\n" }, open: D, at: 2, lag });
+    await v.schedule("2026-09-18");
+    assert.equal(v.notes()[D], "- Errands\n");
+    assert.equal(v.notes()[day("2026-09-18")].trim(), "- [ ] Groceries\n\t- [ ] Milk");
+    assert.deepEqual(Object.keys(v.notes()).filter((p) => !(p in NOTES) && p !== D), [day("2026-09-18")], "no note made");
 });
 
 scenario("under an event, through its log, made with a Follow-ups section; a time entry under the event still refuses (test plan 12, 16)", async ({ lag }) => {

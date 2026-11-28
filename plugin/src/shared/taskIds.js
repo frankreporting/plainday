@@ -270,8 +270,9 @@ export default class TaskIds {
     /** @param {string[]} lines @param {number} i @param {NameReader} [read] @returns {boolean} */
     static isDayLine(lines, i, read) {
         const text = (lines[i] ?? "").replace(/\r$/, "");
-        if (!/^\s/.test(text) || TaskIds.isTop(lines, i) || TaskIds.isEvent(text)) return false;
-        return text.match(TaskIds.CHECKBOX)?.[1] === ">" && !!TaskIds.idOf(text) && !!TaskIds.forwardOf(text, read);
+        // The cheap tests first: the walk up the nest (isTop) runs only on a line that could be one
+        if (!/^\s/.test(text) || text.match(TaskIds.CHECKBOX)?.[1] !== ">" || !TaskIds.idOf(text) || TaskIds.isEvent(text)) return false;
+        return !!TaskIds.forwardOf(text, read) && !TaskIds.isTop(lines, i);
     }
 
     // `text` (a note) with the forward date on each top-level checklist line ending in `id` set to `link`,
