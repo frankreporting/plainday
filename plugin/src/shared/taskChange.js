@@ -13,9 +13,9 @@ import { app, plainday } from "../host.js";
  * @typedef {{ raw: string[], visible: string[], hidden: boolean[] }} Shown
  *
  * A line a change covers (find): its note and line, as written and as seen, whether it's one of the
- * start's task's lines, the notes its links name (null for a link to no note), and `gone` once a
- * write has moved it to a project's To Do.
- * @typedef {{ file: TFile, at: number, raw: string, seen: string, task: boolean, targets: (TFile | null)[], gone?: boolean }} ChangeLine
+ * start's task's lines, the notes its links name (null for a link to no note), `gone` once a
+ * write has moved it to a project's To Do, and `sub` for a day's [>] line (TaskIds.isDayLine, OBS-254).
+ * @typedef {{ file: TFile, at: number, raw: string, seen: string, task: boolean, targets: (TFile | null)[], gone?: boolean, sub?: boolean }} ChangeLine
  *
  * What a change covers (find): the notes that move with it, own notes it doesn't move, its lines, and
  * the notes the start's task's lines link (null from a note).
@@ -69,6 +69,17 @@ export default class TaskChange {
         if (app.metadataCache.initialized !== false) return true;
         new Notice("Obsidian is still indexing the vault; try again in a moment");
         return false;
+    }
+
+    // Where a line of a change sits: as placeOf says for its note, or "sub" for a day's [>] line (OBS-254), which
+    // DueDate and AddTaskNote write as one of its subtask's lines and a project change passes by: its project is
+    // its parent's, and it carries no ⭕ or 🗃️
+    /**
+     * @param {ChangeLine} l
+     * @returns {"periodic" | "home" | "other" | "sub"}
+     */
+    placeAt(l) {
+        return l.sub ? "sub" : this.placeOf(l.file);
     }
 
     // Where a line's note puts it: "periodic", "home" (a project's or area's own note) or "other"
@@ -264,7 +275,8 @@ export default class TaskChange {
                 held.add(`${file.path}:${at}`);
                 const { raw, visible, hidden } = await this.shown(file, memo);
                 if (hidden[at] || visible[at] === undefined) continue;
-                found.lines.push({ file, at, raw: raw[at], seen: visible[at], task, targets: this.targetsOf(raw[at], file.path) });
+                const sub = !T.isTop(visible, at);
+                found.lines.push({ file, at, raw: raw[at], seen: visible[at], task, targets: this.targetsOf(raw[at], file.path), ...(sub ? { sub } : {}) });
                 const id = T.idOf(visible[at])?.toLowerCase();
                 if (id && !idsDone.has(id)) {
                     idsDone.add(id);
@@ -329,7 +341,7 @@ export default class TaskChange {
         /** @type {Break[]} */
         const out = [];
         for (const l of lines) {
-            if (this.placeOf(l.file) !== "periodic") continue;
+            if (this.placeAt(l) !== "periodic") continue;
             const project = home ? home.path : tr.resolve((n) => (n === l.at ? l.seen : ""), l.at, l.file.path, index, l.at).project;
             if (!project) continue;
             // Its own notes as the report reads them, and the one AddTaskNote adds to a line with none
@@ -380,16 +392,16 @@ export default class TaskChange {
         const named = new Set();
         for (const l of found.lines) {
             if (!l.task) continue;
-            if (this.placeOf(l.file) === "home") {
+            if (this.placeAt(l) === "home") {
                 named.add(l.file.path);
                 continue;
             }
-            if (this.placeOf(l.file) === "other") {
+            if (this.placeAt(l) === "other") {
                 const filed = tr.projectOfNote(l.file.path, index);
                 if (filed && !tr.isArchived(filed)) named.add(filed);
                 continue;
             }
-            if (this.placeOf(l.file) !== "periodic") continue;
+            if (this.placeAt(l) !== "periodic") continue;
             const where = tr.resolve((n) => (n === l.at ? l.seen : ""), l.at, l.file.path, index, l.at);
             if (where.conflict) return null;
             if (where.project && !where.archived) named.add(where.project);
@@ -452,7 +464,7 @@ export default class TaskChange {
         const breaking = new Set(weighed.breaks.filter((b) => !b.inbox).map((b) => b.l));
         /** @type {Map<string, Shown>} */
         const memo = new Map();
-        const places = found.lines.map((l) => ({ l, place: this.placeOf(l.file) }));
+        const places = found.lines.map((l) => ({ l, place: this.placeAt(l) }));
         const onDays = places.filter(({ l, place }) => place === "periodic" && schedule.isDailyNote(l.file)).map(({ l }) => l);
         const timed = await this.entries(onDays, index);
         for (const { l, place } of places) {
@@ -738,7 +750,7 @@ export default class TaskChange {
         }
         const /** @type {Map<string, ChangeLine[]>} */ byFile = new Map(), /** @type {Set<ChangeLine>} */ written = new Set();
         for (const l of found.lines) {
-            if ((!home || this.placeOf(l.file) !== "periodic") && !(each && l.task)) continue;
+            if ((!home || this.placeAt(l) !== "periodic") && !(each && l.task)) continue;
             if (!byFile.has(l.file.path)) byFile.set(l.file.path, []);
             byFile.get(l.file.path).push(l);
         }
@@ -749,7 +761,7 @@ export default class TaskChange {
             const periodic = this.placeOf(file) === "periodic";
             try {
                 const { missed, changed } = await this.rewrite(file, list, (text, l) => {
-                    const homed = periodic && home ? this.withProject(text, weighed.link) : text;
+                    const homed = periodic && home && !l.sub ? this.withProject(text, weighed.link) : text;
                     return each && l.task ? each(homed, l) : homed;
                 });
                 if (missed.length) failed.push(file);

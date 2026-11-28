@@ -14,9 +14,10 @@ import { app, plainday } from "../host.js";
  * note's), its short name, the forward mark's link text and link, and the note, made if it isn't there.
  * @typedef {{ path: string, unit: Unit, kind: string, label: string, linktext: () => string, link: () => string, ensure: () => Promise<TFile> }} Destination
  *
- * What moving a task did (moveTask): whether it worked, what Schedule says, whether a line on the
- * destination was reopened, "moved" or "forwarded" (null when nothing moved), and the note the line came from.
- * @typedef {{ ok: boolean, notice: string, reopened: boolean, moved: "moved" | "forwarded" | null, from: TFile | null }} MoveResult
+ * What moving a task did (moveTask): whether it worked, what Schedule says, whether that's only where it went
+ * (`quiet`, a notice a line showing its new forward date can leave unsaid), whether a line on the destination was
+ * reopened, "moved" or "forwarded" (null when nothing moved), and the note the line came from.
+ * @typedef {{ ok: boolean, notice: string, quiet?: boolean, reopened: boolean, moved: "moved" | "forwarded" | null, from: TFile | null }} MoveResult
  *
  * Where the weekly, monthly and yearly notes go (TimeReport.periodPlaces): each one's fixed folder, and
  * its folders by date ("" for none).
@@ -61,10 +62,18 @@ export default class Schedule {
         if (plainday.TaskIds && !plainday.TaskIds.works(srcFile)) return;
         const editor = view.editor;
         const cursor = editor.getCursor().line;
-        // Rule 5 (OBS-193): on a sub-task, or any line under a task or event, Schedule acts on the line at the
-        // top of the nest, in every note. Events belong to the calendar, in any of their forms (rule 1): moving
-        // one here would put the note out of sync with it.
-        const top = plainday.TimeReport.topOf((n) => editor.getLine(n), cursor);
+        const tr = plainday.TimeReport, lineAt = (/** @type {number} */ n) => editor.getLine(n);
+        // A nested task, or a plain bullet or time entry under one, is sent on its own, by way of its parent's note
+        // (OBS-254): the task line the cursor is on, when the task at the top of the nest is its parent. Nested two
+        // deep, it acts on the top until OBS-264.
+        const top = tr.topOf(lineAt, cursor);
+        const at = tr.taskAt(lineAt, cursor);
+        if (at !== top.at && tr.indentWidth(top.line) === 0 && !tr.eventKind(lineAt(at)) && tr.parentAt(lineAt, at) === top.at) {
+            return this.sendNested({ editor, srcFile, at, parent: top.at, named: at !== cursor ? this.nameOf(lineAt(at)) : null });
+        }
+        // Rule 5 (OBS-193): on any other line under a task or event, Schedule acts on the line at the top of the
+        // nest, in every note. Events belong to the calendar, in any of their forms (rule 1): moving one here
+        // would put the note out of sync with it.
         if (top.event) {
             new Notice(top.event === "canceled" ? "This event was canceled in your calendar" : "Events must be moved in your calendar app");
             return;
@@ -132,7 +141,7 @@ export default class Schedule {
                 editor.replaceRange(started ? "/" : " ", { line: lineNum, ch: statusCh }, { line: lineNum, ch: statusCh + 1 }, Schedule.ORIGIN);
                 tasks.touched(srcFile);
                 if (id) {
-                    await this.followForward(id, dest, others.filter((l) => tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task)), { reopen: true });
+                    await this.followForward(id, dest, others.filter((l) => l.sub || (tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task))), { reopen: true });
                     await this.reopenFinished(id, others, [srcFile]);
                 }
                 new Notice(Schedule.said({ reopened: true, named, label: dest.label }));
@@ -144,11 +153,13 @@ export default class Schedule {
             // (rule 13). Read with the notes its line links (its source among them) and the destination,
             // which the cache may not have caught up with.
             const found = id && periodic ? await tasks.gather(id, [...this.linkedNotes(lineText, srcFile.path), destFile]) : [];
-            const others = found.filter((l) => l.file.path !== srcFile.path);
-            // The task's nest as the note is now: from a day, time logged under it keeps it there
+            // A day [>] line of the task in this same note follows too (OBS-254): it's sent back onto its own day
+            const others = found.filter((l) => l.file.path !== srcFile.path || l.sub);
+            // The task's nest as the note is now: from a day, time logged under it keeps it there, and so does a
+            // nested task's day [>] line (OBS-254)
             const now = Schedule.editorLines(editor);
             const weighed = Schedule.nest(now, lineNum);
-            const forwarded = sourceIsDaily && status !== ">" && weighed.time;
+            const forwarded = sourceIsDaily && status !== ">" && (weighed.time || Schedule.holdsDayLine(now, lineNum, weighed.end));
             // A day line that stays whose block ID is another task's (foreignId) gets a fresh one, so no line
             // with that ID is this task's either
             const foreign = !!id && forwarded && this.foreignId(found, srcFile);
@@ -277,13 +288,14 @@ export default class Schedule {
 
             try {
                 if (taskId && !foreign) {
-                    await this.followForward(taskId, dest, others.filter((l) => tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task)), { reopen: true });
+                    await this.followForward(taskId, dest, others.filter((l) => l.sub || (tasks.kindOf(l.file) === "other" && ">xX-".includes(l.task))), { reopen: true });
                     await this.reopenFinished(taskId, others, [file]);
                 }
             } catch (err) {
                 console.error(err);
             }
-            new Notice(Schedule.said({ reopened, forwarded: lineSurvives, named, label: dest.label }));
+            // Only when the line leaves this note, or a line reopens there: one that stays shows it was sent (Brian, 11/28)
+            if (!lineSurvives || reopened) new Notice(Schedule.said({ reopened, forwarded: lineSurvives, named, label: dest.label }));
         }, {
             // A week, a month or a year is its note, as for JumpToDate (OBS-96); a day, a week or a
             // month without a year is the next one
@@ -300,6 +312,200 @@ export default class Schedule {
         const what = named ? ` "${named}"` : "";
         const counts = /** @type {{ counts?: string | null } | null | undefined} */ (reopened)?.counts ? `; that day's time now counts toward ${/** @type {{ counts: string }} */ (reopened).counts}` : "";
         return reopened ? `Reopened${what} on ${label}${counts}` : `${forwarded ? "Forwarded" : "Moved"}${what} to ${label}`;
+    }
+
+    // Schedule on a nested task, line `at` of `srcFile` open in `editor`, nested under the task at the top of its
+    // nest, line `parent` (OBS-254): it's sent on its own, and stays tied to its parent.
+    //   - In a note that isn't a periodic note (a project, area, task or plain note, or a log), it stays where it is,
+    //     under its parent, as [>] with the forward date and its ID, and the new day gets it as any line sent from
+    //     that note: the note's ⭕ (or 🗃️) and a ↗ to its line there, or for a project or area note a ⭕ (or 🗃️)
+    //     that links its line. No note is made (Brian, 11/28).
+    //   - In a periodic note, it goes by way of its parent's note, found, or made the way Add note makes one (asking
+    //     what it asks, and stopping where it stops), after the date is asked: the note gets it at the left edge,
+    //     already sent ([>], the forward date, its ID), and the new day gets it as a line sent from that note. From
+    //     a day it stays under its parent as the day's [>] line; from a week, a month or a year it comes out, and
+    //     what doesn't go with it moves into the note under its [>] line.
+    // Its open nested tasks go to the new day. Its ID is its own block ID unless another note has it, else a new
+    // one. The note first, then the new day, then the line here, so a write that fails can't lose it. A notice only
+    // when the line leaves this note. On a nested line Schedule sent already, the subtask's open line moves
+    // (reschedule). `named`: the task's name, for a notice, when run from under it.
+    /**
+     * @param {{ editor: Editor, srcFile: TFile, at: number, parent: number, named: string | null }} send
+     * @returns {Promise<void>}
+     */
+    async sendNested({ editor, srcFile, at, parent, named }) {
+        const tasks = plainday.TaskIds, T = tasks.constructor, helper = plainday.AddTaskNote;
+        const lineText = editor.getLine(at);
+        const box = lineText.match(/^(\s*)([-*+]\s+)\[(.)\]\s*(.*)$/);
+        if (!box) { new Notice("Not on a checklist item"); return; }
+        const [, indent, bullet, status] = box;
+        const statusCh = indent.length + bullet.length + 1;
+        const id = T.idOf(lineText);
+        const daily = this.isDailyNote(srcFile), periodic = tasks.kindOf(srcFile) !== "other";
+        if (app.metadataCache.initialized === false) { new Notice("Obsidian is still indexing the vault; try again in a moment"); return; }
+        // A nested line Schedule sent already: one of its subtask's lines, so the subtask's open line moves. Done,
+        // canceled or clicked back to [ ] in a note, while the subtask is open or done on a periodic note, it's still
+        // that line, and goes back to [>] once the move goes ahead, as a sent line at the left edge does.
+        const all = Schedule.editorLines(editor);
+        if (id && (daily ? T.isDayLine(all, at) : !periodic && (T.isNestedSent(all, at) || (" /".includes(status) && T.forwardOf(lineText))))) {
+            if (status === ">") return this.reschedule({ editor, srcFile, lineNum: at, lineText, id, named });
+            const fwd = T.forwardOf(lineText);
+            const known = await tasks.gather(id, [fwd ? app.metadataCache.getFirstLinkpathDest(fwd.linkpath, srcFile.path) : null]);
+            if (known.some((l) => l.file.path !== srcFile.path && tasks.kindOf(l.file) !== "other")) return this.reschedule({ editor, srcFile, lineNum: at, lineText, id, lines: known, restore: statusCh, named });
+        }
+        const parentText = editor.getLine(parent);
+        // An event the calendar moved to another day keeps its log on its line there
+        if (plainday.TimeReport.eventKind(parentText) === "forwarded") { new Notice("This event moved to another day: link its log from its line there"); return; }
+        const had = periodic ? plainday.TaskChange.linked(parentText, srcFile.path)[0] : null;
+        if (had && !this.takes(had)) return;
+        const rules = plainday.DatePrompt.weekRules();
+        const jump = plainday.JumpToDate;
+        plainday.DatePrompt.open("Schedule for", async (result, modal) => {
+            const dest = this.destination(result, rules);
+            modal.close();
+            if (dest.path === srcFile.path) { new Notice("Already in this note"); return; }
+            const changed = () => new Notice("The line changed before it could be scheduled, so it wasn't");
+            if (editor.getLine(at) !== lineText || editor.getLine(parent) !== parentText) { changed(); return; }
+            const note = periodic ? await helper.noteFor(editor, srcFile, parent) : null;
+            if (periodic && (!note || !this.takes(note))) return;
+            // Making the note can have put a property above the line (a note that moved): found again by its text
+            let line = at;
+            if (editor.getLine(line) !== lineText) {
+                const hits = Schedule.editorLines(editor).map((l, i) => (l === lineText ? i : -1)).filter((i) => i !== -1);
+                if (hits.length !== 1) { changed(); return; }
+                line = hits[0];
+            }
+            const now = Schedule.editorLines(editor);
+            const { end } = Schedule.nest(now, line);
+            const go = Schedule.openSteps(now, line, end);
+            let taskId = id;
+            if (taskId && tasks.linesOf(taskId).some((l) => l.file.path !== srcFile.path)) {
+                new Notice(`This line's block ID ^${taskId} is also on a line in another note, so the task got a new ID; a link to ^${taskId} in this note needs the new one`);
+                taskId = null;
+            }
+            taskId ??= tasks.freshId();
+            const body = T.withoutId(T.withForward(lineText.replace(/^\s*[-*+]\s+\[.\]\s*/, ""), null));
+            const fwd = T.forwardLink(dest.linktext(), dest.label, taskId);
+            const out = (/** @type {string} */ l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
+            /** @type {number[]} */
+            const under = [];
+            for (let k = line + 1; k <= end; k++) if (now[k].replace(/\r$/, "").trim()) under.push(k);
+            const staying = under.filter((k) => !go.has(k));
+            const outgoing = [this.sentLine(`- [${status === "/" ? "/" : " "}] ${body} ^${taskId}`, note ?? srcFile), ...under.filter((k) => go.has(k)).map((k) => out(now[k]))];
+            const stays = daily || !periodic;
+            const intoNote = note ? [T.withForward(`- [>] ${body} ^${taskId}`, fwd), ...(stays ? [] : staying.map((k) => out(now[k])))] : [];
+            const kept = stays ? [T.withForward(`${indent}${bullet}[>] ${body} ^${taskId}`, fwd), ...staying.map((k) => now[k].replace(/\r$/, ""))] : [];
+
+            // The note first, then the new day, then the line here
+            if (note) {
+                try {
+                    await this.rewrite(note, (t) => Schedule.intoNote(t, intoNote, { log: helper.isLog(note) }));
+                } catch (err) {
+                    console.error(err);
+                    new Notice(`Couldn't write to ${note.basename}, so nothing was scheduled — check console`);
+                    return;
+                }
+            }
+            try {
+                const file = await dest.ensure();
+                const before = await tasks.readNow(file);
+                const prevFolds = this.captureFolds(file, before.split("\n").length);
+                const placed = await this.appendToTopChecklist(file, outgoing);
+                tasks.touched(file);
+                await this.semiFold(file, placed.content, prevFolds, placed.at, placed.count, placed.item);
+            } catch (err) {
+                console.error(err);
+                new Notice(`Couldn't write to the ${dest.kind} note, so nothing was scheduled${note ? `; ${note.basename}'s line for it says ${dest.label}, which the report lists` : ""} — check console`);
+                return;
+            }
+            const current = Schedule.editorLines(editor);
+            if (current.slice(line, end + 1).join("\n") !== now.slice(line, end + 1).join("\n") || (!kept.length && Schedule.nest(current, line).end !== end)) {
+                new Notice(`The task changed while it was scheduled: it's on ${dest.label} now, so ${kept.length ? "set its line here to [>]" : "take it out here"} by hand`);
+                return;
+            }
+            if (kept.length) editor.replaceRange(kept.join("\n"), { line, ch: 0 }, { line: end, ch: editor.getLine(end).length }, Schedule.ORIGIN);
+            else if (end + 1 < editor.lineCount()) editor.replaceRange("", { line, ch: 0 }, { line: end + 1, ch: 0 }, Schedule.ORIGIN);
+            else editor.replaceRange("", { line: line - 1, ch: editor.getLine(line - 1).length }, { line: end, ch: editor.getLine(end).length }, Schedule.ORIGIN);
+            tasks.touched(srcFile);
+            // Only when the line leaves this note: one that stays shows where it went (Brian, 11/28)
+            if (!kept.length) new Notice(`Moved${named ? ` "${named}"` : ""} to ${dest.label}, by way of ${note?.basename}`);
+        }, {
+            periods: true,
+            name: (text) => jump.fromName(text, rules, { ahead: true }),
+            label: (r) => (r.unit === "week" ? jump.periodName(r, rules) : null),
+        });
+    }
+
+    // Whether `note`, a nested task's parent's note, is one Schedule adds a subtask to (OBS-254): a task note, log
+    // or plain note in the system (TaskChange.ours). When not, it says why, naming the note, and nothing moves.
+    /** @param {TFile} note @returns {boolean} */
+    takes(note) {
+        if (plainday.TaskChange.ours(note)) return true;
+        const tasks = plainday.TaskIds, mover = plainday.MoveToProject, { projects, inbox, archive } = tasks.folders();
+        const why = tasks.inArchive(note.path) ? `is in ${archive}`
+            : !tasks.inSystem(note) ? `is outside the ${projects} and ${inbox} folders`
+            : tasks.kindOf(note) !== "other" ? "is a periodic note"
+            : mover.billingNote(note) ? "is an invoice or a timesheet"
+            : "is a project's or area's own note";
+        new Notice(`This task's note ${note.basename} ${why}, where Schedule doesn't add subtasks, so nothing was scheduled`);
+        return false;
+    }
+
+    // Whether the nest under line `at` of `lines` (to `end`) holds a nested task's day [>] line (TaskIds.isDayLine,
+    // OBS-254), which keeps its parent on its day
+    /** @param {string[]} lines @param {number} at @param {number} end @returns {boolean} */
+    static holdsDayLine(lines, at, end) {
+        const T = plainday.TaskIds.constructor;
+        for (let k = at + 1; k <= end; k++) if (T.isDayLine(lines, k)) return true;
+        return false;
+    }
+
+    // `content` (a note) with `newLines`, a subtask sent through it and what goes with it, at the left edge where
+    // its subtasks are (OBS-254). In a log (`log`), at the end of the first list under its `## Follow-ups`, where a
+    // log's action items are, or right under that heading when it has none; with no such heading, one is added at
+    // the end. In a task note or a plain note, at the end of its first checklist at the left edge; with none, a new
+    // one goes just above the first heading after the properties, or at the end. A note with nothing after its
+    // properties gets them right under them. A CRLF note keeps its line endings.
+    /** @param {string} content @param {string[]} newLines @param {{ log?: boolean }} [options] @returns {string} */
+    static intoNote(content, newLines, { log = false } = {}) {
+        const cr = content.includes("\r\n") ? "\r" : "";
+        const lines = content.split("\n");
+        const raw = lines.map((l) => l.replace(/\r$/, ""));
+        const { hidden } = plainday.TimeReport.scan(raw);
+        const block = newLines.map((l) => l + cr);
+        const start = plainday.CalendarSync.afterFrontmatter(lines);
+        const heading = (/** @type {number} */ i) => !hidden[i] && /^#{1,6}\s/.test(raw[i]);
+        // The last line of the list that starts at line i: list items and the lines nested under them
+        const listEnd = (/** @type {number} */ i) => {
+            let last = i;
+            for (let j = i + 1; j < raw.length && raw[j].trim() && !heading(j) && (/^\s/.test(raw[j]) || /^[-*+]\s/.test(raw[j])); j++) last = j;
+            return last;
+        };
+        const insert = (/** @type {number} */ at, /** @type {string[]} */ add) => {
+            if (at === lines.length && at > 0 && cr && !lines[at - 1].endsWith(cr)) lines[at - 1] += cr;
+            lines.splice(at, 0, ...add);
+            return lines.join("\n");
+        };
+        // At the end: after a blank line, unless the note has nothing after its properties
+        const atEnd = (/** @type {string[]} */ add) => {
+            let e = lines.length;
+            while (e > start && !raw[e - 1].trim()) e--;
+            lines.splice(e);
+            const body = e > start;
+            if (e > 0 && cr && !lines[e - 1].endsWith(cr)) lines[e - 1] += cr;
+            return [...lines, ...(body ? [cr] : []), ...add, ""].join("\n");
+        };
+        if (log) {
+            const h = raw.findIndex((l, i) => i >= start && heading(i) && /^#{1,6}\s+follow-ups\s*$/i.test(l));
+            if (h === -1) return atEnd([`## Follow-ups${cr}`, cr, ...block]);
+            for (let i = h + 1; i < raw.length && !heading(i); i++) if (!hidden[i] && /^[-*+]\s/.test(raw[i])) return insert(listEnd(i) + 1, block);
+            return insert(h + 1, [cr, ...block, ...(raw[h + 1]?.trim() ? [cr] : [])]);
+        }
+        const first = raw.findIndex((l, i) => i >= start && !hidden[i] && /^[-*+]\s+\[.\]/.test(l));
+        if (first !== -1) return insert(listEnd(first) + 1, block);
+        const h = raw.findIndex((l, i) => i >= start && heading(i));
+        if (h !== -1) return insert(h, [...(h > start && raw[h - 1].trim() ? [cr] : []), ...block, cr]);
+        return atEnd(block);
     }
 
     // A task line's name for a notice: its text, without checkbox, links that end it, or ID
@@ -407,7 +613,8 @@ export default class Schedule {
     // Points the forward date on a task's source lines (`sources`, from TaskIds.gather) at `dest`, where its open
     // line is now (OBS-181). Only a sent line still ending in the task's ID changes, and an older
     // breadcrumb in front of it comes off (TaskIds.setForwardIn). `reopen` sets a finished one to [>]; `mark`
-    // ("x" or "-") finishes each one instead (CheckOff, OBS-232).
+    // ("x" or "-") finishes each one instead (CheckOff, OBS-232). In a daily note, its day's [>] lines (OBS-254)
+    // follow, and are never finished or reopened.
     /**
      * @param {string} id
      * @param {Destination} dest
@@ -420,7 +627,9 @@ export default class Schedule {
         const link = T.forwardLink(dest.linktext(), dest.label, id);
         for (const file of new Map(sources.map((s) => [s.file.path, s.file])).values()) {
             try {
-                await this.rewrite(file, (text) => T.setForwardIn(text, id, link, { reopen, mark }).text);
+                // In a daily note, only the task's day [>] lines (OBS-254): a day's own [>] line carries no forward date
+                const sub = this.isDailyNote(file);
+                await this.rewrite(file, (text) => T.setForwardIn(text, id, link, { reopen, mark, sub }).text);
             } catch (e) {
                 console.error(`Schedule: couldn't update the forward date in ${file.path}`, e);
             }
@@ -504,7 +713,9 @@ export default class Schedule {
             const dest = this.destination(result, rules);
             modal.close();
             const moved = await this.moveTask({ editor, srcFile, lineNum, lineText, id, lines, restore, named, dest });
-            new Notice(moved.notice);
+            // A line here whose forward date now names the new day shows what happened, so the plain "Moved to" isn't said
+            // (Brian, 11/28); a reopened line, a refusal or a failure is
+            if (!(moved.quiet && T.forwardOf(lineText))) new Notice(moved.notice);
         }, {
             periods: true,
             name: (text) => jump.fromName(text, rules, { ahead: true }),
@@ -512,20 +723,21 @@ export default class Schedule {
         });
     }
 
-    // Where task `id` is, among `lines` (its lines, from gather): { open, done, current, sources }. `open`: its
-    // open line in a periodic note; `done`: with none, its done or canceled line there, since scheduling a
+    // Where task `id` is, among `lines` (its lines, from gather): { open, done, current, sources, kept }. `open`:
+    // its open line in a periodic note; `done`: with none, its done or canceled line there, since scheduling a
     // finished task reopens it (rule 13); `current`: whichever of the two it has; `sources`: its sent lines
-    // outside the periodic notes ([>], or done or canceled once finished).
+    // outside the periodic notes ([>], or done or canceled once finished); `kept`: its day's [>] lines (OBS-254),
+    // whose forward date follows it too, and which are never finished or reopened.
     /**
      * @param {TaskLine[]} lines
-     * @returns {{ open: TaskLine | null, done: TaskLine | null, current: TaskLine | null, sources: TaskLine[] }}
+     * @returns {{ open: TaskLine | null, done: TaskLine | null, current: TaskLine | null, sources: TaskLine[], kept: TaskLine[] }}
      */
     whereIs(lines) {
         const tasks = plainday.TaskIds;
-        const periodic = (/** @type {TaskLine} */ l) => tasks.kindOf(l.file) !== "other";
+        const periodic = (/** @type {TaskLine} */ l) => !l.sub && tasks.kindOf(l.file) !== "other";
         const open = lines.find((l) => " /".includes(l.task) && periodic(l)) ?? null;
         const done = open ? null : lines.find((l) => "xX-".includes(l.task) && periodic(l)) ?? null;
-        return { open, done, current: open ?? done, sources: lines.filter((l) => !periodic(l) && ">xX-".includes(l.task)) };
+        return { open, done, current: open ?? done, sources: lines.filter((l) => !l.sub && !periodic(l) && ">xX-".includes(l.task)), kept: lines.filter((l) => l.sub) };
     }
 
     // Moves task `id`'s open line (or, with none, its done or canceled line, which reopens) to `dest`
@@ -542,7 +754,9 @@ export default class Schedule {
      */
     async moveTask({ editor = null, srcFile = null, lineNum = null, lineText = null, id, lines, restore = null, named = null, dest }) {
         const tasks = plainday.TaskIds, T = tasks.constructor;
-        const { open, done, current, sources } = this.whereIs(lines);
+        const { open, done, current, sources: sent0, kept } = this.whereIs(lines);
+        // Its day's [>] lines' forward date follows it as its sources' does (OBS-254)
+        const sources = [...sent0, ...kept];
         const fromSource = !!srcFile && tasks.kindOf(srcFile) === "other";
         const none = { reopened: false, moved: null, from: null };
         // A source clicked back to [ ] is a sent line still when nothing moves: its [>] comes back, while
@@ -632,7 +846,7 @@ export default class Schedule {
             if (restore !== null && editor.getLine(lineNum) === lineText) editor.replaceRange(">", { line: lineNum, ch: restore }, { line: lineNum, ch: restore + 1 }, Schedule.ORIGIN);
             await this.followForward(id, dest, restore !== null ? [...sources, { file: srcFile }] : sources, { reopen: true });
             await this.reopenFinished(id, lines, [current?.file, file]);
-            return { ok: !said, notice: said ?? Schedule.said({ reopened: reopened || (done ? true : false), forwarded: moved !== "moved", named, label: dest.label }), reopened: !!reopened, moved, from: current?.file ?? null };
+            return { ok: !said, notice: said ?? Schedule.said({ reopened: reopened || (done ? true : false), forwarded: moved !== "moved", named, label: dest.label }), quiet: !said && !reopened && !done, reopened: !!reopened, moved, from: current?.file ?? null };
         } catch (err) {
             console.error(err);
             return { ok: false, notice: `Couldn't write to the ${dest.kind} note — check console`, ...none };
@@ -705,7 +919,8 @@ export default class Schedule {
     /** @param {TaskLine[]} lines @returns {Promise<boolean>} */
     async started(lines) {
         for (const l of lines) {
-            if (!this.isDailyNote(l.file)) continue;
+            // Time under a day's [>] line is under a nested task, and counts for nothing (OBS-254)
+            if (l.sub || !this.isDailyNote(l.file)) continue;
             if (Schedule.nest((await plainday.TaskIds.readNow(l.file)).split("\n"), l.line).time) return true;
         }
         return false;
@@ -764,12 +979,15 @@ export default class Schedule {
         const box = line.match(/\[(.)\]/)[1];
         const finished = "xX-".includes(box);
         const out = (/** @type {string} */ l) => (l.startsWith(indent) ? l.slice(indent.length) : l.trimStart()).replace(/\r$/, "");
-        if (daily && w.time) {
+        // A nested task's day [>] line keeps its parent on its day, as time does, but no work was done, so the copy
+        // keeps its box, a finished one reopening (OBS-254)
+        if (daily && (w.time || Schedule.holdsDayLine(lines, at, w.end))) {
             const raw = lines.map((l) => l.replace(/\r$/, ""));
             const go = Schedule.openSteps(lines, at, w.end);
             const kept = [line.replace(/\[(.)\]/, "[>]")];
             for (let k = at + 1; k <= w.end; k++) if (!go.has(k) && raw[k].trim()) kept.push(lines[k]);
-            const outgoing = [out(line).replace(/\[(.)\]/, "[/]"), ...[...go].filter((k) => raw[k].trim()).map((k) => out(lines[k]))];
+            const copy = w.time ? "/" : finished ? (started ? "/" : " ") : box;
+            const outgoing = [out(line).replace(/\[(.)\]/, `[${copy}]`), ...[...go].filter((k) => raw[k].trim()).map((k) => out(lines[k]))];
             return { lines: [...lines.slice(0, at), ...kept, ...lines.slice(w.end + 1)], outgoing, moved: "forwarded", end: w.end, kept };
         }
         const reopened = (/** @type {string} */ l) => l.replace(/\[(.)\]/, `[${finished ? (started || w.time ? "/" : " ") : box === ">" ? " " : box}]`);
@@ -978,7 +1196,8 @@ export default class Schedule {
 
     // A line sent here from `src`, a note that isn't a daily, weekly, monthly or yearly note (rule 13,
     // OBS-208): its ⭕ (or 🗃️) is its own note's project when it has a ⋯ filed in one, else the project
-    // of the note it came from, finished or not; a project or area note names itself. A ⭕ it had in that
+    // of the note it came from, finished or not; a project or area note names itself, its ⭕ (or 🗃️) linking the
+    // task's line there by its ID, `[[Project#^id|⭕]]` (Brian, 11/28). A ⭕ it had in that
     // note gives way, since a line outside a periodic note has no project of its own (rule 4), and from a
     // note in no project (the Inbox) nothing takes its place. Then a ↗ to the note it came
     // from, after its own ⋯, unless that note is a project or area note, which its ⭕ already names. The
@@ -993,11 +1212,12 @@ export default class Schedule {
         const ownNote = own ? app.metadataCache.getFirstLinkpathDest(own, src.path) : null;
         const ownHome = ownNote ? helper.filedIn(ownNote) : null;
         const srcHome = tagged ? null : helper.filedIn(src);
+        const id = plainday.TaskIds?.constructor.idOf?.(line);
+        // From a project or area note, its ⭕ (or 🗃️) links the task's line there, which a ↗ would link too (Brian, 11/28)
         const homeLink = ownHome ? helper.homeLink(ownHome, helper.linktextFor(ownHome, paths))
-            : tagged ? `[[${helper.linktextFor(src, paths)}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]`
+            : tagged ? `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${this.isProjectNote(src) ? "⭕" : "🗃️"}]]`
             : srcHome ? helper.homeLink(srcHome, helper.linktextFor(srcHome, paths)) : null;
         const sent = helper.withHome(line, homeLink, helper.trailingProjectLinks(line).map((l) => l.raw), { inRun: true });
-        const id = plainday.TaskIds?.constructor.idOf?.(line);
         return tagged ? sent : helper.withFrom(sent, `[[${helper.linktextFor(src, paths)}${id ? `#^${id}` : ""}|${Schedule.FROM_MARK}]]`);
     }
 

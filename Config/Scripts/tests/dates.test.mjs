@@ -169,7 +169,7 @@ test("Due date and Schedule under DD.MM.YYYY: the 🚩, a second Due date replac
     await v.schedule("2026-09-18");
     v.open(day("2026-09-18"), 0);
     assert.equal(v.notes()[KES].split("\n")[at], "- [>] Homepage build [[2026-10-01|🚩 01.10.]] [[2026-09-18#^h1b2c3|18.09.]] ^h1b2c3");
-    assert.deepEqual(v.notices, ["Forwarded to 18.09."]);
+    assert.deepEqual(v.notices, []);
     // A week
     v.open(day("2026-09-16"), 0);
     v.notices.length = 0;

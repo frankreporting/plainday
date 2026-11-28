@@ -322,7 +322,8 @@ export default class CheckOff {
     }
 
     // Whether line `i` (lineAt(i)) of `file` is a line CheckOff acts on: a checklist line at the top of its nest
-    // (rule 5) that ends in a block ID, in a note in the system (rule 12), and not an event (rule 1)
+    // (rule 5), or a nested task Schedule sent on its own (OBS-254), that ends in a block ID, in a note in the system
+    // (rule 12), and not an event (rule 1)
     /**
      * @param {TFile | null | undefined} file
      * @param {(n: number) => string | undefined} lineAt
@@ -333,7 +334,12 @@ export default class CheckOff {
         const tasks = plainday.TaskIds, tr = plainday.TimeReport;
         const text = lineAt(i);
         if (!file || !text || !tasks.inSystem(file) || !CheckOff.BOX.test(text) || !CheckOff.ID_AT_END.test(text)) return false;
-        return !tr.eventKind(text) && tr.nestTop(lineAt, i) === i;
+        if (tr.eventKind(text)) return false;
+        if (tr.nestTop(lineAt, i) === i) return true;
+        // A nested task Schedule sent on its own (OBS-254), its forward date and ID at the end: one of its subtask's
+        // lines, on a day (its day's [>] line) or in a note (its sent line), so a tick or a click works as on a task's
+        const T = tasks.constructor, kind = tasks.kindOf(file);
+        return !!T.forwardOf(text) && (kind === "day" || kind === "other");
     }
 
     // Where `text` is among `ls` (a note's lines): at `line` still, or found by its ID when lines above it came or

@@ -1312,7 +1312,7 @@ test("planted bugs: the sequences catch each one", async () => {
         "a note's ⋯ lines aren't found": ["if (this.linked(text, file.path).some((n) => helper.isSameNote(n, note))) out.push({ file, at });", ""],
         "a project-note line stays behind": ["if (await this.intoToDo(l, home)) {", "if (true) {"],
         "the note doesn't move": ["await app.fileManager.renameFile(step.note, step.to);", ""],
-        "a day line isn't written": ["const homed = periodic && home ? this.withProject(text, weighed.link) : text;", "const homed = text;"],
+        "a day line isn't written": ["const homed = periodic && home && !l.sub ? this.withProject(text, weighed.link) : text;", "const homed = text;"],
         "a note doesn't take its subtasks": ["for (const at of this.subtasks(visible, hidden)) seeds.push({ file: n, at });", ""],
         "a subtask doesn't take its parent": ["if (await this.holds(file, memo)) addNote(file);", ""],
     };

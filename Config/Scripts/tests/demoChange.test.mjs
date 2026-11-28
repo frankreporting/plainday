@@ -340,7 +340,7 @@ for (const lag of [false, true]) {
         for (const p of [PINECREST, KESTREL, W38, SEP, YEAR]) {
             // Brian's words from the test round, as the step says
             const said = r.problems(p).filter((l) => l.includes("Send final copy to Rafe"));
-            assert.deepEqual(said, ["> - Project disagreement on [[2026-09-17|9/17/26]] line 14: `Send final copy to Rafe` names and counts toward [[Kestrel Outfitters 2026]], but it's a subtask of [[Write brochure copy]], which is filed in [[Pinecrest Library Brochure]]. Choose one project by running AddProjectLink on one of its task lines or MoveToProject on the task note"], `${p}:\n${r.problems(p).join("\n")}`);
+            assert.deepEqual(said, ["> - Project disagreement on [[2026-09-17|9/17/26]] line 18: `Send final copy to Rafe` names and counts toward [[Kestrel Outfitters 2026]], but it's a subtask of [[Write brochure copy]], which is filed in [[Pinecrest Library Brochure]]. Choose one project by running AddProjectLink on one of its task lines or MoveToProject on the task note"], `${p}:\n${r.problems(p).join("\n")}`);
         }
         v.asked.length = 0;
         go(day("2026-09-17"), "Send final copy to Rafe");
